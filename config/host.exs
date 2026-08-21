@@ -2,6 +2,15 @@ import Config
 
 # Add configuration that is only needed when running on the host here.
 
+config :nerves_gate,
+  data_dir: Path.join(System.tmp_dir!(), "nerves_gate/#{config_env()}"),
+  network_adapter: NervesGate.Network.HostAdapter,
+  tailscale_enabled: false,
+  network_poll_interval: 60_000
+
+config :nerves_gate, NervesGateWeb.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: if(config_env() == :test, do: 0, else: 4000)]
+
 config :nerves_runtime,
   kv_backend:
     {Nerves.Runtime.KVBackend.InMemory,
@@ -17,5 +26,6 @@ config :nerves_runtime,
        "a.nerves_fw_architecture" => "generic",
        "a.nerves_fw_description" => "N/A",
        "a.nerves_fw_platform" => "host",
-       "a.nerves_fw_version" => "0.0.0"
+       "a.nerves_fw_version" => "0.0.0",
+       "nerves_serial_number" => "host-development"
      }}

@@ -1,43 +1,40 @@
 defmodule NervesGate.Application do
-  # See https://elixir.hexdocs.pm/Application.html
-  # for more information on OTP Applications
   @moduledoc false
-
   use Application
 
   @impl true
   def start(_type, _args) do
-    children =
-      [
-        # Children for all targets
-        # Starts a worker by calling: NervesGate.Worker.start_link(arg)
-        # {NervesGate.Worker, arg},
-      ] ++ target_children()
+    children = [
+      {Phoenix.PubSub, name: NervesGate.PubSub},
+      NervesGateWeb.Presence,
+      {Task.Supervisor, name: NervesGate.TaskSupervisor},
+      NervesGate.Alarms.Reporter,
+      NervesGate.Platform,
+      NervesGate.Device,
+      NervesGate.Commissioning.Access,
+      NervesGate.Network.Manager,
+      {DynamicSupervisor, name: NervesGate.Tailscale.DynamicSupervisor, strategy: :one_for_one},
+      NervesGate.Tailscale.Manager,
+      NervesGate.Tailscale.Observer,
+      NervesGate.Distribution.Manager,
+      {DynamicSupervisor, name: NervesGate.Cluster.DynamicSupervisor, strategy: :one_for_one},
+      NervesGate.Cluster.Manager,
+      NervesGate.Network.Monitor,
+      NervesGate.Setup,
+      NervesGateWeb.Endpoint
+    ]
 
-    # See https://elixir.hexdocs.pm/Supervisor.html
-    # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: NervesGate.Supervisor]
-    Supervisor.start_link(children, opts)
+    Supervisor.start_link(children,
+      strategy: :one_for_one,
+      name: NervesGate.Supervisor,
+      max_restarts: 20,
+      max_seconds: 60
+    )
   end
 
-  # List all child processes to be supervised
-  if Mix.target() == :host do
-    defp target_children do
-      [
-        # Children that only run on the host during development or test.
-        # In general, prefer using `config/host.exs` for differences.
-        #
-        # Starts a worker by calling: Host.Worker.start_link(arg)
-        # {Host.Worker, arg},
-      ]
-    end
-  else
-    defp target_children do
-      [
-        # Children for all targets except host
-        # Starts a worker by calling: Target.Worker.start_link(arg)
-        # {Target.Worker, arg},
-      ]
-    end
+  @impl true
+  def config_change(changed, removed, _extra) do
+    NervesGateWeb.Endpoint.config_change(changed, removed)
+    :ok
   end
 end

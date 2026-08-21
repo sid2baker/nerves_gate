@@ -1,18 +1,15 @@
 defmodule NervesGate do
-  @moduledoc """
-  Documentation for `NervesGate`.
-  """
+  @moduledoc "A small, Tailscale-backed Nerves gateway."
 
-  @doc """
-  Hello world.
+  @doc "Configure and verify the Internet uplink."
+  defdelegate configure_internet(params), to: NervesGate.Setup
 
-  ## Examples
+  @doc "Enroll Tailscale without persisting the auth token."
+  defdelegate configure_tailscale(auth_token), to: NervesGate.Setup
 
-      iex> NervesGate.hello()
-      :world
+  @doc "Start distribution and cluster discovery over Tailscale."
+  defdelegate configure_cluster(), to: NervesGate.Setup
 
-  """
-  def hello do
-    :world
-  end
+  @doc "Return a secret-free status snapshot."
+  defdelegate status(), to: NervesGate.Status, as: :snapshot
 end

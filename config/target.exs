@@ -52,17 +52,13 @@ config :nerves_ssh,
 # Update regulatory_domain to your 2-letter country code E.g., "US"
 #
 # See https://github.com/nerves-networking/vintage_net for more information
+# NervesGate owns uplink and commissioning interfaces at runtime. Keeping
+# VintageNet's boot config empty prevents an unverified DHCP lease from
+# replacing the persisted last-known-good candidate.
 config :vintage_net,
   regulatory_domain: "00",
-  config: [
-    {"usb0", %{type: VintageNetDirect}},
-    {"eth0",
-     %{
-       type: VintageNetEthernet,
-       ipv4: %{method: :dhcp}
-     }},
-    {"wlan0", %{type: VintageNetWiFi}}
-  ]
+  persistence: VintageNet.Persistence.Null,
+  config: []
 
 config :mdns_lite,
   # The `hosts` key specifies what hostnames mdns_lite advertises.  `:hostname`

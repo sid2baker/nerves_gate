@@ -15,15 +15,16 @@ defmodule NervesGate.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       releases: [{@app, release()}],
-      dialyzer: [plt_add_apps: [:ex_unit]],
-      aliases: aliases()
+      dialyzer: [plt_add_apps: [:ex_unit, :mix]],
+      aliases: aliases(),
+      test_ignore_filters: [&String.starts_with?(&1, "test/support/")]
     ]
   end
 
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger, :runtime_tools],
+      extra_applications: [:crypto, :inets, :logger, :runtime_tools, :sasl, :ssl],
       mod: {NervesGate.Application, []}
     ]
   end
@@ -41,6 +42,18 @@ defmodule NervesGate.MixProject do
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
       {:vibe_kit, "~> 0.1"},
+
+      # Runtime dependencies
+      {:alarmist, "~> 0.4.2"},
+      {:bandit, "~> 1.12"},
+      {:jason, "~> 1.4"},
+      {:libcluster, "~> 3.5"},
+      {:phoenix, "~> 1.8"},
+      {:phoenix_live_view, "~> 1.2"},
+      {:phoenix_pubsub, "~> 2.2"},
+      {:tailscale,
+       github: "sid2baker/tailscale_ex", ref: "c0ed65b74b262d4b4f2c905d2f8ae2e47932c267"},
+
       # Dependencies for all targets
       {:nerves, "~> 1.13", runtime: false},
       {:shoehorn, "~> 0.9.1"},
@@ -59,7 +72,8 @@ defmodule NervesGate.MixProject do
       # bumps to Nerves systems. Since these include Linux kernel and Erlang
       # version updates, please review their release notes in case
       # changes to your application are needed.
-      {:nerves_system_x86_64, "~> 1.24", runtime: false, targets: :x86_64}
+      {:nerves_system_nerves_gate,
+       path: "nerves_system_nerves_gate", runtime: false, targets: :x86_64}
     ]
   end
 
@@ -81,6 +95,7 @@ defmodule NervesGate.MixProject do
 
   defp aliases() do
     [
+      firmware: ["nerves_gate.verify_tailscale_bundle", "firmware"],
       ci: [
         "compile --warnings-as-errors",
         "format --check-formatted",

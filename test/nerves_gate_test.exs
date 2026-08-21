@@ -1,8 +1,9 @@
 defmodule NervesGateTest do
-  use ExUnit.Case
-  doctest NervesGate
+  use ExUnit.Case, async: true
 
-  test "greets the world" do
-    assert NervesGate.hello() == :world
+  test "returns a diagnostic status snapshot" do
+    status = NervesGate.status()
+    assert status.identity.hostname =~ "nervesgate-"
+    assert is_list(status.alarms)
   end
 end
