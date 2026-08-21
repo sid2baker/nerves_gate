@@ -106,13 +106,19 @@ mix nerves_gate.qemu restart     # preserve the current disks
 Functional mode safely reads `NERVES_GATE_TAILSCALE_AUTH_KEY` from the ignored
 `.env` file. Setup mode never consumes the credential.
 
-The setup pages are forwarded to:
+While commissioning, the setup page is forwarded to:
 
 ```text
 M01  http://127.0.0.1:4001/
 M02  http://127.0.0.1:4002/
 M03  http://127.0.0.1:4003/
 ```
+
+These localhost forwards intentionally close when commissioning finishes and
+its isolated setup interface is disabled. Functional mode prints and records
+each tailnet-only dashboard URL; the browser must be connected to that same
+tailnet. `mix nerves_gate.qemu status` reports the appropriate setup or tailnet
+location instead of presenting the closed localhost forward as a dashboard.
 
 Each VM has a unique UUID and MAC addresses, a NAT Internet uplink, an isolated
 setup NIC, and a persistent 4 GiB disk in `tmp/qemu`. Enroll all three into the

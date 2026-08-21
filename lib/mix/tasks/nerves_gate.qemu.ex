@@ -73,10 +73,19 @@ defmodule Mix.Tasks.NervesGate.Qemu do
       )
       |> Enum.to_list()
 
-    failures = Enum.reject(results, &match?({:ok, :ok}, &1))
+    dashboards =
+      for {:ok, {node, ipv4}} <- results,
+          is_binary(node) and is_binary(ipv4),
+          do: {node, ipv4}
 
-    if failures == [] do
+    if length(dashboards) == length(@nodes) do
+      Enum.each(dashboards, fn {node, ipv4} ->
+        save_tailnet_ip(node, ipv4)
+        Mix.shell().info("#{node} dashboard (tailnet only): http://#{ipv4}/")
+      end)
+
       Mix.shell().info("All three gateways reached functional mode.")
+      Mix.shell().info("The localhost setup forwards close after commissioning.")
     else
       run_script("stop", "all")
       Mix.raise("functional QEMU setup failed")
@@ -90,10 +99,11 @@ defmodule Mix.Tasks.NervesGate.Qemu do
     :ok = post(base <> "/api/setup/internet", %{"ip_address" => "dhcp"}, 45_000)
     Mix.shell().info("#{node}: Internet verified")
     :ok = retry_tailscale(base, key, 15)
+    ipv4 = tailnet_ipv4(base, 5)
     Mix.shell().info("#{node}: Tailscale connected")
     :ok = retry_cluster(base, 60)
     Mix.shell().info("#{node}: cluster started")
-    :ok
+    {node, ipv4}
   rescue
     _error -> {:error, node}
   catch
@@ -104,7 +114,7 @@ defmodule Mix.Tasks.NervesGate.Qemu do
 
   defp wait_for_setup(base, attempts) do
     case request(:get, base <> "/", nil, 2_000) do
-      {:ok, 200} ->
+      {:ok, 200, _body} ->
         :ok
 
       _unavailable ->
@@ -126,6 +136,20 @@ defmodule Mix.Tasks.NervesGate.Qemu do
     end
   end
 
+  defp tailnet_ipv4(_base, 0), do: raise("Tailscale IP timeout")
+
+  defp tailnet_ipv4(base, attempts) do
+    with {:ok, 200, body} <- request(:get, base <> "/api/setup/status", nil, 2_000),
+         {:ok, status} <- Jason.decode(body),
+         ipv4 when is_binary(ipv4) <- get_in(status, ["tailnet", "ipv4"]) do
+      ipv4
+    else
+      _unavailable ->
+        Process.sleep(500)
+        tailnet_ipv4(base, attempts - 1)
+    end
+  end
+
   defp retry_cluster(_base, 0), do: raise("cluster timeout")
 
   defp retry_cluster(base, attempts) do
@@ -141,8 +165,8 @@ defmodule Mix.Tasks.NervesGate.Qemu do
 
   defp post(url, params, timeout) do
     case request(:post, url, URI.encode_query(params), timeout) do
-      {:ok, status} when status in 200..299 -> :ok
-      {:ok, status} -> {:error, status}
+      {:ok, status, _body} when status in 200..299 -> :ok
+      {:ok, status, _body} -> {:error, status}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -151,7 +175,7 @@ defmodule Mix.Tasks.NervesGate.Qemu do
     options = [timeout: timeout, connect_timeout: timeout]
 
     case :httpc.request(:get, {String.to_charlist(url), []}, options, body_format: :binary) do
-      {:ok, {{_http, status, _message}, _headers, _response}} -> {:ok, status}
+      {:ok, {{_http, status, _message}, _headers, response}} -> {:ok, status, response}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -162,9 +186,15 @@ defmodule Mix.Tasks.NervesGate.Qemu do
     options = [timeout: timeout, connect_timeout: timeout]
 
     case :httpc.request(:post, request, options, body_format: :binary) do
-      {:ok, {{_http, status, _message}, _headers, _response}} -> {:ok, status}
+      {:ok, {{_http, status, _message}, _headers, response}} -> {:ok, status, response}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp save_tailnet_ip(node, ipv4) do
+    state = System.get_env("NERVES_GATE_QEMU_STATE", Path.expand("tmp/qemu"))
+    File.mkdir_p!(state)
+    File.write!(Path.join(state, "#{node}.tailnet-ip"), ipv4 <> "\n")
   end
 
   defp load_dotenv do

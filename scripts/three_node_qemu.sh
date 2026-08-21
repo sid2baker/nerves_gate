@@ -16,6 +16,17 @@ index_of() {
   case "$1" in M01) echo 0;; M02) echo 1;; M03) echo 2;; *) echo "unknown node $1" >&2; exit 2;; esac
 }
 
+print_location() {
+  local node=$1 state=$2 i tailnet_file="$STATE/$1.tailnet-ip"
+  i=$(index_of "$node")
+
+  if test -s "$tailnet_file"; then
+    echo "$node $state; dashboard (tailnet only): http://$(tr -d '\r\n' <"$tailnet_file")/"
+  else
+    echo "$node $state; setup forward: http://127.0.0.1:${ports[$i]}/ (closes when commissioning completes)"
+  fi
+}
+
 prepare_node() {
   local node=$1 disk="$STATE/$1.img"
   test -f "$FIRMWARE" || { echo "Firmware not found: $FIRMWARE" >&2; exit 2; }
@@ -35,7 +46,7 @@ start_node() {
   prepare_node "$node"
 
   if test -f "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-    echo "$node already running at http://127.0.0.1:$port/"
+    print_location "$node" "already running"
     return
   fi
 
@@ -51,7 +62,7 @@ start_node() {
     >"$STATE/$node.qemu.log" 2>&1 &
 
   echo $! >"$pidfile"
-  echo "$node started: http://127.0.0.1:$port/"
+  print_location "$node" "started"
 }
 
 stop_node() {
@@ -80,16 +91,16 @@ case "$command" in
   reset)
     for node in "${selected[@]}"; do
       stop_node "$node"
-      rm -f "$STATE/$node.img" "$STATE/$node.serial.log" "$STATE/$node.qemu.log"
+      rm -f "$STATE/$node.img" "$STATE/$node.serial.log" "$STATE/$node.qemu.log" \
+        "$STATE/$node.tailnet-ip"
       prepare_node "$node"
     done
     ;;
   status)
     for node in "${selected[@]}"; do
-      i=$(index_of "$node")
       pidfile="$STATE/$node.pid"
       if test -f "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-        echo "$node running: http://127.0.0.1:${ports[$i]}/"
+        print_location "$node" "running"
       else
         echo "$node stopped"
       fi
