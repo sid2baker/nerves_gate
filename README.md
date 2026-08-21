@@ -16,6 +16,24 @@ owns `/data/tailscale/`. Writes are atomic and there is no database.
 `NervesGate.Setup` only orchestrates commissioning choices. Internet, Tailnet,
 and Cluster managers reconstruct and repair their own runtime state after boot.
 
+## Replicated device state
+
+Each device is the sole writer of its own `NervesGate.DeviceState.Public` data.
+`NervesGate.DeviceState.Server` sequences pure reducer operations and gives
+joining connected BEAM nodes an atomic snapshot, boot ID, and revision.
+`NervesGate.DeviceState.Client` keeps replicas for already-connected nodes,
+resynchronizes revision gaps, and retains disconnected replicas as stale last
+known state. It never discovers or connects peers.
+
+Only identity, firmware, connectivity state, and safe active alarms are
+replicated. Cluster cookies, Tailscale credentials, PIDs, timers, backoff,
+repair state, and logger history remain private to their owning device.
+
+```elixir
+NervesGate.public_state()
+NervesGate.replicas()
+```
+
 ## Initialization
 
 Connect to the isolated setup Wi-Fi/spare Ethernet interface and open:
@@ -98,7 +116,7 @@ One Mix task provides two fresh three-node environments without TAP setup:
 
 ```sh
 mix nerves_gate.qemu setup       # manual initialization testing
-mix nerves_gate.qemu functional  # automatic DHCP, Tailscale, and clustering
+mix nerves_gate.qemu functional  # automatic DHCP, Tailscale, and singular setup
 mix nerves_gate.qemu status
 mix nerves_gate.qemu stop
 mix nerves_gate.qemu restart     # preserve the current disks
@@ -122,8 +140,9 @@ tailnet. `mix nerves_gate.qemu status` reports the appropriate setup or tailnet
 location instead of presenting the closed localhost forward as a dashboard.
 
 Each VM has a unique UUID and MAC addresses, a NAT Internet uplink, an isolated
-setup NIC, and a persistent 4 GiB disk in `tmp/qemu`. Enroll all three into the
-same tailnet to exercise the real node menu and cluster behavior.
+setup NIC, and a persistent 4 GiB disk in `tmp/qemu`. Configure a shared cookie
+through the backend API before explicitly connecting nodes to exercise public
+state replication.
 
 The external integration witness remains available in
 `test/integration/three_node_test.exs` for tailnet/distribution restart checks.

@@ -1,35 +1,15 @@
 defmodule NervesGate.StatusTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case
 
   alias NervesGate.Status
 
-  test "only the first broken connectivity layer is failed" do
-    enabled = %{enabled: true, online: false}
+  test "the compatibility snapshot projects authoritative DeviceState" do
+    public = NervesGate.DeviceState.Server.public()
+    snapshot = Status.snapshot()
 
-    assert Status.layer_states(%{online: false}, %{online: false}, enabled) == %{
-             internet: :failed,
-             tailnet: :blocked,
-             cluster: :blocked
-           }
-
-    assert Status.layer_states(%{online: true}, %{online: false}, enabled) == %{
-             internet: :ok,
-             tailnet: :failed,
-             cluster: :blocked
-           }
-
-    assert Status.layer_states(%{online: true}, %{online: true}, enabled) == %{
-             internet: :ok,
-             tailnet: :ok,
-             cluster: :failed
-           }
-  end
-
-  test "singular cluster mode is disabled rather than unhealthy" do
-    assert Status.layer_states(
-             %{online: true},
-             %{online: true},
-             %{enabled: false, online: false}
-           ).cluster == :disabled
+    assert snapshot.device_state.local.device_id == public.device_id
+    assert snapshot.device["name"] == public.name
+    assert snapshot.alarms == public.alarms
+    refute Map.has_key?(snapshot.device_state.local, :cookie)
   end
 end

@@ -9,7 +9,7 @@ defmodule Mix.Tasks.NervesGate.Qemu do
 
   `setup` stops after boot so every initialization step can be tested manually.
   `functional` reads `NERVES_GATE_TAILSCALE_AUTH_KEY` from `.env`, configures
-  DHCP, enrolls Tailscale, and starts the cluster on all three nodes.
+  DHCP, enrolls Tailscale, and completes all three nodes in singular mode.
 
   Lifecycle commands preserve the current disks:
 
@@ -101,8 +101,8 @@ defmodule Mix.Tasks.NervesGate.Qemu do
     :ok = retry_tailscale(base, key, 15)
     ipv4 = tailnet_ipv4(base, 5)
     Mix.shell().info("#{node}: Tailscale connected")
-    :ok = retry_cluster(base, 60)
-    Mix.shell().info("#{node}: cluster started")
+    :ok = retry_finish(base, 60)
+    Mix.shell().info("#{node}: singular configuration completed")
     {node, ipv4}
   rescue
     _error -> {:error, node}
@@ -150,16 +150,16 @@ defmodule Mix.Tasks.NervesGate.Qemu do
     end
   end
 
-  defp retry_cluster(_base, 0), do: raise("cluster timeout")
+  defp retry_finish(_base, 0), do: raise("setup completion timeout")
 
-  defp retry_cluster(base, attempts) do
+  defp retry_finish(base, attempts) do
     case post(base <> "/api/setup/cluster", %{}, 10_000) do
       :ok ->
         :ok
 
       {:error, _status} ->
         Process.sleep(1_000)
-        retry_cluster(base, attempts - 1)
+        retry_finish(base, attempts - 1)
     end
   end
 

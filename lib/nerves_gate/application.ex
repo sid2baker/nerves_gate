@@ -19,6 +19,8 @@ defmodule NervesGate.Application do
       NervesGate.Tailnet.Observer,
       NervesGate.Cluster.Manager,
       NervesGate.Setup,
+      NervesGate.DeviceState.Server,
+      NervesGate.DeviceState.Client,
       NervesGateWeb.Endpoint
     ]
 

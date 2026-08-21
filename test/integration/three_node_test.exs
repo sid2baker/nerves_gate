@@ -17,7 +17,33 @@ defmodule NervesGate.ThreeNodeIntegrationTest do
       assert status.cluster.enabled
       assert status.cluster.online
       assert status.distribution.online
+
+      assert_eventually(fn ->
+        replicas =
+          :erpc.call(node, NervesGate.DeviceState.Client, :replicas, [], 10_000)
+
+        connected_gateways =
+          replicas
+          |> Map.values()
+          |> Enum.count(& &1.connected)
+
+        connected_gateways >= 2
+      end)
     end)
+  end
+
+  defp assert_eventually(predicate, attempts \\ 30) do
+    cond do
+      predicate.() ->
+        :ok
+
+      attempts == 0 ->
+        flunk("device-state replicas did not converge")
+
+      true ->
+        Process.sleep(1_000)
+        assert_eventually(predicate, attempts - 1)
+    end
   end
 
   defp required_nodes do
