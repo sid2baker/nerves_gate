@@ -13,6 +13,11 @@
 # Temporary files, for example, from tests.
 /tmp/
 
+# Local credentials. Keep the empty template tracked.
+.env
+.env.*
+!.env.example
+
 # Local Nerves system build artifacts.
 **/.nerves/
 **/build.log
