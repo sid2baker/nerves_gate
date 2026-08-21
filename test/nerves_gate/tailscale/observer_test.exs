@@ -22,6 +22,14 @@ defmodule NervesGate.Tailscale.ObserverTest do
     assert Enum.count(normalized.nodes) == 3
   end
 
+  test "partially populated status during daemon startup is safe" do
+    raw = put_in(online_status(), ["Self", "TailscaleIPs"], nil)
+    normalized = Observer.normalize(raw)
+
+    refute normalized.online
+    assert normalized.ipv4 == nil
+  end
+
   test "loss and recovery of Tailscale are broadcast without crashing observers" do
     Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailscale")
     TestTailscaleClient.put({:ok, online_status()})

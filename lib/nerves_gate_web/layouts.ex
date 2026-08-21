@@ -100,8 +100,11 @@ defmodule NervesGateWeb.Layouts do
           .steps li { display: flex; align-items: center; gap: .55rem; padding: .8rem; border-bottom: 2px solid #26313a; color: #65727e; font-size: .8rem; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
           .steps li span { display: grid; place-items: center; width: 1.55rem; height: 1.55rem; border: 1px solid currentColor; border-radius: 50%; }
           .steps li.complete { border-color: #57c99a; color: #74dfb2; }
+          .current-step { width: min(100%, 620px); margin: 2rem auto 0; }
           .setup-card { position: relative; }
           .setup-card form { display: grid; gap: .15rem; }
+          .finished-step { text-align: center; padding: 3rem 2rem; }
+          .finished-step .step-number { color: #57c99a; }
           .setup-card button { width: 100%; margin-top: .4rem; }
           .step-number { position: absolute; top: 1rem; right: 1rem; color: #34414c; font-size: 2rem; font-weight: 900; }
           .endpoint { display: block; margin-top: 1rem; font-size: .72rem; }

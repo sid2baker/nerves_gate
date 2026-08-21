@@ -3,6 +3,7 @@ defmodule NervesGateWeb.StatusLive do
   use NervesGateWeb, :live_view
 
   alias NervesGate.Device
+  alias NervesGate.Setup
   alias NervesGate.Status
   alias NervesGate.Tailscale.Observer
 
@@ -11,18 +12,44 @@ defmodule NervesGateWeb.StatusLive do
   @impl true
   def mount(_params, session, socket) do
     remote_ip = Map.get(session, "remote_ip", "unknown")
+    tailnet_access = Map.get(session, "tailnet_access", false)
     actor = Observer.actor_for_ip(remote_ip)
+    status = Status.snapshot()
 
     if connected?(socket) do
       Enum.each(@topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
-      Phoenix.PubSub.subscribe(NervesGate.PubSub, NervesGateWeb.Presence.topic())
-      NervesGateWeb.Presence.track_visitor(self(), actor)
+
+      if tailnet_access and status.setup.ready do
+        Phoenix.PubSub.subscribe(NervesGate.PubSub, NervesGateWeb.Presence.topic())
+        NervesGateWeb.Presence.track_visitor(self(), actor)
+      end
     end
 
-    {:ok, assign(socket, status: Status.snapshot(), actor: actor)}
+    {:ok, assign(socket, status: status, actor: actor, tailnet_access: tailnet_access)}
   end
 
   @impl true
+  def handle_event("configure-internet", %{"internet" => params}, socket) do
+    case Setup.configure_internet(params) do
+      {:ok, _phase} -> setup_ok(socket, "Internet verified and saved.")
+      {:error, reason} -> setup_error(socket, "Internet setup failed: #{format_error(reason)}")
+    end
+  end
+
+  def handle_event("configure-tailscale", %{"auth_token" => token}, socket) do
+    case Setup.configure_tailscale(token) do
+      {:ok, :cluster} -> setup_ok(socket, "Tailscale connected.")
+      {:error, reason} -> setup_error(socket, "Tailscale setup failed: #{format_error(reason)}")
+    end
+  end
+
+  def handle_event("configure-cluster", _params, socket) do
+    case Setup.configure_cluster() do
+      {:ok, :ready} -> setup_ok(socket, "Gateway is ready.")
+      {:error, reason} -> setup_error(socket, "Cluster setup failed: #{format_error(reason)}")
+    end
+  end
+
   def handle_event("rename-device", %{"device" => %{"name" => name}}, socket) do
     case Device.rename(name, socket.assigns.actor) do
       :ok ->
@@ -46,6 +73,17 @@ defmodule NervesGateWeb.StatusLive do
 
   @impl true
   def render(assigns) do
+    ~H"""
+    <NervesGateWeb.SetupPage.current
+      :if={!@status.setup.ready or !@tailnet_access}
+      status={@status}
+      flash={@flash}
+    />
+    <.dashboard :if={@status.setup.ready and @tailnet_access} {assigns} />
+    """
+  end
+
+  def dashboard(assigns) do
     ~H"""
     <main class="dashboard">
       <header class="topbar">
@@ -83,7 +121,6 @@ defmodule NervesGateWeb.StatusLive do
           <h2>Gateway overview</h2>
           <p>Live state from this device and its Tailscale-backed Erlang cluster.</p>
         </div>
-        <a :if={!@status.setup.ready} class="button-link" href="/setup">Continue initialization</a>
       </section>
 
       <section class="metric-row">
@@ -118,7 +155,6 @@ defmodule NervesGateWeb.StatusLive do
             <dt>Ready</dt><dd class={text_class(@status.setup.ready)}>{@status.setup.ready}</dd>
             <dt>Recovery</dt><dd>{@status.setup.recovery}</dd>
           </dl>
-          <a class="subtle-link" href="/setup">Open setup flow →</a>
         </article>
 
         <article class="card">
@@ -207,6 +243,21 @@ defmodule NervesGateWeb.StatusLive do
       other -> to_string(other)
     end
   end
+
+  defp setup_ok(socket, message) do
+    {:noreply, socket |> put_flash(:info, message) |> assign(status: Status.snapshot())}
+  end
+
+  defp setup_error(socket, message), do: {:noreply, put_flash(socket, :error, message)}
+
+  defp format_error(reason) when is_atom(reason),
+    do: reason |> to_string() |> String.replace("_", " ")
+
+  defp format_error(reason) when is_map(reason) do
+    Enum.map_join(reason, ", ", fn {field, message} -> "#{field} #{message}" end)
+  end
+
+  defp format_error(_reason), do: "operation failed"
 
   defp node_url(%{ipv4: ip}), do: "http://#{ip}/"
   defp changed_by(nil), do: "Never"

@@ -6,7 +6,7 @@ defmodule NervesGateWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
-    plug(:put_remote_ip)
+    plug(:put_remote_access)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {NervesGateWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -21,6 +21,10 @@ defmodule NervesGateWeb.Router do
     plug(:accepts, ["json"])
   end
 
+  pipeline :home_access do
+    plug(NervesGateWeb.LocalAccess, mode: :home)
+  end
+
   pipeline :tailnet do
     plug(NervesGateWeb.LocalAccess, mode: :tailnet)
   end
@@ -30,23 +34,15 @@ defmodule NervesGateWeb.Router do
   end
 
   scope "/", NervesGateWeb do
-    pipe_through([:browser, :tailnet])
+    pipe_through([:browser, :home_access])
     live("/", StatusLive, :index)
   end
 
-  scope "/setup", NervesGateWeb do
-    pipe_through([:browser, :setup_access])
-    live("/", SetupLive, :index)
-  end
-
-  scope "/configure", NervesGateWeb do
+  scope "/api/setup", NervesGateWeb do
     pipe_through([:api, :setup_access])
+    get("/status", StatusController, :show)
     post("/internet", ConfigureController, :internet)
     post("/tailscale", ConfigureController, :tailscale)
-  end
-
-  scope "/configure", NervesGateWeb do
-    pipe_through([:api, :tailnet])
     post("/cluster", ConfigureController, :cluster)
   end
 
@@ -55,11 +51,15 @@ defmodule NervesGateWeb.Router do
     get("/status", StatusController, :show)
   end
 
-  defp put_remote_ip(connection, _options) do
-    Plug.Conn.put_session(
-      connection,
+  defp put_remote_access(connection, _options) do
+    connection
+    |> Plug.Conn.put_session(
       :remote_ip,
       NervesGateWeb.LocalAccess.ip_string(connection.remote_ip)
+    )
+    |> Plug.Conn.put_session(
+      :tailnet_access,
+      NervesGateWeb.LocalAccess.tailnet?(connection.remote_ip)
     )
   end
 end

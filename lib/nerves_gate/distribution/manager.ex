@@ -81,14 +81,20 @@ defmodule NervesGate.Distribution.Manager do
            :inet.parse_ipv4_address(String.to_charlist(ipv4)),
          :ok <- ensure_epmd(),
          :ok <- configure_distribution(address),
-         :ok <- configure_cookie(),
          node_name = String.to_atom("nervesgate@#{ipv4}"),
-         {:ok, _pid} <- :net_kernel.start([node_name, :longnames]) do
+         {:ok, _pid} <- :net_kernel.start([node_name, :longnames]),
+         :ok <- configure_cookie() do
       {:ok, node_name}
     else
-      {:error, {:already_started, _pid}} -> {:ok, Node.self()}
-      {:error, :einval} -> {:error, :invalid_tailscale_ipv4}
-      {:error, reason} -> {:error, reason}
+      {:error, {:already_started, _pid}} ->
+        configure_cookie()
+        {:ok, Node.self()}
+
+      {:error, :einval} ->
+        {:error, :invalid_tailscale_ipv4}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

@@ -35,7 +35,7 @@ start_node() {
   prepare_node "$node"
 
   if test -f "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-    echo "$node already running at http://127.0.0.1:$port/setup"
+    echo "$node already running at http://127.0.0.1:$port/"
     return
   fi
 
@@ -51,7 +51,7 @@ start_node() {
     >"$STATE/$node.qemu.log" 2>&1 &
 
   echo $! >"$pidfile"
-  echo "$node started: http://127.0.0.1:$port/setup"
+  echo "$node started: http://127.0.0.1:$port/"
 }
 
 stop_node() {
@@ -89,7 +89,7 @@ case "$command" in
       i=$(index_of "$node")
       pidfile="$STATE/$node.pid"
       if test -f "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-        echo "$node running: http://127.0.0.1:${ports[$i]}/setup"
+        echo "$node running: http://127.0.0.1:${ports[$i]}/"
       else
         echo "$node stopped"
       fi

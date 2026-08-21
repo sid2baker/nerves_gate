@@ -142,8 +142,11 @@ defmodule NervesGate.Setup do
     {:noreply, resume(state)}
   end
 
-  def handle_info({:tailscale_changed, %{online: true} = tailscale}, %{phase: phase} = state)
-      when phase in [:cluster, :ready] do
+  def handle_info({:tailscale_changed, %{online: true}}, %{phase: :tailscale} = state) do
+    {:noreply, set_phase(state, :cluster)}
+  end
+
+  def handle_info({:tailscale_changed, %{online: true} = tailscale}, %{phase: :ready} = state) do
     case start_cluster(state, tailscale) do
       {:ok, state} -> {:noreply, state}
       {:error, reason, state} -> {:noreply, %{state | error: public_error(reason)}}
@@ -152,34 +155,58 @@ defmodule NervesGate.Setup do
 
   def handle_info({:tailscale_changed, _status}, state), do: {:noreply, state}
 
+  def handle_info(:disable_setup_access, state) do
+    state.ops.disable_access.()
+    {:noreply, state}
+  end
+
   defp resume(%{phase: :internet} = state) do
-    Alarms.set(Alarm.CommissioningRequired)
-    state.ops.access.(:commissioning, nil)
-    state
+    case Store.read_network(state.root) do
+      {:ok, %Config{}} -> state |> set_phase(:tailscale) |> resume()
+      _missing_or_invalid -> enable_setup_access(state, :commissioning, nil)
+    end
   end
 
   defp resume(%{phase: :tailscale} = state) do
+    state
+    |> enable_setup_access(:commissioning, known_uplink(state.root))
+    |> start_and_poll_tailscale()
+  end
+
+  defp resume(%{phase: :cluster} = state) do
+    if cluster_ready?(state) do
+      state.ops.disable_access.()
+      Alarms.clear(Alarm.CommissioningRequired)
+      set_phase(state, :ready)
+    else
+      state
+      |> enable_setup_access(:commissioning, known_uplink(state.root))
+      |> start_and_poll_tailscale()
+    end
+  end
+
+  defp resume(%{phase: :ready} = state), do: start_and_poll_tailscale(state)
+
+  defp resume(%{phase: :recovery} = state) do
+    enable_setup_access(state, :recovery, known_uplink(state.root))
+  end
+
+  defp enable_setup_access(state, mode, uplink) do
     Alarms.set(Alarm.CommissioningRequired)
-    state.ops.access.(:commissioning, known_uplink(state.root))
-    state.ops.start_tailscale.()
+    state.ops.access.(mode, uplink)
     state
   end
 
-  defp resume(%{phase: phase} = state) when phase in [:cluster, :ready] do
-    if phase == :cluster do
-      Alarms.set(Alarm.CommissioningRequired)
-      state.ops.access.(:commissioning, known_uplink(state.root))
-    end
-
+  defp start_and_poll_tailscale(state) do
     state.ops.start_tailscale.()
     state.ops.poll_tailscale.()
     state
   end
 
-  defp resume(%{phase: :recovery} = state) do
-    Alarms.set(Alarm.CommissioningRequired)
-    state.ops.access.(:recovery, known_uplink(state.root))
-    state
+  defp cluster_ready?(state) do
+    state.ops
+    |> Map.get(:cluster_ready, fn -> false end)
+    |> then(& &1.())
   end
 
   defp start_cluster(state, tailscale \\ nil) do
@@ -187,9 +214,9 @@ defmodule NervesGate.Setup do
 
     with %{online: true, ipv4: ipv4} when is_binary(ipv4) <- tailscale,
          :ok <- state.ops.distribution.(ipv4),
-         :ok <- state.ops.cluster.(),
-         :ok <- state.ops.disable_access.() do
+         :ok <- state.ops.cluster.() do
       Alarms.clear(Alarm.CommissioningRequired)
+      Process.send_after(self(), :disable_setup_access, 1_000)
       {:ok, state |> set_phase(:ready) |> Map.put(:error, nil)}
     else
       %{online: false} -> {:error, :tailscale_offline, state}
@@ -294,6 +321,9 @@ defmodule NervesGate.Setup do
       tail_status: &Observer.status/0,
       distribution: &DistributionManager.ensure_started/1,
       cluster: &ClusterManager.ensure_started/0,
+      cluster_ready: fn ->
+        ClusterManager.status().running and DistributionManager.status().online
+      end,
       access: &Access.enable/2,
       disable_access: &Access.disable/0
     }

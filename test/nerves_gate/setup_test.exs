@@ -65,7 +65,7 @@ defmodule NervesGate.SetupTest do
     assert {:ok, :ready} = Setup.configure_cluster(setup)
     assert_receive {:distribution, "100.64.0.10"}
     assert_receive :cluster
-    assert_receive :disable_access
+    assert_receive :disable_access, 1_500
     assert {:ok, %{"phase" => "ready"}} = Store.read_setup(root)
     refute File.read!(Path.join(root, "setup.json")) =~ token
   end

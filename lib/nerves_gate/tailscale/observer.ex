@@ -87,7 +87,7 @@ defmodule NervesGate.Tailscale.Observer do
     self = Map.get(raw, "Self", %{})
     online = Map.get(self, "Online", false) == true
     backend = Map.get(raw, "BackendState")
-    ips = Map.get(self, "TailscaleIPs", Map.get(raw, "TailscaleIPs", []))
+    ips = Map.get(self, "TailscaleIPs") || Map.get(raw, "TailscaleIPs") || []
     ipv4 = Enum.find(ips, &ipv4?/1)
     users = Map.get(raw, "User", %{})
 
@@ -140,7 +140,7 @@ defmodule NervesGate.Tailscale.Observer do
   end
 
   defp normalize_peer(peer, users) do
-    ips = Map.get(peer, "TailscaleIPs", [])
+    ips = Map.get(peer, "TailscaleIPs") || []
     user_id = Map.get(peer, "UserID")
     user = Map.get(users, user_id) || Map.get(users, to_string(user_id)) || %{}
 

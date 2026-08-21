@@ -1,7 +1,7 @@
 ## Customize flags given to the VM: https://www.erlang.org/doc/apps/erts/erl_cmd.html
 
 ## Do not set -name or -sname here. Prefer configuring them at runtime
-## Configure -setcookie in the mix.exs release section or at runtime
+-setcookie nerves_gate_field_cluster
 
 ## Number of dirty schedulers doing IO work (file, sockets, and others)
 ##+SDio 5

@@ -35,5 +35,15 @@ defmodule NervesGateWeb.LocalAccess do
 
   defp allowed?(:tailnet, ip), do: tailnet?(ip)
   defp allowed?(:setup, ip), do: setup?(ip)
+
+  defp allowed?(:home, ip) do
+    case NervesGate.Setup.status() do
+      %{ready: true} -> tailnet?(ip)
+      _setup -> setup?(ip)
+    end
+  catch
+    :exit, _reason -> setup?(ip)
+  end
+
   defp allowed?(:management, ip), do: setup?(ip)
 end

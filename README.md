@@ -22,7 +22,7 @@ effects together in a regular, directly testable GenServer.
 Connect to the isolated setup Wi-Fi/spare Ethernet interface and open:
 
 ```text
-http://192.168.77.1/setup
+http://192.168.77.1/
 ```
 
 1. Configure DHCP or static Internet. A candidate is persisted only after link,
@@ -41,19 +41,19 @@ NervesGate.configure_tailscale("tskey-auth-…")
 NervesGate.configure_cluster()
 ```
 
-They are also exposed as HTTP POST endpoints:
+They are also exposed as API endpoints, not separate pages:
 
 ```text
-POST /configure/internet
-POST /configure/tailscale
-POST /configure/cluster
+POST /api/setup/internet
+POST /api/setup/tailscale
+POST /api/setup/cluster
 ```
 
 For static Internet, send `ip_address`, `prefix_length`, `gateway`, and `dns`.
 Use request bodies, not query strings: query strings leak auth tokens into
-browser history, proxies, and access logs. Internet and Tailscale setup routes
-are reachable from the isolated setup network; cluster configuration and the
-main dashboard require a tailnet source address.
+browser history, proxies, and access logs. The root page shows only the current
+required step. Once setup is complete, the same URL renders the dashboard and
+requires a tailnet source address.
 
 ## Dashboard
 
@@ -93,21 +93,25 @@ _build/x86_64_dev/nerves/images/nerves_gate.fw
 
 ## Local three-node environment
 
-One Mix task manages three persistent Nerves/QEMU systems without TAP setup:
+One Mix task provides two fresh three-node environments without TAP setup:
 
 ```sh
-mix nerves_gate.qemu          # start M01, M02, and M03
+mix nerves_gate.qemu setup       # manual initialization testing
+mix nerves_gate.qemu functional  # automatic DHCP, Tailscale, and clustering
 mix nerves_gate.qemu status
 mix nerves_gate.qemu stop
-mix nerves_gate.qemu reset    # delete and recreate persistent disks
+mix nerves_gate.qemu restart     # preserve the current disks
 ```
+
+Functional mode safely reads `NERVES_GATE_TAILSCALE_AUTH_KEY` from the ignored
+`.env` file. Setup mode never consumes the credential.
 
 The setup pages are forwarded to:
 
 ```text
-M01  http://127.0.0.1:4001/setup
-M02  http://127.0.0.1:4002/setup
-M03  http://127.0.0.1:4003/setup
+M01  http://127.0.0.1:4001/
+M02  http://127.0.0.1:4002/
+M03  http://127.0.0.1:4003/
 ```
 
 Each VM has a unique UUID and MAC addresses, a NAT Internet uplink, an isolated

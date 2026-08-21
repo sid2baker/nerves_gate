@@ -82,7 +82,7 @@ defmodule NervesGate.MixProject do
       overwrite: true,
       # Erlang distribution is not started automatically.
       # See https://nerves-pack.hexdocs.pm/readme.html#erlang-distribution
-      cookie: "#{@app}_cookie",
+      cookie: "nerves_gate_field_cluster",
       include_erts: &Nerves.Release.erts/0,
       steps: [&Nerves.Release.init/1, :assemble],
       strip_beams: Mix.env() == :prod or [keep: ["Docs"]]
