@@ -31,6 +31,19 @@ defmodule NervesGate.StoreTest do
     assert {:ok, %{"phase" => "internet"}} = Store.read_setup(root)
   end
 
+  test "cluster configuration is human-readable and restricted to the owner" do
+    root = TestScenario.temporary_root(:cluster_cookie)
+    cookie = "Persistent_cookie-123"
+
+    assert :ok = Store.initialize(root)
+    assert :ok = Store.write_cluster(cookie, root)
+    assert {:ok, ^cookie} = Store.read_cluster(root)
+
+    path = Path.join(root, "cluster.json")
+    assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
+    assert Jason.decode!(File.read!(path)) == %{"version" => 1, "cookie" => cookie}
+  end
+
   test "unwritable data path reports an error" do
     root = TestScenario.temporary_root(:unwritable)
     File.write!(root, "blocks-directory-creation")

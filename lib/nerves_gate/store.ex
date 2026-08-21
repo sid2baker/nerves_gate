@@ -2,7 +2,8 @@ defmodule NervesGate.Store do
   @moduledoc "Human-readable, atomic persistence under `/data`."
 
   alias NervesGate.AtomicFile
-  alias NervesGate.Network.Config
+  alias NervesGate.Cluster.Manager, as: ClusterManager
+  alias NervesGate.Internet.Config
 
   @phases ~w(internet tailscale cluster ready recovery)
   @default_setup %{"version" => 1, "phase" => "internet"}
@@ -41,6 +42,22 @@ defmodule NervesGate.Store do
     write_json(Path.join(root, "network.json"), Config.to_persisted(config))
   end
 
+  @spec read_cluster(Path.t()) :: {:ok, String.t() | nil} | {:error, term()}
+  def read_cluster(root \\ root()) do
+    read_json(Path.join(root, "cluster.json"), &validate_cluster/1, nil)
+  end
+
+  @spec write_cluster(String.t() | nil, Path.t()) :: :ok | {:error, term()}
+  def write_cluster(cookie, root \\ root()) do
+    with {:ok, cookie} <- ClusterManager.validate_cookie(cookie) do
+      write_json(
+        Path.join(root, "cluster.json"),
+        %{"version" => 1, "cookie" => cookie},
+        mode: 0o600
+      )
+    end
+  end
+
   @spec read_json(Path.t(), (map() -> {:ok, term()}), term()) :: {:ok, term()} | {:error, term()}
   def read_json(path, validator, missing) do
     case File.read(path) do
@@ -62,10 +79,10 @@ defmodule NervesGate.Store do
     end
   end
 
-  @spec write_json(Path.t(), map()) :: :ok | {:error, term()}
-  def write_json(path, value) do
+  @spec write_json(Path.t(), map(), keyword()) :: :ok | {:error, term()}
+  def write_json(path, value, options \\ []) do
     with {:ok, json} <- Jason.encode(value, pretty: true) do
-      AtomicFile.write(path, json <> "\n")
+      AtomicFile.write(path, json <> "\n", options)
     end
   end
 
@@ -82,4 +99,10 @@ defmodule NervesGate.Store do
     do: {:ok, %{"version" => 1, "phase" => phase}}
 
   defp validate_setup(_setup), do: {:error, :invalid_setup}
+
+  defp validate_cluster(%{"version" => 1, "cookie" => cookie}) do
+    ClusterManager.validate_cookie(cookie)
+  end
+
+  defp validate_cluster(_cluster), do: {:error, :invalid_cluster_configuration}
 end

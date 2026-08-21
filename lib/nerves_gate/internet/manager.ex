@@ -1,12 +1,12 @@
-defmodule NervesGate.Network.Manager do
+defmodule NervesGate.Internet.Manager do
   @moduledoc "Applies candidate uplink settings and persists only verified configurations."
 
   use GenServer
 
-  alias NervesGate.Alarms
   alias NervesGate.Backoff
-  alias NervesGate.Network.Config
-  alias NervesGate.Network.Connectivity
+  alias NervesGate.Internet.Config
+  alias NervesGate.Internet.Connectivity
+  alias NervesGate.Storage.Alarms, as: StorageAlarms
   alias NervesGate.Store
 
   @initial_retry 250
@@ -29,18 +29,23 @@ defmodule NervesGate.Network.Manager do
   @spec status(GenServer.server()) :: map()
   def status(server \\ __MODULE__), do: GenServer.call(server, :status)
 
+  @spec reapply(GenServer.server()) :: :ok | {:error, term()}
+  def reapply(server \\ __MODULE__), do: GenServer.call(server, :reapply)
+
   @impl true
   def init(options) do
     root = Keyword.get(options, :root, Store.root())
     adapter = Keyword.get(options, :adapter, configured_adapter())
     verifier = Keyword.get(options, :verifier, &Connectivity.verify/1)
 
-    known_good =
+    {known_good, storage_error?} =
       case Store.read_network(root) do
-        {:ok, %Config{} = config} -> config
-        _other -> nil
+        {:ok, %Config{} = config} -> {config, false}
+        {:ok, nil} -> {nil, false}
+        {:error, _reason} -> {nil, true}
       end
 
+    if storage_error?, do: StorageAlarms.failure(true)
     if known_good, do: adapter.configure_uplink(known_good)
 
     {:ok, %__MODULE__{adapter: adapter, verifier: verifier, root: root, known_good: known_good}}
@@ -79,10 +84,15 @@ defmodule NervesGate.Network.Manager do
     {:reply, status, state}
   end
 
+  def handle_call(:reapply, _from, %{known_good: %Config{} = config} = state) do
+    {:reply, state.adapter.configure_uplink(config), state}
+  end
+
+  def handle_call(:reapply, _from, state), do: {:reply, {:error, :not_configured}, state}
+
   @impl true
   def handle_info(:verify_candidate, %{pending: pending} = state) when not is_nil(pending) do
     checks = state.verifier.(pending.config.interface)
-    Alarms.report_connectivity(pending.config.interface, checks, pending.config.method)
 
     cond do
       Connectivity.internet_ready?(checks) ->
@@ -108,7 +118,7 @@ defmodule NervesGate.Network.Manager do
         {:noreply, %{state | pending: nil, known_good: pending.config, checks: checks}}
 
       {:error, reason} ->
-        Alarms.set(NervesGate.Alarm.StorageFailure)
+        StorageAlarms.failure(true)
         rollback(state)
         GenServer.reply(pending.from, {:error, {:persistence_failed, reason}})
         {:noreply, %{state | pending: nil, checks: checks}}
@@ -129,10 +139,13 @@ defmodule NervesGate.Network.Manager do
     do: adapter.clear(config.interface)
 
   defp broadcast(message) do
+    Phoenix.PubSub.broadcast(NervesGate.PubSub, "internet_configuration", message)
+
+    # Compatibility: remove this compatibility topic during the NervesGateWeb refactor.
     Phoenix.PubSub.broadcast(NervesGate.PubSub, "network", message)
   end
 
   defp configured_adapter do
-    Application.fetch_env!(:nerves_gate, :network_adapter)
+    Application.fetch_env!(:nerves_gate, :internet_adapter)
   end
 end

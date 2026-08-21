@@ -1,72 +1,27 @@
 defmodule NervesGate.Alarms do
-  @moduledoc "Safe Alarmist facade. Alarm descriptions never contain caller data."
+  @moduledoc "Generic, secret-safe Alarmist infrastructure. Domain logic lives with each subsystem."
 
-  alias NervesGate.Alarm
-
-  @descriptions %{
-    Alarm.CommissioningRequired => "Device commissioning is required",
-    Alarm.CommissioningUnavailable => "No local commissioning interface is available",
-    Alarm.LinkFailure => "Physical network link is unavailable",
-    Alarm.DHCPFailed => "DHCP did not provide usable connectivity",
-    Alarm.IPAddressUnavailable => "The configured interface has no IPv4 address",
-    Alarm.MissingRoute => "Default network route is unavailable",
-    Alarm.DNSFailure => "DNS resolution is unavailable",
-    Alarm.InternetUnavailable => "Internet HTTPS connectivity is unavailable",
-    Alarm.NetworkFlapping => "Network connectivity is unstable",
-    Alarm.StorageFailure => "Persistent storage is unavailable or corrupt",
-    Alarm.TailscaleBinaryFailure => "Pinned Tailscale binaries are unavailable or invalid",
-    Alarm.TailscaleAuthenticationRequired => "Tailscale authentication is required",
-    Alarm.TailscaleOffline => "Tailscale is offline",
-    Alarm.TailscaleUnstable => "Tailscale connectivity is unstable",
-    Alarm.DistributionFailure => "BEAM distribution is unavailable",
-    Alarm.DegradedCluster => "The expected cluster is degraded"
-  }
-
-  @spec set(Alarmist.alarm_id()) :: :ok
-  def set(id) do
-    :alarm_handler.set_alarm({id, description(id)})
+  @spec set(Alarmist.alarm_id(), String.t()) :: :ok
+  def set(id, description) when is_binary(description) do
+    :alarm_handler.set_alarm({id, description})
   end
 
   @spec clear(Alarmist.alarm_id()) :: :ok
-  def clear(id) do
-    :alarm_handler.clear_alarm(id)
-  end
+  def clear(id), do: :alarm_handler.clear_alarm(id)
+
+  @spec toggle(Alarmist.alarm_id(), boolean(), String.t()) :: :ok
+  def toggle(id, true, description), do: set(id, description)
+  def toggle(id, false, _description), do: clear(id)
 
   @spec active() :: [map()]
   def active do
-    Alarmist.get_alarms(level: :debug)
+    Alarmist.get_alarms(level: :info)
     |> Enum.map(fn {id, description} ->
       %{id: encode_id(id), description: description}
     end)
     |> Enum.sort_by(& &1.id)
   catch
     :exit, _reason -> []
-  end
-
-  @spec report_connectivity(String.t(), map(), :dhcp | :static) :: :ok
-  def report_connectivity(interface, checks, method \\ :dhcp) do
-    toggle({Alarm.LinkFailure, interface}, checks.physical_link != :ok)
-    toggle({Alarm.DHCPFailed, interface}, method == :dhcp and checks.ip_address != :ok)
-
-    toggle(
-      {Alarm.IPAddressUnavailable, interface},
-      method == :static and checks.ip_address != :ok
-    )
-
-    toggle(Alarm.MissingRoute, checks.default_route != :ok)
-    toggle(Alarm.DNSFailure, checks.dns != :ok)
-    toggle(Alarm.InternetUnavailable, checks.internet_https != :ok)
-    :ok
-  end
-
-  @spec toggle(Alarmist.alarm_id(), boolean()) :: :ok
-  def toggle(id, true), do: set(id)
-  def toggle(id, false), do: clear(id)
-
-  defp description(id) do
-    id
-    |> Alarmist.alarm_type()
-    |> then(&Map.get(@descriptions, &1, "Operational condition requires attention"))
   end
 
   defp encode_id(id) when is_atom(id), do: inspect(id)
@@ -81,10 +36,15 @@ defmodule NervesGate.Alarms do
 end
 
 defmodule NervesGate.Alarms.Reporter do
-  @moduledoc false
+  @moduledoc "Logs Alarmist transitions and preserves the existing PubSub notification."
   use GenServer
 
-  def start_link(options \\ []), do: GenServer.start_link(__MODULE__, options, name: __MODULE__)
+  require Logger
+
+  def start_link(options \\ []) do
+    name = Keyword.get(options, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, options, name: name)
+  end
 
   @impl true
   def init(_options) do
@@ -94,28 +54,30 @@ defmodule NervesGate.Alarms.Reporter do
 
   @impl true
   def handle_info(%Alarmist.Event{} = event, state) do
+    log_transition(event)
     Phoenix.PubSub.broadcast(NervesGate.PubSub, "alarms", {:alarms_changed, event.state})
     {:noreply, state}
   end
-end
 
-defmodule NervesGate.Alarm.NetworkFlapping do
-  @moduledoc "Internet connectivity changed too frequently."
-  use Alarmist.Alarm, level: :warning
+  @doc false
+  @spec log_transition(Alarmist.Event.t()) :: :ok
+  def log_transition(%Alarmist.Event{} = event) do
+    alarm_id = inspect(event.id)
 
-  alarm_if do
-    hold(
-      intensity(NervesGate.Alarm.InternetUnavailable, 4, :timer.minutes(5)),
-      :timer.minutes(10)
+    Logger.log(event.level, "alarm #{event.state}: #{alarm_id}",
+      alarm: true,
+      alarm_id: alarm_id,
+      alarm_state: event.state,
+      alarm_level: event.level,
+      alarm_description: safe_description(event.id)
     )
   end
-end
 
-defmodule NervesGate.Alarm.TailscaleUnstable do
-  @moduledoc "Tailscale connectivity changed too frequently."
-  use Alarmist.Alarm, level: :warning
+  defp safe_description(id) do
+    type = Alarmist.alarm_type(id)
 
-  alarm_if do
-    hold(intensity(NervesGate.Alarm.TailscaleOffline, 4, :timer.minutes(5)), :timer.minutes(10))
+    if Code.ensure_loaded?(type) and function_exported?(type, :description, 0),
+      do: type.description(),
+      else: "Operational condition changed"
   end
 end

@@ -1,7 +1,9 @@
 ## Customize flags given to the VM: https://www.erlang.org/doc/apps/erts/erl_cmd.html
 
 ## Do not set -name or -sname here. Prefer configuring them at runtime
--setcookie nerves_gate_field_cluster
+# Dynamic distribution starts without a release credential. Cluster.Manager
+# immediately applies the validated credential persisted under /data.
+-nocookie
 
 ## Number of dirty schedulers doing IO work (file, sockets, and others)
 ##+SDio 5

@@ -1,17 +1,23 @@
-defmodule NervesGate.Tailscale.Manager do
-  @moduledoc "Starts tailscale_ex only when verified kernel-mode binaries are available."
+defmodule NervesGate.Tailnet.Manager do
+  @moduledoc "Owns the local tailscaled runtime and repairs it only when Internet is available."
 
   use GenServer
 
-  alias NervesGate.Alarm
-  alias NervesGate.Alarms
   alias NervesGate.Backoff
   alias NervesGate.Store
 
   @initial_retry 1_000
   @maximum_retry 60_000
 
-  defstruct [:child, :monitor, :paths, :binary_paths, retry: @initial_retry, enabled: true]
+  defstruct [
+    :child,
+    :monitor,
+    :paths,
+    :binary_paths,
+    retry: @initial_retry,
+    enabled: true,
+    internet_online: false
+  ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -24,6 +30,9 @@ defmodule NervesGate.Tailscale.Manager do
 
   @spec repair(GenServer.server()) :: :ok | {:error, term()}
   def repair(server \\ __MODULE__), do: GenServer.call(server, :repair, 70_000)
+
+  @spec repair_runtime(GenServer.server()) :: :ok | :blocked
+  def repair_runtime(server \\ __MODULE__), do: GenServer.call(server, :repair_runtime)
 
   @spec running?(GenServer.server()) :: boolean()
   def running?(server \\ __MODULE__), do: GenServer.call(server, :running?)
@@ -38,11 +47,14 @@ defmodule NervesGate.Tailscale.Manager do
     enabled =
       Keyword.get(options, :enabled, Application.get_env(:nerves_gate, :tailscale_enabled, true))
 
+    Phoenix.PubSub.subscribe(NervesGate.PubSub, "internet")
+
     {:ok,
      %__MODULE__{
        enabled: enabled,
        binary_paths: Keyword.get(options, :binary_paths),
-       retry: Keyword.get(options, :retry, @initial_retry)
+       retry: Keyword.get(options, :retry, @initial_retry),
+       internet_online: internet_online?()
      }}
   end
 
@@ -54,22 +66,9 @@ defmodule NervesGate.Tailscale.Manager do
     do: {:reply, :ok, state}
 
   def handle_call(:ensure_started, _from, state) do
-    case locate_binaries(state) do
-      {:ok, paths} ->
-        case start_tailscale(paths) do
-          {:ok, pid} ->
-            monitor = Process.monitor(pid)
-            Alarms.clear(Alarm.TailscaleBinaryFailure)
-            {:reply, :ok, %{state | child: pid, monitor: monitor, paths: paths}}
-
-          {:error, reason} ->
-            Alarms.set(Alarm.TailscaleOffline)
-            {:reply, {:error, classify(reason)}, state}
-        end
-
-      {:error, reason} ->
-        Alarms.set(Alarm.TailscaleBinaryFailure)
-        {:reply, {:error, reason}, state}
+    case start_runtime(state) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
   end
 
@@ -81,48 +80,46 @@ defmodule NervesGate.Tailscale.Manager do
     ]
 
     case Tailscale.Binary.ensure_installed(options) do
-      {:ok, paths} ->
-        Alarms.clear(Alarm.TailscaleBinaryFailure)
-        {:reply, :ok, %{state | paths: paths}}
-
-      {:error, _reason} ->
-        Alarms.set(Alarm.TailscaleBinaryFailure)
-        {:reply, {:error, :binary_repair_failed}, state}
+      {:ok, paths} -> {:reply, :ok, %{state | paths: paths}}
+      {:error, _reason} -> {:reply, {:error, :binary_repair_failed}, state}
     end
+  end
+
+  def handle_call(:repair_runtime, _from, %{internet_online: false} = state) do
+    {:reply, :blocked, state}
+  end
+
+  def handle_call(:repair_runtime, _from, %{child: pid} = state) when is_pid(pid) do
+    Process.exit(pid, :shutdown)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:repair_runtime, _from, state) do
+    send(self(), :restart)
+    {:reply, :ok, state}
   end
 
   def handle_call(:running?, _from, state), do: {:reply, is_pid(state.child), state}
 
   @impl true
   def handle_info({:DOWN, reference, :process, _pid, _reason}, %{monitor: reference} = state) do
-    Alarms.set(Alarm.TailscaleOffline)
-    {wait, next_retry} = Backoff.next(state.retry, @maximum_retry)
-    Process.send_after(self(), :restart, wait)
-    {:noreply, %{state | child: nil, monitor: nil, retry: next_retry}}
+    state = %{state | child: nil, monitor: nil}
+
+    if state.internet_online do
+      {wait, next_retry} = Backoff.next(state.retry, @maximum_retry)
+      Process.send_after(self(), :restart, wait)
+      {:noreply, %{state | retry: next_retry}}
+    else
+      {:noreply, state}
+    end
   end
 
-  def handle_info(:restart, %{child: nil, enabled: true} = state) do
-    case locate_binaries(state) do
-      {:ok, paths} ->
-        case start_tailscale(paths) do
-          {:ok, pid} ->
-            {:noreply,
-             %{
-               state
-               | child: pid,
-                 monitor: Process.monitor(pid),
-                 paths: paths,
-                 retry: @initial_retry
-             }}
+  def handle_info(:restart, %{child: nil, enabled: true, internet_online: true} = state) do
+    case start_runtime(state) do
+      {:ok, state} ->
+        {:noreply, %{state | retry: @initial_retry}}
 
-          {:error, _reason} ->
-            {wait, next_retry} = Backoff.next(state.retry, @maximum_retry)
-            Process.send_after(self(), :restart, wait)
-            {:noreply, %{state | retry: next_retry}}
-        end
-
-      {:error, _reason} ->
-        Alarms.set(Alarm.TailscaleBinaryFailure)
+      {:error, _reason, state} ->
         {wait, next_retry} = Backoff.next(state.retry, @maximum_retry)
         Process.send_after(self(), :restart, wait)
         {:noreply, %{state | retry: next_retry}}
@@ -130,6 +127,28 @@ defmodule NervesGate.Tailscale.Manager do
   end
 
   def handle_info(:restart, state), do: {:noreply, state}
+
+  def handle_info({:internet_changed, %{online: online}}, state) do
+    state = %{state | internet_online: online}
+    if online and is_nil(state.child), do: send(self(), :restart)
+    {:noreply, state}
+  end
+
+  defp start_runtime(state) do
+    with {:ok, paths} <- locate_binaries(state),
+         {:ok, pid} <- start_tailscale(paths) do
+      {:ok,
+       %{
+         state
+         | child: pid,
+           monitor: Process.monitor(pid),
+           paths: paths,
+           retry: @initial_retry
+       }}
+    else
+      {:error, reason} -> {:error, classify(reason), state}
+    end
+  end
 
   defp locate_binaries(%{binary_paths: paths}) when is_map(paths) do
     if validate_binary_paths(paths) == :ok,
@@ -217,7 +236,7 @@ defmodule NervesGate.Tailscale.Manager do
           restart: :temporary
         }
 
-        DynamicSupervisor.start_child(NervesGate.Tailscale.DynamicSupervisor, child_spec)
+        DynamicSupervisor.start_child(NervesGate.Tailnet.DynamicSupervisor, child_spec)
       end
     end
   end
@@ -230,6 +249,15 @@ defmodule NervesGate.Tailscale.Manager do
     end
   end
 
-  defp classify(:kernel_tun_unavailable), do: :kernel_tun_unavailable
+  defp internet_online? do
+    NervesGate.Internet.Monitor.status().online
+  catch
+    :exit, _reason -> false
+  end
+
+  defp classify(reason)
+       when reason in [:kernel_tun_unavailable, :missing_pinned_binary, :disabled],
+       do: reason
+
   defp classify(_reason), do: :tailscale_start_failed
 end

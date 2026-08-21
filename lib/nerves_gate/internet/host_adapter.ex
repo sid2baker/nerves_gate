@@ -1,6 +1,6 @@
-defmodule NervesGate.Network.HostAdapter do
+defmodule NervesGate.Internet.HostAdapter do
   @moduledoc false
-  @behaviour NervesGate.Network.Adapter
+  @behaviour NervesGate.Internet.Adapter
 
   @impl true
   def configure_uplink(_config), do: :ok

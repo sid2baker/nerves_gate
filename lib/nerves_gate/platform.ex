@@ -2,17 +2,11 @@ defmodule NervesGate.Platform do
   @moduledoc false
   use GenServer
 
-  alias NervesGate.Alarm
-  alias NervesGate.Alarms
-
   def start_link(options \\ []), do: GenServer.start_link(__MODULE__, options, name: __MODULE__)
 
   @impl true
   def init(_options) do
-    if Nerves.Runtime.mix_target() != :host do
-      configure_forwarding()
-      Alarms.toggle(Alarm.TailscaleBinaryFailure, not File.exists?("/dev/net/tun"))
-    end
+    if Nerves.Runtime.mix_target() != :host, do: configure_forwarding()
 
     {:ok, %{}}
   end

@@ -1,6 +1,6 @@
 defmodule NervesGate.TestScenario do
   @moduledoc false
-  alias NervesGate.Network.Config
+  alias NervesGate.Internet.Config
 
   def temporary_root(context) do
     root =

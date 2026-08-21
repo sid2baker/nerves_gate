@@ -1,9 +1,9 @@
-defmodule NervesGate.Network.VintageNetAdapter do
+defmodule NervesGate.Internet.VintageNetAdapter do
   @moduledoc "VintageNet implementation used on Nerves targets."
 
-  @behaviour NervesGate.Network.Adapter
+  @behaviour NervesGate.Internet.Adapter
 
-  alias NervesGate.Network.Config
+  alias NervesGate.Internet.Config
 
   @impl true
   def configure_uplink(%Config{} = config) do

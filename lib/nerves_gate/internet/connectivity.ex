@@ -1,4 +1,4 @@
-defmodule NervesGate.Network.Connectivity do
+defmodule NervesGate.Internet.Connectivity do
   @moduledoc "Performs bounded, independent connectivity checks."
 
   @https_url ~c"https://controlplane.tailscale.com/key?v=1"

@@ -1,4 +1,4 @@
-defmodule NervesGate.Network.Config do
+defmodule NervesGate.Internet.Config do
   @moduledoc "Validated uplink configuration with redacted inspection."
 
   import Bitwise
@@ -105,8 +105,8 @@ defmodule NervesGate.Network.Config do
     import Inspect.Algebra
 
     def inspect(config, opts) do
-      public = NervesGate.Network.Config.to_public(config)
-      concat(["#NervesGate.Network.Config<", to_doc(public, opts), ">"])
+      public = NervesGate.Internet.Config.to_public(config)
+      concat(["#NervesGate.Internet.Config<", to_doc(public, opts), ">"])
     end
   end
 

@@ -47,7 +47,6 @@ defmodule NervesGate.MixProject do
       {:alarmist, "~> 0.4.2"},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
-      {:libcluster, "~> 3.5"},
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.2"},
       {:phoenix_pubsub, "~> 2.2"},
@@ -80,9 +79,7 @@ defmodule NervesGate.MixProject do
   def release do
     [
       overwrite: true,
-      # Erlang distribution is not started automatically.
-      # See https://nerves-pack.hexdocs.pm/readme.html#erlang-distribution
-      cookie: "nerves_gate_field_cluster",
+      # Erlang distribution is started only when a persisted cluster cookie exists.
       include_erts: &Nerves.Release.erts/0,
       steps: [&Nerves.Release.init/1, :assemble],
       strip_beams: Mix.env() == :prod or [keep: ["Docs"]]

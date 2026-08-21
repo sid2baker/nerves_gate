@@ -4,9 +4,20 @@ import Config
 
 config :nerves_gate,
   data_dir: Path.join(System.tmp_dir!(), "nerves_gate/#{config_env()}"),
-  network_adapter: NervesGate.Network.HostAdapter,
+  internet_adapter: NervesGate.Internet.HostAdapter,
   tailscale_enabled: false,
-  network_poll_interval: 60_000
+  internet_poll_interval: 60_000,
+  cluster_poll_interval: 60_000
+
+if config_env() == :test do
+  config :nerves_gate,
+    alarm_timings: %{
+      failure_debounce: 20,
+      flapping_count: 4,
+      flapping_period: 500,
+      flapping_hold: 100
+    }
+end
 
 config :nerves_gate, NervesGateWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: if(config_env() == :test, do: 0, else: 4000)]

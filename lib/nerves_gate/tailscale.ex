@@ -1,10 +1,8 @@
 defmodule NervesGate.Tailscale do
   @moduledoc "Only application boundary for tailscale_ex calls."
 
-  alias NervesGate.Alarm
-  alias NervesGate.Alarms
   alias NervesGate.Identity
-  alias NervesGate.Tailscale.Manager
+  alias NervesGate.Tailnet.Manager
 
   @server NervesGate.Tailscale.Daemon
 
@@ -30,12 +28,9 @@ defmodule NervesGate.Tailscale do
              :hostname_failed
            ),
          :ok <- successful(result) do
-      Alarms.clear(Alarm.TailscaleAuthenticationRequired)
       :ok
     else
-      _failure ->
-        Alarms.set(Alarm.TailscaleAuthenticationRequired)
-        {:error, :authentication_failed}
+      _failure -> {:error, :authentication_failed}
     end
   end
 

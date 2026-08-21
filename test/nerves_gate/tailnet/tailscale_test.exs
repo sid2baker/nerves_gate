@@ -1,9 +1,9 @@
-defmodule NervesGate.TailscaleTest do
+defmodule NervesGate.Tailnet.TailscaleTest do
   use ExUnit.Case
 
-  alias NervesGate.Network.Config
+  alias NervesGate.Internet.Config
   alias NervesGate.Store
-  alias NervesGate.Tailscale.Manager
+  alias NervesGate.Tailnet.Manager
   alias NervesGate.TestScenario
   alias NervesGate.TestTailscaleClient
 
@@ -64,14 +64,23 @@ defmodule NervesGate.TailscaleTest do
         binary_paths: %{cli_path: executable, daemon_path: executable}
       )
 
+    send(manager, {:internet_changed, %{online: true}})
     assert :ok = Manager.ensure_started(manager)
     Process.exit(Process.whereis(NervesGate.Tailscale.Daemon), :kill)
     assert_eventually(fn -> :sys.get_state(manager).retry > 10 end)
     assert Process.alive?(manager)
   end
 
+  test "runtime repair is blocked while Internet is unavailable" do
+    name = String.to_atom("tailnet_repair_#{System.unique_integer([:positive])}")
+    {:ok, manager} = Manager.start_link(name: name, enabled: false)
+    on_exit(fn -> if Process.alive?(manager), do: GenServer.stop(manager) end)
+
+    assert :blocked = Manager.repair_runtime(manager)
+  end
+
   test "kernel TUN mode is mandatory in runtime configuration" do
-    source = File.read!("lib/nerves_gate/tailscale/manager.ex")
+    source = File.read!("lib/nerves_gate/tailnet/manager.ex")
     assert source =~ "tun: :kernel"
     refute source =~ "tun: :userspace"
   end

@@ -83,11 +83,6 @@ config :mdns_lite,
       protocol: "sftp-ssh",
       transport: "tcp",
       port: 22
-    },
-    %{
-      protocol: "epmd",
-      transport: "tcp",
-      port: 4369
     }
   ]
 

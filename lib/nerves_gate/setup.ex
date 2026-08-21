@@ -1,23 +1,23 @@
 defmodule NervesGate.Setup do
   @moduledoc """
-  The complete initialization flow: Internet → Tailscale → cluster → ready.
+  Persists the three commissioning choices: Internet, Tailnet, and Cluster.
 
-  Each public function performs one step and advances the persisted phase only
-  after that step succeeds. The small API is shared by LiveView, HTTP, and tests.
+  Runtime health is owned by the three domain managers and is never persisted
+  here. The phase file remains temporarily for the current web UI and can be
+  removed during the NervesGateWeb refactor.
   """
 
   use GenServer
 
-  alias NervesGate.Alarm
-  alias NervesGate.Alarms
   alias NervesGate.Cluster.Manager, as: ClusterManager
   alias NervesGate.Commissioning.Access
-  alias NervesGate.Distribution.Manager, as: DistributionManager
-  alias NervesGate.Network.Config
-  alias NervesGate.Network.Manager, as: NetworkManager
+  alias NervesGate.Commissioning.Alarms, as: CommissioningAlarms
+  alias NervesGate.Internet.Config
+  alias NervesGate.Internet.Manager, as: InternetManager
+  alias NervesGate.Storage.Alarms, as: StorageAlarms
   alias NervesGate.Store
+  alias NervesGate.Tailnet.Observer
   alias NervesGate.Tailscale
-  alias NervesGate.Tailscale.Observer
 
   @phases [:internet, :tailscale, :cluster, :ready, :recovery]
 
@@ -42,14 +42,35 @@ defmodule NervesGate.Setup do
 
   def configure_tailscale(auth_token, server)
       when is_binary(auth_token) and byte_size(auth_token) in 8..512 do
-    GenServer.call(server, {:configure_tailscale, auth_token}, 20_000)
+    GenServer.call(server, {:configure_tailscale, fn -> auth_token end}, 20_000)
   end
 
   def configure_tailscale(_auth_token, _server), do: {:error, :invalid_auth_token}
 
-  @spec configure_cluster(GenServer.server()) :: {:ok, :ready} | {:error, term()}
-  def configure_cluster(server \\ __MODULE__),
-    do: GenServer.call(server, :configure_cluster, 10_000)
+  @doc "Compatibility call for the current web controller; selects singular mode."
+  @spec configure_cluster() :: {:ok, :ready} | {:error, term()}
+  def configure_cluster, do: configure_cluster(nil, __MODULE__)
+
+  @doc "Configures a cookie, or accepts the old explicit server argument for singular mode."
+  @spec configure_cluster(String.t() | nil | GenServer.server()) ::
+          {:ok, :ready} | {:error, term()}
+  def configure_cluster(cookie) when is_binary(cookie) or is_nil(cookie),
+    do: configure_cluster(cookie, __MODULE__)
+
+  def configure_cluster(server), do: configure_cluster(nil, server)
+
+  @spec configure_cluster(String.t() | nil, GenServer.server()) ::
+          {:ok, :ready} | {:error, term()}
+  def configure_cluster(cookie, server) do
+    with {:ok, cookie} <- ClusterManager.validate_cookie(cookie) do
+      GenServer.call(server, {:configure_cluster, fn -> cookie end}, 10_000)
+    end
+  end
+
+  @spec configure_cluster_cookie(String.t() | nil, GenServer.server()) ::
+          {:ok, :ready} | {:error, term()}
+  def configure_cluster_cookie(cookie, server \\ __MODULE__),
+    do: configure_cluster(cookie, server)
 
   @spec recover(atom(), GenServer.server()) :: :ok
   def recover(reason \\ :requested, server \\ __MODULE__) do
@@ -63,7 +84,7 @@ defmodule NervesGate.Setup do
   def init(options) do
     root = Keyword.get(options, :root, Store.root())
     ops = Keyword.get(options, :ops, default_ops())
-    Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailscale")
+    Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
 
     {phase, error} = load_phase(root)
     state = %__MODULE__{root: root, phase: phase, error: error, ops: ops}
@@ -73,11 +94,11 @@ defmodule NervesGate.Setup do
 
   @impl true
   def handle_call({:configure_internet, config}, _from, state) do
-    case state.ops.network.(config) do
+    case state.ops.internet.(config) do
       {:ok, _checks} ->
         next_phase = if state.phase in [:internet, :recovery], do: :tailscale, else: state.phase
         state = set_phase(state, next_phase)
-        state.ops.start_tailscale.()
+        state.ops.start_tailnet.()
         {:reply, {:ok, next_phase}, %{state | error: nil}}
 
       {:error, reason} ->
@@ -93,14 +114,14 @@ defmodule NervesGate.Setup do
     end
   end
 
-  def handle_call({:configure_tailscale, _token}, _from, %{phase: :internet} = state) do
+  def handle_call({:configure_tailscale, _load_token}, _from, %{phase: :internet} = state) do
     {:reply, {:error, :internet_required}, state}
   end
 
-  def handle_call({:configure_tailscale, token}, _from, state) do
-    case enroll(state.ops.tailscale, token) do
+  def handle_call({:configure_tailscale, load_token}, _from, state) do
+    case enroll(state.ops.enroll_tailnet, load_token.()) do
       :ok ->
-        state.ops.poll_tailscale.()
+        state.ops.poll_tailnet.()
         {:reply, {:ok, :cluster}, state |> set_phase(:cluster) |> Map.put(:error, nil)}
 
       {:error, reason} ->
@@ -108,14 +129,23 @@ defmodule NervesGate.Setup do
     end
   end
 
-  def handle_call(:configure_cluster, _from, %{phase: :ready} = state) do
-    {:reply, {:ok, :ready}, state}
+  def handle_call({:configure_cluster, _load_cookie}, _from, %{phase: :internet} = state) do
+    {:reply, {:error, :internet_required}, state}
   end
 
-  def handle_call(:configure_cluster, _from, state) do
-    case start_cluster(state) do
-      {:ok, state} -> {:reply, {:ok, :ready}, state}
-      {:error, reason, state} -> {:reply, {:error, reason}, state}
+  def handle_call({:configure_cluster, _load_cookie}, _from, %{phase: :tailscale} = state) do
+    {:reply, {:error, :tailnet_required}, state}
+  end
+
+  def handle_call({:configure_cluster, load_cookie}, _from, state) do
+    case safe_configure_cluster(state.ops.configure_cluster, load_cookie.()) do
+      :ok ->
+        CommissioningAlarms.required(false)
+        Process.send_after(self(), :disable_setup_access, 1_000)
+        {:reply, {:ok, :ready}, state |> set_phase(:ready) |> Map.put(:error, nil)}
+
+      {:error, reason} ->
+        {:reply, {:error, public_error(reason)}, %{state | error: public_error(reason)}}
     end
   end
 
@@ -133,27 +163,18 @@ defmodule NervesGate.Setup do
   @impl true
   def handle_cast({:recover, reason}, state) do
     state.ops.access.(:recovery, known_uplink(state.root))
-    Alarms.set(Alarm.CommissioningRequired)
+    CommissioningAlarms.required(true)
     {:noreply, %{set_phase(state, :recovery) | error: reason}}
   end
 
   @impl true
-  def handle_info(:resume, state) do
-    {:noreply, resume(state)}
-  end
+  def handle_info(:resume, state), do: {:noreply, resume(state)}
 
-  def handle_info({:tailscale_changed, %{online: true}}, %{phase: :tailscale} = state) do
+  def handle_info({:tailnet_changed, %{online: true}}, %{phase: :tailscale} = state) do
     {:noreply, set_phase(state, :cluster)}
   end
 
-  def handle_info({:tailscale_changed, %{online: true} = tailscale}, %{phase: :ready} = state) do
-    case start_cluster(state, tailscale) do
-      {:ok, state} -> {:noreply, state}
-      {:error, reason, state} -> {:noreply, %{state | error: public_error(reason)}}
-    end
-  end
-
-  def handle_info({:tailscale_changed, _status}, state), do: {:noreply, state}
+  def handle_info({:tailnet_changed, _status}, state), do: {:noreply, state}
 
   def handle_info(:disable_setup_access, state) do
     state.ops.disable_access.()
@@ -170,59 +191,34 @@ defmodule NervesGate.Setup do
   defp resume(%{phase: :tailscale} = state) do
     state
     |> enable_setup_access(:commissioning, known_uplink(state.root))
-    |> start_and_poll_tailscale()
+    |> poll_tailnet()
   end
 
   defp resume(%{phase: :cluster} = state) do
-    if cluster_ready?(state) do
-      state.ops.disable_access.()
-      Alarms.clear(Alarm.CommissioningRequired)
-      set_phase(state, :ready)
-    else
-      state
-      |> enable_setup_access(:commissioning, known_uplink(state.root))
-      |> start_and_poll_tailscale()
-    end
+    state
+    |> enable_setup_access(:commissioning, known_uplink(state.root))
+    |> poll_tailnet()
   end
 
-  defp resume(%{phase: :ready} = state), do: start_and_poll_tailscale(state)
+  defp resume(%{phase: :ready} = state) do
+    CommissioningAlarms.required(false)
+    state.ops.disable_access.()
+    poll_tailnet(state)
+  end
 
   defp resume(%{phase: :recovery} = state) do
     enable_setup_access(state, :recovery, known_uplink(state.root))
   end
 
   defp enable_setup_access(state, mode, uplink) do
-    Alarms.set(Alarm.CommissioningRequired)
+    CommissioningAlarms.required(true)
     state.ops.access.(mode, uplink)
     state
   end
 
-  defp start_and_poll_tailscale(state) do
-    state.ops.start_tailscale.()
-    state.ops.poll_tailscale.()
+  defp poll_tailnet(state) do
+    state.ops.poll_tailnet.()
     state
-  end
-
-  defp cluster_ready?(state) do
-    state.ops
-    |> Map.get(:cluster_ready, fn -> false end)
-    |> then(& &1.())
-  end
-
-  defp start_cluster(state, tailscale \\ nil) do
-    tailscale = tailscale || state.ops.tail_status.()
-
-    with %{online: true, ipv4: ipv4} when is_binary(ipv4) <- tailscale,
-         :ok <- state.ops.distribution.(ipv4),
-         :ok <- state.ops.cluster.() do
-      Alarms.clear(Alarm.CommissioningRequired)
-      Process.send_after(self(), :disable_setup_access, 1_000)
-      {:ok, state |> set_phase(:ready) |> Map.put(:error, nil)}
-    else
-      %{online: false} -> {:error, :tailscale_offline, state}
-      {:error, reason} -> {:error, reason, state}
-      _other -> {:error, :tailscale_not_ready, state}
-    end
   end
 
   defp set_phase(state, phase) when phase in @phases do
@@ -232,7 +228,7 @@ defmodule NervesGate.Setup do
         %{state | phase: phase}
 
       {:error, reason} ->
-        Alarms.set(Alarm.StorageFailure)
+        StorageAlarms.failure(true)
         state.ops.access.(:recovery, known_uplink(state.root))
         %{state | phase: :recovery, error: public_error(reason)}
     end
@@ -251,7 +247,7 @@ defmodule NervesGate.Setup do
         {phase, nil}
 
       {:error, reason} ->
-        Alarms.set(Alarm.StorageFailure)
+        StorageAlarms.failure(true)
         Store.write_phase(:recovery, root)
         {:recovery, public_error(reason)}
     end
@@ -309,21 +305,22 @@ defmodule NervesGate.Setup do
     _kind, _reason -> {:error, :authentication_failed}
   end
 
+  defp safe_configure_cluster(configure, cookie) do
+    configure.(cookie)
+  catch
+    _kind, _reason -> {:error, :cluster_configuration_failed}
+  end
+
   defp public_error(reason) when is_atom(reason), do: reason
   defp public_error(_reason), do: :operation_failed
 
   defp default_ops do
     %{
-      network: &NetworkManager.apply_candidate/1,
-      tailscale: &Tailscale.enroll/1,
-      start_tailscale: &Tailscale.ensure_started/0,
-      poll_tailscale: &Observer.poll_now/0,
-      tail_status: &Observer.status/0,
-      distribution: &DistributionManager.ensure_started/1,
-      cluster: &ClusterManager.ensure_started/0,
-      cluster_ready: fn ->
-        ClusterManager.status().running and DistributionManager.status().online
-      end,
+      internet: &InternetManager.apply_candidate/1,
+      enroll_tailnet: &Tailscale.enroll/1,
+      start_tailnet: &Tailscale.ensure_started/0,
+      poll_tailnet: &Observer.poll_now/0,
+      configure_cluster: &ClusterManager.configure/1,
       access: &Access.enable/2,
       disable_access: &Access.disable/0
     }

@@ -1,4 +1,4 @@
-defmodule NervesGate.Network.Hardware do
+defmodule NervesGate.Internet.Hardware do
   @moduledoc "Discovers local interfaces without assuming Wi-Fi is present."
 
   @spec interfaces() :: [map()]

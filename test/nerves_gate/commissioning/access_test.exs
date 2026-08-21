@@ -2,10 +2,10 @@ defmodule NervesGate.Commissioning.AccessTest do
   use ExUnit.Case
 
   alias NervesGate.Commissioning.Access
-  alias NervesGate.TestNetworkAdapter
+  alias NervesGate.TestInternetAdapter
 
   setup do
-    {:ok, _pid} = TestNetworkAdapter.reset()
+    {:ok, _pid} = TestInternetAdapter.reset()
     :ok
   end
 
@@ -19,7 +19,7 @@ defmodule NervesGate.Commissioning.AccessTest do
     end
 
     {:ok, pid} =
-      Access.start_link(name: unique_name(), adapter: TestNetworkAdapter, hardware: hardware)
+      Access.start_link(name: unique_name(), adapter: TestInternetAdapter, hardware: hardware)
 
     assert {:ok, active} = Access.enable(:commissioning, "eth0", pid)
     assert Enum.map(active, & &1.interface) == ["wlan0", "eth1"]
@@ -29,7 +29,7 @@ defmodule NervesGate.Commissioning.AccessTest do
     assert :ok = Access.release("eth1", pid)
     assert Enum.map(Access.status(pid).active, & &1.interface) == ["wlan0"]
     assert :ok = Access.disable(pid)
-    refute {:clear, "eth1"} in TestNetworkAdapter.state().calls
+    refute {:clear, "eth1"} in TestInternetAdapter.state().calls
   end
 
   test "commissioning without Wi-Fi falls back to eth1 and preserves eth0 uplink" do

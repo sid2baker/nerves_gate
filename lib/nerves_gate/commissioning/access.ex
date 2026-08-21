@@ -3,10 +3,9 @@ defmodule NervesGate.Commissioning.Access do
 
   use GenServer
 
-  alias NervesGate.Alarm
-  alias NervesGate.Alarms
+  alias NervesGate.Commissioning.Alarms
   alias NervesGate.Identity
-  alias NervesGate.Network.Hardware
+  alias NervesGate.Internet.Hardware
 
   defstruct [:adapter, :hardware, active: [], mode: :disabled]
 
@@ -36,7 +35,7 @@ defmodule NervesGate.Commissioning.Access do
     {:ok,
      %__MODULE__{
        adapter:
-         Keyword.get(options, :adapter, Application.fetch_env!(:nerves_gate, :network_adapter)),
+         Keyword.get(options, :adapter, Application.fetch_env!(:nerves_gate, :internet_adapter)),
        hardware: Keyword.get(options, :hardware, &Hardware.interfaces/0)
      }}
   end
@@ -62,11 +61,11 @@ defmodule NervesGate.Commissioning.Access do
 
     case active do
       [] ->
-        Alarms.set(Alarm.CommissioningUnavailable)
+        Alarms.unavailable(true)
         {:reply, {:error, :no_interface}, %{state | active: [], mode: mode}}
 
       available ->
-        Alarms.clear(Alarm.CommissioningUnavailable)
+        Alarms.unavailable(false)
         {:reply, {:ok, available}, %{state | active: available, mode: mode}}
     end
   end

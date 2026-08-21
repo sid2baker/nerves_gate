@@ -1,6 +1,6 @@
-defmodule NervesGate.TestNetworkAdapter do
+defmodule NervesGate.TestInternetAdapter do
   @moduledoc false
-  @behaviour NervesGate.Network.Adapter
+  @behaviour NervesGate.Internet.Adapter
 
   def start_link do
     Agent.start_link(fn -> %{calls: [], current: nil} end, name: __MODULE__)

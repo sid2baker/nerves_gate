@@ -20,21 +20,32 @@ config :nerves, source_date_epoch: "1787244399"
 
 config :phoenix, :json_library, Jason
 
+config :logger, :default_formatter,
+  metadata: [:alarm, :alarm_id, :alarm_state, :alarm_level, :alarm_description]
+
 config :alarmist,
   managed_alarms: [
-    NervesGate.Alarm.NetworkFlapping,
-    NervesGate.Alarm.TailscaleUnstable
+    NervesGate.Internet.Condition.ActionableUnavailable,
+    NervesGate.Internet.Alarm.Unavailable,
+    NervesGate.Internet.Alarm.Unstable,
+    NervesGate.Tailnet.Condition.ActionableUnavailable,
+    NervesGate.Tailnet.Alarm.Unavailable,
+    NervesGate.Cluster.Condition.ActionableUnavailable,
+    NervesGate.Cluster.Alarm.Unavailable
   ],
   alarm_levels: %{
-    NervesGate.Alarm.StorageFailure => :error,
-    NervesGate.Alarm.TailscaleBinaryFailure => :error,
-    NervesGate.Alarm.CommissioningUnavailable => :error
+    NervesGate.Internet.Signal.Unavailable => :debug,
+    NervesGate.Tailnet.Signal.Unavailable => :debug,
+    NervesGate.Cluster.Signal.Enabled => :debug,
+    NervesGate.Cluster.Signal.Unavailable => :debug,
+    NervesGate.Storage.Alarm.Failure => :error,
+    NervesGate.Commissioning.Alarm.Unavailable => :error
   }
 
 config :nerves_gate,
   data_dir: "/data",
-  network_adapter: NervesGate.Network.VintageNetAdapter,
-  network_poll_interval: 10_000,
+  internet_adapter: NervesGate.Internet.VintageNetAdapter,
+  internet_poll_interval: 10_000,
   tailscale_enabled: true,
   tailscale_version: "1.102.3",
   tailscale_binary_sha256: %{
@@ -46,7 +57,14 @@ config :nerves_gate,
     daemon_path: "/usr/lib/nerves_gate/tailscale/tailscaled"
   },
   distribution_port: 43_769,
-  distribution_cookie: :nerves_gate_field_cluster
+  cluster_poll_interval: 5_000,
+  tailnet_repair_failures: 6,
+  alarm_timings: %{
+    failure_debounce: 30_000,
+    flapping_count: 4,
+    flapping_period: :timer.minutes(5),
+    flapping_hold: :timer.minutes(10)
+  }
 
 config :nerves_gate, NervesGateWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,

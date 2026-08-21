@@ -7,8 +7,11 @@ defmodule NervesGate do
   @doc "Enroll Tailscale without persisting the auth token."
   defdelegate configure_tailscale(auth_token), to: NervesGate.Setup
 
-  @doc "Start distribution and cluster discovery over Tailscale."
+  @doc "Select singular mode for compatibility with the current web setup flow."
   defdelegate configure_cluster(), to: NervesGate.Setup
+
+  @doc "Configure the optional cluster cookie; nil selects singular mode."
+  defdelegate configure_cluster(cookie), to: NervesGate.Setup, as: :configure_cluster_cookie
 
   @doc "Return a secret-free status snapshot."
   defdelegate status(), to: NervesGate.Status, as: :snapshot

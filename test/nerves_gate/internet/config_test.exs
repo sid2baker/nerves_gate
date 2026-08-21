@@ -1,7 +1,7 @@
-defmodule NervesGate.Network.ConfigTest do
+defmodule NervesGate.Internet.ConfigTest do
   use ExUnit.Case, async: true
 
-  alias NervesGate.Network.Config
+  alias NervesGate.Internet.Config
 
   test "supports DHCP and static IPv4 including subnet masks" do
     assert {:ok, %Config{method: :dhcp}} =

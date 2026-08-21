@@ -4,18 +4,17 @@ NervesGate is an x86_64 Nerves gateway with a deliberately small initialization
 flow:
 
 ```text
-Internet → Tailscale → cluster → ready
+Internet → Tailnet → Cluster
 ```
 
-The current phase is stored as readable JSON in `/data/setup.json`. Verified
-network settings live in `/data/network.json`, editable device information and
-its change history in `/data/device.json`, and Tailscale owns
-`/data/tailscale/`. Writes are atomic and there is no database.
+The current web compatibility phase is stored in `/data/setup.json`. Verified
+Internet settings live in `/data/network.json`, the optional cluster cookie is
+stored with restrictive permissions in `/data/cluster.json`, editable device
+information and its change history live in `/data/device.json`, and Tailscale
+owns `/data/tailscale/`. Writes are atomic and there is no database.
 
-Finitomata was evaluated for this flow. It is useful for large or dynamic state
-machines, but four linear phases do not justify another framework and its
-runtime dependencies. `NervesGate.Setup` keeps the transition rules and side
-effects together in a regular, directly testable GenServer.
+`NervesGate.Setup` only orchestrates commissioning choices. Internet, Tailnet,
+and Cluster managers reconstruct and repair their own runtime state after boot.
 
 ## Initialization
 
@@ -30,15 +29,17 @@ http://192.168.77.1/
    known-good configuration.
 2. Supply a Tailscale auth token. It is used for the enrollment call and never
    written to disk.
-3. Open the assigned tailnet address and start the cluster. Distribution binds
-   to the Tailscale IP and libcluster discovers other NervesGate peers.
+3. Select singular mode or provide a cluster cookie. A cookie enables Erlang
+   distribution bound to the Tailscale IP. It authorizes connections but does
+   not discover or automatically connect peers.
 
 The same operations have a small Elixir API:
 
 ```elixir
 NervesGate.configure_internet(%{"ip_address" => "dhcp"})
 NervesGate.configure_tailscale("tskey-auth-…")
-NervesGate.configure_cluster()
+NervesGate.configure_cluster()            # temporary singular-mode compatibility
+NervesGate.configure_cluster("shared-secret") # cluster-enabled backend API
 ```
 
 They are also exposed as API endpoints, not separate pages:
