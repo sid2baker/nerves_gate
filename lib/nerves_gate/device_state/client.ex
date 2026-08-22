@@ -1,20 +1,42 @@
 defmodule NervesGate.DeviceState.Client do
-  @moduledoc "Maintains replicas for already-connected BEAM nodes without discovering or connecting peers."
+  @moduledoc """
+  Keeps local `%DeviceState.Data{}` copies for already-connected gateways.
+
+  Canonical data is stored separately from replication transport metadata.
+  This process never discovers or connects peers. It only joins authoritative
+  servers on BEAM nodes that are already connected.
+  """
 
   use GenServer
 
-  alias NervesGate.DeviceState.Replica
+  alias NervesGate.DeviceState.Data
   alias NervesGate.DeviceState.Server
-  alias NervesGate.DeviceState.Snapshot
 
   @max_buffered_operations 100
 
-  defstruct replicas: %{},
+  defstruct data: %{},
+            metadata: %{},
             pending: MapSet.new(),
             buffered: %{},
             server_monitors: %{},
             retries: %{},
             monitoring_nodes: false
+
+  @type metadata :: %{
+          boot_id: String.t(),
+          revision: non_neg_integer(),
+          connected: boolean(),
+          last_seen_at: DateTime.t()
+        }
+
+  @type replica :: %{
+          data: Data.t(),
+          node: node(),
+          boot_id: String.t(),
+          revision: non_neg_integer(),
+          connected: boolean(),
+          last_seen_at: DateTime.t()
+        }
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -22,12 +44,20 @@ defmodule NervesGate.DeviceState.Client do
     GenServer.start_link(__MODULE__, options, name: name)
   end
 
-  @spec replicas(GenServer.server()) :: %{String.t() => Replica.t()}
+  @spec replicas(GenServer.server()) :: %{String.t() => replica()}
   def replicas(server \\ __MODULE__), do: GenServer.call(server, :replicas)
 
-  @spec get(String.t(), GenServer.server()) :: Replica.t() | nil
+  @spec get(String.t(), GenServer.server()) :: replica() | nil
   def get(device_id, server \\ __MODULE__) do
     server |> replicas() |> Map.get(device_id)
+  end
+
+  @spec data(String.t(), GenServer.server()) :: Data.t() | nil
+  def data(device_id, server \\ __MODULE__) do
+    case get(device_id, server) do
+      %{data: data} -> data
+      nil -> nil
+    end
   end
 
   @impl true
@@ -48,7 +78,9 @@ defmodule NervesGate.DeviceState.Client do
   @impl true
   def handle_call(:replicas, _from, state) do
     replicas =
-      Map.new(state.replicas, fn {_node, replica} -> {replica.data.device_id, replica} end)
+      Map.new(state.data, fn {node, data} ->
+        {data.device_id, replica(node, data, Map.fetch!(state.metadata, node))}
+      end)
 
     {:reply, replicas, state}
   end
@@ -73,7 +105,7 @@ defmodule NervesGate.DeviceState.Client do
 
   def handle_info({:cluster_changed, %{online: false}}, state) do
     state =
-      state.replicas
+      state.data
       |> Map.keys()
       |> Enum.reduce(%{state | monitoring_nodes: false}, &mark_disconnected(&2, &1))
       |> Map.put(:retries, %{})
@@ -86,9 +118,13 @@ defmodule NervesGate.DeviceState.Client do
     {:noreply, state}
   end
 
-  def handle_info({:device_state_joined, node, {:ok, %Snapshot{} = snapshot}}, state) do
-    state = install_snapshot(state, node, snapshot)
-    {:noreply, state}
+  def handle_info(
+        {:device_state_joined, node,
+         {:ok, %{boot_id: boot_id, revision: revision, data: %Data{} = data}}},
+        state
+      ) do
+    snapshot = %{boot_id: boot_id, revision: revision, data: data}
+    {:noreply, install_snapshot(state, node, snapshot)}
   end
 
   def handle_info({:device_state_joined, node, _error}, state) do
@@ -119,14 +155,18 @@ defmodule NervesGate.DeviceState.Client do
   end
 
   defp receive_operation(state, node, boot_id, revision, operation) do
-    case Map.fetch(state.replicas, node) do
-      {:ok, replica} ->
-        if MapSet.member?(state.pending, node) do
-          buffer_operation(state, node, {boot_id, revision, operation})
-        else
-          apply_to_replica(state, replica, node, boot_id, revision, operation)
-        end
+    if MapSet.member?(state.pending, node) do
+      buffer_operation(state, node, {boot_id, revision, operation})
+    else
+      apply_or_join(state, node, boot_id, revision, operation)
+    end
+  end
 
+  defp apply_or_join(state, node, boot_id, revision, operation) do
+    with {:ok, data} <- Map.fetch(state.data, node),
+         {:ok, metadata} <- Map.fetch(state.metadata, node) do
+      apply_to_replica(state, node, data, metadata, boot_id, revision, operation)
+    else
       :error ->
         state
         |> buffer_operation(node, {boot_id, revision, operation})
@@ -134,10 +174,10 @@ defmodule NervesGate.DeviceState.Client do
     end
   end
 
-  defp apply_to_replica(state, replica, node, boot_id, revision, operation) do
-    case Replica.apply_operation(replica, boot_id, revision, operation) do
-      {:ok, replica} ->
-        put_replica(state, node, replica)
+  defp apply_to_replica(state, node, data, metadata, boot_id, revision, operation) do
+    case apply_remote_operation(data, metadata, boot_id, revision, operation) do
+      {:ok, data, metadata} ->
+        put_replica(state, node, data, metadata)
 
       :duplicate ->
         state
@@ -150,12 +190,35 @@ defmodule NervesGate.DeviceState.Client do
     end
   end
 
-  defp start_join(state, remote_node) do
-    if remote_node == Node.self() do
-      state
-    else
-      do_start_join(state, remote_node)
+  defp apply_remote_operation(data, metadata, boot_id, revision, operation) do
+    cond do
+      boot_id != metadata.boot_id ->
+        :resync
+
+      revision <= metadata.revision ->
+        :duplicate
+
+      revision != metadata.revision + 1 ->
+        :resync
+
+      true ->
+        apply_ordered_operation(data, metadata, revision, operation)
     end
+  end
+
+  defp apply_ordered_operation(data, metadata, revision, operation) do
+    case Data.apply_operation(data, operation) do
+      {:ok, data, _actions} ->
+        metadata = %{metadata | revision: revision, connected: true, last_seen_at: now()}
+        {:ok, data, metadata}
+
+      :error ->
+        :resync
+    end
+  end
+
+  defp start_join(state, remote_node) do
+    if remote_node == Node.self(), do: state, else: do_start_join(state, remote_node)
   end
 
   defp do_start_join(state, node) do
@@ -185,42 +248,58 @@ defmodule NervesGate.DeviceState.Client do
   end
 
   defp install_snapshot(state, node, snapshot) do
+    metadata = %{
+      boot_id: snapshot.boot_id,
+      revision: snapshot.revision,
+      connected: true,
+      last_seen_at: now()
+    }
+
     state =
       state
       |> clear_pending(node)
       |> clear_retry(node)
       |> monitor_remote_server(node)
-      |> put_replica(node, Replica.new(node, snapshot))
+      |> put_replica(node, snapshot.data, metadata)
 
     buffered = state.buffered |> Map.get(node, []) |> Enum.sort_by(&elem(&1, 1))
     state = %{state | buffered: Map.delete(state.buffered, node)}
 
-    Enum.reduce_while(buffered, state, fn {boot_id, revision, operation}, acc ->
-      replica = Map.fetch!(acc.replicas, node)
-
-      case Replica.apply_operation(replica, boot_id, revision, operation) do
-        {:ok, replica} -> {:cont, put_replica(acc, node, replica)}
-        :duplicate -> {:cont, acc}
-        :resync -> {:halt, acc |> mark_disconnected(node) |> start_join(node)}
+    Enum.reduce_while(buffered, state, fn {boot_id, revision, operation}, state ->
+      case apply_buffered_operation(state, node, boot_id, revision, operation) do
+        {:ok, state} -> {:cont, state}
+        :resync -> {:halt, state |> mark_disconnected(node) |> start_join(node)}
       end
     end)
   end
 
-  defp put_replica(state, node, replica) do
-    replicas =
-      state.replicas
-      |> Enum.reject(fn {other_node, other} ->
-        other_node != node and other.data.device_id == replica.data.device_id
-      end)
-      |> Map.new()
-      |> Map.put(node, replica)
+  defp apply_buffered_operation(state, node, boot_id, revision, operation) do
+    data = Map.fetch!(state.data, node)
+    metadata = Map.fetch!(state.metadata, node)
 
-    state = %{state | replicas: replicas}
+    case apply_remote_operation(data, metadata, boot_id, revision, operation) do
+      {:ok, data, metadata} -> {:ok, put_replica(state, node, data, metadata)}
+      :duplicate -> {:ok, state}
+      :resync -> :resync
+    end
+  end
+
+  defp put_replica(state, node, data, metadata) do
+    duplicate_nodes =
+      for {other_node, other_data} <- state.data,
+          other_node != node and other_data.device_id == data.device_id,
+          do: other_node
+
+    state = %{
+      state
+      | data: state.data |> Map.drop(duplicate_nodes) |> Map.put(node, data),
+        metadata: state.metadata |> Map.drop(duplicate_nodes) |> Map.put(node, metadata)
+    }
 
     Phoenix.PubSub.broadcast(
       NervesGate.PubSub,
       "device_state",
-      {:replica_changed, replica.data.device_id, replica}
+      {:replica_changed, data.device_id, replica(node, data, metadata)}
     )
 
     state
@@ -229,9 +308,9 @@ defmodule NervesGate.DeviceState.Client do
   defp mark_disconnected(state, node) do
     state = clear_pending(state, node)
 
-    case Map.fetch(state.replicas, node) do
-      {:ok, replica} when replica.connected ->
-        put_replica(state, node, Replica.disconnected(replica))
+    case Map.fetch(state.metadata, node) do
+      {:ok, %{connected: true} = metadata} ->
+        put_replica(state, node, Map.fetch!(state.data, node), %{metadata | connected: false})
 
       _missing_or_stale ->
         state
@@ -286,4 +365,10 @@ defmodule NervesGate.DeviceState.Client do
       state
     end
   end
+
+  defp replica(node, data, metadata) do
+    Map.merge(metadata, %{node: node, data: data})
+  end
+
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:millisecond)
 end

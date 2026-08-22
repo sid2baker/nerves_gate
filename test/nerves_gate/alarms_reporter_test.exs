@@ -15,13 +15,13 @@ defmodule NervesGate.AlarmsReporterTest do
     NervesGate.Alarms.set(Public, Public.description())
 
     assert_eventually(fn ->
-      Enum.any?(NervesGate.DeviceState.Server.public().alarms, &(&1.id == inspect(Public)))
+      Enum.any?(NervesGate.DeviceState.Server.data().alarms, &(&1.id == inspect(Public)))
     end)
 
     NervesGate.Alarms.clear(Public)
 
     assert_eventually(fn ->
-      Enum.all?(NervesGate.DeviceState.Server.public().alarms, &(&1.id != inspect(Public)))
+      Enum.all?(NervesGate.DeviceState.Server.data().alarms, &(&1.id != inspect(Public)))
     end)
   end
 

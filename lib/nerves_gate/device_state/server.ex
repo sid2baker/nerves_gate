@@ -1,18 +1,29 @@
 defmodule NervesGate.DeviceState.Server do
-  @moduledoc "Single authoritative owner and operation sequencer for this device's public state."
+  @moduledoc """
+  Owns and sequences this gateway's canonical device data.
+
+  Every accepted operation is applied to the local `%DeviceState.Data{}` first
+  and then sent to all joined clients. Consequently every client observes the
+  same operations in the same order and can maintain an identical local copy.
+  """
 
   use GenServer
 
   alias NervesGate.Alarms
   alias NervesGate.Cluster.Manager, as: ClusterManager
   alias NervesGate.Device
-  alias NervesGate.DeviceState.Public
-  alias NervesGate.DeviceState.Snapshot
+  alias NervesGate.DeviceState.Data
   alias NervesGate.Identity
   alias NervesGate.Internet.Monitor
   alias NervesGate.Tailnet.Observer
 
-  defstruct [:public, :boot_id, revision: 0, clients: %{}]
+  defstruct [:data, :boot_id, revision: 0, clients: %{}]
+
+  @type snapshot :: %{
+          boot_id: String.t(),
+          revision: non_neg_integer(),
+          data: Data.t()
+        }
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -20,18 +31,18 @@ defmodule NervesGate.DeviceState.Server do
     GenServer.start_link(__MODULE__, options, name: name)
   end
 
-  @spec public(GenServer.server()) :: Public.t()
-  def public(server \\ __MODULE__), do: GenServer.call(server, :public)
+  @spec data(GenServer.server()) :: Data.t()
+  def data(server \\ __MODULE__), do: GenServer.call(server, :data)
 
-  @spec snapshot(GenServer.server()) :: Snapshot.t()
+  @spec snapshot(GenServer.server()) :: snapshot()
   def snapshot(server \\ __MODULE__), do: GenServer.call(server, :snapshot)
 
-  @spec join(pid(), GenServer.server()) :: {:ok, Snapshot.t()}
+  @spec join(pid(), GenServer.server()) :: {:ok, snapshot()}
   def join(client, server \\ __MODULE__) when is_pid(client) do
     GenServer.call(server, {:join, client})
   end
 
-  @spec apply_operation(Public.operation(), GenServer.server()) :: :ok
+  @spec apply_operation(Data.operation(), GenServer.server()) :: :ok | :error
   def apply_operation(operation, server \\ __MODULE__) do
     GenServer.call(server, {:apply_operation, operation})
   end
@@ -46,17 +57,12 @@ defmodule NervesGate.DeviceState.Server do
   def init(options) do
     if Keyword.get(options, :subscribe, true), do: subscribe_sources()
     boot_id = Keyword.get_lazy(options, :boot_id, &new_boot_id/0)
-
-    public =
-      Keyword.get_lazy(options, :initial_public, fn ->
-        build_public(boot_id)
-      end)
-
-    {:ok, %__MODULE__{public: public, boot_id: boot_id}}
+    data = Keyword.get_lazy(options, :initial_data, &build_data/0)
+    {:ok, %__MODULE__{data: data, boot_id: boot_id}}
   end
 
   @impl true
-  def handle_call(:public, _from, state), do: {:reply, state.public, state}
+  def handle_call(:data, _from, state), do: {:reply, state.data, state}
   def handle_call(:snapshot, _from, state), do: {:reply, snapshot_from(state), state}
 
   def handle_call({:join, client}, _from, state) do
@@ -65,36 +71,42 @@ defmodule NervesGate.DeviceState.Server do
   end
 
   def handle_call({:apply_operation, operation}, _from, state) do
-    {:reply, :ok, apply_local_operation(state, operation)}
+    case apply_local_operation(state, operation) do
+      {:ok, state} -> {:reply, :ok, state}
+      :error -> {:reply, :error, state}
+    end
   end
 
   @impl true
   def handle_cast({:alarm_transition, event}, state) do
-    state =
+    operation =
       case Alarms.public_event(event) do
-        {:set, alarm} -> apply_local_operation(state, {:alarm_set, alarm})
-        {:clear, id} -> apply_local_operation(state, {:alarm_cleared, id})
-        :ignore -> state
+        {:set, alarm} -> {:set_alarm, :alarms, alarm}
+        {:clear, id} -> {:clear_alarm, :alarms, id}
+        :ignore -> nil
       end
 
-    {:noreply, state}
+    {:noreply, maybe_apply_local_operation(state, operation)}
   end
 
   @impl true
   def handle_info({:device_changed, %{"name" => name}}, state) do
-    {:noreply, apply_local_operation(state, {:name_changed, name})}
+    {:noreply, apply_valid_local_operation(state, {:set_name, :device, name})}
   end
 
   def handle_info({:internet_changed, status}, state) do
-    {:noreply, apply_local_operation(state, {:internet_changed, public_internet(status)})}
+    operation = {:set_internet, :internet, internet_data(status)}
+    {:noreply, apply_valid_local_operation(state, operation)}
   end
 
   def handle_info({:tailnet_changed, status}, state) do
-    {:noreply, apply_local_operation(state, {:tailnet_changed, public_tailnet(status)})}
+    operation = {:set_tailnet, :tailnet, tailnet_data(status)}
+    {:noreply, apply_valid_local_operation(state, operation)}
   end
 
   def handle_info({:cluster_changed, status}, state) do
-    {:noreply, apply_local_operation(state, {:cluster_changed, public_cluster(status)})}
+    operation = {:set_cluster, :cluster, cluster_data(status)}
+    {:noreply, apply_valid_local_operation(state, operation)}
   end
 
   def handle_info({:DOWN, reference, :process, client, _reason}, state) do
@@ -104,18 +116,37 @@ defmodule NervesGate.DeviceState.Server do
     end
   end
 
-  defp apply_local_operation(state, operation) do
-    public = Public.reduce(state.public, operation)
+  defp maybe_apply_local_operation(state, nil), do: state
 
-    if public == state.public do
-      state
-    else
-      revision = state.revision + 1
-      message = {:device_state_operation, node(), state.boot_id, revision, operation}
-      Enum.each(Map.keys(state.clients), &send(&1, message))
-      Phoenix.PubSub.broadcast(NervesGate.PubSub, "device_state", {:local_state_changed, public})
-      %{state | public: public, revision: revision}
+  defp maybe_apply_local_operation(state, operation),
+    do: apply_valid_local_operation(state, operation)
+
+  defp apply_valid_local_operation(state, operation) do
+    {:ok, state} = apply_local_operation(state, operation)
+    state
+  end
+
+  defp apply_local_operation(state, operation) do
+    case Data.apply_operation(state.data, operation) do
+      {:ok, data, _actions} when data == state.data ->
+        {:ok, state}
+
+      {:ok, data, actions} ->
+        revision = state.revision + 1
+        message = {:device_state_operation, node(), state.boot_id, revision, operation}
+        Enum.each(Map.keys(state.clients), &send(&1, message))
+        execute_actions(actions, data)
+        {:ok, %{state | data: data, revision: revision}}
+
+      :error ->
+        :error
     end
+  end
+
+  defp execute_actions(actions, data) do
+    Enum.each(actions, fn :broadcast ->
+      Phoenix.PubSub.broadcast(NervesGate.PubSub, "device_state", {:local_state_changed, data})
+    end)
   end
 
   defp monitor_client(state, client) do
@@ -126,38 +157,35 @@ defmodule NervesGate.DeviceState.Server do
   end
 
   defp snapshot_from(state) do
-    %Snapshot{boot_id: state.boot_id, revision: state.revision, data: state.public}
+    %{boot_id: state.boot_id, revision: state.revision, data: state.data}
   end
 
-  defp build_public(boot_id) do
+  defp build_data do
     identity = Identity.get()
     profile = safe(Device, :get, %{"name" => identity.hostname})
 
-    %Public{
+    Data.new(
       device_id: identity.machine_id,
       name: Map.get(profile, "name", identity.hostname),
-      boot_id: boot_id,
       firmware_version: firmware_version(),
-      internet: public_internet(safe(Monitor, :status, %{online: false, reason: :starting})),
-      tailnet: public_tailnet(safe(Observer, :status, %{})),
-      cluster: public_cluster(safe(ClusterManager, :status, %{})),
+      internet: internet_data(safe(Monitor, :status, %{online: false, reason: :starting})),
+      tailnet: tailnet_data(safe(Observer, :status, %{})),
+      cluster: cluster_data(safe(ClusterManager, :status, %{})),
       alarms: Alarms.active()
-    }
-    |> Public.reduce({:internet_changed, public_internet(safe(Monitor, :status, %{}))})
+    )
   end
 
-  defp public_internet(status) do
+  defp internet_data(status) do
     %{
       status: if(Map.get(status, :online, false), do: :online, else: :failed),
       reason: Map.get(status, :reason)
     }
   end
 
-  defp public_tailnet(status) do
+  defp tailnet_data(status) do
     observed_status = if Map.get(status, :online, false), do: :online, else: :offline
 
     %{
-      status: observed_status,
       observed_status: observed_status,
       authenticated: Map.get(status, :authenticated, :unknown),
       hostname: Map.get(status, :hostname),
@@ -165,12 +193,11 @@ defmodule NervesGate.DeviceState.Server do
     }
   end
 
-  defp public_cluster(status) do
+  defp cluster_data(status) do
     enabled = Map.get(status, :enabled, false)
     online = Map.get(status, :online, false)
 
     %{
-      status: cluster_runtime_status(enabled, online),
       runtime_status: cluster_runtime_status(enabled, online),
       enabled: enabled,
       node: encode_node(Map.get(status, :node)),

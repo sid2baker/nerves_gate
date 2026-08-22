@@ -18,19 +18,24 @@ and Cluster managers reconstruct and repair their own runtime state after boot.
 
 ## Replicated device state
 
-Each device is the sole writer of its own `NervesGate.DeviceState.Public` data.
-`NervesGate.DeviceState.Server` sequences pure reducer operations and gives
-joining connected BEAM nodes an atomic snapshot, boot ID, and revision.
-`NervesGate.DeviceState.Client` keeps replicas for already-connected nodes,
-resynchronizes revision gaps, and retains disconnected replicas as stale last
-known state. It never discovers or connects peers.
+Each gateway is the sole writer of its own canonical
+`NervesGate.DeviceState.Data`. Every change is represented as an operation and
+first applied by `NervesGate.DeviceState.Server` through the pure
+`Data.apply_operation/2` transition function. The server then broadcasts the
+accepted operation in order, so connected clients apply the same function and
+keep identical local `%Data{}` copies with minimal messages.
 
-Only identity, firmware, connectivity state, and safe active alarms are
-replicated. Cluster cookies, Tailscale credentials, PIDs, timers, backoff,
-repair state, and logger history remain private to their owning device.
+A joining client receives the current data atomically. Boot IDs, revisions,
+connection freshness, monitors, retries, and operation buffers remain separate
+transport metadata. Revision gaps trigger a fresh join, while disconnected
+clients retain stale last-known data. Clients never discover or connect peers.
+
+Only identity, firmware, connectivity state, and safe active alarms are in
+`Data`. Cluster cookies, Tailscale credentials, repair state, and logger history
+remain private to their owning gateway.
 
 ```elixir
-NervesGate.public_state()
+NervesGate.device_state()
 NervesGate.replicas()
 ```
 

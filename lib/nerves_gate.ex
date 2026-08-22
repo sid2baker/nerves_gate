@@ -13,8 +13,8 @@ defmodule NervesGate do
   @doc "Configure the optional cluster cookie; nil selects singular mode."
   defdelegate configure_cluster(cookie), to: NervesGate.Setup, as: :configure_cluster_cookie
 
-  @doc "Return this device's authoritative, secret-free public state."
-  defdelegate public_state(), to: NervesGate.DeviceState.Server, as: :public
+  @doc "Return this gateway's authoritative, secret-free device data."
+  defdelegate device_state(), to: NervesGate.DeviceState.Server, as: :data
 
   @doc "Return local replicas of currently or previously connected devices."
   defdelegate replicas(), to: NervesGate.DeviceState.Client

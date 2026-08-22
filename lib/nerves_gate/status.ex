@@ -1,9 +1,9 @@
 defmodule NervesGate.Status do
-  @moduledoc "Compatibility projection over authoritative local public data and peer replicas."
+  @moduledoc "Compatibility projection over canonical local device data and remote copies."
 
   alias NervesGate.Device
   alias NervesGate.DeviceState.Client
-  alias NervesGate.DeviceState.Public
+  alias NervesGate.DeviceState.Data
   alias NervesGate.DeviceState.Server
   alias NervesGate.Identity
   alias NervesGate.Internet.Hardware
@@ -13,98 +13,98 @@ defmodule NervesGate.Status do
 
   @spec snapshot() :: map()
   def snapshot do
-    public = safe(Server, :public, fallback_public())
+    data = safe(Server, :data, fallback_data())
     replicas = safe(Client, :replicas, %{})
     internet_diagnostics = safe(Monitor, :status, offline_internet())
-    cluster = cluster_compatibility(public)
+    cluster = cluster_compatibility(data)
 
     # Compatibility: remove this legacy shape during the NervesGateWeb refactor.
     # Local operational truth and all remote state now come from DeviceState.
     %{
-      device: compatibility_device(public),
+      device: compatibility_device(data),
       identity: Identity.get(),
       setup: safe(Setup, :status, %{phase: :internet, ready: false, recovery: false}),
       network: %{
         configuration: safe(InternetManager, :status, %{}),
-        connectivity: compatibility_internet(public, internet_diagnostics),
+        connectivity: compatibility_internet(data, internet_diagnostics),
         interfaces: Hardware.interfaces()
       },
-      tailnet: compatibility_tailnet(public),
-      layers: public_layers(public),
+      tailnet: compatibility_tailnet(data),
+      layers: layers(data),
       people_count: safe(NervesGateWeb.Presence, :count, 0),
       distribution: Map.take(cluster, [:online, :node, :connected]),
-      cluster: Map.put(cluster, :nodes, cluster_nodes(public, replicas)),
-      alarms: public.alarms,
+      cluster: Map.put(cluster, :nodes, cluster_nodes(data, replicas)),
+      alarms: data.alarms,
       device_state: %{
-        local: Public.to_map(public),
+        local: Data.to_map(data),
         replicas: Map.new(replicas, fn {id, replica} -> {id, replica_map(replica)} end)
       },
-      diagnostics: diagnostics(public)
+      diagnostics: diagnostics(data)
     }
   end
 
   @spec api_snapshot() :: map()
   def api_snapshot, do: snapshot() |> json_safe()
 
-  defp public_layers(public) do
+  defp layers(data) do
     %{
-      internet: public.internet.status |> public_layer_state(),
-      tailnet: public.tailnet.status |> public_layer_state(),
-      cluster: public.cluster.status |> public_layer_state()
+      internet: data.internet.status |> layer_state(),
+      tailnet: data.tailnet.status |> layer_state(),
+      cluster: data.cluster.status |> layer_state()
     }
   end
 
-  defp public_layer_state(:online), do: :ok
-  defp public_layer_state(:offline), do: :failed
-  defp public_layer_state(status) when status in [:failed, :blocked, :disabled], do: status
-  defp public_layer_state(_unknown), do: :failed
+  defp layer_state(:online), do: :ok
+  defp layer_state(:offline), do: :failed
+  defp layer_state(status) when status in [:failed, :blocked, :disabled], do: status
+  defp layer_state(_unknown), do: :failed
 
-  defp compatibility_device(public) do
+  defp compatibility_device(data) do
     profile = safe(Device, :get, %{"history" => []})
-    Map.put(profile, "name", public.name)
+    Map.put(profile, "name", data.name)
   end
 
-  defp compatibility_internet(public, diagnostics) do
-    online = public.internet.status == :online
+  defp compatibility_internet(data, diagnostics) do
+    online = data.internet.status == :online
 
     diagnostics
     |> Map.put(:online, online)
     |> Map.put(:ready, online)
-    |> Map.put(:reason, public.internet.reason)
+    |> Map.put(:reason, data.internet.reason)
   end
 
-  defp compatibility_tailnet(public) do
+  defp compatibility_tailnet(data) do
     %{
-      online: public.tailnet.status == :online,
-      authenticated: public.tailnet.authenticated,
-      hostname: public.tailnet.hostname,
-      ipv4: public.tailnet.ipv4,
+      online: data.tailnet.status == :online,
+      authenticated: data.tailnet.authenticated,
+      hostname: data.tailnet.hostname,
+      ipv4: data.tailnet.ipv4,
       peers: [],
       nodes: [],
-      error: if(public.tailnet.status == :online, do: nil, else: public.tailnet.status)
+      error: if(data.tailnet.status == :online, do: nil, else: data.tailnet.status)
     }
   end
 
-  defp cluster_compatibility(public) do
-    online = public.cluster.status == :online
+  defp cluster_compatibility(data) do
+    online = data.cluster.status == :online
 
     %{
-      enabled: public.cluster.enabled,
+      enabled: data.cluster.enabled,
       online: online,
       running: online,
-      node: public.cluster.node,
-      connected: public.cluster.connected
+      node: data.cluster.node,
+      connected: data.cluster.connected
     }
   end
 
-  defp cluster_nodes(public, replicas) do
-    local = public_node(public, true, true, nil)
+  defp cluster_nodes(data, replicas) do
+    local = device_node(data, true, true, nil)
 
     remote =
       replicas
       |> Map.values()
       |> Enum.map(fn replica ->
-        public_node(replica.data, false, replica.connected, replica.last_seen_at)
+        device_node(replica.data, false, replica.connected, replica.last_seen_at)
       end)
 
     [local | remote]
@@ -112,11 +112,11 @@ defmodule NervesGate.Status do
     |> Enum.sort_by(&{not &1.self, &1.hostname || ""})
   end
 
-  defp public_node(public, self?, connected?, last_seen_at) do
+  defp device_node(data, self?, connected?, last_seen_at) do
     %{
-      hostname: public.tailnet.hostname || public.name,
-      ipv4: public.tailnet.ipv4,
-      online: connected? and public.tailnet.status == :online,
+      hostname: data.tailnet.hostname || data.name,
+      ipv4: data.tailnet.ipv4,
+      online: connected? and data.tailnet.status == :online,
       self: self?,
       stale: not connected?,
       last_seen_at: last_seen_at
@@ -125,7 +125,7 @@ defmodule NervesGate.Status do
 
   defp replica_map(replica) do
     %{
-      data: Public.to_map(replica.data),
+      data: Data.to_map(replica.data),
       node: to_string(replica.node),
       boot_id: replica.boot_id,
       revision: replica.revision,
@@ -146,13 +146,13 @@ defmodule NervesGate.Status do
   defp json_safe(value) when is_pid(value) or is_reference(value), do: inspect(value)
   defp json_safe(value), do: value
 
-  defp diagnostics(public) do
+  defp diagnostics(data) do
     {uptime, _since_last_call} = :erlang.statistics(:wall_clock)
 
     %{
       target: Nerves.Runtime.mix_target(),
       uptime_seconds: div(uptime, 1_000),
-      firmware_version: public.firmware_version,
+      firmware_version: data.firmware_version,
       otp_release: List.to_string(:erlang.system_info(:otp_release)),
       memory_bytes: :erlang.memory(:total)
     }
@@ -164,15 +164,14 @@ defmodule NervesGate.Status do
     _kind, _reason -> fallback
   end
 
-  defp fallback_public do
+  defp fallback_data do
     identity = Identity.get()
 
-    %Public{
+    Data.new(
       device_id: identity.machine_id,
       name: identity.hostname,
-      boot_id: "starting",
       firmware_version: Application.spec(:nerves_gate, :vsn) |> to_string()
-    }
+    )
   end
 
   defp offline_internet do
