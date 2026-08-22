@@ -111,11 +111,19 @@ requires a tailnet source address.
 
 The main page at `http://<tailscale-ip>/` is tailnet-only. It provides:
 
-- a top-left node menu linking to every discovered gateway homepage;
-- the current Tailscale name and IP;
-- a cluster-wide count of distinct people currently viewing one or more gateway dashboards;
-- setup, Internet, cluster, alarm, and runtime status;
-- an editable device display name.
+- a fleet switcher for this gateway and every previously connected gateway;
+- clear live, degraded, and stale connection states;
+- the last replicated alarms and revision for an offline gateway;
+- the dependency-ordered Internet → Tailnet → Cluster state for each gateway;
+- a cluster-wide count of distinct dashboard visitors;
+- local diagnostics, editable device naming, and recovery access.
+
+The LiveView follows the same operation model as the backend. On connection it
+joins the local `DeviceState.Server`, keeps canonical `%DeviceState.Data{}` in
+`socket.private`, applies ordered operations locally, and assigns only a small
+rendering projection. Remote copies come from `DeviceState.Client`. Rendering is
+split into `StatusLive.Render`, a pure `StatusLive.View`, and reusable Core,
+Gateway, and Setup components styled with Tailwind CSS.
 
 Name changes are recorded with timestamp, actor name, and tailnet IP in
 `/data/device.json`. The profile schema already reserves a `documents` list for

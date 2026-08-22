@@ -22,6 +22,11 @@ end
 config :nerves_gate, NervesGateWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: if(config_env() == :test, do: 0, else: 4000)]
 
+if config_env() == :dev do
+  config :nerves_gate, NervesGateWeb.Endpoint,
+    watchers: [tailwind: {Tailwind, :install_and_run, [:default, ~w(--watch)]}]
+end
+
 config :nerves_runtime,
   kv_backend:
     {Nerves.Runtime.KVBackend.InMemory,

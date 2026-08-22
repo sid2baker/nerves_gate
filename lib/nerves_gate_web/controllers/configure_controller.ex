@@ -14,8 +14,9 @@ defmodule NervesGateWeb.ConfigureController do
     respond(connection, Setup.configure_tailscale(token))
   end
 
-  def cluster(connection, _params) do
-    respond(connection, Setup.configure_cluster())
+  def cluster(connection, params) do
+    cookie = get_in(params, ["cluster", "cookie"]) || Map.get(params, "cookie")
+    respond(connection, Setup.configure_cluster(blank_to_nil(cookie)))
   end
 
   defp respond(connection, {:ok, phase}) do
@@ -32,6 +33,17 @@ defmodule NervesGateWeb.ConfigureController do
     |> put_status(status)
     |> json(%{ok: false, error: public_error(reason)})
   end
+
+  defp blank_to_nil(nil), do: nil
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp blank_to_nil(value), do: value
 
   defp public_error(reason) when is_atom(reason), do: reason
   defp public_error(reason) when is_map(reason), do: reason

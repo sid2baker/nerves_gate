@@ -13,6 +13,7 @@ defmodule NervesGateWeb do
     quote do
       use Phoenix.LiveView
       import Phoenix.Component
+      import NervesGateWeb.CoreComponents
       alias NervesGateWeb.Layouts
       unquote(verified_routes())
     end
@@ -21,6 +22,7 @@ defmodule NervesGateWeb do
   def html do
     quote do
       use Phoenix.Component
+      import NervesGateWeb.CoreComponents
       import Phoenix.Controller, only: [get_csrf_token: 0]
       unquote(verified_routes())
     end

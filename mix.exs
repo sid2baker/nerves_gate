@@ -39,8 +39,10 @@ defmodule NervesGate.MixProject do
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:tailwind, "~> 0.5.1", runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:lazy_html, ">= 0.1.0", only: :test},
       {:vibe_kit, "~> 0.1"},
 
       # Runtime dependencies
@@ -93,7 +95,12 @@ defmodule NervesGate.MixProject do
 
   defp aliases() do
     [
-      firmware: ["nerves_gate.verify_tailscale_bundle", "firmware"],
+      firmware: [
+        "nerves_gate.verify_tailscale_bundle",
+        "tailwind default --minify",
+        "firmware"
+      ],
+      "assets.build": ["tailwind default --minify"],
       ci: [
         "compile --warnings-as-errors",
         "format --check-formatted",

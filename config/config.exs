@@ -20,6 +20,22 @@ config :nerves, source_date_epoch: "1787244399"
 
 config :phoenix, :json_library, Jason
 
+config :phoenix, :filter_parameters, [
+  "auth_key",
+  "auth_token",
+  "cookie",
+  "password",
+  "credential",
+  "secret"
+]
+
+config :tailwind,
+  version: "4.3.0",
+  default: [
+    args: ~w(--input=assets/css/app.css --output=priv/static/app.css),
+    cd: Path.expand("..", __DIR__)
+  ]
+
 config :logger, :default_formatter,
   metadata: [:alarm, :alarm_id, :alarm_state, :alarm_level, :alarm_description]
 
@@ -72,7 +88,6 @@ config :nerves_gate, NervesGateWeb.Endpoint,
   url: [host: "nervesgate.local", port: 80, scheme: "http"],
   http: [ip: {0, 0, 0, 0}, port: 80],
   secret_key_base: "kVe8TVi10nIRiiuHjUdxi5zudS5O8H3CHf19UvOK1fmQY3PGuF8NrmhT2om8bgkM",
-  filter_parameters: ["auth_key", "auth_token", "password", "credential", "secret"],
   render_errors: [
     formats: [html: NervesGateWeb.ErrorHTML, json: NervesGateWeb.ErrorJSON],
     layout: false

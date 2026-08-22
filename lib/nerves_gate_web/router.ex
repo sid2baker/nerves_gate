@@ -13,7 +13,7 @@ defmodule NervesGateWeb.Router do
 
     plug(:put_secure_browser_headers, %{
       "content-security-policy" =>
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; form-action 'self'; frame-ancestors 'none'"
+        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws: wss:; form-action 'self'; frame-ancestors 'none'"
     })
   end
 

@@ -18,7 +18,7 @@ defmodule NervesGateWeb.Endpoint do
     at: "/assets",
     from: :nerves_gate,
     gzip: false,
-    only: ~w(app.js)
+    only: ~w(app.css app.js)
   )
 
   plug(Plug.Static,

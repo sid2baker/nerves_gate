@@ -1,32 +1,64 @@
 defmodule NervesGateWeb.StatusLive do
   @moduledoc false
+
   use NervesGateWeb, :live_view
 
   alias NervesGate.Device
+  alias NervesGate.DeviceState.Client
+  alias NervesGate.DeviceState.Data
+  alias NervesGate.DeviceState.Server
+  alias NervesGate.Identity
+  alias NervesGate.Internet.Monitor
   alias NervesGate.Setup
-  alias NervesGate.Status
   alias NervesGate.Tailnet.Observer
+  alias NervesGateWeb.Presence
+  alias NervesGateWeb.StatusLive.Render
+  alias NervesGateWeb.StatusLive.View
 
-  @topics ~w(setup device internet_configuration internet tailnet cluster alarms device_state)
+  @context_topics ~w(setup device internet)
 
   @impl true
   def mount(_params, session, socket) do
     remote_ip = Map.get(session, "remote_ip", "unknown")
     tailnet_access = Map.get(session, "tailnet_access", false)
     actor = Observer.actor_for_ip(remote_ip)
-    status = Status.snapshot()
 
     if connected?(socket) do
-      Enum.each(@topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
-
-      if tailnet_access and status.setup.ready do
-        Phoenix.PubSub.subscribe(NervesGate.PubSub, NervesGateWeb.Presence.topic())
-        NervesGateWeb.Presence.track_visitor(self(), actor)
-      end
+      Phoenix.PubSub.subscribe(NervesGate.PubSub, "device_state")
+      Enum.each(@context_topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
     end
 
-    {:ok, assign(socket, status: status, actor: actor, tailnet_access: tailnet_access)}
+    {:ok, snapshot} =
+      if connected?(socket), do: Server.join(self()), else: {:ok, Server.snapshot()}
+
+    state = %{
+      data: snapshot.data,
+      boot_id: snapshot.boot_id,
+      revision: snapshot.revision,
+      replicas: Client.replicas()
+    }
+
+    context = load_context()
+
+    socket =
+      socket
+      |> assign(
+        tailnet_access: tailnet_access,
+        selected_device_id: state.data.device_id,
+        presence_tracked: false
+      )
+      |> assign_private(state: state, context: context, actor: actor)
+      |> assign_view()
+      |> maybe_track_presence()
+
+    {:ok, socket}
   end
+
+  @impl true
+  defdelegate render(assigns), to: Render
+
+  @doc false
+  defdelegate dashboard(assigns), to: Render
 
   @impl true
   def handle_event("configure-internet", %{"internet" => params}, socket) do
@@ -38,217 +70,186 @@ defmodule NervesGateWeb.StatusLive do
 
   def handle_event("configure-tailscale", %{"auth_token" => token}, socket) do
     case Setup.configure_tailscale(token) do
-      {:ok, :cluster} -> setup_ok(socket, "Tailscale connected.")
-      {:error, reason} -> setup_error(socket, "Tailscale setup failed: #{format_error(reason)}")
+      {:ok, :cluster} -> setup_ok(socket, "Tailnet enrollment completed.")
+      {:error, reason} -> setup_error(socket, "Tailnet setup failed: #{format_error(reason)}")
     end
   end
 
-  def handle_event("configure-cluster", _params, socket) do
-    case Setup.configure_cluster() do
-      {:ok, :ready} -> setup_ok(socket, "Gateway is ready.")
+  def handle_event("configure-cluster", params, socket) do
+    cookie = params |> get_in(["cluster", "cookie"]) |> blank_to_nil()
+
+    case Setup.configure_cluster(cookie) do
+      {:ok, :ready} -> setup_ok(socket, "Gateway setup completed.")
       {:error, reason} -> setup_error(socket, "Cluster setup failed: #{format_error(reason)}")
     end
   end
 
   def handle_event("rename-device", %{"device" => %{"name" => name}}, socket) do
-    case Device.rename(name, socket.assigns.actor) do
+    case Device.rename(name, socket.private.actor) do
       :ok ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Device name saved.")
-         |> assign(status: Status.snapshot())}
+        {:noreply, socket |> put_flash(:info, "Device name saved.") |> refresh_context()}
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Name must contain 1–80 printable characters.")}
     end
   end
 
+  def handle_event("select-node", %{"device-id" => device_id}, socket) do
+    {:noreply, socket |> assign(:selected_device_id, device_id) |> assign_view()}
+  end
+
   def handle_event("enable-recovery", _params, socket) do
     :ok = Setup.enable_recovery_access(:local_action)
-    {:noreply, put_flash(socket, :info, "Local recovery access is being enabled.")}
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Local recovery access is being enabled.")
+     |> refresh_context()}
   end
 
   @impl true
-  def handle_info(_message, socket), do: {:noreply, assign(socket, status: Status.snapshot())}
-
-  @impl true
-  def render(assigns) do
-    ~H"""
-    <NervesGateWeb.SetupPage.current
-      :if={!@status.setup.ready or !@tailnet_access}
-      status={@status}
-      flash={@flash}
-    />
-    <.dashboard :if={@status.setup.ready and @tailnet_access} {assigns} />
-    """
+  def handle_info(
+        {:device_state_operation, _owner_node, boot_id, revision, operation},
+        socket
+      ) do
+    {:noreply, apply_operation(socket, boot_id, revision, operation)}
   end
 
-  def dashboard(assigns) do
-    ~H"""
-    <main class="dashboard">
-      <header class="topbar">
-        <details class="node-menu">
-          <summary aria-label="Open cluster nodes"><span class="hamburger">☰</span></summary>
-          <nav>
-            <div class="menu-title">Cluster nodes</div>
-            <a :for={node <- @status.cluster.nodes} href={node_url(node)} class={if node.self, do: "current"}>
-              <span class={if node.online, do: "node-dot online", else: "node-dot"}></span>
-              <span><strong>{node.hostname}</strong><small>{node.ipv4}</small></span>
-            </a>
-            <p :if={@status.cluster.nodes == []}>No tailnet nodes discovered.</p>
-          </nav>
-        </details>
-
-        <div class="brand">
-          <span class="eyebrow">NervesGate</span>
-          <h1>{@status.device["name"]}</h1>
-        </div>
-
-        <div class="tailnet-summary">
-          <div><strong>{@status.tailnet.hostname || "offline"}</strong><small>{@status.tailnet.ipv4 || "No tailnet IP"}</small></div>
-          <div class="people" title="People viewing one or more gateway dashboards">
-            <span>♙</span><strong>{@status.people_count}</strong>
-          </div>
-        </div>
-      </header>
-
-      <p :if={Phoenix.Flash.get(@flash, :info)} class="flash">{Phoenix.Flash.get(@flash, :info)}</p>
-      <p :if={Phoenix.Flash.get(@flash, :error)} class="flash bad">{Phoenix.Flash.get(@flash, :error)}</p>
-
-      <section class="hero">
-        <div>
-          <span class={status_class(@status.setup.ready)}>{if @status.setup.ready, do: "Operational", else: "Setup required"}</span>
-          <h2>Gateway overview</h2>
-          <p>Live state from this device and its Tailscale-backed Erlang cluster.</p>
-        </div>
-      </section>
-
-      <section class="metric-row">
-        <.metric label="Tailnet" value={online_label(@status.tailnet.online)} good={@status.tailnet.online} />
-        <.metric label="Cluster peers" value={length(@status.cluster.connected)} good={@status.cluster.running} />
-        <.metric label="People connected" value={@status.people_count} good={@status.people_count > 0} neutral />
-        <.metric label="Active alarms" value={length(@status.alarms)} good={@status.alarms == []} />
-      </section>
-
-      <section class="content-grid">
-        <article class="card span-two">
-          <div class="card-heading"><div><span class="eyebrow">Identity</span><h2>Device information</h2></div></div>
-          <form class="inline-form" phx-submit="rename-device">
-            <label>Display name
-              <input name="device[name]" value={@status.device["name"]} maxlength="80" required />
-            </label>
-            <button type="submit">Save name</button>
-          </form>
-          <dl class="details">
-            <dt>Machine ID</dt><dd>{@status.identity.machine_id}</dd>
-            <dt>System hostname</dt><dd>{@status.identity.hostname}</dd>
-            <dt>Last changed</dt><dd>{@status.device["updated_at"] || "Never"}</dd>
-            <dt>Changed by</dt><dd>{changed_by(@status.device["updated_by"])}</dd>
-          </dl>
-          <p class="hint">Stored as readable JSON in <code>/data/device.json</code>. The schema already reserves versioned documents and change history.</p>
-        </article>
-
-        <article class="card">
-          <span class="eyebrow">Initialization</span><h2>Setup</h2>
-          <dl class="details compact">
-            <dt>Phase</dt><dd>{@status.setup.phase}</dd>
-            <dt>Ready</dt><dd class={text_class(@status.setup.ready)}>{@status.setup.ready}</dd>
-            <dt>Recovery</dt><dd>{@status.setup.recovery}</dd>
-          </dl>
-        </article>
-
-        <article class="card">
-          <span class="eyebrow">Connectivity</span><h2>Internet</h2>
-          <ul class="checks">
-            <.check_row label="Physical link" value={check(@status, :physical_link)} />
-            <.check_row label="IP address" value={check(@status, :ip_address)} />
-            <.check_row label="Default route" value={check(@status, :default_route)} />
-            <.check_row label="DNS" value={check(@status, :dns)} />
-            <.check_row label="HTTPS" value={check(@status, :internet_https)} />
-          </ul>
-        </article>
-
-        <article class="card span-two">
-          <span class="eyebrow">Tailnet</span><h2>Cluster nodes</h2>
-          <table>
-            <thead><tr><th>Node</th><th>Tailnet IP</th><th>Status</th><th></th></tr></thead>
-            <tbody>
-              <tr :for={node <- @status.cluster.nodes}>
-                <td>{node.hostname}</td><td><code>{node.ipv4}</code></td>
-                <td><span class={if node.online, do: "state good", else: "state bad"}>{if node.online, do: "online", else: "offline"}</span></td>
-                <td><a href={node_url(node)}>Open →</a></td>
-              </tr>
-              <tr :if={@status.cluster.nodes == []}><td colspan="4">No nodes discovered.</td></tr>
-            </tbody>
-          </table>
-        </article>
-
-        <article class="card">
-          <span class="eyebrow">Runtime</span><h2>System</h2>
-          <dl class="details compact">
-            <dt>Firmware</dt><dd>{@status.diagnostics.firmware_version}</dd>
-            <dt>Target</dt><dd>{@status.diagnostics.target}</dd>
-            <dt>OTP</dt><dd>{@status.diagnostics.otp_release}</dd>
-            <dt>Uptime</dt><dd>{duration(@status.diagnostics.uptime_seconds)}</dd>
-            <dt>Memory</dt><dd>{megabytes(@status.diagnostics.memory_bytes)} MB</dd>
-          </dl>
-        </article>
-
-        <article class="card span-two">
-          <span class="eyebrow">Operations</span><h2>Active alarms</h2>
-          <p :if={@status.alarms == []} class="empty-state">Everything looks healthy.</p>
-          <ul :if={@status.alarms != []} class="alarm-list">
-            <li :for={alarm <- @status.alarms}><strong>{alarm.id}</strong><span>{alarm.description}</span></li>
-          </ul>
-        </article>
-
-        <article class="card danger-zone">
-          <span class="eyebrow">Local access</span><h2>Recovery</h2>
-          <p>Re-enable the isolated setup network without changing saved Internet or Tailscale state.</p>
-          <button type="button" class="danger" phx-click="enable-recovery">Enable recovery</button>
-        </article>
-      </section>
-    </main>
-    """
+  def handle_info({:local_state_changed, data}, socket) do
+    if data == socket.private.state.data,
+      do: {:noreply, socket},
+      else: {:noreply, rejoin_local(socket)}
   end
 
-  attr(:label, :string, required: true)
-  attr(:value, :any, required: true)
-  attr(:good, :boolean, required: true)
-  attr(:neutral, :boolean, default: false)
-
-  defp metric(assigns) do
-    ~H"""
-    <article class="metric"><span>{@label}</span><strong class={if @neutral, do: "", else: text_class(@good)}>{@value}</strong></article>
-    """
+  def handle_info({:replica_changed, _device_id, _replica}, socket) do
+    state = %{socket.private.state | replicas: Client.replicas()}
+    {:noreply, socket |> assign_private(state: state) |> assign_view()}
   end
 
-  attr(:label, :string, required: true)
-  attr(:value, :string, required: true)
-
-  defp check_row(assigns) do
-    ~H"""
-    <li><span>{@label}</span><strong class={check_class(@value)}>{@value}</strong></li>
-    """
+  def handle_info(_context_or_presence_event, socket) do
+    {:noreply, refresh_context(socket)}
   end
 
-  defp check(status, key) do
-    status.network.connectivity
-    |> Map.get(:checks, %{})
-    |> Map.get(key, :unknown)
-    |> case do
-      :ok -> "ok"
-      :unknown -> "unknown"
-      {:error, reason} -> reason |> to_string() |> String.replace("_", " ")
-      other -> to_string(other)
+  defp apply_operation(socket, boot_id, revision, operation) do
+    state = socket.private.state
+
+    case operation_position(state, boot_id, revision) do
+      :next -> apply_next_operation(socket, state, revision, operation)
+      :duplicate -> socket
+      :resync -> rejoin_local(socket)
     end
   end
 
+  defp apply_next_operation(socket, state, revision, operation) do
+    case Data.apply_operation(state.data, operation) do
+      {:ok, data, _actions} ->
+        state = %{state | data: data, revision: revision}
+        socket |> assign_private(state: state) |> assign_view()
+
+      :error ->
+        rejoin_local(socket)
+    end
+  end
+
+  defp operation_position(%{boot_id: boot_id, revision: current}, boot_id, revision)
+       when revision == current + 1,
+       do: :next
+
+  defp operation_position(%{boot_id: boot_id, revision: current}, boot_id, revision)
+       when revision <= current,
+       do: :duplicate
+
+  defp operation_position(_state, _boot_id, _revision), do: :resync
+
+  defp rejoin_local(socket) do
+    {:ok, snapshot} = Server.join(self())
+
+    state = %{
+      data: snapshot.data,
+      boot_id: snapshot.boot_id,
+      revision: snapshot.revision,
+      replicas: Client.replicas()
+    }
+
+    socket |> assign_private(state: state) |> assign_view()
+  end
+
   defp setup_ok(socket, message) do
-    {:noreply, socket |> put_flash(:info, message) |> assign(status: Status.snapshot())}
+    {:noreply, socket |> put_flash(:info, message) |> refresh_context()}
   end
 
   defp setup_error(socket, message), do: {:noreply, put_flash(socket, :error, message)}
+
+  defp refresh_context(socket) do
+    socket
+    |> assign_private(context: load_context())
+    |> assign_view()
+    |> maybe_track_presence()
+  end
+
+  defp assign_view(socket) do
+    view =
+      View.build(
+        socket.private.state,
+        socket.private.context,
+        socket.assigns.selected_device_id
+      )
+
+    assign(socket, view: view)
+  end
+
+  defp maybe_track_presence(socket) do
+    if connected?(socket) and socket.assigns.tailnet_access and socket.assigns.view.setup.ready and
+         not socket.assigns.presence_tracked do
+      Phoenix.PubSub.subscribe(NervesGate.PubSub, Presence.topic())
+      Presence.track_visitor(self(), socket.private.actor)
+      socket |> assign(:presence_tracked, true) |> refresh_people_count()
+    else
+      socket
+    end
+  end
+
+  defp refresh_people_count(socket) do
+    context = Map.put(socket.private.context, :people_count, Presence.count())
+    socket |> assign_private(context: context) |> assign_view()
+  end
+
+  defp load_context do
+    %{
+      setup: Setup.status(),
+      profile: Device.get(),
+      identity: Identity.get(),
+      internet: Monitor.status(),
+      people_count: Presence.count(),
+      diagnostics: diagnostics()
+    }
+  end
+
+  defp diagnostics do
+    {uptime, _since_last_call} = :erlang.statistics(:wall_clock)
+
+    %{
+      target: Nerves.Runtime.mix_target(),
+      uptime_seconds: div(uptime, 1_000),
+      otp_release: List.to_string(:erlang.system_info(:otp_release)),
+      memory_bytes: :erlang.memory(:total)
+    }
+  end
+
+  defp assign_private(socket, assigns) do
+    Enum.reduce(assigns, socket, fn {key, value}, socket ->
+      put_in(socket.private[key], value)
+    end)
+  end
+
+  defp blank_to_nil(nil), do: nil
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      value -> value
+    end
+  end
 
   defp format_error(reason) when is_atom(reason),
     do: reason |> to_string() |> String.replace("_", " ")
@@ -258,20 +259,4 @@ defmodule NervesGateWeb.StatusLive do
   end
 
   defp format_error(_reason), do: "operation failed"
-
-  defp node_url(%{ipv4: ip}), do: "http://#{ip}/"
-  defp changed_by(nil), do: "Never"
-  defp changed_by(%{"name" => name, "ip" => ip}), do: "#{name} · #{ip}"
-  defp changed_by(_actor), do: "Unknown"
-  defp online_label(true), do: "Online"
-  defp online_label(false), do: "Offline"
-  defp status_class(true), do: "state good"
-  defp status_class(false), do: "state bad"
-  defp text_class(true), do: "good-text"
-  defp text_class(false), do: "bad-text"
-  defp check_class("ok"), do: "good-text"
-  defp check_class("unknown"), do: "muted"
-  defp check_class(_value), do: "bad-text"
-  defp duration(seconds), do: "#{div(seconds, 3600)}h #{div(rem(seconds, 3600), 60)}m"
-  defp megabytes(bytes), do: Float.round(bytes / 1_048_576, 1)
 end

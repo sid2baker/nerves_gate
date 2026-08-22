@@ -59,7 +59,7 @@ defmodule NervesGate.Cluster.ManagerTest do
 
     assert_receive {:distribution_start, "100.64.0.10", cookie_atom}
     assert cookie_atom == :"Secret_cookie-123"
-    assert_receive {:cluster_changed, status}
+    assert_receive {:cluster_changed, %{enabled: true} = status}
     assert status.enabled
     assert status.online
     assert status.connected == []
