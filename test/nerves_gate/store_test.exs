@@ -31,17 +31,31 @@ defmodule NervesGate.StoreTest do
     assert {:ok, %{"phase" => "internet"}} = Store.read_setup(root)
   end
 
-  test "cluster configuration is human-readable and restricted to the owner" do
-    root = TestScenario.temporary_root(:cluster_cookie)
-    cookie = "Persistent_cookie-123"
+  test "cluster configuration persists a human-readable public group" do
+    root = TestScenario.temporary_root(:cluster_group)
+    group = "Plant_floor"
 
     assert :ok = Store.initialize(root)
-    assert :ok = Store.write_cluster(cookie, root)
-    assert {:ok, ^cookie} = Store.read_cluster(root)
+    assert :ok = Store.write_cluster(group, root)
+    assert {:ok, ^group} = Store.read_cluster(root)
 
     path = Path.join(root, "cluster.json")
-    assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
-    assert Jason.decode!(File.read!(path)) == %{"version" => 1, "cookie" => cookie}
+    assert Jason.decode!(File.read!(path)) == %{"version" => 2, "group" => group}
+  end
+
+  test "version 1 cluster files migrate without losing their group value" do
+    root = TestScenario.temporary_root(:cluster_group_v1)
+    group = "Legacy_group"
+    assert :ok = Store.initialize(root)
+
+    File.write!(
+      Path.join(root, "cluster.json"),
+      Jason.encode!(%{"version" => 1, "cookie" => group})
+    )
+
+    assert {:ok, ^group} = Store.read_cluster(root)
+    assert :ok = Store.write_cluster(group, root)
+    assert Jason.decode!(File.read!(Path.join(root, "cluster.json")))["version"] == 2
   end
 
   test "unwritable data path reports an error" do

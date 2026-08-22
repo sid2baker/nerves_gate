@@ -218,11 +218,7 @@ defmodule NervesGate.Tailnet.Manager do
     end
   end
 
-  defp internet_online? do
-    NervesGate.Internet.Monitor.status().online
-  catch
-    :exit, _reason -> false
-  end
+  defp internet_online?, do: NervesGate.Internet.Monitor.status().online
 
   defp classify(reason)
        when reason in [:kernel_tun_unavailable, :missing_pinned_binary, :disabled],

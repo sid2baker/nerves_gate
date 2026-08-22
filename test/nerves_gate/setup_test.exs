@@ -22,9 +22,9 @@ defmodule NervesGate.SetupTest do
       end,
       start_tailnet: fn -> :ok end,
       poll_tailnet: fn -> :ok end,
-      configure_cluster: fn cookie ->
-        send(owner, {:cluster_configuration, cookie})
-        Store.write_cluster(cookie, root)
+      configure_cluster: fn group ->
+        send(owner, {:cluster_configuration, group})
+        Store.write_cluster(group, root)
       end,
       access: fn mode, uplink ->
         send(owner, {:access, mode, uplink})
@@ -39,7 +39,7 @@ defmodule NervesGate.SetupTest do
     name = String.to_atom("setup_#{System.unique_integer([:positive])}")
     {:ok, setup} = Setup.start_link(name: name, root: root, ops: ops)
     on_exit(fn -> File.rm_rf!(root) end)
-    %{root: root, setup: setup}
+    %{root: root, setup: setup, ops: ops}
   end
 
   test "the complete setup is three explicit, independently testable calls", %{
@@ -65,14 +65,31 @@ defmodule NervesGate.SetupTest do
     refute File.read!(Path.join(root, "setup.json")) =~ token
   end
 
-  test "the new backend API persists an explicit cluster cookie", %{root: root, setup: setup} do
-    cookie = "Valid_cluster-cookie_123"
+  test "the backend API persists an explicit public cluster group", %{root: root, setup: setup} do
+    group = "Plant_floor"
 
     assert {:ok, :tailscale} = Setup.configure_internet(%{"ip_address" => "dhcp"}, setup)
     assert {:ok, :cluster} = Setup.configure_tailscale("tskey-not-real", setup)
-    assert {:ok, :ready} = Setup.configure_cluster_cookie(cookie, setup)
-    assert_receive {:cluster_configuration, ^cookie}
-    assert {:ok, ^cookie} = Store.read_cluster(root)
+    assert {:ok, :ready} = Setup.configure_cluster_group(group, setup)
+    assert_receive {:cluster_configuration, ^group}
+    assert {:ok, ^group} = Store.read_cluster(root)
+  end
+
+  test "completed commissioning is immutable through setup operations", %{setup: setup} do
+    assert {:ok, :tailscale} = Setup.configure_internet(%{"ip_address" => "dhcp"}, setup)
+    assert {:ok, :cluster} = Setup.configure_tailscale("tskey-not-real", setup)
+    assert {:ok, :ready} = Setup.configure_cluster(setup)
+
+    assert {:error, :guarded_settings_required} =
+             Setup.configure_internet(%{"ip_address" => "dhcp"}, setup)
+
+    assert {:error, :guarded_settings_required} =
+             Setup.configure_tailscale("tskey-replacement", setup)
+
+    assert {:error, :guarded_settings_required} =
+             Setup.configure_cluster_group("Replacement_group", setup)
+
+    assert Setup.status(setup).phase == :ready
   end
 
   test "a static IP uses the clear API field names", %{setup: setup} do
@@ -98,5 +115,55 @@ defmodule NervesGate.SetupTest do
     assert {:error, errors} = Setup.configure_internet(%{"ip_address" => "invalid"}, setup)
     assert errors.address
     refute_receive {:internet, _config}
+  end
+
+  test "development mode keeps setup access after commissioning", %{ops: ops} do
+    root = TestScenario.temporary_root(:local_dashboard)
+    on_exit(fn -> File.rm_rf!(root) end)
+    :ok = Store.initialize(root)
+
+    owner = self()
+
+    ops =
+      Map.put(ops, :configure_cluster, fn group ->
+        send(owner, {:cluster_configuration, group})
+        Store.write_cluster(group, root)
+      end)
+
+    {:ok, setup} =
+      Setup.start_link(
+        name: String.to_atom("setup_#{System.unique_integer([:positive])}"),
+        root: root,
+        ops: ops,
+        keep_local_access: true
+      )
+
+    assert_receive {:access, :commissioning, nil}
+    assert {:ok, :tailscale} = Setup.configure_internet(%{"ip_address" => "dhcp"}, setup)
+    assert {:ok, :cluster} = Setup.configure_tailscale("tskey-not-real", setup)
+    assert {:ok, :ready} = Setup.configure_cluster(setup)
+    refute_receive :disable_access, 1_500
+
+    GenServer.stop(setup)
+  end
+
+  test "development mode restores setup access after a commissioned restart", %{ops: ops} do
+    root = TestScenario.temporary_root(:local_dashboard_restart)
+    on_exit(fn -> File.rm_rf!(root) end)
+    :ok = Store.initialize(root)
+    :ok = Store.write_network(TestScenario.dhcp(), root)
+    :ok = Store.write_phase(:ready, root)
+
+    {:ok, setup} =
+      Setup.start_link(
+        name: String.to_atom("setup_#{System.unique_integer([:positive])}"),
+        root: root,
+        ops: ops,
+        keep_local_access: true
+      )
+
+    assert_receive {:access, :commissioning, "eth0"}
+    refute_receive :disable_access
+    GenServer.stop(setup)
   end
 end

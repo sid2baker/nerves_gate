@@ -50,12 +50,12 @@ defmodule NervesGate.DeviceState.ServerTest do
 
     operation =
       {:set_cluster, :cluster,
-       %{enabled: true, runtime_status: :online, connected: [], cookie: "private-cookie"}}
+       %{enabled: true, runtime_status: :online, connected: [], credential: "private-value"}}
 
     assert :error = Server.apply_operation(operation, server)
     refute_receive {:device_state_operation, _, _, _, _}
     assert Server.snapshot(server).revision == 0
-    refute inspect(Server.data(server)) =~ "private-cookie"
+    refute inspect(Server.data(server)) =~ "private-value"
   end
 
   test "client monitors remain outside canonical data", %{server: server} do

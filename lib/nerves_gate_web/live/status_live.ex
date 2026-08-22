@@ -3,11 +3,13 @@ defmodule NervesGateWeb.StatusLive do
 
   use NervesGateWeb, :live_view
 
+  alias NervesGate.Cluster.Manager, as: ClusterManager
   alias NervesGate.Device
   alias NervesGate.DeviceState.Client
   alias NervesGate.DeviceState.Data
   alias NervesGate.DeviceState.Server
   alias NervesGate.Identity
+  alias NervesGate.Internet.Manager, as: InternetManager
   alias NervesGate.Internet.Monitor
   alias NervesGate.Setup
   alias NervesGate.Tailnet.Observer
@@ -19,8 +21,16 @@ defmodule NervesGateWeb.StatusLive do
 
   @impl true
   def mount(_params, session, socket) do
+    if Setup.status().ready do
+      mount_dashboard(session, socket)
+    else
+      {:ok, redirect(socket, to: ~p"/commissioning")}
+    end
+  end
+
+  defp mount_dashboard(session, socket) do
     remote_ip = Map.get(session, "remote_ip", "unknown")
-    tailnet_access = Map.get(session, "tailnet_access", false)
+    dashboard_access = Map.get(session, "dashboard_access", false)
     actor = Observer.actor_for_ip(remote_ip)
 
     if connected?(socket) do
@@ -43,7 +53,7 @@ defmodule NervesGateWeb.StatusLive do
     socket =
       socket
       |> assign(
-        tailnet_access: tailnet_access,
+        dashboard_access: dashboard_access,
         selected_device_id: state.data.device_id,
         presence_tracked: false
       )
@@ -61,29 +71,6 @@ defmodule NervesGateWeb.StatusLive do
   defdelegate dashboard(assigns), to: Render
 
   @impl true
-  def handle_event("configure-internet", %{"internet" => params}, socket) do
-    case Setup.configure_internet(params) do
-      {:ok, _phase} -> setup_ok(socket, "Internet verified and saved.")
-      {:error, reason} -> setup_error(socket, "Internet setup failed: #{format_error(reason)}")
-    end
-  end
-
-  def handle_event("configure-tailscale", %{"auth_token" => token}, socket) do
-    case Setup.configure_tailscale(token) do
-      {:ok, :cluster} -> setup_ok(socket, "Tailnet enrollment completed.")
-      {:error, reason} -> setup_error(socket, "Tailnet setup failed: #{format_error(reason)}")
-    end
-  end
-
-  def handle_event("configure-cluster", params, socket) do
-    cookie = params |> get_in(["cluster", "cookie"]) |> blank_to_nil()
-
-    case Setup.configure_cluster(cookie) do
-      {:ok, :ready} -> setup_ok(socket, "Gateway setup completed.")
-      {:error, reason} -> setup_error(socket, "Cluster setup failed: #{format_error(reason)}")
-    end
-  end
-
   def handle_event("rename-device", %{"device" => %{"name" => name}}, socket) do
     case Device.rename(name, socket.private.actor) do
       :ok ->
@@ -174,12 +161,6 @@ defmodule NervesGateWeb.StatusLive do
     socket |> assign_private(state: state) |> assign_view()
   end
 
-  defp setup_ok(socket, message) do
-    {:noreply, socket |> put_flash(:info, message) |> refresh_context()}
-  end
-
-  defp setup_error(socket, message), do: {:noreply, put_flash(socket, :error, message)}
-
   defp refresh_context(socket) do
     socket
     |> assign_private(context: load_context())
@@ -199,7 +180,7 @@ defmodule NervesGateWeb.StatusLive do
   end
 
   defp maybe_track_presence(socket) do
-    if connected?(socket) and socket.assigns.tailnet_access and socket.assigns.view.setup.ready and
+    if connected?(socket) and socket.assigns.dashboard_access and socket.assigns.view.setup.ready and
          not socket.assigns.presence_tracked do
       Phoenix.PubSub.subscribe(NervesGate.PubSub, Presence.topic())
       Presence.track_visitor(self(), socket.private.actor)
@@ -220,6 +201,9 @@ defmodule NervesGateWeb.StatusLive do
       profile: Device.get(),
       identity: Identity.get(),
       internet: Monitor.status(),
+      network_configuration: InternetManager.status(),
+      tailnet: Observer.status(),
+      cluster: ClusterManager.status(),
       people_count: Presence.count(),
       diagnostics: diagnostics()
     }
@@ -241,22 +225,4 @@ defmodule NervesGateWeb.StatusLive do
       put_in(socket.private[key], value)
     end)
   end
-
-  defp blank_to_nil(nil), do: nil
-
-  defp blank_to_nil(value) when is_binary(value) do
-    case String.trim(value) do
-      "" -> nil
-      value -> value
-    end
-  end
-
-  defp format_error(reason) when is_atom(reason),
-    do: reason |> to_string() |> String.replace("_", " ")
-
-  defp format_error(reason) when is_map(reason) do
-    Enum.map_join(reason, ", ", fn {field, message} -> "#{field} #{message}" end)
-  end
-
-  defp format_error(_reason), do: "operation failed"
 end

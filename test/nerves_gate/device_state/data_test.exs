@@ -21,6 +21,7 @@ defmodule NervesGate.DeviceState.DataTest do
        %{
          runtime_status: :online,
          enabled: true,
+         group: "Plant_floor",
          node: "nervesgate@100.64.0.10",
          connected: []
        }},
@@ -57,6 +58,7 @@ defmodule NervesGate.DeviceState.DataTest do
          %{
            runtime_status: :online,
            enabled: true,
+           group: "Plant_floor",
            node: "nervesgate@100.64.0.10",
            connected: []
          }}
@@ -87,11 +89,20 @@ defmodule NervesGate.DeviceState.DataTest do
          enabled: true,
          runtime_status: :online,
          connected: [],
-         cookie: "must-not-replicate"
+         credential: "must-not-replicate"
        }}
 
     assert :error = Data.apply_operation(data, operation)
     refute inspect(data) =~ "must-not-replicate"
+
+    public =
+      apply!(
+        data,
+        {:set_cluster, :cluster,
+         %{enabled: true, runtime_status: :online, group: "Plant_floor", connected: []}}
+      )
+
+    assert public.cluster.group == "Plant_floor"
   end
 
   test "malformed and unknown operations are rejected" do

@@ -1,6 +1,7 @@
 defmodule NervesGate.Status do
   @moduledoc "Compatibility projection over canonical local device data and remote copies."
 
+  alias NervesGate.Cluster.Manager, as: ClusterManager
   alias NervesGate.Device
   alias NervesGate.DeviceState.Client
   alias NervesGate.DeviceState.Data
@@ -9,14 +10,18 @@ defmodule NervesGate.Status do
   alias NervesGate.Internet.Hardware
   alias NervesGate.Internet.Manager, as: InternetManager
   alias NervesGate.Internet.Monitor
+  alias NervesGate.Settings
   alias NervesGate.Setup
+  alias NervesGate.Tailnet.Observer
 
   @spec snapshot() :: map()
   def snapshot do
     data = safe(Server, :data, fallback_data())
     replicas = safe(Client, :replicas, %{})
     internet_diagnostics = safe(Monitor, :status, offline_internet())
-    cluster = cluster_compatibility(data)
+    tailnet_diagnostics = safe(Observer, :status, offline_tailnet())
+    cluster_diagnostics = safe(ClusterManager, :status, %{})
+    cluster = cluster_compatibility(data, cluster_diagnostics)
 
     # Compatibility: remove this legacy shape during the NervesGateWeb refactor.
     # Local operational truth and all remote state now come from DeviceState.
@@ -24,12 +29,13 @@ defmodule NervesGate.Status do
       device: compatibility_device(data),
       identity: Identity.get(),
       setup: safe(Setup, :status, %{phase: :internet, ready: false, recovery: false}),
+      settings: safe(Settings, :status, %{pending: nil, maintenance: [], last_error: nil}),
       network: %{
         configuration: safe(InternetManager, :status, %{}),
         connectivity: compatibility_internet(data, internet_diagnostics),
         interfaces: Hardware.interfaces()
       },
-      tailnet: compatibility_tailnet(data),
+      tailnet: compatibility_tailnet(data, tailnet_diagnostics),
       layers: layers(data),
       people_count: safe(NervesGateWeb.Presence, :count, 0),
       distribution: Map.take(cluster, [:online, :node, :connected]),
@@ -73,27 +79,30 @@ defmodule NervesGate.Status do
     |> Map.put(:reason, data.internet.reason)
   end
 
-  defp compatibility_tailnet(data) do
+  defp compatibility_tailnet(data, diagnostics) do
     %{
       online: data.tailnet.status == :online,
       authenticated: data.tailnet.authenticated,
       hostname: data.tailnet.hostname,
       ipv4: data.tailnet.ipv4,
-      peers: [],
-      nodes: [],
+      peers: Map.get(diagnostics, :peers, []),
+      nodes: Map.get(diagnostics, :nodes, []),
       error: if(data.tailnet.status == :online, do: nil, else: data.tailnet.status)
     }
   end
 
-  defp cluster_compatibility(data) do
+  defp cluster_compatibility(data, diagnostics) do
     online = data.cluster.status == :online
 
     %{
       enabled: data.cluster.enabled,
+      group: data.cluster.group,
       online: online,
       running: online,
       node: data.cluster.node,
-      connected: data.cluster.connected
+      connected: data.cluster.connected,
+      candidates: Map.get(diagnostics, :candidates, []),
+      groups: Map.get(diagnostics, :groups, [])
     }
   end
 
@@ -161,7 +170,7 @@ defmodule NervesGate.Status do
   defp safe(module, function, fallback) do
     apply(module, function, [])
   catch
-    _kind, _reason -> fallback
+    :exit, _reason -> fallback
   end
 
   defp fallback_data do
@@ -176,5 +185,9 @@ defmodule NervesGate.Status do
 
   defp offline_internet do
     %{interface: nil, online: false, ready: false, reason: :unavailable, checks: %{}}
+  end
+
+  defp offline_tailnet do
+    %{peers: [], nodes: []}
   end
 end

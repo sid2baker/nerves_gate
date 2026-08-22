@@ -36,6 +36,12 @@ defmodule NervesGateWeb.Router do
   scope "/", NervesGateWeb do
     pipe_through([:browser, :home_access])
     live("/", StatusLive, :index)
+    live("/settings", SettingsLive, :index)
+  end
+
+  scope "/", NervesGateWeb do
+    pipe_through([:browser, :setup_access])
+    live("/commissioning", CommissioningLive, :index)
   end
 
   scope "/api/setup", NervesGateWeb do
@@ -49,6 +55,7 @@ defmodule NervesGateWeb.Router do
   scope "/api", NervesGateWeb do
     pipe_through([:api, :tailnet])
     get("/status", StatusController, :show)
+    get("/discovery", DiscoveryController, :show)
   end
 
   defp put_remote_access(connection, _options) do
@@ -58,8 +65,8 @@ defmodule NervesGateWeb.Router do
       NervesGateWeb.LocalAccess.ip_string(connection.remote_ip)
     )
     |> Plug.Conn.put_session(
-      :tailnet_access,
-      NervesGateWeb.LocalAccess.tailnet?(connection.remote_ip)
+      :dashboard_access,
+      NervesGateWeb.LocalAccess.dashboard?(connection.remote_ip)
     )
   end
 end

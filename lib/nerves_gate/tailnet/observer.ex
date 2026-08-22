@@ -152,17 +152,11 @@ defmodule NervesGate.Tailnet.Observer do
 
   defp maybe_repair(%{repair_after: threshold} = state, failures)
        when failures >= threshold do
-    safe_repair(state.repair)
+    state.repair.()
     0
   end
 
   defp maybe_repair(_state, failures), do: failures
-
-  defp safe_repair(repair) do
-    repair.()
-  catch
-    _kind, _reason -> :ok
-  end
 
   defp normalize_peer(peer, users) do
     ips = Map.get(peer, "TailscaleIPs") || []
@@ -204,7 +198,7 @@ defmodule NervesGate.Tailnet.Observer do
   defp publish_if_changed(previous, current) when previous == current, do: :ok
 
   defp publish_if_changed(_previous, current) do
-    Phoenix.PubSub.broadcast(NervesGate.PubSub, "tailnet", {:tailnet_changed, current})
+    Phoenix.PubSub.local_broadcast(NervesGate.PubSub, "tailnet", {:tailnet_changed, current})
   end
 
   defp schedule(state, delay) do

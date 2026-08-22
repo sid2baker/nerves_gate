@@ -64,20 +64,39 @@ defmodule NervesGateWeb.SetupComponents do
         <label class="grid gap-2 text-sm font-medium text-zinc-300">
           <span>Addressing</span>
           <select
+            id="internet-method"
             name="internet[method]"
+            aria-controls="static-internet-fields"
+            aria-expanded="false"
+            data-internet-method
+            phx-hook="InternetMethod"
             class="min-h-11 rounded-xl border border-white/10 bg-zinc-950/80 px-3.5 text-zinc-100 outline-none focus:border-emerald-400/70 focus:ring-3 focus:ring-emerald-400/10"
           >
-            <option value="dhcp">DHCP</option>
+            <option value="dhcp">DHCP (automatic)</option>
             <option value="static">Static IPv4</option>
           </select>
         </label>
-        <div class="grid gap-4 sm:grid-cols-2">
+        <p class="text-xs leading-5 text-zinc-500">
+          DHCP obtains the IP address, subnet, gateway, and DNS settings automatically.
+        </p>
+        <div
+          id="static-internet-fields"
+          data-static-internet-fields
+          hidden
+          class="grid gap-4 sm:grid-cols-2"
+        >
           <.input label="IP address" name="internet[ip_address]" placeholder="192.0.2.20" />
           <.input label="Prefix length" name="internet[prefix_length]" placeholder="24" />
           <.input label="Gateway" name="internet[gateway]" placeholder="192.0.2.1" />
           <.input label="DNS resolver" name="internet[dns]" placeholder="1.1.1.1" />
         </div>
-        <.button type="submit" class="mt-2 w-full">Verify and save Internet</.button>
+        <.button
+          type="submit"
+          phx-disable-with="Verifying Internet…"
+          class="mt-2 w-full"
+        >
+          Verify and save Internet
+        </.button>
       </form>
     </.card>
     """
@@ -113,8 +132,8 @@ defmodule NervesGateWeb.SetupComponents do
     <.card class="relative overflow-hidden p-6 sm:p-8">
       <span class="absolute top-5 right-6 text-5xl font-black text-white/[0.035]">03</span>
       <.step_heading title="Choose cluster mode">
-        Leave the cookie blank for singular mode. A shared cookie enables explicit distributed
-        Erlang connections; it does not discover or connect gateways automatically.
+        Leave the group blank for singular mode, join a visible group, or create a new public
+        group name. Gateways in the same Tailnet group connect automatically.
       </.step_heading>
       <dl class="mt-6 grid grid-cols-[8rem_1fr] gap-3 rounded-xl border border-white/8 bg-zinc-950/50 p-4 text-sm">
         <dt class="text-zinc-500">Tailnet name</dt>
@@ -124,16 +143,28 @@ defmodule NervesGateWeb.SetupComponents do
       </dl>
       <form phx-submit="configure-cluster" class="mt-5 grid gap-4">
         <.input
-          label="Shared cluster cookie"
-          name="cluster[cookie]"
-          type="password"
-          autocomplete="new-password"
-          minlength="8"
+          label="Cluster group"
+          name="cluster[group]"
+          list="commissioning-cluster-groups"
           maxlength="128"
-          pattern="[A-Za-z0-9_-]+"
-          hint="Optional. Use the same 8–128 character value on gateways you intend to connect."
+          pattern="[A-Za-z0-9][A-Za-z0-9_-]*"
+          hint="Public group name. Select a visible group, enter a new name, or leave blank for singular mode."
         />
-        <.button type="submit" class="w-full">Complete setup</.button>
+        <datalist id="commissioning-cluster-groups">
+          <option :for={group <- @view.cluster.groups} value={group.name}>
+            {group.members} visible gateway(s)
+          </option>
+        </datalist>
+        <div :if={@view.cluster.groups != []} class="rounded-xl border border-white/8 bg-zinc-950/40 p-4">
+          <p class="text-xs font-bold uppercase tracking-wider text-zinc-500">Available groups</p>
+          <ul class="mt-2 grid gap-2 text-sm">
+            <li :for={group <- @view.cluster.groups} class="flex justify-between gap-3 text-zinc-300">
+              <span class="font-medium">{group.name}</span>
+              <span class="text-zinc-500">{group.members} visible</span>
+            </li>
+          </ul>
+        </div>
+        <.button type="submit" class="w-full">Complete and persist setup</.button>
       </form>
     </.card>
     """

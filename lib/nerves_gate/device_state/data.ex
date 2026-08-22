@@ -35,6 +35,7 @@ defmodule NervesGate.DeviceState.Data do
       status: :disabled,
       runtime_status: :disabled,
       enabled: false,
+      group: nil,
       node: nil,
       connected: []
     },
@@ -61,6 +62,7 @@ defmodule NervesGate.DeviceState.Data do
           status: layer_status(),
           runtime_status: :online | :failed | :disabled,
           enabled: boolean(),
+          group: String.t() | nil,
           node: String.t() | nil,
           connected: [String.t()]
         }
@@ -232,17 +234,20 @@ defmodule NervesGate.DeviceState.Data do
     enabled = Map.get(cluster, :enabled, false)
     default_status = if enabled, do: :failed, else: :disabled
     runtime_status = Map.get(cluster, :runtime_status, default_status)
+    group = Map.get(cluster, :group)
     node = Map.get(cluster, :node)
     connected = Map.get(cluster, :connected, [])
 
-    if only_keys?(cluster, [:runtime_status, :enabled, :node, :connected]) and
+    if only_keys?(cluster, [:runtime_status, :enabled, :group, :node, :connected]) and
          is_boolean(enabled) and runtime_status in [:online, :failed, :disabled] and
-         optional_string?(node) and is_list(connected) and Enum.all?(connected, &is_binary/1) do
+         optional_string?(group) and optional_string?(node) and is_list(connected) and
+         Enum.all?(connected, &is_binary/1) do
       {:ok,
        %{
          status: runtime_status,
          runtime_status: runtime_status,
          enabled: enabled,
+         group: group,
          node: node,
          connected: Enum.sort(connected)
        }}

@@ -34,6 +34,32 @@ defmodule NervesGate.Tailnet.TailscaleTest do
     refute inspect(NervesGate.Tailscale) =~ "tskey-invalid"
   end
 
+  test "staged enrollment can switch back to the previous account profile" do
+    TestTailscaleClient.put(
+      {:ok,
+       %{
+         "Self" => %{"Online" => true},
+         profiles: [
+           %{"id" => "old-profile", "nickname" => "known-good", "selected" => true}
+         ]
+       }}
+    )
+
+    assert {:ok, "old-profile"} = NervesGate.Tailscale.current_profile_id()
+
+    assert {:ok, metadata} =
+             NervesGate.Tailscale.stage_enrollment(
+               "tskey-auth-candidate",
+               "change-123",
+               "old-profile"
+             )
+
+    assert metadata["candidate_profile_id"] == "candidate-profile"
+    assert {:ok, "candidate-profile"} = NervesGate.Tailscale.current_profile_id()
+    assert :ok = NervesGate.Tailscale.rollback_enrollment(metadata)
+    assert {:ok, "old-profile"} = NervesGate.Tailscale.current_profile_id()
+  end
+
   test "missing or corrupt pinned binaries are rejected" do
     root = TestScenario.temporary_root(:binary)
     cli = Path.join(root, "tailscale")

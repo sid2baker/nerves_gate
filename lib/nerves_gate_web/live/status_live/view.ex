@@ -14,6 +14,9 @@ defmodule NervesGateWeb.StatusLive.View do
       profile: Map.put(context.profile, "name", state.data.name),
       identity: context.identity,
       internet: context.internet,
+      network_configuration: context.network_configuration,
+      tailnet: context.tailnet,
+      cluster: cluster_view(context.cluster),
       diagnostics: context.diagnostics,
       people_count: context.people_count,
       local: local,
@@ -103,6 +106,13 @@ defmodule NervesGateWeb.StatusLive.View do
   defp layer_tone(:disabled), do: :neutral
   defp layer_tone(:blocked), do: :warning
   defp layer_tone(_status), do: :bad
+
+  defp cluster_view(cluster) do
+    cluster
+    |> Map.put_new(:group, nil)
+    |> Map.put_new(:groups, [])
+    |> Map.put_new(:candidates, [])
+  end
 
   defp node_sort_key(node), do: {not node.self, not node.connected, String.downcase(node.name)}
 

@@ -9,6 +9,7 @@ defmodule NervesGate.Tailnet.Condition.ActionableUnavailable do
 
   alarm_if do
     NervesGate.Tailnet.Signal.Unavailable and
+      not NervesGate.Settings.Signal.TailnetChanging and
       not NervesGate.Internet.Signal.Unavailable and
       not NervesGate.Commissioning.Alarm.Required
   end
@@ -35,10 +36,15 @@ defmodule NervesGate.Tailnet.Alarms do
   @moduledoc "Owns translation from immediate Tailnet health to raw conditions."
 
   alias NervesGate.Alarms
+  alias NervesGate.Settings.Maintenance
   alias NervesGate.Tailnet.Signal
 
   @spec report(map()) :: :ok
   def report(%{online: online}) do
-    Alarms.toggle(Signal.Unavailable, not online, Signal.Unavailable.description())
+    unless Maintenance.active?(:tailnet) do
+      Alarms.toggle(Signal.Unavailable, not online, Signal.Unavailable.description())
+    end
+
+    :ok
   end
 end

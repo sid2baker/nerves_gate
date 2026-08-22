@@ -48,13 +48,33 @@ defmodule NervesGate.Store do
   end
 
   @spec write_cluster(String.t() | nil, Path.t()) :: :ok | {:error, term()}
-  def write_cluster(cookie, root \\ root()) do
-    with {:ok, cookie} <- ClusterManager.validate_cookie(cookie) do
+  def write_cluster(group, root \\ root()) do
+    with {:ok, group} <- ClusterManager.validate_group(group) do
       write_json(
         Path.join(root, "cluster.json"),
-        %{"version" => 1, "cookie" => cookie},
-        mode: 0o600
+        %{"version" => 2, "group" => group}
       )
+    end
+  end
+
+  @spec read_settings_change(Path.t()) :: {:ok, map() | nil} | {:error, term()}
+  def read_settings_change(root \\ root()) do
+    read_json(Path.join(root, "settings-change.json"), &validate_settings_change/1, nil)
+  end
+
+  @spec write_settings_change(map(), Path.t()) :: :ok | {:error, term()}
+  def write_settings_change(change, root \\ root()) when is_map(change) do
+    with {:ok, change} <- validate_settings_change(change) do
+      write_json(Path.join(root, "settings-change.json"), change, mode: 0o600)
+    end
+  end
+
+  @spec clear_settings_change(Path.t()) :: :ok | {:error, term()}
+  def clear_settings_change(root \\ root()) do
+    case File.rm(Path.join(root, "settings-change.json")) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -100,9 +120,32 @@ defmodule NervesGate.Store do
 
   defp validate_setup(_setup), do: {:error, :invalid_setup}
 
-  defp validate_cluster(%{"version" => 1, "cookie" => cookie}) do
-    ClusterManager.validate_cookie(cookie)
+  defp validate_cluster(%{"version" => 2, "group" => group}) do
+    ClusterManager.validate_group(group)
+  end
+
+  # Version 1 used the public group value under its Erlang implementation name.
+  defp validate_cluster(%{"version" => 1, "cookie" => group}) do
+    ClusterManager.validate_group(group)
   end
 
   defp validate_cluster(_cluster), do: {:error, :invalid_cluster_configuration}
+
+  defp validate_settings_change(
+         %{
+           "version" => 1,
+           "id" => id,
+           "kind" => kind,
+           "phase" => phase,
+           "rollback" => rollback,
+           "started_at" => started_at
+         } = change
+       )
+       when is_binary(id) and kind in ["internet", "tailnet", "cluster"] and
+              phase in ["applying", "awaiting_confirmation", "rolling_back"] and
+              is_map(rollback) and is_binary(started_at) do
+    {:ok, Map.take(change, ["version", "id", "kind", "phase", "rollback", "started_at"])}
+  end
+
+  defp validate_settings_change(_change), do: {:error, :invalid_settings_change}
 end

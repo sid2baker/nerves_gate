@@ -51,7 +51,7 @@ defmodule Mix.Tasks.NervesGate.Qemu do
 
       commission_all(key)
     else
-      Mix.shell().info("Fresh setup environment ready at http://127.0.0.1:4001 through :4003")
+      Mix.shell().info("Fresh commissioning pages ready on ports 4001–4003 at /commissioning")
     end
   end
 
@@ -81,11 +81,14 @@ defmodule Mix.Tasks.NervesGate.Qemu do
     if length(dashboards) == length(@nodes) do
       Enum.each(dashboards, fn {node, ipv4} ->
         save_tailnet_ip(node, ipv4)
-        Mix.shell().info("#{node} dashboard (tailnet only): http://#{ipv4}/")
+        Mix.shell().info("#{node} tailnet dashboard: http://#{ipv4}/")
       end)
 
       Mix.shell().info("All three gateways reached functional mode.")
-      Mix.shell().info("The localhost setup forwards close after commissioning.")
+
+      Mix.shell().info(
+        "Local dashboards remain available at http://127.0.0.1:4001 through :4003."
+      )
     else
       run_script("stop", "all")
       Mix.raise("functional QEMU setup failed")
@@ -113,7 +116,7 @@ defmodule Mix.Tasks.NervesGate.Qemu do
   defp wait_for_setup(_base, 0), do: raise("setup timeout")
 
   defp wait_for_setup(base, attempts) do
-    case request(:get, base <> "/", nil, 2_000) do
+    case request(:get, base <> "/commissioning", nil, 2_000) do
       {:ok, 200, _body} ->
         :ok
 

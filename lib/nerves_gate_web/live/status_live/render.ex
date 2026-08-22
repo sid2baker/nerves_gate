@@ -4,24 +4,13 @@ defmodule NervesGateWeb.StatusLive.Render do
   use NervesGateWeb, :html
 
   import NervesGateWeb.GatewayComponents
-  import NervesGateWeb.SetupComponents
 
   attr(:view, :map, required: true)
-  attr(:tailnet_access, :boolean, required: true)
   attr(:flash, :map, required: true)
 
   def render(assigns) do
     ~H"""
-    <.current
-      :if={!@view.setup.ready or !@tailnet_access}
-      view={@view}
-      flash={@flash}
-    />
-    <.dashboard
-      :if={@view.setup.ready and @tailnet_access}
-      view={@view}
-      flash={@flash}
-    />
+    <.dashboard view={@view} flash={@flash} />
     """
   end
 
@@ -44,6 +33,7 @@ defmodule NervesGateWeb.StatusLive.Render do
           </div>
 
           <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+            <.link_button href={~p"/settings"}>Settings</.link_button>
             <div class="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2 text-right">
               <strong class="block text-sm text-zinc-200">{@view.local.hostname}</strong>
               <span class="block font-mono text-xs text-zinc-500">{@view.local.ipv4 || "No Tailnet IP"}</span>
@@ -243,6 +233,7 @@ defmodule NervesGateWeb.StatusLive.Render do
       {"Machine ID", node.id},
       {"Tailnet hostname", node.data.tailnet.hostname || "Unavailable"},
       {"Tailnet IPv4", node.data.tailnet.ipv4 || "Unavailable"},
+      {"Cluster group", node.data.cluster.group || "Singular"},
       {"BEAM node", format_node(node.data.cluster.node)},
       {"Firmware", node.data.firmware_version},
       {"Revision", node.revision},

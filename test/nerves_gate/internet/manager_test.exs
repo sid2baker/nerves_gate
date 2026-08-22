@@ -124,6 +124,45 @@ defmodule NervesGate.Internet.ManagerTest do
     assert TestInternetAdapter.state().current == original
   end
 
+  test "a staged candidate remains temporary until commit", %{root: root} do
+    original = TestScenario.static()
+    candidate = TestScenario.dhcp()
+    :ok = Store.write_network(original, root)
+    pid = start_manager(root, fn _interface -> TestScenario.checks() end)
+
+    assert {:ok, pending} =
+             Manager.stage_candidate(candidate, "connection-a", server: pid, timeout: 100)
+
+    assert Manager.status(pid).pending.phase == :awaiting_confirmation
+    assert {:ok, ^original} = Store.read_network(root)
+    assert TestInternetAdapter.state().current == candidate
+
+    assert {:error, :fresh_connection_required} =
+             Manager.confirm(pending.id, "connection-a", pid)
+
+    assert :ok = Manager.confirm(pending.id, "connection-b", pid)
+    assert {:ok, ^candidate} = Store.read_network(root)
+    assert Manager.status(pid).pending == nil
+  end
+
+  test "a staged candidate can be rolled back without persistence", %{root: root} do
+    original = TestScenario.static()
+    :ok = Store.write_network(original, root)
+    pid = start_manager(root, fn _interface -> TestScenario.checks() end)
+
+    assert {:ok, pending} =
+             Manager.stage_candidate(
+               TestScenario.dhcp(),
+               "connection-a",
+               server: pid,
+               timeout: 100
+             )
+
+    assert :ok = Manager.revert(pending.id, pid)
+    assert TestInternetAdapter.state().current == original
+    assert {:ok, ^original} = Store.read_network(root)
+  end
+
   defp start_manager(root, verifier) do
     name = String.to_atom("network_manager_#{System.unique_integer([:positive])}")
 

@@ -21,9 +21,9 @@ print_location() {
   i=$(index_of "$node")
 
   if test -s "$tailnet_file"; then
-    echo "$node $state; dashboard (tailnet only): http://$(tr -d '\r\n' <"$tailnet_file")/"
+    echo "$node $state; local dashboard: http://127.0.0.1:${ports[$i]}/; tailnet dashboard: http://$(tr -d '\r\n' <"$tailnet_file")/"
   else
-    echo "$node $state; setup forward: http://127.0.0.1:${ports[$i]}/ (closes when commissioning completes)"
+    echo "$node $state; local setup/dashboard: http://127.0.0.1:${ports[$i]}/"
   fi
 }
 

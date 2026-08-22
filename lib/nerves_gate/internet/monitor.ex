@@ -81,8 +81,6 @@ defmodule NervesGate.Internet.Monitor do
       %{interface: interface} -> summarize(interface, verifier.(interface))
       nil -> offline(:not_configured)
     end
-  catch
-    :exit, _reason -> offline(:manager_unavailable)
   end
 
   defp first_failure(checks) do
@@ -110,7 +108,7 @@ defmodule NervesGate.Internet.Monitor do
     now = System.monotonic_time(:millisecond)
 
     if is_nil(state.last_repair) or now - state.last_repair >= state.repair_interval do
-      safe_repair(state.repair)
+      state.repair.()
       %{state | last_repair: now}
     else
       state
@@ -119,14 +117,8 @@ defmodule NervesGate.Internet.Monitor do
 
   defp maybe_repair(state, _result), do: state
 
-  defp safe_repair(repair) do
-    repair.()
-  catch
-    _kind, _reason -> :ok
-  end
-
   defp publish(result) do
-    Phoenix.PubSub.broadcast(NervesGate.PubSub, "internet", {:internet_changed, result})
+    Phoenix.PubSub.local_broadcast(NervesGate.PubSub, "internet", {:internet_changed, result})
   end
 
   defp schedule(state, delay), do: %{state | timer: Process.send_after(self(), :poll, delay)}

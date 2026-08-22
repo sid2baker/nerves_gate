@@ -1,5 +1,5 @@
 defmodule NervesGateWeb.LocalAccess do
-  @moduledoc "Restricts setup to local commissioning networks and the dashboard to Tailscale."
+  @moduledoc "Restricts management to Tailscale and explicitly enabled local development networks."
 
   import Plug.Conn
 
@@ -30,6 +30,12 @@ defmodule NervesGateWeb.LocalAccess do
   def setup?({192, 168, third, _d}) when third in 77..90, do: true
   def setup?(ip), do: tailnet?(ip)
 
+  @spec dashboard?(:inet.ip_address()) :: boolean()
+  def dashboard?(ip) do
+    tailnet?(ip) or
+      (Application.get_env(:nerves_gate, :local_dashboard, false) and setup?(ip))
+  end
+
   @spec ip_string(:inet.ip_address()) :: String.t()
   def ip_string(ip), do: ip |> :inet.ntoa() |> to_string()
 
@@ -38,7 +44,7 @@ defmodule NervesGateWeb.LocalAccess do
 
   defp allowed?(:home, ip) do
     case NervesGate.Setup.status() do
-      %{ready: true} -> tailnet?(ip)
+      %{ready: true} -> dashboard?(ip)
       _setup -> setup?(ip)
     end
   catch

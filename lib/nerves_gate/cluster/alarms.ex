@@ -1,5 +1,5 @@
 defmodule NervesGate.Cluster.Signal.Enabled do
-  @moduledoc "Immediate internal condition indicating that a cluster cookie is configured."
+  @moduledoc "Immediate internal condition indicating that a cluster group is configured."
   def description, do: "Cluster mode enabled"
 end
 
@@ -15,6 +15,7 @@ defmodule NervesGate.Cluster.Condition.ActionableUnavailable do
   alarm_if do
     NervesGate.Cluster.Signal.Enabled and
       NervesGate.Cluster.Signal.Unavailable and
+      not NervesGate.Settings.Signal.ClusterChanging and
       not NervesGate.Internet.Signal.Unavailable and
       not NervesGate.Tailnet.Signal.Unavailable and
       not NervesGate.Commissioning.Alarm.Required
@@ -43,15 +44,20 @@ defmodule NervesGate.Cluster.Alarms do
 
   alias NervesGate.Alarms
   alias NervesGate.Cluster.Signal
+  alias NervesGate.Settings.Maintenance
 
   @spec report(boolean(), boolean()) :: :ok
   def report(enabled, runtime_broken) do
-    Alarms.toggle(Signal.Enabled, enabled, Signal.Enabled.description())
+    unless Maintenance.active?(:cluster) do
+      Alarms.toggle(Signal.Enabled, enabled, Signal.Enabled.description())
 
-    Alarms.toggle(
-      Signal.Unavailable,
-      enabled and runtime_broken,
-      Signal.Unavailable.description()
-    )
+      Alarms.toggle(
+        Signal.Unavailable,
+        enabled and runtime_broken,
+        Signal.Unavailable.description()
+      )
+    end
+
+    :ok
   end
 end

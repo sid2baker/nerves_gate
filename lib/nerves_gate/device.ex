@@ -38,7 +38,7 @@ defmodule NervesGate.Device do
     with {:ok, name} <- valid_name(name),
          profile <- changed_profile(state.profile, name, actor),
          :ok <- Store.write_json(state.path, profile) do
-      Phoenix.PubSub.broadcast(NervesGate.PubSub, "device", {:device_changed, profile})
+      Phoenix.PubSub.local_broadcast(NervesGate.PubSub, "device", {:device_changed, profile})
       {:reply, :ok, %{state | profile: profile}}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}

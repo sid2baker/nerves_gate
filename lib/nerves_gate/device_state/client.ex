@@ -244,7 +244,6 @@ defmodule NervesGate.DeviceState.Client do
     Server.join(client, {Server, node})
   catch
     :exit, reason -> {:error, reason}
-    _kind, reason -> {:error, reason}
   end
 
   defp install_snapshot(state, node, snapshot) do
@@ -296,7 +295,7 @@ defmodule NervesGate.DeviceState.Client do
         metadata: state.metadata |> Map.drop(duplicate_nodes) |> Map.put(node, metadata)
     }
 
-    Phoenix.PubSub.broadcast(
+    Phoenix.PubSub.local_broadcast(
       NervesGate.PubSub,
       "device_state",
       {:replica_changed, data.device_id, replica(node, data, metadata)}

@@ -93,7 +93,7 @@ defmodule NervesGate.Alarms.Reporter do
   def handle_info(%Alarmist.Event{} = event, state) do
     log_transition(event)
     NervesGate.DeviceState.Server.alarm_transition(event)
-    Phoenix.PubSub.broadcast(NervesGate.PubSub, "alarms", {:alarms_changed, event.state})
+    Phoenix.PubSub.local_broadcast(NervesGate.PubSub, "alarms", {:alarms_changed, event.state})
     {:noreply, state}
   end
 

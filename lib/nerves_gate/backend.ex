@@ -24,6 +24,7 @@ defmodule NervesGate.Backend do
     children = [
       {Task.Supervisor, name: NervesGate.TaskSupervisor},
       NervesGate.Alarms.Reporter,
+      NervesGate.Settings.ChangeControl,
       NervesGate.Device,
       NervesGate.Commissioning.Access,
       NervesGate.Internet.Manager,
@@ -31,6 +32,7 @@ defmodule NervesGate.Backend do
       {DynamicSupervisor, name: NervesGate.Tailnet.DynamicSupervisor, strategy: :one_for_one},
       NervesGate.Tailnet.Manager,
       NervesGate.Tailnet.Observer,
+      NervesGate.Tailnet.Configuration,
       NervesGate.Cluster.Manager,
       NervesGate.Setup,
       NervesGate.DeviceState.Server,

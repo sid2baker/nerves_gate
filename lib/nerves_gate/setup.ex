@@ -21,7 +21,7 @@ defmodule NervesGate.Setup do
 
   @phases [:internet, :tailscale, :cluster, :ready, :recovery]
 
-  defstruct [:root, :phase, :error, :ops]
+  defstruct [:root, :phase, :error, :ops, keep_local_access: false]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -32,10 +32,14 @@ defmodule NervesGate.Setup do
   @spec configure_internet(map(), GenServer.server()) ::
           {:ok, :tailscale | :ready} | {:error, term()}
   def configure_internet(params, server \\ __MODULE__) do
-    with {:ok, config} <- Config.new(internet_params(params)) do
+    with {:ok, config} <- internet_config(params) do
       GenServer.call(server, {:configure_internet, config}, 35_000)
     end
   end
+
+  @doc false
+  @spec internet_config(map()) :: {:ok, Config.t()} | {:error, map()}
+  def internet_config(params), do: Config.new(internet_params(params))
 
   @spec configure_tailscale(String.t(), GenServer.server()) :: {:ok, :cluster} | {:error, term()}
   def configure_tailscale(auth_token, server \\ __MODULE__)
@@ -47,30 +51,30 @@ defmodule NervesGate.Setup do
 
   def configure_tailscale(_auth_token, _server), do: {:error, :invalid_auth_token}
 
-  @doc "Compatibility call for the current web controller; selects singular mode."
+  @doc "Selects singular mode."
   @spec configure_cluster() :: {:ok, :ready} | {:error, term()}
   def configure_cluster, do: configure_cluster(nil, __MODULE__)
 
-  @doc "Configures a cookie, or accepts the old explicit server argument for singular mode."
+  @doc "Configures a public cluster group, or accepts a server argument for singular mode."
   @spec configure_cluster(String.t() | nil | GenServer.server()) ::
           {:ok, :ready} | {:error, term()}
-  def configure_cluster(cookie) when is_binary(cookie) or is_nil(cookie),
-    do: configure_cluster(cookie, __MODULE__)
+  def configure_cluster(group) when is_binary(group) or is_nil(group),
+    do: configure_cluster(group, __MODULE__)
 
   def configure_cluster(server), do: configure_cluster(nil, server)
 
   @spec configure_cluster(String.t() | nil, GenServer.server()) ::
           {:ok, :ready} | {:error, term()}
-  def configure_cluster(cookie, server) do
-    with {:ok, cookie} <- ClusterManager.validate_cookie(cookie) do
-      GenServer.call(server, {:configure_cluster, fn -> cookie end}, 10_000)
+  def configure_cluster(group, server) do
+    with {:ok, group} <- ClusterManager.validate_group(group) do
+      GenServer.call(server, {:configure_cluster, fn -> group end}, 10_000)
     end
   end
 
-  @spec configure_cluster_cookie(String.t() | nil, GenServer.server()) ::
+  @spec configure_cluster_group(String.t() | nil, GenServer.server()) ::
           {:ok, :ready} | {:error, term()}
-  def configure_cluster_cookie(cookie, server \\ __MODULE__),
-    do: configure_cluster(cookie, server)
+  def configure_cluster_group(group, server \\ __MODULE__),
+    do: configure_cluster(group, server)
 
   @spec enable_recovery_access(atom(), GenServer.server()) :: :ok
   def enable_recovery_access(reason \\ :requested, server \\ __MODULE__) do
@@ -87,12 +91,29 @@ defmodule NervesGate.Setup do
     Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
 
     {phase, error} = load_phase(root)
-    state = %__MODULE__{root: root, phase: phase, error: error, ops: ops}
+
+    state = %__MODULE__{
+      root: root,
+      phase: phase,
+      error: error,
+      ops: ops,
+      keep_local_access:
+        Keyword.get(
+          options,
+          :keep_local_access,
+          Application.get_env(:nerves_gate, :local_dashboard, false)
+        )
+    }
+
     send(self(), :resume)
     {:ok, state}
   end
 
   @impl true
+  def handle_call({:configure_internet, _config}, _from, %{phase: :ready} = state) do
+    {:reply, {:error, :guarded_settings_required}, state}
+  end
+
   def handle_call({:configure_internet, config}, _from, state) do
     case state.ops.internet.(config) do
       {:ok, _checks} ->
@@ -114,35 +135,45 @@ defmodule NervesGate.Setup do
     end
   end
 
+  def handle_call({:configure_tailscale, _load_token}, _from, %{phase: :ready} = state) do
+    {:reply, {:error, :guarded_settings_required}, state}
+  end
+
   def handle_call({:configure_tailscale, _load_token}, _from, %{phase: :internet} = state) do
     {:reply, {:error, :internet_required}, state}
   end
 
   def handle_call({:configure_tailscale, load_token}, _from, state) do
-    case enroll(state.ops.enroll_tailnet, load_token.()) do
+    case state.ops.enroll_tailnet.(load_token.()) do
       :ok ->
         state.ops.poll_tailnet.()
-        {:reply, {:ok, :cluster}, state |> set_phase(:cluster) |> Map.put(:error, nil)}
+        next_phase = if state.phase == :tailscale, do: :cluster, else: state.phase
+        {:reply, {:ok, next_phase}, state |> set_phase(next_phase) |> Map.put(:error, nil)}
 
       {:error, reason} ->
         {:reply, {:error, reason}, %{state | error: public_error(reason)}}
     end
   end
 
-  def handle_call({:configure_cluster, _load_cookie}, _from, %{phase: :internet} = state) do
+  def handle_call({:configure_cluster, _load_group}, _from, %{phase: :ready} = state) do
+    {:reply, {:error, :guarded_settings_required}, state}
+  end
+
+  def handle_call({:configure_cluster, _load_group}, _from, %{phase: :internet} = state) do
     {:reply, {:error, :internet_required}, state}
   end
 
-  def handle_call({:configure_cluster, _load_cookie}, _from, %{phase: :tailscale} = state) do
+  def handle_call({:configure_cluster, _load_group}, _from, %{phase: :tailscale} = state) do
     {:reply, {:error, :tailnet_required}, state}
   end
 
-  def handle_call({:configure_cluster, load_cookie}, _from, state) do
-    case safe_configure_cluster(state.ops.configure_cluster, load_cookie.()) do
+  def handle_call({:configure_cluster, load_group}, _from, state) do
+    case state.ops.configure_cluster.(load_group.()) do
       :ok ->
         CommissioningAlarms.required(false)
-        Process.send_after(self(), :disable_setup_access, 1_000)
-        {:reply, {:ok, :ready}, state |> set_phase(:ready) |> Map.put(:error, nil)}
+        state = state |> set_phase(:ready) |> Map.put(:error, nil)
+        maybe_disable_setup_access(state)
+        {:reply, {:ok, :ready}, state}
 
       {:error, reason} ->
         {:reply, {:error, public_error(reason)}, %{state | error: public_error(reason)}}
@@ -156,7 +187,7 @@ defmodule NervesGate.Setup do
        ready: state.phase == :ready,
        recovery: state.phase == :recovery,
        error: state.error,
-       access: safe_access_status()
+       access: Access.status()
      }, state}
   end
 
@@ -202,7 +233,13 @@ defmodule NervesGate.Setup do
 
   defp resume(%{phase: :ready} = state) do
     CommissioningAlarms.required(false)
-    state.ops.disable_access.()
+
+    if state.keep_local_access do
+      state.ops.access.(:commissioning, known_uplink(state.root))
+    else
+      state.ops.disable_access.()
+    end
+
     poll_tailnet(state)
   end
 
@@ -216,6 +253,13 @@ defmodule NervesGate.Setup do
     state
   end
 
+  defp maybe_disable_setup_access(%{keep_local_access: true}), do: :ok
+
+  defp maybe_disable_setup_access(_state) do
+    Process.send_after(self(), :disable_setup_access, 1_000)
+    :ok
+  end
+
   defp poll_tailnet(state) do
     state.ops.poll_tailnet.()
     state
@@ -224,7 +268,7 @@ defmodule NervesGate.Setup do
   defp set_phase(state, phase) when phase in @phases do
     case Store.write_phase(phase, state.root) do
       :ok ->
-        Phoenix.PubSub.broadcast(NervesGate.PubSub, "setup", {:setup_changed, phase})
+        Phoenix.PubSub.local_broadcast(NervesGate.PubSub, "setup", {:setup_changed, phase})
         %{state | phase: phase}
 
       {:error, reason} ->
@@ -291,24 +335,6 @@ defmodule NervesGate.Setup do
       {:ok, %Config{interface: interface}} -> interface
       _other -> nil
     end
-  end
-
-  defp safe_access_status do
-    Access.status()
-  catch
-    :exit, _reason -> %{active: [], mode: :unavailable}
-  end
-
-  defp enroll(enroll, token) do
-    enroll.(token)
-  catch
-    _kind, _reason -> {:error, :authentication_failed}
-  end
-
-  defp safe_configure_cluster(configure, cookie) do
-    configure.(cookie)
-  catch
-    _kind, _reason -> {:error, :cluster_configuration_failed}
   end
 
   defp public_error(reason) when is_atom(reason), do: reason

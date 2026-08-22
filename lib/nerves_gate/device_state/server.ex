@@ -145,7 +145,11 @@ defmodule NervesGate.DeviceState.Server do
 
   defp execute_actions(actions, data) do
     Enum.each(actions, fn :broadcast ->
-      Phoenix.PubSub.broadcast(NervesGate.PubSub, "device_state", {:local_state_changed, data})
+      Phoenix.PubSub.local_broadcast(
+        NervesGate.PubSub,
+        "device_state",
+        {:local_state_changed, data}
+      )
     end)
   end
 
@@ -162,15 +166,15 @@ defmodule NervesGate.DeviceState.Server do
 
   defp build_data do
     identity = Identity.get()
-    profile = safe(Device, :get, %{"name" => identity.hostname})
+    profile = Device.get()
 
     Data.new(
       device_id: identity.machine_id,
       name: Map.get(profile, "name", identity.hostname),
       firmware_version: firmware_version(),
-      internet: internet_data(safe(Monitor, :status, %{online: false, reason: :starting})),
-      tailnet: tailnet_data(safe(Observer, :status, %{})),
-      cluster: cluster_data(safe(ClusterManager, :status, %{})),
+      internet: internet_data(Monitor.status()),
+      tailnet: tailnet_data(Observer.status()),
+      cluster: cluster_data(ClusterManager.status()),
       alarms: Alarms.active()
     )
   end
@@ -200,6 +204,7 @@ defmodule NervesGate.DeviceState.Server do
     %{
       runtime_status: cluster_runtime_status(enabled, online),
       enabled: enabled,
+      group: Map.get(status, :group),
       node: encode_node(Map.get(status, :node)),
       connected: status |> Map.get(:connected, []) |> Enum.map(&to_string/1) |> Enum.sort()
     }
@@ -224,11 +229,5 @@ defmodule NervesGate.DeviceState.Server do
     Enum.each(~w(device internet tailnet cluster), fn topic ->
       Phoenix.PubSub.subscribe(NervesGate.PubSub, topic)
     end)
-  end
-
-  defp safe(module, function, fallback) do
-    apply(module, function, [])
-  catch
-    _kind, _reason -> fallback
   end
 end

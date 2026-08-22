@@ -84,7 +84,8 @@ defmodule NervesGateWeb.CoreComponents do
   attr(:class, :any, default: nil)
 
   attr(:rest, :global,
-    include: ~w(autocomplete disabled maxlength minlength pattern placeholder readonly required)
+    include:
+      ~w(autocomplete disabled list maxlength minlength pattern placeholder readonly required)
   )
 
   def input(assigns) do

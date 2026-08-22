@@ -15,8 +15,8 @@ defmodule NervesGateWeb.ConfigureController do
   end
 
   def cluster(connection, params) do
-    cookie = get_in(params, ["cluster", "cookie"]) || Map.get(params, "cookie")
-    respond(connection, Setup.configure_cluster(blank_to_nil(cookie)))
+    group = get_in(params, ["cluster", "group"]) || Map.get(params, "group")
+    respond(connection, Setup.configure_cluster(blank_to_nil(group)))
   end
 
   defp respond(connection, {:ok, phase}) do
@@ -25,9 +25,14 @@ defmodule NervesGateWeb.ConfigureController do
 
   defp respond(connection, {:error, reason}) do
     status =
-      if reason in [:internet_required, :tailscale_offline, :tailscale_not_ready],
-        do: 409,
-        else: 422
+      if reason in [
+           :internet_required,
+           :tailscale_offline,
+           :tailscale_not_ready,
+           :guarded_settings_required
+         ],
+         do: 409,
+         else: 422
 
     connection
     |> put_status(status)

@@ -25,6 +25,19 @@ defmodule NervesGate.Cluster.Distribution do
     result
   end
 
+  @spec connect(String.t()) :: {:ok, node()} | {:error, term()}
+  def connect(ipv4) when is_binary(ipv4) do
+    with {:ok, _address, canonical_ipv4} <- parse_ipv4(ipv4) do
+      node_name = String.to_atom("nervesgate@#{canonical_ipv4}")
+
+      case Node.connect(node_name) do
+        true -> {:ok, node_name}
+        false -> {:error, :unreachable}
+        :ignored -> {:error, :distribution_not_started}
+      end
+    end
+  end
+
   @spec connected() :: [node()]
   def connected, do: Node.list(:connected)
 
