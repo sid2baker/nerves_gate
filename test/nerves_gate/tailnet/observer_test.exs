@@ -34,18 +34,18 @@ defmodule NervesGate.Tailnet.ObserverTest do
   end
 
   test "loss and recovery of Tailscale are broadcast without crashing observers" do
-    Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailscale")
+    Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
     TestTailscaleClient.put({:ok, online_status()})
     {:ok, observer} = start_observer()
 
-    assert_receive {:tailscale_changed, %{online: true}}, 500
+    assert_receive {:tailnet_changed, %{online: true}}, 500
     TestTailscaleClient.put({:error, :daemon_crashed})
     Observer.poll_now(observer)
-    assert_receive {:tailscale_changed, %{online: false, error: :status_unavailable}}, 500
+    assert_receive {:tailnet_changed, %{online: false, error: :status_unavailable}}, 500
 
     TestTailscaleClient.put({:ok, online_status()})
     Observer.poll_now(observer)
-    assert_receive {:tailscale_changed, %{online: true}}, 500
+    assert_receive {:tailnet_changed, %{online: true}}, 500
   end
 
   defp stop_if_running(name) do

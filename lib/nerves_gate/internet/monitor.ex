@@ -127,13 +127,6 @@ defmodule NervesGate.Internet.Monitor do
 
   defp publish(result) do
     Phoenix.PubSub.broadcast(NervesGate.PubSub, "internet", {:internet_changed, result})
-
-    # Compatibility: remove this compatibility event during the NervesGateWeb refactor.
-    Phoenix.PubSub.broadcast(
-      NervesGate.PubSub,
-      "network_health",
-      {:connectivity_changed, result}
-    )
   end
 
   defp schedule(state, delay), do: %{state | timer: Process.send_after(self(), :poll, delay)}

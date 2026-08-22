@@ -205,9 +205,6 @@ defmodule NervesGate.Tailnet.Observer do
 
   defp publish_if_changed(_previous, current) do
     Phoenix.PubSub.broadcast(NervesGate.PubSub, "tailnet", {:tailnet_changed, current})
-
-    # Compatibility: remove this compatibility topic during the NervesGateWeb refactor.
-    Phoenix.PubSub.broadcast(NervesGate.PubSub, "tailscale", {:tailscale_changed, current})
   end
 
   defp schedule(state, delay) do

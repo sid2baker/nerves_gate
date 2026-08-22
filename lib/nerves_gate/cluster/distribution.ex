@@ -1,8 +1,6 @@
 defmodule NervesGate.Cluster.Distribution do
   @moduledoc "Small, local boundary around EPMD and distributed Erlang on the Tailscale IPv4."
 
-  alias NervesGate.Command
-
   @spec start(String.t(), atom()) :: {:ok, node()} | {:error, term()}
   def start(ipv4, cookie) when is_binary(ipv4) and is_atom(cookie) do
     with {:ok, address, canonical_ipv4} <- parse_ipv4(ipv4),
@@ -54,7 +52,7 @@ defmodule NervesGate.Cluster.Distribution do
   defp ensure_epmd(ipv4) do
     System.put_env("ERL_EPMD_ADDRESS", ipv4)
 
-    case Command.run("epmd", ["-daemon"], 2_000) do
+    case run_epmd(["-daemon"]) do
       {:ok, _output} -> :ok
       {:error, reason} -> {:error, {:epmd, reason}}
     end
@@ -78,9 +76,23 @@ defmodule NervesGate.Cluster.Distribution do
   end
 
   defp stop_epmd do
-    case Command.run("epmd", ["-kill"], 2_000) do
+    case run_epmd(["-kill"]) do
       {:ok, _output} -> :ok
       {:error, _reason} -> :ok
+    end
+  end
+
+  defp run_epmd(arguments) do
+    case System.find_executable("epmd") do
+      nil ->
+        {:error, :not_found}
+
+      path ->
+        case MuonTrap.cmd(path, arguments, stderr_to_stdout: true, timeout: 2_000) do
+          {output, 0} -> {:ok, String.trim(output)}
+          {_output, :timeout} -> {:error, :timeout}
+          {output, code} -> {:error, {:exit, code, String.slice(String.trim(output), 0, 512)}}
+        end
     end
   end
 end

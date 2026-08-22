@@ -5,9 +5,9 @@ defmodule NervesGateWeb.StatusLive do
   alias NervesGate.Device
   alias NervesGate.Setup
   alias NervesGate.Status
-  alias NervesGate.Tailscale.Observer
+  alias NervesGate.Tailnet.Observer
 
-  @topics ~w(setup device network network_health tailscale beam alarms)
+  @topics ~w(setup device internet_configuration internet tailnet cluster alarms device_state)
 
   @impl true
   def mount(_params, session, socket) do
@@ -64,7 +64,7 @@ defmodule NervesGateWeb.StatusLive do
   end
 
   def handle_event("enable-recovery", _params, socket) do
-    :ok = NervesGate.Recovery.activate()
+    :ok = Setup.enable_recovery_access(:local_action)
     {:noreply, put_flash(socket, :info, "Local recovery access is being enabled.")}
   end
 

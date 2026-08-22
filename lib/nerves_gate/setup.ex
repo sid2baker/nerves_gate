@@ -72,9 +72,9 @@ defmodule NervesGate.Setup do
   def configure_cluster_cookie(cookie, server \\ __MODULE__),
     do: configure_cluster(cookie, server)
 
-  @spec recover(atom(), GenServer.server()) :: :ok
-  def recover(reason \\ :requested, server \\ __MODULE__) do
-    GenServer.cast(server, {:recover, reason})
+  @spec enable_recovery_access(atom(), GenServer.server()) :: :ok
+  def enable_recovery_access(reason \\ :requested, server \\ __MODULE__) do
+    GenServer.cast(server, {:enable_recovery_access, reason})
   end
 
   @spec status(GenServer.server()) :: map()
@@ -161,7 +161,7 @@ defmodule NervesGate.Setup do
   end
 
   @impl true
-  def handle_cast({:recover, reason}, state) do
+  def handle_cast({:enable_recovery_access, reason}, state) do
     state.ops.access.(:recovery, known_uplink(state.root))
     CommissioningAlarms.required(true)
     {:noreply, %{set_phase(state, :recovery) | error: reason}}

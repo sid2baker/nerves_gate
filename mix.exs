@@ -47,6 +47,7 @@ defmodule NervesGate.MixProject do
       {:alarmist, "~> 0.4.2"},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
+      {:muontrap, "~> 1.0"},
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.2"},
       {:phoenix_pubsub, "~> 2.2"},

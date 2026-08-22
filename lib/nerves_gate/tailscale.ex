@@ -36,15 +36,6 @@ defmodule NervesGate.Tailscale do
 
   def enroll(_auth_key), do: {:error, :authentication_failed}
 
-  @spec repair_binary() :: :ok | {:error, term()}
-  def repair_binary do
-    lifecycle = manager()
-
-    with :ok <- lifecycle.repair() do
-      lifecycle.ensure_started()
-    end
-  end
-
   defp backend, do: Application.get_env(:nerves_gate, :tailscale_backend, Elixir.Tailscale)
   defp manager, do: Application.get_env(:nerves_gate, :tailscale_manager, Manager)
 

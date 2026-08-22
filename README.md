@@ -16,6 +16,34 @@ owns `/data/tailscale/`. Writes are atomic and there is no database.
 `NervesGate.Setup` only orchestrates commissioning choices. Internet, Tailnet,
 and Cluster managers reconstruct and repair their own runtime state after boot.
 
+## Backend model
+
+The application supervisor has four responsibilities: PubSub, the backend,
+Phoenix Presence, and the web endpoint. `NervesGate.Backend` makes the runtime
+ordering explicit:
+
+```text
+Device profile / commissioning access
+                ↓
+Internet.Manager → Internet.Monitor
+                ↓
+Tailnet.Manager  → Tailnet.Observer
+                ↓
+Cluster.Manager
+                ↓
+DeviceState.Server → DeviceState.Client
+```
+
+Each mutable concern has one owner. Managers own persisted configuration and
+local process lifecycle. Monitors and observers publish runtime facts. Alarm
+modules translate those facts into actionable conditions. `Setup` sends
+commissioning commands but owns no runtime health, and `DeviceState` is the
+secret-free read model shared with already-connected gateways.
+
+Kernel forwarding is immutable gateway platform policy in `/etc/sysctl.conf`,
+loaded by `nerves_runtime` before this application starts. It is intentionally
+not a Tailscale library side effect.
+
 ## Replicated device state
 
 Each gateway is the sole writer of its own canonical
@@ -94,9 +122,9 @@ Name changes are recorded with timestamp, actor name, and tailnet IP in
 later versioned documentation support.
 
 Local setup networks cannot open the dashboard. Loopback remains allowed for
-host development and on-device diagnostics. `NervesGate.Recovery.activate/0`
-re-enables isolated recovery access without deleting the known network or
-Tailscale state.
+host development and on-device diagnostics.
+`NervesGate.Setup.enable_recovery_access/1` re-enables isolated access without
+deleting the known network or Tailscale state.
 
 ## Firmware
 

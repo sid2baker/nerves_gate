@@ -1,5 +1,5 @@
 defmodule NervesGate.Backoff do
-  @moduledoc "Bounded exponential backoff with jitter."
+  @moduledoc "Pure bounded retry-delay calculation; callers own all timers and retry state."
 
   @spec next(pos_integer(), pos_integer()) :: {pos_integer(), pos_integer()}
   def next(current, maximum) when current > 0 and maximum >= current do

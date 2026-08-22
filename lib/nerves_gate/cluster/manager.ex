@@ -221,13 +221,6 @@ defmodule NervesGate.Cluster.Manager do
   defp publish(state) do
     status = public_status(state)
     Phoenix.PubSub.broadcast(NervesGate.PubSub, "cluster", {:cluster_changed, status})
-
-    # Compatibility: remove this compatibility event during the NervesGateWeb refactor.
-    Phoenix.PubSub.broadcast(
-      NervesGate.PubSub,
-      "beam",
-      {:nodes_changed, MapSet.new(status.connected)}
-    )
   end
 
   defp load_cookie(root) do

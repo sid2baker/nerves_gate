@@ -140,9 +140,6 @@ defmodule NervesGate.Internet.Manager do
 
   defp broadcast(message) do
     Phoenix.PubSub.broadcast(NervesGate.PubSub, "internet_configuration", message)
-
-    # Compatibility: remove this compatibility topic during the NervesGateWeb refactor.
-    Phoenix.PubSub.broadcast(NervesGate.PubSub, "network", message)
   end
 
   defp configured_adapter do

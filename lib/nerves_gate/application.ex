@@ -6,21 +6,8 @@ defmodule NervesGate.Application do
   def start(_type, _args) do
     children = [
       {Phoenix.PubSub, name: NervesGate.PubSub},
+      NervesGate.Backend,
       NervesGateWeb.Presence,
-      {Task.Supervisor, name: NervesGate.TaskSupervisor},
-      NervesGate.Alarms.Reporter,
-      NervesGate.Platform,
-      NervesGate.Device,
-      NervesGate.Commissioning.Access,
-      NervesGate.Internet.Manager,
-      {DynamicSupervisor, name: NervesGate.Tailnet.DynamicSupervisor, strategy: :one_for_one},
-      NervesGate.Tailnet.Manager,
-      NervesGate.Internet.Monitor,
-      NervesGate.Tailnet.Observer,
-      NervesGate.Cluster.Manager,
-      NervesGate.Setup,
-      NervesGate.DeviceState.Server,
-      NervesGate.DeviceState.Client,
       NervesGateWeb.Endpoint
     ]
 

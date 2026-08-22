@@ -12,7 +12,6 @@ defmodule NervesGate.Tailnet.Manager do
   defstruct [
     :child,
     :monitor,
-    :paths,
     :binary_paths,
     retry: @initial_retry,
     enabled: true,
@@ -27,9 +26,6 @@ defmodule NervesGate.Tailnet.Manager do
 
   @spec ensure_started(GenServer.server()) :: :ok | {:error, term()}
   def ensure_started(server \\ __MODULE__), do: GenServer.call(server, :ensure_started, 15_000)
-
-  @spec repair(GenServer.server()) :: :ok | {:error, term()}
-  def repair(server \\ __MODULE__), do: GenServer.call(server, :repair, 70_000)
 
   @spec repair_runtime(GenServer.server()) :: :ok | :blocked
   def repair_runtime(server \\ __MODULE__), do: GenServer.call(server, :repair_runtime)
@@ -69,19 +65,6 @@ defmodule NervesGate.Tailnet.Manager do
     case start_runtime(state) do
       {:ok, state} -> {:reply, :ok, state}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
-    end
-  end
-
-  def handle_call(:repair, _from, state) do
-    options = [
-      version: Application.fetch_env!(:nerves_gate, :tailscale_version),
-      install_dir: Path.join(Store.root(), "tailscale/bin"),
-      timeout: 60_000
-    ]
-
-    case Tailscale.Binary.ensure_installed(options) do
-      {:ok, paths} -> {:reply, :ok, %{state | paths: paths}}
-      {:error, _reason} -> {:reply, {:error, :binary_repair_failed}, state}
     end
   end
 
@@ -142,7 +125,6 @@ defmodule NervesGate.Tailnet.Manager do
          state
          | child: pid,
            monitor: Process.monitor(pid),
-           paths: paths,
            retry: @initial_retry
        }}
     else
@@ -159,22 +141,9 @@ defmodule NervesGate.Tailnet.Manager do
   defp locate_binaries(_state) do
     bundled = Application.fetch_env!(:nerves_gate, :tailscale_binaries)
 
-    if verified_binary_paths?(bundled) do
-      {:ok, bundled}
-    else
-      version = Application.fetch_env!(:nerves_gate, :tailscale_version)
-      arch = if(:erlang.system_info(:wordsize) == 8, do: "amd64", else: "386")
-      base = Path.join([Store.root(), "tailscale/bin", version, arch])
-
-      persistent = %{
-        cli_path: Path.join(base, "tailscale"),
-        daemon_path: Path.join(base, "tailscaled")
-      }
-
-      if verified_binary_paths?(persistent),
-        do: {:ok, persistent},
-        else: {:error, :missing_pinned_binary}
-    end
+    if verified_binary_paths?(bundled),
+      do: {:ok, bundled},
+      else: {:error, :missing_pinned_binary}
   end
 
   defp verified_binary_paths?(paths) do
