@@ -2,7 +2,7 @@ defmodule NervesGate.Status do
   @moduledoc "Compatibility projection over canonical local device data and remote copies."
 
   alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.Device
+  alias NervesGate.Configuration
   alias NervesGate.DeviceState.Client
   alias NervesGate.DeviceState.Data
   alias NervesGate.DeviceState.Server
@@ -10,8 +10,6 @@ defmodule NervesGate.Status do
   alias NervesGate.Internet.Hardware
   alias NervesGate.Internet.Manager, as: InternetManager
   alias NervesGate.Internet.Monitor
-  alias NervesGate.Settings
-  alias NervesGate.Setup
   alias NervesGate.Tailnet.Observer
 
   @spec snapshot() :: map()
@@ -28,8 +26,8 @@ defmodule NervesGate.Status do
     %{
       device: compatibility_device(data),
       identity: Identity.get(),
-      setup: safe(Setup, :status, %{phase: :internet, ready: false, recovery: false}),
-      settings: safe(Settings, :status, %{pending: nil, maintenance: [], last_error: nil}),
+      configuration:
+        safe(Configuration, :status, %{configured: false, pending: nil, last_error: nil}),
       network: %{
         configuration: safe(InternetManager, :status, %{}),
         connectivity: compatibility_internet(data, internet_diagnostics),
@@ -65,10 +63,7 @@ defmodule NervesGate.Status do
   defp layer_state(status) when status in [:failed, :blocked, :disabled], do: status
   defp layer_state(_unknown), do: :failed
 
-  defp compatibility_device(data) do
-    profile = safe(Device, :get, %{"history" => []})
-    Map.put(profile, "name", data.name)
-  end
+  defp compatibility_device(data), do: %{"name" => data.name}
 
   defp compatibility_internet(data, diagnostics) do
     online = data.internet.status == :online

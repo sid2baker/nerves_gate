@@ -54,9 +54,7 @@ config :alarmist,
     NervesGate.Tailnet.Signal.Unavailable => :debug,
     NervesGate.Cluster.Signal.Enabled => :debug,
     NervesGate.Cluster.Signal.Unavailable => :debug,
-    NervesGate.Settings.Signal.InternetChanging => :debug,
-    NervesGate.Settings.Signal.TailnetChanging => :debug,
-    NervesGate.Settings.Signal.ClusterChanging => :debug,
+    NervesGate.Configuration.Signal.Changing => :debug,
     NervesGate.Storage.Alarm.Failure => :error,
     NervesGate.Commissioning.Alarm.Unavailable => :error
   }
@@ -81,7 +79,6 @@ config :nerves_gate,
   distribution_port: 43_769,
   cluster_poll_interval: 5_000,
   tailnet_repair_failures: 6,
-  settings_confirmation_timeout: :timer.minutes(5),
   alarm_timings: %{
     failure_debounce: 30_000,
     flapping_count: 4,

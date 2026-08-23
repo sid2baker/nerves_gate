@@ -1,8 +1,6 @@
 defmodule NervesGate.Tailnet.TailscaleTest do
   use ExUnit.Case
 
-  alias NervesGate.Internet.Config
-  alias NervesGate.Store
   alias NervesGate.Tailnet.Manager
   alias NervesGate.TestScenario
   alias NervesGate.TestTailscaleClient
@@ -23,15 +21,27 @@ defmodule NervesGate.Tailnet.TailscaleTest do
     :ok
   end
 
-  test "invalid Tailscale auth key is discarded while network configuration remains" do
-    root = TestScenario.temporary_root(:invalid_auth)
-    :ok = Store.initialize(root)
-    network = TestScenario.dhcp()
-    :ok = Store.write_network(network, root)
-
+  test "invalid Tailscale auth keys are discarded" do
     assert {:error, :authentication_failed} = NervesGate.Tailscale.enroll("tskey-invalid")
-    assert {:ok, %Config{method: :dhcp}} = Store.read_network(root)
     refute inspect(NervesGate.Tailscale) =~ "tskey-invalid"
+  end
+
+  test "initial enrollment can be reverted without a previous profile" do
+    TestTailscaleClient.put({:ok, %{"Self" => %{"Online" => false}, profiles: []}})
+
+    assert {:ok, nil} = NervesGate.Tailscale.current_profile_id()
+
+    assert {:ok, metadata} =
+             NervesGate.Tailscale.stage_enrollment(
+               "tskey-auth-candidate",
+               "change-123",
+               nil
+             )
+
+    assert metadata["previous_profile_id"] == nil
+    assert {:ok, "candidate-profile"} = NervesGate.Tailscale.current_profile_id()
+    assert :ok = NervesGate.Tailscale.rollback_enrollment(metadata)
+    assert {:ok, nil} = NervesGate.Tailscale.current_profile_id()
   end
 
   test "staged enrollment can switch back to the previous account profile" do
@@ -58,6 +68,21 @@ defmodule NervesGate.Tailnet.TailscaleTest do
     assert {:ok, "candidate-profile"} = NervesGate.Tailscale.current_profile_id()
     assert :ok = NervesGate.Tailscale.rollback_enrollment(metadata)
     assert {:ok, "old-profile"} = NervesGate.Tailscale.current_profile_id()
+  end
+
+  test "an accepted settings snapshot can restore its selected profile" do
+    TestTailscaleClient.put(
+      {:ok,
+       %{
+         profiles: [
+           %{"id" => "slot-a", "selected" => false},
+           %{"id" => "slot-b", "selected" => true}
+         ]
+       }}
+    )
+
+    assert :ok = NervesGate.Tailscale.select_profile("slot-a")
+    assert {:ok, "slot-a"} = NervesGate.Tailscale.current_profile_id()
   end
 
   test "missing or corrupt pinned binaries are rejected" do

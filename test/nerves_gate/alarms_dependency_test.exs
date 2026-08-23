@@ -4,8 +4,8 @@ defmodule NervesGate.AlarmsDependencyTest do
   alias NervesGate.Alarms
   alias NervesGate.Cluster
   alias NervesGate.Commissioning
+  alias NervesGate.Configuration
   alias NervesGate.Internet
-  alias NervesGate.Settings
   alias NervesGate.Tailnet
 
   setup do
@@ -15,9 +15,7 @@ defmodule NervesGate.AlarmsDependencyTest do
       Cluster.Signal.Enabled,
       Cluster.Signal.Unavailable,
       Commissioning.Alarm.Required,
-      Settings.Signal.InternetChanging,
-      Settings.Signal.TailnetChanging,
-      Settings.Signal.ClusterChanging
+      Configuration.Signal.Changing
     ]
 
     Enum.each(ids, &Alarms.clear/1)
@@ -71,9 +69,9 @@ defmodule NervesGate.AlarmsDependencyTest do
     assert Alarmist.alarm_state(Tailnet.Alarm.Unavailable) != :set
   end
 
-  test "planned Internet changes inhibit expected dependency alarms" do
-    Settings.Maintenance.begin(:internet)
-    on_exit(&Settings.Maintenance.clear/0)
+  test "a configuration candidate inhibits expected dependency alarms" do
+    set(Configuration.Signal.Changing)
+    on_exit(fn -> Alarms.clear(Configuration.Signal.Changing) end)
     set(Cluster.Signal.Enabled)
     set(Cluster.Signal.Unavailable)
     set(Tailnet.Signal.Unavailable)
@@ -85,9 +83,10 @@ defmodule NervesGate.AlarmsDependencyTest do
     assert Alarmist.alarm_state(Cluster.Alarm.Unavailable) != :set
   end
 
-  test "subsystems do not feed expected maintenance transitions into alarm history" do
-    Settings.Maintenance.begin(:internet)
-    on_exit(&Settings.Maintenance.clear/0)
+  test "subsystems do not feed candidate transitions into alarm history" do
+    set(Configuration.Signal.Changing)
+    on_exit(fn -> Alarms.clear(Configuration.Signal.Changing) end)
+    wait_for(fn -> Alarmist.alarm_state(Configuration.Signal.Changing) == :set end)
 
     Internet.Alarms.report(%{online: false})
     Tailnet.Alarms.report(%{online: false})

@@ -10,9 +10,7 @@ defmodule NervesGateWeb.StatusLive.View do
     selected = Enum.find(nodes, local, &(&1.id == selected_device_id))
 
     %{
-      setup: context.setup,
-      profile: Map.put(context.profile, "name", state.data.name),
-      identity: context.identity,
+      configuration: context.configuration,
       internet: context.internet,
       network_configuration: context.network_configuration,
       tailnet: context.tailnet,

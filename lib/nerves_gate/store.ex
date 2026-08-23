@@ -1,77 +1,50 @@
 defmodule NervesGate.Store do
-  @moduledoc "Human-readable, atomic persistence under `/data`."
+  @moduledoc "Atomic JSON persistence under `/data`."
 
   alias NervesGate.AtomicFile
-  alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.Internet.Config
-
-  @phases ~w(internet tailscale cluster ready recovery)
-  @default_setup %{"version" => 1, "phase" => "internet"}
 
   @spec root() :: Path.t()
   def root, do: Application.fetch_env!(:nerves_gate, :data_dir)
 
   @spec initialize(Path.t()) :: :ok | {:error, term()}
   def initialize(root \\ root()) do
+    probe = Path.join(root, ".write-probe")
+
     with :ok <- File.mkdir_p(root),
          :ok <- File.chmod(root, 0o700),
-         :ok <- AtomicFile.write(Path.join(root, ".write-probe"), "ok") do
-      File.rm(Path.join(root, ".write-probe"))
-      :ok
+         :ok <- AtomicFile.write(probe, "ok") do
+      File.rm(probe)
     end
   end
 
-  @spec read_setup(Path.t()) :: {:ok, map()} | {:error, term()}
-  def read_setup(root \\ root()) do
-    read_json(Path.join(root, "setup.json"), &validate_setup/1, @default_setup)
+  @spec settings_path(String.t(), Path.t()) :: Path.t()
+  def settings_path(slot, root \\ root()) when slot in ["a", "b"] do
+    Path.join(root, "settings-#{slot}.json")
   end
 
-  @spec write_phase(atom(), Path.t()) :: :ok | {:error, term()}
-  def write_phase(phase, root \\ root())
-      when phase in [:internet, :tailscale, :cluster, :ready, :recovery] do
-    write_json(Path.join(root, "setup.json"), %{"version" => 1, "phase" => Atom.to_string(phase)})
+  @spec candidate_path(Path.t()) :: Path.t()
+  def candidate_path(root \\ root()), do: Path.join(root, "settings-candidate.json")
+
+  @spec clear_legacy_settings(Path.t()) :: :ok | {:error, term()}
+  def clear_legacy_settings(root \\ root()) do
+    ~w(setup.json network.json cluster.json device.json settings-change.json)
+    |> Enum.reduce_while(:ok, fn name, :ok ->
+      case File.rm(Path.join(root, name)) do
+        :ok -> {:cont, :ok}
+        {:error, :enoent} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, {name, reason}}}
+      end
+    end)
   end
 
-  @spec read_network(Path.t()) :: {:ok, Config.t() | nil} | {:error, term()}
-  def read_network(root \\ root()) do
-    read_json(Path.join(root, "network.json"), &Config.from_persisted/1, nil)
+  @spec promote_candidate(String.t(), Path.t()) :: :ok | {:error, term()}
+  def promote_candidate(slot, root \\ root()) when slot in ["a", "b"] do
+    AtomicFile.replace(candidate_path(root), settings_path(slot, root))
   end
 
-  @spec write_network(Config.t(), Path.t()) :: :ok | {:error, term()}
-  def write_network(%Config{} = config, root \\ root()) do
-    write_json(Path.join(root, "network.json"), Config.to_persisted(config))
-  end
-
-  @spec read_cluster(Path.t()) :: {:ok, String.t() | nil} | {:error, term()}
-  def read_cluster(root \\ root()) do
-    read_json(Path.join(root, "cluster.json"), &validate_cluster/1, nil)
-  end
-
-  @spec write_cluster(String.t() | nil, Path.t()) :: :ok | {:error, term()}
-  def write_cluster(group, root \\ root()) do
-    with {:ok, group} <- ClusterManager.validate_group(group) do
-      write_json(
-        Path.join(root, "cluster.json"),
-        %{"version" => 2, "group" => group}
-      )
-    end
-  end
-
-  @spec read_settings_change(Path.t()) :: {:ok, map() | nil} | {:error, term()}
-  def read_settings_change(root \\ root()) do
-    read_json(Path.join(root, "settings-change.json"), &validate_settings_change/1, nil)
-  end
-
-  @spec write_settings_change(map(), Path.t()) :: :ok | {:error, term()}
-  def write_settings_change(change, root \\ root()) when is_map(change) do
-    with {:ok, change} <- validate_settings_change(change) do
-      write_json(Path.join(root, "settings-change.json"), change, mode: 0o600)
-    end
-  end
-
-  @spec clear_settings_change(Path.t()) :: :ok | {:error, term()}
-  def clear_settings_change(root \\ root()) do
-    case File.rm(Path.join(root, "settings-change.json")) do
+  @spec clear_candidate(Path.t()) :: :ok | {:error, term()}
+  def clear_candidate(root \\ root()) do
+    case File.rm(candidate_path(root)) do
       :ok -> :ok
       {:error, :enoent} -> :ok
       {:error, reason} -> {:error, reason}
@@ -114,38 +87,4 @@ defmodule NervesGate.Store do
       error -> error
     end
   end
-
-  defp validate_setup(%{"version" => 1, "phase" => phase}) when phase in @phases,
-    do: {:ok, %{"version" => 1, "phase" => phase}}
-
-  defp validate_setup(_setup), do: {:error, :invalid_setup}
-
-  defp validate_cluster(%{"version" => 2, "group" => group}) do
-    ClusterManager.validate_group(group)
-  end
-
-  # Version 1 used the public group value under its Erlang implementation name.
-  defp validate_cluster(%{"version" => 1, "cookie" => group}) do
-    ClusterManager.validate_group(group)
-  end
-
-  defp validate_cluster(_cluster), do: {:error, :invalid_cluster_configuration}
-
-  defp validate_settings_change(
-         %{
-           "version" => 1,
-           "id" => id,
-           "kind" => kind,
-           "phase" => phase,
-           "rollback" => rollback,
-           "started_at" => started_at
-         } = change
-       )
-       when is_binary(id) and kind in ["internet", "tailnet", "cluster"] and
-              phase in ["applying", "awaiting_confirmation", "rolling_back"] and
-              is_map(rollback) and is_binary(started_at) do
-    {:ok, Map.take(change, ["version", "id", "kind", "phase", "rollback", "started_at"])}
-  end
-
-  defp validate_settings_change(_change), do: {:error, :invalid_settings_change}
 end

@@ -1,5 +1,5 @@
 defmodule NervesGateWeb.CoreComponents do
-  @moduledoc "Reusable, presentation-only components shared by setup and dashboard views."
+  @moduledoc "Reusable presentation-only components shared by gateway views."
 
   use Phoenix.Component
 
@@ -85,7 +85,7 @@ defmodule NervesGateWeb.CoreComponents do
 
   attr(:rest, :global,
     include:
-      ~w(autocomplete disabled list maxlength minlength pattern placeholder readonly required)
+      ~w(autocomplete disabled list max maxlength min minlength pattern placeholder readonly required step)
   )
 
   def input(assigns) do

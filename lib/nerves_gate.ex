@@ -1,17 +1,8 @@
 defmodule NervesGate do
   @moduledoc "A small, Tailscale-backed Nerves gateway."
 
-  @doc "Configure and verify the Internet uplink."
-  defdelegate configure_internet(params), to: NervesGate.Setup
-
-  @doc "Enroll Tailscale without persisting the auth token."
-  defdelegate configure_tailscale(auth_token), to: NervesGate.Setup
-
-  @doc "Select singular cluster mode."
-  defdelegate configure_cluster(), to: NervesGate.Setup
-
-  @doc "Configure the public cluster group; nil selects singular mode."
-  defdelegate configure_cluster(group), to: NervesGate.Setup, as: :configure_cluster_group
+  @doc "Return the public firmware-tagged configuration status."
+  defdelegate configuration(), to: NervesGate.Configuration, as: :status
 
   @doc "Return this gateway's authoritative, secret-free device data."
   defdelegate device_state(), to: NervesGate.DeviceState.Server, as: :data

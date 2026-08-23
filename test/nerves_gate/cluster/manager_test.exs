@@ -5,12 +5,8 @@ defmodule NervesGate.Cluster.ManagerTest do
 
   alias NervesGate.Cluster.Alarm
   alias NervesGate.Cluster.Manager
-  alias NervesGate.Store
-  alias NervesGate.TestScenario
 
   setup do
-    root = TestScenario.temporary_root(:cluster_manager)
-    :ok = Store.initialize(root)
     owner = self()
 
     {:ok, runtime} =
@@ -43,14 +39,11 @@ defmodule NervesGate.Cluster.ManagerTest do
     }
 
     name = String.to_atom("cluster_manager_#{System.unique_integer([:positive])}")
-    {:ok, manager} = Manager.start_link(name: name, root: root, ops: ops, interval: 60_000)
+    {:ok, manager} = Manager.start_link(name: name, ops: ops, interval: 60_000)
 
-    on_exit(fn ->
-      if Process.alive?(manager), do: GenServer.stop(manager)
-      File.rm_rf!(root)
-    end)
+    on_exit(fn -> if Process.alive?(manager), do: GenServer.stop(manager) end)
 
-    %{manager: manager, name: name, ops: ops, root: root, runtime: runtime}
+    %{manager: manager, runtime: runtime}
   end
 
   test "nil group is truly singular and never starts distribution", %{manager: manager} do
@@ -62,7 +55,7 @@ defmodule NervesGate.Cluster.ManagerTest do
   end
 
   test "a public group enables distribution and is exposed in status", context do
-    %{manager: manager, root: root, runtime: runtime} = context
+    %{manager: manager, runtime: runtime} = context
     group = "Plant_floor"
     Agent.update(runtime, &%{&1 | tailnet: online()})
     Phoenix.PubSub.subscribe(NervesGate.PubSub, "cluster")
@@ -79,7 +72,6 @@ defmodule NervesGate.Cluster.ManagerTest do
     assert inspect(status) =~ group
     assert inspect(:sys.get_state(manager)) =~ group
     refute logs =~ "distribution_start_failed"
-    assert {:ok, ^group} = Store.read_cluster(root)
     assert Alarmist.alarm_state(Alarm.Unavailable) in [:clear, :unknown]
   end
 
@@ -125,23 +117,6 @@ defmodule NervesGate.Cluster.ManagerTest do
     assert Manager.status(manager).connected == []
   end
 
-  test "a persisted group survives manager restart", context do
-    %{manager: manager, name: name, ops: ops, root: root, runtime: runtime} = context
-    group = "Restart_group"
-    Agent.update(runtime, &%{&1 | tailnet: online()})
-    assert :ok = Manager.configure(group, manager)
-    assert_receive {:distribution_start, _, _}
-
-    GenServer.stop(manager)
-    Agent.update(runtime, &%{&1 | alive: false})
-    {:ok, restarted} = Manager.start_link(name: name, root: root, ops: ops, interval: 60_000)
-    on_exit(fn -> if Process.alive?(restarted), do: GenServer.stop(restarted) end)
-
-    assert_eventually(fn -> Manager.status(restarted).online end)
-    assert_receive {:distribution_start, "100.64.0.10", _cookie}
-    assert Manager.status(restarted).enabled
-  end
-
   test "changing and clearing the group rebuilds then stops distribution", context do
     %{manager: manager, runtime: runtime} = context
     Agent.update(runtime, &%{&1 | tailnet: online()})
@@ -156,33 +131,6 @@ defmodule NervesGate.Cluster.ManagerTest do
     assert :ok = Manager.configure(nil, manager)
     assert_receive :distribution_stop
     assert %{enabled: false, online: false, connected: []} = Manager.status(manager)
-    assert {:ok, nil} = Store.read_cluster(context.root)
-  end
-
-  test "a staged group is temporary until confirmed or rolled back", context do
-    %{manager: manager, runtime: runtime, root: root} = context
-    Agent.update(runtime, &%{&1 | tailnet: online()})
-    assert :ok = Manager.configure("Original_group", manager)
-    assert_receive {:distribution_start, _, :Original_group}
-
-    assert {:ok, pending} = Manager.stage("Candidate_group", "connection-a", manager)
-    assert_receive :distribution_stop
-    assert_receive {:distribution_start, _, :Candidate_group}
-    assert Manager.status(manager).group == "Candidate_group"
-    assert {:ok, "Original_group"} = Store.read_cluster(root)
-
-    assert :ok = Manager.revert(pending.id, manager)
-    assert_receive :distribution_stop
-    assert_receive {:distribution_start, _, :Original_group}
-    assert Manager.status(manager).group == "Original_group"
-
-    assert {:ok, pending} = Manager.stage("Candidate_group", "connection-a", manager)
-
-    assert {:error, :fresh_connection_required} =
-             Manager.confirm(pending.id, "connection-a", manager)
-
-    assert :ok = Manager.confirm(pending.id, "connection-b", manager)
-    assert {:ok, "Candidate_group"} = Store.read_cluster(root)
   end
 
   test "the compatibility API snapshot exposes the configured public group" do
@@ -196,12 +144,8 @@ defmodule NervesGate.Cluster.ManagerTest do
     end
   end
 
-  test "invalid group input never reaches persistence or atom conversion", %{
-    manager: manager,
-    root: root
-  } do
+  test "invalid group input never reaches runtime or atom conversion", %{manager: manager} do
     assert {:error, :invalid_cluster_group} = Manager.configure("bad group!", manager)
-    assert {:ok, nil} = Store.read_cluster(root)
     refute_receive {:distribution_start, _, _}
   end
 

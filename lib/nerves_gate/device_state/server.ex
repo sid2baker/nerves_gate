@@ -11,7 +11,7 @@ defmodule NervesGate.DeviceState.Server do
 
   alias NervesGate.Alarms
   alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.Device
+  alias NervesGate.Configuration
   alias NervesGate.DeviceState.Data
   alias NervesGate.Identity
   alias NervesGate.Internet.Monitor
@@ -166,11 +166,11 @@ defmodule NervesGate.DeviceState.Server do
 
   defp build_data do
     identity = Identity.get()
-    profile = Device.get()
+    configuration = Configuration.current()
 
     Data.new(
       device_id: identity.machine_id,
-      name: Map.get(profile, "name", identity.hostname),
+      name: Map.get(configuration, "name", identity.hostname),
       firmware_version: firmware_version(),
       internet: internet_data(Monitor.status()),
       tailnet: tailnet_data(Observer.status()),

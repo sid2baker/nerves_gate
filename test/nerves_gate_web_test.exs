@@ -1,125 +1,110 @@
 defmodule NervesGateWebTest do
-  use ExUnit.Case, async: true
-  import ExUnit.CaptureLog
+  use ExUnit.Case, async: false
+
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
   @endpoint NervesGateWeb.Endpoint
 
-  test "commissioning has its own connected LiveView" do
-    {:ok, view, html} = live(build_conn(), "/commissioning")
+  test "unconfigured gateways start the three-step commissioning flow with Internet" do
+    with_configured(false, fn ->
+      {:ok, view, html} = live(build_conn(), "/commissioning")
 
-    assert html =~ "Initialize this gateway"
-    assert render(view) =~ "Current step"
-  end
-
-  test "the commissioning page shows only the current setup step" do
-    body = build_conn() |> get("/commissioning") |> html_response(200)
-
-    assert body =~ "Initialize this gateway"
-    assert body =~ "Connect to the Internet"
-    assert body =~ ~r/<div(?=[^>]*id="static-internet-fields")(?=[^>]*hidden)[^>]*>/
-    assert body =~ "DHCP obtains the IP address, subnet, gateway, and DNS settings automatically."
-    assert body =~ ~s(phx-disable-with="Verifying Internet…")
-    refute body =~ "Join the tailnet"
-    refute body =~ "Start the cluster"
-    assert body =~ "/assets/app.css"
-    assert body =~ "/assets/app.js"
-    refute body =~ "https://cdn"
-  end
-
-  test "each phase renders only its required action" do
-    steps = [
-      internet: "Connect to the Internet",
-      tailscale: "Join the tailnet",
-      cluster: "Choose cluster mode",
-      ready: "Gateway ready"
-    ]
-
-    Enum.each(steps, fn {phase, expected} ->
-      current = put_in(view(), [:setup], %{view().setup | phase: phase, ready: phase == :ready})
-
-      body =
-        render_component(&NervesGateWeb.SetupComponents.current/1,
-          view: current,
-          flash: %{}
-        )
-
-      assert body =~ expected
-
-      steps
-      |> Keyword.values()
-      |> List.delete(expected)
-      |> Enum.each(fn heading -> refute body =~ heading end)
+      assert html =~ "Configure gateway"
+      assert html =~ "Gateway name"
+      assert html =~ "Connect to the Internet"
+      assert html =~ ~s(phx-submit="configure-internet")
+      assert html =~ ~s(phx-disable-with="Verifying Internet…")
+      assert html =~ ~r/<div(?=[^>]*id="configuration-static-fields")(?=[^>]*hidden)[^>]*>/
+      refute html =~ "Tailscale auth key"
+      refute html =~ "Cluster group"
+      refute html =~ "Initialize this gateway"
+      refute render(view) =~ "Change settings</button>"
     end)
   end
 
-  test "the status page redirects unfinished gateways to commissioning" do
-    local = %{build_conn() | remote_ip: {192, 168, 77, 20}}
-    assert redirected_to(local |> get("/")) == "/commissioning"
+  test "configured gateways start with only change settings and a revert time" do
+    with_configured(true, fn ->
+      {:ok, view, html} = live(build_conn(), "/commissioning")
 
-    local = %{build_conn() | remote_ip: {192, 168, 77, 20}}
-    assert local |> get("/commissioning") |> html_response(200) =~ "Initialize this gateway"
+      assert html =~ "Change settings"
+      assert html =~ "Auto-revert after"
+      assert html =~ ~s(value="1")
+      refute html =~ "Apply configuration"
 
-    local = %{build_conn() | remote_ip: {192, 168, 77, 20}}
-    assert redirected_to(local |> get("/settings")) == "/commissioning"
+      html =
+        view
+        |> form("form", %{"configuration" => %{"revert_minutes" => "3"}})
+        |> render_submit()
+
+      assert html =~ "Connect to the Internet"
+      assert html =~ ~s(phx-submit="configure-internet")
+      refute html =~ "Tailscale auth key"
+      refute html =~ "Cluster group"
+    end)
   end
 
-  test "tailnet users can open the same commissioning page" do
-    tailnet = %{build_conn() | remote_ip: {100, 64, 0, 20}}
-    assert tailnet |> get("/commissioning") |> html_response(200) =~ "Connect to the Internet"
+  test "completed Internet and Tailnet settings remain accessible" do
+    with_pending_phase(:tailnet, fn ->
+      {:ok, view, html} = live(build_conn(), "/commissioning")
+
+      assert html =~ "Join the tailnet"
+      assert html =~ "Tailscale auth key"
+      assert html =~ ~s(phx-submit="configure-tailnet")
+      refute html =~ "Cluster group"
+
+      html = view |> element(~s(button[phx-value-step="internet"])) |> render_click()
+      assert html =~ "Connect to the Internet"
+    end)
+
+    with_pending_phase(:cluster, fn ->
+      {:ok, view, html} = live(build_conn(), "/commissioning")
+
+      assert html =~ "Choose cluster mode"
+      assert html =~ "Cluster group"
+      assert html =~ ~s(phx-submit="configure-cluster")
+
+      html = view |> element(~s(button[phx-value-step="tailnet"])) |> render_click()
+      assert html =~ "Tailscale auth key"
+
+      html = view |> element(~s(button[phx-value-step="internet"])) |> render_click()
+      assert html =~ "Connect to the Internet"
+    end)
   end
 
-  test "the completed dashboard renders the fleet and selected canonical state" do
-    view = put_in(view(), [:setup], %{view().setup | phase: :ready, ready: true})
-    body = render_component(&NervesGateWeb.StatusLive.dashboard/1, view: view, flash: %{})
+  test "first-time setup candidates have no automatic revert timer" do
+    with_pending_phase(:tailnet, nil, fn ->
+      {:ok, _view, html} = live(build_conn(), "/commissioning")
+
+      assert html =~ "First-time setup has no automatic revert timer."
+      refute html =~ "Revert in"
+    end)
+  end
+
+  test "the old settings and setup API routes are gone" do
+    assert build_conn() |> get("/settings") |> response(404)
+    assert build_conn() |> post("/api/setup/internet", %{}) |> response(404)
+    assert build_conn() |> get("/api/setup/status") |> response(404)
+  end
+
+  test "the status page redirects unconfigured gateways to commissioning" do
+    with_configured(false, fn ->
+      assert redirected_to(build_conn() |> get("/")) == "/commissioning"
+    end)
+  end
+
+  test "the completed dashboard is read-only for connectivity settings" do
+    body =
+      render_component(&NervesGateWeb.StatusLive.dashboard/1, view: dashboard_view(), flash: %{})
 
     assert body =~ "Gateway state"
     assert body =~ "Known gateways"
     assert body =~ "Active alarms"
     assert body =~ "Internet checks"
-    assert body =~ "Settings"
-    refute body =~ "Reconfigure this gateway"
-    refute body =~ "configure-internet"
-    refute body =~ "configure-tailscale"
-    refute body =~ "configure-cluster"
-  end
-
-  test "guarded forms live on the dedicated settings UI component" do
-    current = view()
-
-    body =
-      render_component(&NervesGateWeb.SettingsComponents.forms/1,
-        view: current,
-        disabled: false
-      )
-
-    assert body =~ "Guarded change"
-    assert body =~ "stage-internet"
-    assert body =~ "stage-tailnet"
-    assert body =~ "stage-cluster"
-    assert body =~ "Candidate cluster group"
-  end
-
-  test "an unconfirmed settings change renders confirmation and rollback actions" do
-    pending = %{
-      id: "change-1",
-      kind: :internet,
-      phase: :awaiting_confirmation,
-      started_at: DateTime.utc_now() |> DateTime.to_iso8601(),
-      remaining_seconds: 120,
-      confirmable: true
-    }
-
-    body =
-      render_component(&NervesGateWeb.SettingsComponents.change_guard/1,
-        view: view(),
-        settings: %{pending: pending, last_error: nil}
-      )
-
-    assert body =~ "Keep changes"
-    assert body =~ "Revert now"
-    assert body =~ "Rollback in 2m 0s"
+    assert body =~ ~s(href="/commissioning")
+    refute body =~ "apply-configuration"
+    refute body =~ "auth_token"
+    refute body =~ "Enable recovery access"
   end
 
   test "stale replicas expose last-known alarms with an explicit warning" do
@@ -142,8 +127,11 @@ defmodule NervesGateWebTest do
       last_seen_at: ~U[2026-08-22 10:00:00Z]
     }
 
-    view = view(%{"remote-gateway" => replica}, "remote-gateway")
-    body = render_component(&NervesGateWeb.StatusLive.dashboard/1, view: view, flash: %{})
+    body =
+      render_component(&NervesGateWeb.StatusLive.dashboard/1,
+        view: dashboard_view(%{"remote-gateway" => replica}, "remote-gateway"),
+        flash: %{}
+      )
 
     assert body =~ "last successfully replicated alarms"
     assert body =~ "Remote gateway needs attention"
@@ -155,36 +143,11 @@ defmodule NervesGateWebTest do
     assert connection |> get("/api/status") |> response(403)
   end
 
-  test "setup endpoints are POST-only and return useful validation" do
-    response =
-      build_conn()
-      |> post("/api/setup/internet", %{"ip_address" => "not-an-ip"})
-      |> json_response(422)
-
-    assert response["ok"] == false
-    assert response["error"]["address"]
-    assert build_conn() |> get("/api/setup/tailscale?auth_token=secret") |> response(404)
-  end
-
-  test "Tailscale tokens are filtered from request logs" do
-    token = "tskey-auth-super-secret-value"
-
-    log =
-      capture_log(fn ->
-        build_conn()
-        |> post("/api/setup/tailscale", %{"auth_token" => token})
-        |> json_response(409)
-      end)
-
-    refute log =~ token
-  end
-
-  test "status API exposes device and tailnet state without credential fields" do
+  test "status API exposes the slot configuration without credentials" do
     body = build_conn() |> get("/api/status") |> json_response(200)
 
-    assert body["identity"]["hostname"] =~ "nervesgate-"
+    assert is_map(body["configuration"])
     assert is_map(body["device"])
-    assert is_map(body["tailnet"])
     refute inspect(body) =~ "auth_token"
     refute inspect(body) =~ "password"
   end
@@ -196,7 +159,53 @@ defmodule NervesGateWebTest do
     assert Map.has_key?(body, "cluster_group")
   end
 
-  defp view(replicas \\ %{}, selected_device_id \\ nil) do
+  defp with_pending_phase(phase, function) do
+    with_pending_phase(phase, System.monotonic_time(:millisecond) + 60_000, function)
+  end
+
+  defp with_pending_phase(phase, deadline, function) do
+    original = :sys.get_state(NervesGate.Configuration)
+
+    pending = %{
+      id: "candidate-test",
+      phase: phase,
+      source_connection: "source-connection",
+      deadline: deadline,
+      candidate: original.current
+    }
+
+    :sys.replace_state(NervesGate.Configuration, &%{&1 | pending: pending, timer: nil})
+
+    try do
+      function.()
+    after
+      :sys.replace_state(NervesGate.Configuration, fn _state -> original end)
+    end
+  end
+
+  defp with_configured(configured, function) do
+    original = :sys.get_state(NervesGate.Configuration)
+
+    current =
+      original.current
+      |> Map.put("configured", configured)
+      |> Map.put("internet", if(configured, do: persisted_dhcp(), else: nil))
+      |> put_in(["tailnet", "profile_id"], if(configured, do: "profile-1"))
+
+    :sys.replace_state(NervesGate.Configuration, &%{&1 | current: current, pending: nil})
+
+    try do
+      function.()
+    after
+      :sys.replace_state(NervesGate.Configuration, fn _state -> original end)
+    end
+  end
+
+  defp persisted_dhcp do
+    NervesGate.TestScenario.dhcp() |> NervesGate.Internet.Config.to_persisted()
+  end
+
+  defp dashboard_view(replicas \\ %{}, selected_device_id \\ nil) do
     snapshot = NervesGate.DeviceState.Server.snapshot()
     status = NervesGate.Status.snapshot()
 
@@ -208,9 +217,7 @@ defmodule NervesGateWebTest do
     }
 
     context = %{
-      setup: status.setup,
-      profile: status.device,
-      identity: status.identity,
+      configuration: status.configuration,
       internet: status.network.connectivity,
       network_configuration: status.network.configuration,
       tailnet: NervesGate.Tailnet.Observer.status(),

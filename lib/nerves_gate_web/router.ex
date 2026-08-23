@@ -36,20 +36,11 @@ defmodule NervesGateWeb.Router do
   scope "/", NervesGateWeb do
     pipe_through([:browser, :home_access])
     live("/", StatusLive, :index)
-    live("/settings", SettingsLive, :index)
   end
 
   scope "/", NervesGateWeb do
     pipe_through([:browser, :setup_access])
     live("/commissioning", CommissioningLive, :index)
-  end
-
-  scope "/api/setup", NervesGateWeb do
-    pipe_through([:api, :setup_access])
-    get("/status", StatusController, :show)
-    post("/internet", ConfigureController, :internet)
-    post("/tailscale", ConfigureController, :tailscale)
-    post("/cluster", ConfigureController, :cluster)
   end
 
   scope "/api", NervesGateWeb do

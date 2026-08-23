@@ -6,10 +6,9 @@ defmodule NervesGate.Backend do
 
       Internet → Tailnet → Cluster → DeviceState
 
-  `Setup` orchestrates commissioning commands but does not own runtime health.
-  Each layer owns its local configuration, process lifecycle, observation, and
-  alarms. `DeviceState` is the secret-free projection replicated to connected
-  gateways.
+  `Configuration` owns one firmware-tagged settings snapshot and applies it
+  through the runtime layers. `DeviceState` is the secret-free projection
+  replicated to connected gateways.
   """
 
   use Supervisor
@@ -24,21 +23,18 @@ defmodule NervesGate.Backend do
     children = [
       {Task.Supervisor, name: NervesGate.TaskSupervisor},
       NervesGate.Alarms.Reporter,
-      NervesGate.Settings.ChangeControl,
-      NervesGate.Device,
       NervesGate.Commissioning.Access,
       NervesGate.Internet.Manager,
       NervesGate.Internet.Monitor,
-      {DynamicSupervisor, name: NervesGate.Tailnet.DynamicSupervisor, strategy: :one_for_one},
       NervesGate.Tailnet.Manager,
+      {DynamicSupervisor, name: NervesGate.Tailnet.DynamicSupervisor, strategy: :one_for_one},
       NervesGate.Tailnet.Observer,
-      NervesGate.Tailnet.Configuration,
       NervesGate.Cluster.Manager,
-      NervesGate.Setup,
+      NervesGate.Configuration,
       NervesGate.DeviceState.Server,
       NervesGate.DeviceState.Client
     ]
 
-    Supervisor.init(children, strategy: :one_for_one)
+    Supervisor.init(children, strategy: :rest_for_one)
   end
 end

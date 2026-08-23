@@ -4,20 +4,12 @@ defmodule NervesGate.Internet.ManagerTest do
   alias NervesGate.Internet.Config
   alias NervesGate.Internet.Manager
   alias NervesGate.Internet.Monitor
-  alias NervesGate.Store
   alias NervesGate.TestInternetAdapter
   alias NervesGate.TestScenario
 
   setup do
     {:ok, _pid} = TestInternetAdapter.reset()
-    root = TestScenario.temporary_root(:network_manager)
-    :ok = Store.initialize(root)
-
-    on_exit(fn ->
-      File.rm_rf!(root)
-    end)
-
-    %{root: root}
+    :ok
   end
 
   test "Internet status preserves diagnostic causes behind one operational state" do
@@ -31,145 +23,58 @@ defmodule NervesGate.Internet.ManagerTest do
            } = Monitor.summarize("eth0", checks)
   end
 
-  test "DHCP success is verified before persistence", %{root: root} do
-    pid = start_manager(root, fn _interface -> TestScenario.checks() end)
+  test "configuration is applied only after verification" do
+    manager = start_manager(fn _interface -> TestScenario.checks() end)
     config = TestScenario.dhcp()
 
-    assert {:ok, checks} = Manager.apply_candidate(config, server: pid, timeout: 100)
+    assert {:ok, checks} = Manager.configure(config, server: manager, timeout: 100)
     assert checks.internet_https == :ok
-    assert {:ok, %Config{method: :dhcp}} = Store.read_network(root)
+    assert %Config{method: :dhcp} = TestInternetAdapter.state().current
+    assert Manager.status(manager).known_good.method == :dhcp
   end
 
-  test "DHCP failure can be followed by known-good static configuration", %{root: root} do
+  test "a failed candidate restores the previous runtime configuration" do
+    mode = Agent.start_link(fn -> :ok end) |> elem(1)
+
     verifier = fn _interface ->
-      case TestInternetAdapter.state().current do
-        %Config{method: :dhcp} -> TestScenario.checks(%{ip_address: {:error, :dhcp_failed}})
-        %Config{method: :static} -> TestScenario.checks()
+      case Agent.get(mode, & &1) do
+        :ok -> TestScenario.checks()
+        :fail -> TestScenario.checks(%{internet_https: {:error, :offline}})
       end
     end
 
-    pid = start_manager(root, verifier)
+    manager = start_manager(verifier)
+    original = TestScenario.static()
+    candidate = %{TestScenario.dhcp() | interface: "eth1"}
+
+    assert {:ok, _checks} = Manager.configure(original, server: manager, timeout: 100)
+    Agent.update(mode, fn _ -> :fail end)
 
     assert {:error, {:verification_failed, _checks}} =
-             Manager.apply_candidate(TestScenario.dhcp(), server: pid, timeout: 20)
+             Manager.configure(candidate, server: manager, timeout: 20)
 
-    assert {:ok, _checks} =
-             Manager.apply_candidate(TestScenario.static(), server: pid, timeout: 100)
-
-    assert {:ok, %Config{method: :static}} = Store.read_network(root)
+    assert TestInternetAdapter.state().current == original
+    assert {:clear, "eth1"} in TestInternetAdapter.state().calls
+    assert Manager.status(manager).known_good.method == :static
   end
 
-  test "wrong gateway or DNS rolls back without overwriting last-known-good", %{root: root} do
-    known_good = TestScenario.dhcp()
-    :ok = Store.write_network(known_good, root)
-
-    verifier = fn _interface ->
-      TestScenario.checks(%{
-        default_route: {:error, :wrong_gateway},
-        dns: {:error, :bad_dns},
-        internet_https: {:error, :unreachable}
-      })
-    end
-
-    pid = start_manager(root, verifier)
-    candidate = TestScenario.static("eth0", "192.0.2.254")
-
-    assert {:error, {:verification_failed, checks}} =
-             Manager.apply_candidate(candidate, server: pid, timeout: 20)
-
-    assert checks.dns == {:error, :bad_dns}
-    assert {:ok, ^known_good} = Store.read_network(root)
-    assert %Config{method: :dhcp} = TestInternetAdapter.state().current
-  end
-
-  test "loss and recovery of Internet preserves and re-verifies network state", %{root: root} do
-    online? =
-      Agent.get_and_update(TestInternetAdapter, fn state ->
-        {true, Map.put(state, :online, false)}
-      end)
-
-    assert online?
-
-    verifier = fn _interface ->
-      if Agent.get(TestInternetAdapter, &Map.get(&1, :online, false)) do
-        TestScenario.checks()
-      else
-        TestScenario.checks(%{internet_https: {:error, :offline}})
-      end
-    end
-
-    pid = start_manager(root, verifier)
+  test "restore applies the active snapshot without creating persistence" do
+    manager = start_manager(fn _interface -> TestScenario.checks() end)
     config = TestScenario.dhcp()
 
-    assert {:error, {:verification_failed, _checks}} =
-             Manager.apply_candidate(config, server: pid, timeout: 20)
-
-    Agent.update(TestInternetAdapter, &Map.put(&1, :online, true))
-    assert {:ok, _checks} = Manager.apply_candidate(config, server: pid, timeout: 100)
-    assert {:ok, ^config} = Store.read_network(root)
+    assert :ok = Manager.restore(config, manager)
+    assert TestInternetAdapter.state().current == config
+    assert :ok = Manager.restore(nil, manager)
+    assert TestInternetAdapter.state().current == nil
   end
 
-  test "failed network change automatically restores the working candidate", %{root: root} do
-    original = TestScenario.static()
-    :ok = Store.write_network(original, root)
-
-    pid =
-      start_manager(root, fn _interface ->
-        TestScenario.checks(%{internet_https: {:error, :timeout}})
-      end)
-
-    assert {:error, {:verification_failed, _checks}} =
-             Manager.apply_candidate(TestScenario.dhcp(), server: pid, timeout: 20)
-
-    assert TestInternetAdapter.state().current == original
-  end
-
-  test "a staged candidate remains temporary until commit", %{root: root} do
-    original = TestScenario.static()
-    candidate = TestScenario.dhcp()
-    :ok = Store.write_network(original, root)
-    pid = start_manager(root, fn _interface -> TestScenario.checks() end)
-
-    assert {:ok, pending} =
-             Manager.stage_candidate(candidate, "connection-a", server: pid, timeout: 100)
-
-    assert Manager.status(pid).pending.phase == :awaiting_confirmation
-    assert {:ok, ^original} = Store.read_network(root)
-    assert TestInternetAdapter.state().current == candidate
-
-    assert {:error, :fresh_connection_required} =
-             Manager.confirm(pending.id, "connection-a", pid)
-
-    assert :ok = Manager.confirm(pending.id, "connection-b", pid)
-    assert {:ok, ^candidate} = Store.read_network(root)
-    assert Manager.status(pid).pending == nil
-  end
-
-  test "a staged candidate can be rolled back without persistence", %{root: root} do
-    original = TestScenario.static()
-    :ok = Store.write_network(original, root)
-    pid = start_manager(root, fn _interface -> TestScenario.checks() end)
-
-    assert {:ok, pending} =
-             Manager.stage_candidate(
-               TestScenario.dhcp(),
-               "connection-a",
-               server: pid,
-               timeout: 100
-             )
-
-    assert :ok = Manager.revert(pending.id, pid)
-    assert TestInternetAdapter.state().current == original
-    assert {:ok, ^original} = Store.read_network(root)
-  end
-
-  defp start_manager(root, verifier) do
+  defp start_manager(verifier) do
     name = String.to_atom("network_manager_#{System.unique_integer([:positive])}")
 
-    {:ok, pid} =
-      Manager.start_link(name: name, root: root, adapter: TestInternetAdapter, verifier: verifier)
+    {:ok, manager} =
+      Manager.start_link(name: name, adapter: TestInternetAdapter, verifier: verifier)
 
-    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
-    pid
+    on_exit(fn -> if Process.alive?(manager), do: GenServer.stop(manager) end)
+    manager
   end
 end

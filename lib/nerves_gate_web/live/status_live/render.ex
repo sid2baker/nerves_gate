@@ -33,7 +33,7 @@ defmodule NervesGateWeb.StatusLive.Render do
           </div>
 
           <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-            <.link_button href={~p"/settings"}>Settings</.link_button>
+            <.link_button href={~p"/commissioning"}>Settings</.link_button>
             <div class="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2 text-right">
               <strong class="block text-sm text-zinc-200">{@view.local.hostname}</strong>
               <span class="block font-mono text-xs text-zinc-500">{@view.local.ipv4 || "No Tailnet IP"}</span>
@@ -161,27 +161,6 @@ defmodule NervesGateWeb.StatusLive.Render do
     <div class="grid gap-6 xl:grid-cols-2">
       <.card>
         <.section_header
-          eyebrow="Local configuration"
-          title="Device name"
-          description="Saved atomically in /data/device.json and replicated as public state."
-        />
-        <form phx-submit="rename-device" class="mt-5 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-          <.input
-            label="Display name"
-            name="device[name]"
-            value={@view.profile["name"]}
-            maxlength="80"
-            required
-          />
-          <.button type="submit">Save name</.button>
-        </form>
-        <div class="mt-5 border-t border-white/8 pt-5">
-          <.detail_list items={profile_details(@view)} />
-        </div>
-      </.card>
-
-      <.card>
-        <.section_header
           eyebrow="Local diagnostics"
           title="Internet checks"
           description="Detailed checks remain local and are not replicated."
@@ -202,16 +181,6 @@ defmodule NervesGateWeb.StatusLive.Render do
         </div>
       </.card>
 
-      <.card class="border-rose-400/15">
-        <.section_header
-          eyebrow="Local access"
-          title="Recovery network"
-          description="Re-enable isolated commissioning access without deleting saved Internet or Tailnet state."
-        />
-        <.button phx-click="enable-recovery" tone={:danger} class="mt-5 w-full">
-          <.icon name={:shield} class="size-4" /> Enable recovery access
-        </.button>
-      </.card>
     </div>
     """
   end
@@ -238,14 +207,6 @@ defmodule NervesGateWeb.StatusLive.Render do
       {"Firmware", node.data.firmware_version},
       {"Revision", node.revision},
       {"Connection", if(node.connected, do: "Connected", else: "Stale")}
-    ]
-  end
-
-  defp profile_details(view) do
-    [
-      {"System hostname", view.identity.hostname},
-      {"Last changed", view.profile["updated_at"] || "Never"},
-      {"Changed by", changed_by(view.profile["updated_by"])}
     ]
   end
 
@@ -279,11 +240,6 @@ defmodule NervesGateWeb.StatusLive.Render do
       other -> humanize(other)
     end
   end
-
-  defp changed_by(nil), do: "Never"
-  defp changed_by(%{"name" => name, "ip" => nil}), do: name
-  defp changed_by(%{"name" => name, "ip" => ip}), do: "#{name} · #{ip}"
-  defp changed_by(_actor), do: "Unknown"
 
   defp format_node(nil), do: "Disabled"
   defp format_node(node), do: to_string(node)

@@ -15,7 +15,7 @@ defmodule NervesGate.Commissioning.Access do
     GenServer.start_link(__MODULE__, options, name: name)
   end
 
-  @spec enable(:commissioning | :recovery, String.t() | nil, GenServer.server()) ::
+  @spec enable(:commissioning, String.t() | nil, GenServer.server()) ::
           {:ok, [map()]} | {:error, :no_interface}
   def enable(mode, uplink \\ nil, server \\ __MODULE__) do
     GenServer.call(server, {:enable, mode, uplink})

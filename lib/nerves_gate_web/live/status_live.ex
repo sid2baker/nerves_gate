@@ -4,24 +4,22 @@ defmodule NervesGateWeb.StatusLive do
   use NervesGateWeb, :live_view
 
   alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.Device
+  alias NervesGate.Configuration
   alias NervesGate.DeviceState.Client
   alias NervesGate.DeviceState.Data
   alias NervesGate.DeviceState.Server
-  alias NervesGate.Identity
   alias NervesGate.Internet.Manager, as: InternetManager
   alias NervesGate.Internet.Monitor
-  alias NervesGate.Setup
   alias NervesGate.Tailnet.Observer
   alias NervesGateWeb.Presence
   alias NervesGateWeb.StatusLive.Render
   alias NervesGateWeb.StatusLive.View
 
-  @context_topics ~w(setup device internet)
+  @context_topics ~w(configuration device internet)
 
   @impl true
   def mount(_params, session, socket) do
-    if Setup.status().ready do
+    if Configuration.configured?() do
       mount_dashboard(session, socket)
     else
       {:ok, redirect(socket, to: ~p"/commissioning")}
@@ -71,27 +69,8 @@ defmodule NervesGateWeb.StatusLive do
   defdelegate dashboard(assigns), to: Render
 
   @impl true
-  def handle_event("rename-device", %{"device" => %{"name" => name}}, socket) do
-    case Device.rename(name, socket.private.actor) do
-      :ok ->
-        {:noreply, socket |> put_flash(:info, "Device name saved.") |> refresh_context()}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Name must contain 1–80 printable characters.")}
-    end
-  end
-
   def handle_event("select-node", %{"device-id" => device_id}, socket) do
     {:noreply, socket |> assign(:selected_device_id, device_id) |> assign_view()}
-  end
-
-  def handle_event("enable-recovery", _params, socket) do
-    :ok = Setup.enable_recovery_access(:local_action)
-
-    {:noreply,
-     socket
-     |> put_flash(:info, "Local recovery access is being enabled.")
-     |> refresh_context()}
   end
 
   @impl true
@@ -180,8 +159,8 @@ defmodule NervesGateWeb.StatusLive do
   end
 
   defp maybe_track_presence(socket) do
-    if connected?(socket) and socket.assigns.dashboard_access and socket.assigns.view.setup.ready and
-         not socket.assigns.presence_tracked do
+    if connected?(socket) and socket.assigns.dashboard_access and
+         socket.assigns.view.configuration.configured and not socket.assigns.presence_tracked do
       Phoenix.PubSub.subscribe(NervesGate.PubSub, Presence.topic())
       Presence.track_visitor(self(), socket.private.actor)
       socket |> assign(:presence_tracked, true) |> refresh_people_count()
@@ -197,9 +176,7 @@ defmodule NervesGateWeb.StatusLive do
 
   defp load_context do
     %{
-      setup: Setup.status(),
-      profile: Device.get(),
-      identity: Identity.get(),
+      configuration: Configuration.status(),
       internet: Monitor.status(),
       network_configuration: InternetManager.status(),
       tailnet: Observer.status(),

@@ -1,92 +1,526 @@
 defmodule NervesGateWeb.CommissioningLive do
-  @moduledoc "Owns the persisted first-run commissioning workflow."
+  @moduledoc "Edits the complete firmware-slot configuration in dependency order."
 
   use NervesGateWeb, :live_view
 
-  alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.DeviceState.Server
-  alias NervesGate.Setup
-  alias NervesGateWeb.FormHelpers
-  alias NervesGateWeb.SetupComponents
+  import NervesGateWeb.GatewayComponents
 
-  @topics ~w(setup internet tailnet cluster device_state)
+  alias NervesGate.Cluster.Manager, as: ClusterManager
+  alias NervesGate.Configuration
+  alias NervesGate.Tailnet.Observer
+  alias NervesGateWeb.FormHelpers
+
+  @topics ~w(configuration internet_configuration internet tailnet cluster)
+  @steps [:internet, :tailnet, :cluster]
+  @default_revert_minutes 1
+  @maximum_revert_minutes 60
 
   @impl true
   def mount(_params, _session, socket) do
-    setup = Setup.status()
+    connection_id = connection_id()
 
-    if setup.ready do
-      {:ok, redirect(socket, to: ~p"/")}
-    else
-      if connected?(socket),
-        do: Enum.each(@topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
+    if connected?(socket),
+      do: Enum.each(@topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
 
-      {:ok, assign_view(socket)}
-    end
+    status = Configuration.status(connection_id)
+    mode = if status.configured and is_nil(status.pending), do: :entry, else: :editor
+
+    socket =
+      socket
+      |> assign(
+        connection_id: connection_id,
+        mode: mode,
+        editor_step: current_step(status),
+        tick_timer: nil,
+        revert_minutes: @default_revert_minutes,
+        revert_timeout:
+          if(status.configured, do: :timer.minutes(@default_revert_minutes), else: nil)
+      )
+      |> refresh()
+      |> schedule_tick()
+
+    {:ok, socket}
   end
 
   @impl true
   def render(assigns) do
     ~H"""
-    <SetupComponents.current view={@view} flash={@flash} />
+    <main class="surface-grid min-h-screen">
+      <div :if={@mode == :entry} class="mx-auto w-full max-w-xl px-4 py-8 sm:px-6 sm:py-14">
+        <header class="border-b border-white/10 pb-6">
+          <p class="text-xs font-black uppercase tracking-[0.22em] text-emerald-400">NervesGate</p>
+          <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white">Change settings</h1>
+          <p class="mt-2 text-sm leading-6 text-zinc-400">
+            A candidate is applied temporarily. If it is not accepted from a fresh connection,
+            this firmware slot restores its current settings automatically.
+          </p>
+        </header>
+
+        <div class="mt-5"><.flash_group flash={@flash} /></div>
+
+        <.card class="mt-6">
+          <form phx-submit="change-settings" class="grid gap-5">
+            <.input
+              label="Auto-revert after"
+              name="configuration[revert_minutes]"
+              type="number"
+              value={@revert_minutes}
+              min="1"
+              max="60"
+              step="1"
+              required
+              hint="Minutes. Defaults to 1; the maximum is 60."
+            />
+            <.button type="submit" class="w-full">Change settings</.button>
+          </form>
+        </.card>
+
+        <div class="mt-5 text-center">
+          <.link href={~p"/"} class="text-sm text-zinc-400 hover:text-white">Back to status</.link>
+        </div>
+      </div>
+
+      <div :if={@mode == :editor} class="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 sm:py-10">
+        <header class="flex flex-col gap-4 border-b border-white/10 pb-6 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p class="text-xs font-black uppercase tracking-[0.22em] text-emerald-400">NervesGate</p>
+            <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white">
+              {if @configuration.configured, do: "Change settings", else: "Configure gateway"}
+            </h1>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
+              Configure Internet, Tailnet, and clustering in order. They remain one reversible
+              settings candidate until accepted.
+            </p>
+          </div>
+          <.link_button :if={@configuration.configured} href={~p"/"} class="shrink-0">
+            Back to status
+          </.link_button>
+        </header>
+
+        <div class="mt-5"><.flash_group flash={@flash} /></div>
+
+        <ol class="mt-7 grid grid-cols-3 gap-1" aria-label="Commissioning progress">
+          <li
+            :for={{phase, index} <- Enum.with_index(@steps, 1)}
+            aria-current={if @editor_step == phase, do: "step"}
+            class={[
+              "border-b-2 px-1 pb-3 text-center text-[10px] font-bold uppercase tracking-wider sm:text-xs",
+              progress_classes(@configuration, @editor_step, phase)
+            ]}
+          >
+            <button
+              type="button"
+              phx-click="edit-step"
+              phx-value-step={phase}
+              disabled={!step_accessible?(@configuration, phase)}
+              class="w-full disabled:cursor-not-allowed"
+            >
+              <span class="hidden sm:inline">{index}. </span>{step_label(phase)}
+            </button>
+          </li>
+        </ol>
+
+        <.card
+          :if={@configuration.pending}
+          class="mt-6 border-amber-400/25 bg-amber-400/[0.06]"
+        >
+          <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p class="text-xs font-bold uppercase tracking-[0.18em] text-amber-300">
+                Unconfirmed configuration
+              </p>
+              <h2 class="mt-2 text-xl font-semibold text-white">
+                {pending_title(@configuration.pending.phase)}
+              </h2>
+              <p class="mt-2 text-sm leading-6 text-zinc-300">
+                The active slot file is unchanged until all three steps are complete and the
+                candidate is accepted.
+              </p>
+              <p
+                :if={@configuration.pending.remaining_seconds}
+                class="mt-2 font-mono text-sm text-amber-200"
+              >
+                Revert in {duration(@configuration.pending.remaining_seconds)}
+              </p>
+              <p
+                :if={is_nil(@configuration.pending.remaining_seconds)}
+                class="mt-2 text-sm text-amber-200"
+              >
+                First-time setup has no automatic revert timer.
+              </p>
+            </div>
+            <.badge tone={:warning}>candidate</.badge>
+          </div>
+
+          <div class="mt-5 flex flex-wrap gap-3">
+            <.button
+              :if={@editor_step == :confirmation and @configuration.pending.confirmable}
+              phx-click="accept-configuration"
+              phx-value-id={@configuration.pending.id}
+            >
+              Accept settings
+            </.button>
+            <.link_button
+              :if={@editor_step == :confirmation and @configuration.pending.phase == :confirmation and !@configuration.pending.confirmable}
+              href={~p"/commissioning"}
+            >
+              Reconnect to accept
+            </.link_button>
+            <.button
+              phx-click="revert-configuration"
+              phx-value-id={@configuration.pending.id}
+              tone={:danger}
+            >
+              Revert now
+            </.button>
+          </div>
+        </.card>
+
+        <.card :if={@editor_step == :internet} class="mt-6">
+          <span class="float-right text-5xl font-black text-white/[0.035]">01</span>
+          <.section_header
+            eyebrow="Internet"
+            title="Connect to the Internet"
+            description="Internet is applied and verified before Tailnet enrollment becomes available."
+          />
+          <form phx-submit="configure-internet" class="mt-6 grid gap-6">
+            <.input
+              label="Gateway name"
+              name="device[name]"
+              value={editing_settings(@configuration).name}
+              maxlength="80"
+              required
+              hint="Public display name replicated to connected gateways."
+            />
+            <div class="grid gap-4 border-t border-white/8 pt-6">
+              <label class="grid gap-2 text-sm font-medium text-zinc-300">
+                <span>Addressing</span>
+                <select
+                  id="configuration-internet-method"
+                  name="internet[method]"
+                  aria-controls="configuration-static-fields"
+                  aria-expanded={to_string(network_method(editing_settings(@configuration)) == :static)}
+                  data-internet-method
+                  phx-hook="InternetMethod"
+                  class="min-h-11 rounded-xl border border-white/10 bg-zinc-950/80 px-3.5 text-zinc-100 outline-none focus:border-emerald-400/70"
+                >
+                  <option value="dhcp" selected={network_method(editing_settings(@configuration)) == :dhcp}>
+                    DHCP (automatic)
+                  </option>
+                  <option value="static" selected={network_method(editing_settings(@configuration)) == :static}>
+                    Static IPv4
+                  </option>
+                </select>
+              </label>
+              <p class="text-xs leading-5 text-zinc-500">
+                DHCP obtains the IP address, subnet, gateway, and DNS settings automatically.
+              </p>
+              <div
+                id="configuration-static-fields"
+                data-static-internet-fields
+                hidden={network_method(editing_settings(@configuration)) != :static}
+                class="grid gap-4 sm:grid-cols-2"
+              >
+                <.input label="IP address" name="internet[ip_address]" value={network_value(editing_settings(@configuration), :address)} />
+                <.input label="Prefix length" name="internet[prefix_length]" value={network_value(editing_settings(@configuration), :prefix_length)} />
+                <.input label="Gateway" name="internet[gateway]" value={network_value(editing_settings(@configuration), :gateway)} />
+                <.input label="DNS resolver" name="internet[dns]" value={network_value(editing_settings(@configuration), :dns_primary)} />
+              </div>
+            </div>
+            <.button type="submit" class="w-full" phx-disable-with="Verifying Internet…">
+              Verify Internet and continue
+            </.button>
+          </form>
+        </.card>
+
+        <.card :if={@editor_step == :tailnet} class="mt-6">
+          <span class="float-right text-5xl font-black text-white/[0.035]">02</span>
+          <.section_header
+            eyebrow="Tailnet"
+            title="Join the tailnet"
+            description="The auth key is used once and is never written to a settings file."
+          />
+          <form phx-submit="configure-tailnet" class="mt-6 grid gap-5">
+            <input type="hidden" name="candidate_id" value={@configuration.pending.id} />
+            <.input
+              label="Tailscale auth key"
+              name="auth_token"
+              type="password"
+              autocomplete="off"
+              required={!editing_settings(@configuration).tailnet_configured}
+              hint={tailnet_hint(@configuration)}
+            />
+            <.button type="submit" class="w-full" phx-disable-with="Joining tailnet…">
+              Join Tailnet and continue
+            </.button>
+          </form>
+        </.card>
+
+        <.card :if={@editor_step == :cluster} class="mt-6">
+          <span class="float-right text-5xl font-black text-white/[0.035]">03</span>
+          <.section_header
+            eyebrow="Cluster"
+            title="Choose cluster mode"
+            description="Clustering is configured only after this gateway has joined its Tailnet."
+          />
+          <dl class="mt-6 grid grid-cols-[8rem_1fr] gap-3 rounded-xl border border-white/8 bg-zinc-950/50 p-4 text-sm">
+            <dt class="text-zinc-500">Tailnet name</dt>
+            <dd class="truncate text-zinc-200">{@view.tailnet.hostname || "Connected"}</dd>
+            <dt class="text-zinc-500">Tailnet IP</dt>
+            <dd class="font-mono text-zinc-200">{@view.tailnet.ipv4 || "Detecting…"}</dd>
+          </dl>
+          <form phx-submit="configure-cluster" class="mt-5 grid gap-4">
+            <input type="hidden" name="candidate_id" value={@configuration.pending.id} />
+            <.input
+              label="Cluster group"
+              name="cluster[group]"
+              value={editing_settings(@configuration).cluster_group}
+              list="configuration-cluster-groups"
+              maxlength="128"
+              pattern="[A-Za-z0-9][A-Za-z0-9_-]*"
+              hint="Select a visible group, enter a public name, or leave blank for singular mode."
+            />
+            <datalist id="configuration-cluster-groups">
+              <option :for={group <- @view.cluster.groups} value={group.name}>
+                {group.members} visible gateway(s)
+              </option>
+            </datalist>
+            <div :if={@view.cluster.groups != []} class="rounded-xl border border-white/8 bg-zinc-950/40 p-4">
+              <p class="text-xs font-bold uppercase tracking-wider text-zinc-500">Available groups</p>
+              <ul class="mt-2 grid gap-2 text-sm">
+                <li :for={group <- @view.cluster.groups} class="flex justify-between gap-3 text-zinc-300">
+                  <span class="font-medium">{group.name}</span>
+                  <span class="text-zinc-500">{group.members} visible</span>
+                </li>
+              </ul>
+            </div>
+            <.button type="submit" class="w-full" phx-disable-with="Applying cluster settings…">
+              Apply complete candidate
+            </.button>
+          </form>
+        </.card>
+      </div>
+    </main>
     """
   end
 
   @impl true
-  def handle_event("configure-internet", %{"internet" => params}, socket) do
-    case Setup.configure_internet(params) do
-      {:ok, _phase} ->
-        setup_ok(socket, "Internet verified and saved.")
+  def handle_event("change-settings", %{"configuration" => params}, socket) do
+    case parse_revert_minutes(params["revert_minutes"]) do
+      {:ok, minutes} ->
+        {:noreply,
+         assign(socket,
+           mode: :editor,
+           editor_step: :internet,
+           revert_minutes: minutes,
+           revert_timeout: :timer.minutes(minutes)
+         )}
 
-      {:error, reason} ->
-        setup_error(socket, "Internet setup failed: #{FormHelpers.format_error(reason)}")
+      :error ->
+        {:noreply, put_flash(socket, :error, "Choose a time between 1 and 60 minutes.")}
     end
   end
 
-  def handle_event("configure-tailscale", %{"auth_token" => token}, socket) do
-    case Setup.configure_tailscale(token) do
-      {:ok, _phase} ->
-        setup_ok(socket, "Tailnet enrollment completed.")
+  def handle_event("edit-step", %{"step" => step}, socket) do
+    phase =
+      Map.get(%{"internet" => :internet, "tailnet" => :tailnet, "cluster" => :cluster}, step)
 
-      {:error, reason} ->
-        setup_error(socket, "Tailnet setup failed: #{FormHelpers.format_error(reason)}")
+    if phase && step_accessible?(socket.assigns.configuration, phase) do
+      {:noreply, assign(socket, :editor_step, phase)}
+    else
+      {:noreply, socket}
     end
   end
 
-  def handle_event("configure-cluster", params, socket) do
-    group = params |> get_in(["cluster", "group"]) |> FormHelpers.blank_to_nil()
+  def handle_event("configure-internet", params, socket) do
+    result =
+      case socket.assigns.configuration.pending do
+        nil ->
+          Configuration.stage_internet(
+            params,
+            socket.assigns.connection_id,
+            socket.assigns.revert_timeout
+          )
 
-    case Setup.configure_cluster(group) do
-      {:ok, :ready} ->
-        setup_ok(socket, "Gateway commissioning completed and persisted.")
+        pending ->
+          Configuration.update_internet(pending.id, params)
+      end
+
+    case result do
+      {:ok, _pending} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Internet verified. Continue with Tailnet enrollment.")
+         |> refresh()
+         |> assign(:editor_step, :tailnet)
+         |> schedule_tick()}
 
       {:error, reason} ->
-        setup_error(socket, "Cluster setup failed: #{FormHelpers.format_error(reason)}")
+        {:noreply,
+         put_flash(socket, :error, "Internet setup failed: #{FormHelpers.format_error(reason)}")}
+    end
+  end
+
+  def handle_event("configure-tailnet", %{"candidate_id" => id} = params, socket) do
+    case Configuration.stage_tailnet(id, params) do
+      {:ok, _pending} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Tailnet ready. Choose the cluster mode.")
+         |> refresh()
+         |> assign(:editor_step, :cluster)
+         |> schedule_tick()}
+
+      {:error, reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Tailnet setup failed: #{FormHelpers.format_error(reason)}")}
+    end
+  end
+
+  def handle_event("configure-cluster", %{"candidate_id" => id} = params, socket) do
+    case Configuration.stage_cluster(id, params) do
+      {:ok, _pending} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Candidate applied. Reconnect and verify it before accepting.")
+         |> refresh()
+         |> assign(:editor_step, :confirmation)
+         |> schedule_tick()}
+
+      {:error, reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Cluster setup failed: #{FormHelpers.format_error(reason)}")}
+    end
+  end
+
+  def handle_event("accept-configuration", %{"id" => id}, socket) do
+    case Configuration.confirm(id, socket.assigns.connection_id) do
+      :ok ->
+        {:noreply,
+         socket |> put_flash(:info, "Settings accepted.") |> assign(:mode, :entry) |> refresh()}
+
+      {:error, reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Accept failed: #{FormHelpers.format_error(reason)}")}
+    end
+  end
+
+  def handle_event("revert-configuration", %{"id" => id}, socket) do
+    case Configuration.revert(id) do
+      :ok ->
+        socket = socket |> put_flash(:info, "Candidate reverted.") |> refresh()
+        mode = if socket.assigns.configuration.configured, do: :entry, else: :editor
+        {:noreply, assign(socket, mode: mode, editor_step: :internet)}
+
+      {:error, reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Revert failed: #{FormHelpers.format_error(reason)}")}
     end
   end
 
   @impl true
-  def handle_info(_event, socket), do: {:noreply, assign_view(socket)}
+  def handle_info(:configuration_tick, socket) do
+    socket = socket |> assign(:tick_timer, nil) |> refresh()
 
-  defp assign_view(socket) do
-    data = Server.data()
-    cluster = ClusterManager.status()
+    socket =
+      if socket.assigns.configuration.pending do
+        schedule_tick(socket)
+      else
+        assign(socket,
+          mode: if(socket.assigns.configuration.configured, do: :entry, else: :editor),
+          editor_step: :internet
+        )
+      end
 
-    view = %{
-      setup: Setup.status(),
-      cluster: cluster,
-      local: %{
-        data: data,
-        url: if(data.tailnet.ipv4, do: "http://#{data.tailnet.ipv4}/", else: nil)
-      }
-    }
-
-    assign(socket, :view, view)
+    {:noreply, socket}
   end
 
-  defp setup_ok(socket, message) do
-    {:noreply, socket |> put_flash(:info, message) |> assign_view()}
+  def handle_info(_event, socket), do: {:noreply, refresh(socket)}
+
+  defp refresh(socket) do
+    assign(socket,
+      configuration: Configuration.status(socket.assigns.connection_id),
+      view: %{cluster: ClusterManager.status(), tailnet: Observer.status()},
+      steps: @steps
+    )
   end
 
-  defp setup_error(socket, message), do: {:noreply, put_flash(socket, :error, message)}
+  defp schedule_tick(socket) do
+    pending = socket.assigns.configuration.pending
+
+    if connected?(socket) && pending && pending.remaining_seconds &&
+         is_nil(socket.assigns.tick_timer) do
+      assign(socket, :tick_timer, Process.send_after(self(), :configuration_tick, 1_000))
+    else
+      socket
+    end
+  end
+
+  defp current_step(%{pending: nil}), do: :internet
+  defp current_step(%{pending: %{phase: phase}}), do: phase
+
+  defp progress_classes(configuration, editor_step, phase) do
+    cond do
+      phase == editor_step ->
+        "border-amber-300 text-amber-200"
+
+      step_accessible?(configuration, phase) ->
+        "border-emerald-400 text-emerald-300"
+
+      true ->
+        "border-white/10 text-zinc-600"
+    end
+  end
+
+  defp step_accessible?(%{pending: nil}, phase), do: phase == :internet
+
+  defp step_accessible?(%{pending: %{phase: current}}, phase) do
+    current == :confirmation or step_index(phase) <= step_index(current)
+  end
+
+  defp step_index(phase), do: Enum.find_index(@steps, &(&1 == phase))
+
+  defp step_label(:internet), do: "Internet"
+  defp step_label(:tailnet), do: "Tailnet"
+  defp step_label(:cluster), do: "Cluster"
+
+  defp pending_title(:tailnet), do: "Internet verified"
+  defp pending_title(:cluster), do: "Tailnet ready"
+  defp pending_title(:confirmation), do: "Verify access and accept"
+
+  defp tailnet_hint(configuration) do
+    if editing_settings(configuration).tailnet_configured,
+      do: "Leave blank to keep the current Tailnet profile.",
+      else: "Required for initial configuration. Use a key scoped for this gateway."
+  end
+
+  defp editing_settings(%{pending: %{candidate: candidate}}), do: candidate
+  defp editing_settings(configuration), do: configuration.current
+
+  defp network_method(settings) do
+    case settings.internet do
+      %{method: method} -> method
+      _missing -> :dhcp
+    end
+  end
+
+  defp network_value(settings, key) do
+    case settings.internet do
+      internet when is_map(internet) -> Map.get(internet, key)
+      _missing -> nil
+    end
+  end
+
+  defp parse_revert_minutes(value) do
+    case Integer.parse(to_string(value)) do
+      {minutes, ""} when minutes in 1..@maximum_revert_minutes -> {:ok, minutes}
+      _invalid -> :error
+    end
+  end
+
+  defp duration(seconds), do: "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
+
+  defp connection_id do
+    18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+  end
 end

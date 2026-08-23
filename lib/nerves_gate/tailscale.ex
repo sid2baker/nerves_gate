@@ -36,23 +36,35 @@ defmodule NervesGate.Tailscale do
 
   def enroll(_auth_key), do: {:error, :authentication_failed}
 
-  @doc "Returns the selected Tailscale account profile used for rollback journaling."
-  @spec current_profile_id() :: {:ok, String.t()} | {:error, atom()}
+  @doc "Returns the selected Tailscale account profile, or nil before enrollment."
+  @spec current_profile_id() :: {:ok, String.t() | nil} | {:error, atom()}
   def current_profile_id do
-    with {:ok, profiles} <- profiles(),
-         %{"id" => id} when is_binary(id) <- Enum.find(profiles, &Map.get(&1, "selected", false)) do
-      {:ok, id}
-    else
-      _other -> {:error, :tailnet_profile_unavailable}
+    with {:ok, profiles} <- profiles() do
+      case Enum.find(profiles, &Map.get(&1, "selected", false)) do
+        %{"id" => id} when is_binary(id) -> {:ok, id}
+        nil -> {:ok, nil}
+        _invalid -> {:error, :tailnet_profile_unavailable}
+      end
+    end
+  end
+
+  @doc "Selects the profile referenced by the active settings snapshot."
+  @spec select_profile(String.t() | nil) :: :ok | {:error, atom()}
+  def select_profile(nil), do: :ok
+
+  def select_profile(profile_id) when is_binary(profile_id) do
+    with :ok <- ensure_started() do
+      switch_profile(profile_id)
     end
   end
 
   @doc "Logs into a temporary account profile and returns rollback metadata."
-  @spec stage_enrollment(String.t(), String.t(), String.t()) ::
+  @spec stage_enrollment(String.t(), String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, atom()} | {:error, atom(), map()}
   def stage_enrollment(auth_key, change_id, previous_profile_id)
       when is_binary(auth_key) and byte_size(auth_key) in 8..512 and
-             is_binary(change_id) and is_binary(previous_profile_id) do
+             is_binary(change_id) and
+             (is_binary(previous_profile_id) or is_nil(previous_profile_id)) do
     client = backend()
     nickname = "nervesgate-pending-#{String.slice(change_id, 0, 12)}"
 
@@ -106,12 +118,26 @@ defmodule NervesGate.Tailscale do
     previous = Map.get(metadata, "previous_profile_id")
     candidate = Map.get(metadata, "candidate_profile_id")
 
-    with true <- is_binary(previous),
-         :ok <- switch_profile(previous),
-         :ok <- maybe_remove_candidate(candidate, previous) do
-      :ok
-    else
-      _failure -> {:error, :tailnet_rollback_failed}
+    case {previous, candidate} do
+      {previous, candidate} when is_binary(previous) ->
+        with :ok <- switch_profile(previous),
+             :ok <- maybe_remove_candidate(candidate, previous) do
+          :ok
+        else
+          _failure -> {:error, :tailnet_rollback_failed}
+        end
+
+      {nil, candidate} when is_binary(candidate) ->
+        case remove_profile(candidate) do
+          :ok -> :ok
+          _failure -> {:error, :tailnet_rollback_failed}
+        end
+
+      {nil, nil} ->
+        :ok
+
+      _invalid ->
+        {:error, :tailnet_rollback_failed}
     end
   end
 

@@ -15,7 +15,7 @@ defmodule NervesGate.Cluster.Condition.ActionableUnavailable do
   alarm_if do
     NervesGate.Cluster.Signal.Enabled and
       NervesGate.Cluster.Signal.Unavailable and
-      not NervesGate.Settings.Signal.ClusterChanging and
+      not NervesGate.Configuration.Signal.Changing and
       not NervesGate.Internet.Signal.Unavailable and
       not NervesGate.Tailnet.Signal.Unavailable and
       not NervesGate.Commissioning.Alarm.Required
@@ -44,11 +44,11 @@ defmodule NervesGate.Cluster.Alarms do
 
   alias NervesGate.Alarms
   alias NervesGate.Cluster.Signal
-  alias NervesGate.Settings.Maintenance
+  alias NervesGate.Configuration
 
   @spec report(boolean(), boolean()) :: :ok
   def report(enabled, runtime_broken) do
-    unless Maintenance.active?(:cluster) do
+    unless Configuration.changing?() do
       Alarms.toggle(Signal.Enabled, enabled, Signal.Enabled.description())
 
       Alarms.toggle(

@@ -22,6 +22,19 @@ defmodule NervesGate.AtomicFile do
     end
   end
 
+  @spec replace(Path.t(), Path.t()) :: :ok | {:error, term()}
+  def replace(source, destination) do
+    directory = Path.dirname(destination)
+
+    if Path.dirname(source) == directory do
+      with :ok <- File.rename(source, destination) do
+        sync_directory(directory)
+      end
+    else
+      {:error, :cross_device_replace}
+    end
+  end
+
   defp write_sync_close(file, contents) do
     result =
       case :file.write(file, contents) do
