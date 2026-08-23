@@ -108,7 +108,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
 
     assert pending.remaining_seconds == nil
     Process.sleep(75)
-    assert Server.configuration(nil, server).pending.id == pending.id
+    assert Server.configuration(server).pending.id == pending.id
     assert :ok = Server.revert(pending.id, server)
   end
 
@@ -151,7 +151,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
 
     send(server, {:revert_timeout, pending.id, old_timer_token})
     Process.sleep(10)
-    assert Server.configuration(nil, server).pending.id == pending.id
+    assert Server.configuration(server).pending.id == pending.id
     assert :ok = Server.revert(pending.id, server)
   end
 
@@ -167,7 +167,6 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
              )
 
     assert internet_pending.phase == :tailnet
-    refute Server.configuration(nil, server).pending.confirmable
     assert File.exists?(Persistence.candidate_path(context.root))
     assert settings(context.root, "a")["configured"] == false
     assert candidate(context.root)["internet"]["method"] == "dhcp"
@@ -175,7 +174,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
     assert candidate(context.root)["cluster"]["group"] == nil
 
     assert {:error, :configuration_incomplete} =
-             Server.confirm(internet_pending.id, "connection-b", server)
+             Server.confirm(internet_pending.id, tailnet_connection("connection-b"), server)
 
     assert {:ok, tailnet_pending} =
              Server.stage_tailnet(
@@ -195,13 +194,15 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
              )
 
     assert pending.phase == :confirmation
-    assert Server.configuration("connection-b", server).pending.confirmable
     assert candidate(context.root)["cluster"]["group"] == "Field_group"
 
-    assert {:error, :fresh_connection_required} =
-             Server.confirm(pending.id, "connection-a", server)
+    assert {:error, :tailnet_connection_required} =
+             Server.confirm(pending.id, %{id: "connection-b", tailnet?: false}, server)
 
-    assert :ok = Server.confirm(pending.id, "connection-b", server)
+    assert {:error, :fresh_connection_required} =
+             Server.confirm(pending.id, tailnet_connection("connection-a"), server)
+
+    assert :ok = Server.confirm(pending.id, tailnet_connection("connection-b"), server)
     active = settings(context.root, "a")
     assert active["configured"]
     assert active["internet"]["method"] == "dhcp"
@@ -232,7 +233,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
                server
              )
 
-    assert Server.configuration(nil, server).pending == nil
+    assert Server.configuration(server).pending == nil
     assert Server.data(server).subnet_router.enabled
     assert Server.data(server).subnet_router.routes == ["192.168.10.0/24"]
 
@@ -365,7 +366,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
 
     assert {:ok, _pending} = stage_complete(server, 50)
 
-    assert_eventually(fn -> Server.configuration(nil, server).pending == nil end)
+    assert_eventually(fn -> Server.configuration(server).pending == nil end)
     assert settings(context.root, "a") == accepted
     refute File.exists?(Persistence.candidate_path(context.root))
     assert_receive {:rollback_tailnet, %{"candidate_profile_id" => "candidate-profile"}}
@@ -380,7 +381,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
     assert File.exists?(Persistence.candidate_path(context.root))
 
     restarted = start_server(context)
-    assert Server.configuration(nil, restarted).pending == nil
+    assert Server.configuration(restarted).pending == nil
     refute File.exists?(Persistence.candidate_path(context.root))
     assert settings(context.root, "a")["configured"] == false
   end
@@ -392,7 +393,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
 
     restarted = start_server(context)
 
-    assert Server.configuration(nil, restarted).pending == nil
+    assert Server.configuration(restarted).pending == nil
     refute File.exists?(Persistence.candidate_path(context.root))
 
     assert [_quarantined] =
@@ -402,7 +403,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
   test "a corrupt active slot inherits the other accepted slot", context do
     server = start_server(context)
     {:ok, pending} = stage_complete(server)
-    :ok = Server.confirm(pending.id, "connection-b", server)
+    :ok = Server.confirm(pending.id, tailnet_connection("connection-b"), server)
     GenServer.stop(server)
 
     slot_b =
@@ -423,7 +424,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
   test "a newly booted firmware slot inherits and retags the other slot", context do
     server = start_server(context)
     {:ok, pending} = stage_complete(server)
-    :ok = Server.confirm(pending.id, "connection-b", server)
+    :ok = Server.confirm(pending.id, tailnet_connection("connection-b"), server)
     GenServer.stop(server)
 
     firmware = firmware("b", "firmware-a", "firmware-b-v2")
@@ -455,7 +456,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
 
   defp accept_initial(server) do
     {:ok, pending} = stage_complete(server)
-    :ok = Server.confirm(pending.id, "connection-b", server)
+    :ok = Server.confirm(pending.id, tailnet_connection("connection-b"), server)
     :ok
   end
 
@@ -494,6 +495,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
   end
 
   defp tag(slot, uuid), do: %{"slot" => slot, "uuid" => uuid, "version" => "1.0.0"}
+  defp tailnet_connection(id), do: %{id: id, tailnet?: true}
 
   defp settings(root, slot) do
     {:ok, value} =

@@ -16,19 +16,32 @@ defmodule NervesGateWeb.CommissioningLive do
   @maximum_revert_minutes 60
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, session, socket) do
     connection_id = connection_id()
+    tailnet_access = Map.get(session, "tailnet_access", false)
+    loopback_access = loopback_access?(session)
 
+    case maybe_accept(params, connection_id, tailnet_access) do
+      :accepted ->
+        {:ok, socket |> put_flash(:info, "Settings accepted.") |> redirect(to: ~p"/")}
+
+      {:continue, flash} ->
+        mount_editor(socket, connection_id, loopback_access, flash)
+    end
+  end
+
+  defp mount_editor(socket, connection_id, loopback_access, flash) do
     if connected?(socket),
       do: Enum.each(@topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
 
-    status = Server.configuration(connection_id)
+    status = Server.configuration()
     mode = if status.configured and is_nil(status.pending), do: :entry, else: :editor
 
     socket =
       socket
       |> assign(
         connection_id: connection_id,
+        loopback_access: loopback_access,
         mode: mode,
         editor_step: current_step(status),
         tick_timer: nil,
@@ -36,6 +49,7 @@ defmodule NervesGateWeb.CommissioningLive do
         revert_timeout:
           if(status.configured, do: :timer.minutes(@default_revert_minutes), else: nil)
       )
+      |> maybe_put_accept_error(flash)
       |> refresh()
       |> schedule_tick()
 
@@ -153,19 +167,18 @@ defmodule NervesGateWeb.CommissioningLive do
           </div>
 
           <div class="mt-5 flex flex-wrap gap-3">
-            <.button
-              :if={@editor_step == :confirmation and @configuration.pending.confirmable}
-              phx-click="accept-configuration"
-              phx-value-id={@configuration.pending.id}
+            <.link_button
+              :if={@editor_step == :confirmation and @view.acceptance_url}
+              href={@view.acceptance_url}
             >
               Accept settings
-            </.button>
-            <.link_button
-              :if={@editor_step == :confirmation and @configuration.pending.phase == :confirmation and !@configuration.pending.confirmable}
-              href={~p"/commissioning"}
-            >
-              Reconnect to accept
             </.link_button>
+            <p
+              :if={@editor_step == :confirmation and is_nil(@view.acceptance_url)}
+              class="self-center text-sm text-amber-200"
+            >
+              Waiting for a Tailnet address before acceptance.
+            </p>
             <.button
               phx-click="revert-configuration"
               phx-value-id={@configuration.pending.id}
@@ -382,7 +395,7 @@ defmodule NervesGateWeb.CommissioningLive do
       {:ok, _pending} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Candidate applied. Reconnect and verify it before accepting.")
+         |> put_flash(:info, "Candidate applied. Accept it through the Tailnet to finish.")
          |> refresh()
          |> assign(:editor_step, :confirmation)
          |> schedule_tick()}
@@ -390,18 +403,6 @@ defmodule NervesGateWeb.CommissioningLive do
       {:error, reason} ->
         {:noreply,
          put_flash(socket, :error, "Cluster setup failed: #{FormHelpers.format_error(reason)}")}
-    end
-  end
-
-  def handle_event("accept-configuration", %{"id" => id}, socket) do
-    case Server.confirm(id, socket.assigns.connection_id) do
-      :ok ->
-        {:noreply,
-         socket |> put_flash(:info, "Settings accepted.") |> assign(:mode, :entry) |> refresh()}
-
-      {:error, reason} ->
-        {:noreply,
-         put_flash(socket, :error, "Accept failed: #{FormHelpers.format_error(reason)}")}
     end
   end
 
@@ -438,9 +439,16 @@ defmodule NervesGateWeb.CommissioningLive do
   def handle_info(_event, socket), do: {:noreply, refresh(socket)}
 
   defp refresh(socket) do
+    configuration = Server.configuration()
+    tailnet = Observer.status()
+
     assign(socket,
-      configuration: Server.configuration(socket.assigns.connection_id),
-      view: %{cluster: ClusterManager.status(), tailnet: Observer.status()},
+      configuration: configuration,
+      view: %{
+        cluster: ClusterManager.status(),
+        tailnet: tailnet,
+        acceptance_url: acceptance_url(configuration, tailnet, socket.assigns.loopback_access)
+      },
       steps: @steps
     )
   end
@@ -486,7 +494,7 @@ defmodule NervesGateWeb.CommissioningLive do
 
   defp pending_title(:tailnet), do: "Internet verified"
   defp pending_title(:cluster), do: "Tailnet ready"
-  defp pending_title(:confirmation), do: "Verify access and accept"
+  defp pending_title(:confirmation), do: "Ready to accept"
 
   defp tailnet_hint(configuration) do
     if editing_settings(configuration).tailnet_configured,
@@ -510,6 +518,38 @@ defmodule NervesGateWeb.CommissioningLive do
       _missing -> nil
     end
   end
+
+  defp maybe_accept(%{"accept" => id}, connection_id, tailnet_access)
+       when is_binary(id) do
+    case Server.confirm(id, %{id: connection_id, tailnet?: tailnet_access}) do
+      :ok -> :accepted
+      {:error, reason} -> {:continue, "Accept failed: #{FormHelpers.format_error(reason)}"}
+    end
+  end
+
+  defp maybe_accept(_params, _connection_id, _tailnet_access), do: {:continue, nil}
+
+  defp maybe_put_accept_error(socket, nil), do: socket
+  defp maybe_put_accept_error(socket, message), do: put_flash(socket, :error, message)
+
+  defp acceptance_url(%{pending: %{id: id, phase: :confirmation}}, _tailnet, true) do
+    "/commissioning?#{URI.encode_query(%{"accept" => id})}"
+  end
+
+  defp acceptance_url(
+         %{pending: %{id: id, phase: :confirmation}},
+         %{ipv4: ipv4},
+         false
+       )
+       when is_binary(ipv4) do
+    "http://#{ipv4}/commissioning?#{URI.encode_query(%{"accept" => id})}"
+  end
+
+  defp acceptance_url(_configuration, _tailnet, _loopback_access), do: nil
+
+  defp loopback_access?(%{"remote_ip" => "127." <> _rest}), do: true
+  defp loopback_access?(%{"remote_ip" => "::1"}), do: true
+  defp loopback_access?(_session), do: false
 
   defp parse_revert_minutes(value) do
     case Integer.parse(to_string(value)) do

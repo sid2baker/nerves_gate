@@ -59,5 +59,9 @@ defmodule NervesGateWeb.Router do
       :dashboard_access,
       NervesGateWeb.LocalAccess.dashboard?(connection.remote_ip)
     )
+    |> Plug.Conn.put_session(
+      :tailnet_access,
+      NervesGateWeb.LocalAccess.tailnet?(connection.remote_ip)
+    )
   end
 end

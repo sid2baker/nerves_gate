@@ -74,6 +74,40 @@ defmodule NervesGateWebTest do
     end)
   end
 
+  test "a complete candidate has one Tailnet acceptance action" do
+    with_pending_phase(:confirmation, fn ->
+      {:ok, _view, html} = live(build_conn(), "/commissioning")
+
+      assert html =~ "Ready to accept"
+      assert html =~ "Accept settings"
+      assert html =~ ~s(href="/commissioning?accept=candidate-test")
+      refute html =~ "Reconnect to accept"
+      refute html =~ ~s(phx-click="accept-configuration")
+    end)
+  end
+
+  test "commissioning access accepts through the candidate Tailnet address" do
+    with_tailnet_ipv4("100.84.12.7", fn ->
+      with_pending_phase(:confirmation, fn ->
+        connection = %{build_conn() | remote_ip: {192, 168, 77, 20}}
+        {:ok, _view, html} = live(connection, "/commissioning")
+
+        assert html =~
+                 ~s(href="http://100.84.12.7/commissioning?accept=candidate-test")
+      end)
+    end)
+  end
+
+  test "acceptance from a fresh Tailnet request redirects to status" do
+    with_acceptance_candidate(fn id ->
+      connection = build_conn() |> get("/commissioning?accept=#{id}")
+
+      assert redirected_to(connection) == "/"
+      assert Server.configured?()
+      assert Server.configuration().pending == nil
+    end)
+  end
+
   test "first-time setup candidates have no automatic revert timer" do
     with_pending_phase(:tailnet, nil, fn ->
       {:ok, _view, html} = live(build_conn(), "/commissioning")
@@ -224,6 +258,76 @@ defmodule NervesGateWebTest do
 
     assert is_binary(body["gateway_id"])
     assert Map.has_key?(body, "cluster_group")
+  end
+
+  defp with_tailnet_ipv4(ipv4, function) do
+    observer = NervesGate.Tailnet.Observer
+    original = :sys.get_state(observer)
+
+    :sys.replace_state(observer, fn state ->
+      %{state | status: state.status |> Map.put(:online, true) |> Map.put(:ipv4, ipv4)}
+    end)
+
+    try do
+      function.()
+    after
+      :sys.replace_state(observer, fn _state -> original end)
+    end
+  end
+
+  defp with_acceptance_candidate(function) do
+    original = :sys.get_state(Server)
+    root = NervesGate.TestScenario.temporary_root(:acceptance_redirect)
+    id = "candidate-acceptance"
+
+    candidate =
+      original.current
+      |> Map.put("configured", true)
+      |> Map.put("internet", persisted_dhcp())
+      |> Map.put("tailnet", %{"profile_id" => "profile-1"})
+      |> Map.put("cluster", %{"group" => nil})
+      |> NervesGate.Gateway.Settings.touch()
+
+    pending = %{
+      id: id,
+      phase: :confirmation,
+      source_connection: "source-connection",
+      timeout: nil,
+      deadline: nil,
+      timer_token: nil,
+      candidate: candidate
+    }
+
+    ops =
+      original.ops
+      |> Map.put(:commit_tailnet, fn _metadata -> :ok end)
+      |> Map.put(:subnet_router, fn _enabled, routes -> {:ok, routes} end)
+      |> Map.put(:access, fn _mode, _interface -> {:ok, []} end)
+      |> Map.put(:disable_access, fn -> :ok end)
+
+    active_slot = original.firmware.active
+    :ok = NervesGate.Storage.initialize(root)
+    :ok = NervesGate.Gateway.Persistence.write_slot(original.current, active_slot, root)
+    :ok = NervesGate.Gateway.Persistence.write_candidate(candidate, root)
+
+    :sys.replace_state(Server, fn state ->
+      %{
+        state
+        | root: root,
+          pending: pending,
+          timer: nil,
+          ops: ops,
+          keep_local_access: true
+      }
+    end)
+
+    try do
+      function.(id)
+    after
+      :sys.replace_state(Server, fn _state -> original end)
+      NervesGate.Commissioning.Alarms.required(not original.current["configured"])
+      File.rm_rf!(root)
+    end
   end
 
   defp with_pending_phase(phase, function) do

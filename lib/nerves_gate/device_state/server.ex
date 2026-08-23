@@ -91,10 +91,8 @@ defmodule NervesGate.DeviceState.Server do
   @spec current(GenServer.server()) :: map()
   def current(server \\ __MODULE__), do: GenServer.call(server, :current)
 
-  @spec configuration(String.t() | nil, GenServer.server()) :: map()
-  def configuration(connection_id \\ nil, server \\ __MODULE__) do
-    GenServer.call(server, {:configuration, connection_id})
-  end
+  @spec configuration(GenServer.server()) :: map()
+  def configuration(server \\ __MODULE__), do: GenServer.call(server, :configuration)
 
   @spec stage_internet(map(), String.t(), pos_integer() | nil, GenServer.server()) ::
           {:ok, map()} | {:error, term()}
@@ -130,9 +128,13 @@ defmodule NervesGate.DeviceState.Server do
     GenServer.call(server, {:stage_cluster, id, params}, 45_000)
   end
 
-  @spec confirm(String.t(), String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def confirm(id, connection_id, server \\ __MODULE__) do
-    GenServer.call(server, {:confirm, id, connection_id}, 20_000)
+  @type acceptance_connection :: %{id: String.t(), tailnet?: boolean()}
+
+  @spec confirm(String.t(), acceptance_connection(), GenServer.server()) ::
+          :ok | {:error, term()}
+  def confirm(id, connection, server \\ __MODULE__)
+      when is_binary(id) and is_map(connection) do
+    GenServer.call(server, {:confirm, id, connection}, 20_000)
   end
 
   @spec revert(String.t(), GenServer.server()) :: :ok | {:error, term()}
@@ -238,8 +240,8 @@ defmodule NervesGate.DeviceState.Server do
 
   def handle_call(:current, _from, state), do: {:reply, state.current, state}
 
-  def handle_call({:configuration, connection_id}, _from, state) do
-    {:reply, public_configuration(state, connection_id), state}
+  def handle_call(:configuration, _from, state) do
+    {:reply, public_configuration(state), state}
   end
 
   def handle_call(
@@ -275,7 +277,7 @@ defmodule NervesGate.DeviceState.Server do
 
           state = %{state | pending: pending, timer: timer, last_error: nil}
           publish(state)
-          {:reply, {:ok, public_pending(pending, source_connection)}, state}
+          {:reply, {:ok, public_pending(pending)}, state}
 
         {:error, reason} ->
           state = rollback_candidate(state, candidate, reason)
@@ -395,7 +397,15 @@ defmodule NervesGate.DeviceState.Server do
   end
 
   def handle_call(
-        {:confirm, id, connection_id},
+        {:confirm, id, %{tailnet?: false}},
+        _from,
+        %{pending: %{id: id, phase: :confirmation}} = state
+      ) do
+    {:reply, {:error, :tailnet_connection_required}, state}
+  end
+
+  def handle_call(
+        {:confirm, id, %{id: connection_id, tailnet?: true}},
         _from,
         %{pending: %{id: id, phase: :confirmation}} = state
       ) do
@@ -716,7 +726,7 @@ defmodule NervesGate.DeviceState.Server do
       :ok ->
         state = advance_change(state, pending, pending.phase, candidate)
         publish(state)
-        {:reply, {:ok, public_pending(state.pending, pending.source_connection)}, state}
+        {:reply, {:ok, public_pending(state.pending)}, state}
 
       {:error, reason} ->
         state.ops.internet_restore.(internet(pending.candidate))
@@ -737,7 +747,7 @@ defmodule NervesGate.DeviceState.Server do
           |> Map.put(:last_error, cleanup_error(cleanup_result))
 
         publish(state)
-        {:reply, {:ok, public_pending(state.pending, pending.source_connection)}, state}
+        {:reply, {:ok, public_pending(state.pending)}, state}
 
       {:error, reason} ->
         rollback_new_tailnet(pending.candidate, candidate, state.ops)
@@ -801,7 +811,7 @@ defmodule NervesGate.DeviceState.Server do
       :ok ->
         state = advance_change(state, pending, :confirmation, candidate)
         publish(state)
-        {:reply, {:ok, public_pending(state.pending, pending.source_connection)}, state}
+        {:reply, {:ok, public_pending(state.pending)}, state}
 
       {:error, reason} ->
         state.ops.cluster.(cluster_group(pending.candidate))
@@ -970,24 +980,21 @@ defmodule NervesGate.DeviceState.Server do
     }
   end
 
-  defp public_configuration(state, connection_id) do
+  defp public_configuration(state) do
     %{
       configured: state.current["configured"],
       current: Settings.public(state.current),
-      pending: if(state.pending, do: public_pending(state.pending, connection_id)),
+      pending: if(state.pending, do: public_pending(state.pending)),
       last_error: state.last_error
     }
   end
 
-  defp public_pending(pending, connection_id) do
+  defp public_pending(pending) do
     %{
       id: pending.id,
       phase: pending.phase,
       candidate: Settings.public(pending.candidate),
-      remaining_seconds: remaining_seconds(pending.deadline),
-      confirmable:
-        pending.phase == :confirmation and is_binary(connection_id) and
-          pending.source_connection != connection_id
+      remaining_seconds: remaining_seconds(pending.deadline)
     }
   end
 
@@ -1036,7 +1043,7 @@ defmodule NervesGate.DeviceState.Server do
     Phoenix.PubSub.local_broadcast(
       NervesGate.PubSub,
       "configuration",
-      {:configuration_changed, public_configuration(state, nil)}
+      {:configuration_changed, public_configuration(state)}
     )
   end
 

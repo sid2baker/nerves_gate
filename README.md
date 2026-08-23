@@ -96,9 +96,10 @@ Commissioning follows the runtime dependencies:
 Each dependency is applied before the next step is available, while all three
 remain one reversible candidate. Completed Internet and Tailnet steps stay
 accessible for further editing without undoing downstream runtime changes.
-After the final step, reconnect through the candidate management path and accept
-it. Configured changes must be accepted before their countdown expires.
-Production then restricts the dashboard to Tailscale. Development firmware keeps
+After the final step, **Accept settings** opens the candidate Tailnet address,
+promotes the candidate on that fresh request, and redirects directly to status.
+Configured changes must be accepted before their countdown expires. Production
+then restricts the dashboard to Tailscale. Development firmware keeps
 QEMU's isolated local dashboard forwards available.
 
 ## Subnet routing
