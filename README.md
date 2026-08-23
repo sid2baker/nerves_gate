@@ -178,32 +178,62 @@ _build/x86_64_dev/nerves/images/nerves_gate.fw
 The system supports explicit `Nerves.Runtime.revert/0`. Automatic GRUB trial
 boot fallback remains separate system-level work.
 
-## Local three-node environment
+## Local QEMU environment
+
+The host-only control plane lives in its own Mix project under
+`tools/nerves_gate_qemu`. Start it from the repository root with:
 
 ```sh
-mix nerves_gate.qemu setup
+mix nerves_gate.dev
+```
+
+Then open `http://qemu.localhost:4000/dev/qemu`. The task starts only the
+standalone QEMU OTP application and its endpoint, router, PubSub, session, and
+assets. It has no dependency on the gateway application or Nerves runtime stack,
+so `/`, `/commissioning`, and `/api/status` are not served on port `4000`.
+
+The control plane manages a variable topology, shows combined QMP and gateway
+status, embeds isolated gateway dashboards, and can disconnect or heal each
+uplink without touching its commissioning NIC. Lifecycle actions run
+asynchronously.
+
+```sh
+mix nerves_gate.qemu setup --count 3
+mix nerves_gate.qemu add
+mix nerves_gate.qemu remove M04
 mix nerves_gate.qemu status
-mix nerves_gate.qemu observe   # runtime, discovery, distribution, and replicas
+mix nerves_gate.qemu observe          # runtime, discovery, distribution, and replicas
 mix nerves_gate.qemu observe --json
-mix nerves_gate.qemu logs      # follow all serial logs
+mix nerves_gate.qemu logs             # follow all serial logs
 mix nerves_gate.qemu stop
-mix nerves_gate.qemu restart   # preserves disks and settings slots
-mix nerves_gate.qemu reset     # deletes disks
+mix nerves_gate.qemu restart          # preserves disks and settings slots
+mix nerves_gate.qemu reset            # deletes disks
 ```
 
-QEMU URLs:
+Topology is stored atomically in `tmp/qemu/topology.json`. Machine `M01` uses
+port `4001`, `M02` uses `4002`, and so on. Gateway dashboards use isolated
+hostnames such as `http://m01.localhost:4001/`; commissioning is available at
+`http://m01.localhost:4001/commissioning`.
 
-```text
-M01  http://127.0.0.1:4001/   commissioning: http://127.0.0.1:4001/commissioning
-M02  http://127.0.0.1:4002/   commissioning: http://127.0.0.1:4002/commissioning
-M03  http://127.0.0.1:4003/   commissioning: http://127.0.0.1:4003/commissioning
+Each VM has unique identifiers, a NAT uplink, an isolated commissioning NIC,
+QMP and serial sockets, and a persistent disk under `tmp/qemu`. Gateways discover
+peers over the Tailnet and connect when their public groups match. `observe`
+reads each development VM's secret-free status API through its local forward;
+use `watch -n 2 mix nerves_gate.qemu observe` to follow convergence. Loss,
+latency, and blackhole semantics are reserved for the future isolated TAP/netem
+uplink layer; deterministic QMP link-down faults work with the current SLIRP
+networking.
+
+Once at least three gateways are commissioned and Internet, Tailnet, and cluster
+status have converged, run the deterministic fault test with:
+
+```sh
+cd tools/nerves_gate_qemu
+mix test --include integration test/integration/qemu_fault_test.exs
 ```
 
-Each VM has unique identifiers, a NAT uplink, an isolated commissioning NIC, and
-a persistent disk under `tmp/qemu`. Gateways discover peers over the Tailnet and
-connect when their public groups match. `observe` reads each development VM's
-secret-free status API through its local forward; use
-`watch -n 2 mix nerves_gate.qemu observe` to follow convergence.
+The test observes failures through `/api/status` and always heals host-side
+fault state during cleanup.
 
 Tailscale grants must allow gateway tags to reach other gateways on TCP port `80`
 for group discovery and ports `4369` and `43769` for Erlang distribution.

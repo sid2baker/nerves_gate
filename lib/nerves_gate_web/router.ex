@@ -3,6 +3,8 @@ defmodule NervesGateWeb.Router do
   use Phoenix.Router
   import Phoenix.LiveView.Router
 
+  @frame_ancestors Application.compile_env(:nerves_gate, :frame_ancestors, "'none'")
+
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -13,7 +15,7 @@ defmodule NervesGateWeb.Router do
 
     plug(:put_secure_browser_headers, %{
       "content-security-policy" =>
-        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws: wss:; form-action 'self'; frame-ancestors 'none'"
+        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws: wss:; frame-src 'self'; form-action 'self'; frame-ancestors #{@frame_ancestors}"
     })
   end
 

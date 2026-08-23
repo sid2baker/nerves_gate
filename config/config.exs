@@ -65,6 +65,7 @@ config :nerves_gate,
   # Development firmware keeps its isolated setup NIC available so QEMU's
   # loopback-only forwards remain useful after commissioning.
   local_dashboard: config_env() == :dev,
+  frame_ancestors: "'none'",
   internet_adapter: NervesGate.Internet.VintageNetAdapter,
   internet_poll_interval: 10_000,
   tailscale_enabled: true,

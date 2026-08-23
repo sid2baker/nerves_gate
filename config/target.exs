@@ -17,6 +17,13 @@ config :shoehorn, init: [:nerves_runtime, :vintage_net]
 # validation retries and reboot, so leave it disabled until GRUB supports it.
 config :nerves_runtime, startup_guard_enabled: false
 
+config :nerves_gate,
+  frame_ancestors:
+    if(config_env() == :dev and Mix.target() == :x86_64,
+      do: "http://qemu.localhost:4000 http://localhost:4000",
+      else: "'none'"
+    )
+
 # Erlinit can be configured without a rootfs_overlay. See
 # https://github.com/nerves-project/erlinit/ for more information on
 # configuring erlinit.
