@@ -2,13 +2,9 @@ defmodule NervesGate.Backend do
   @moduledoc """
   Supervises the gateway backend in dependency order.
 
-  Runtime truth flows in one direction:
-
-      Internet → Tailnet → Cluster → DeviceState
-
-  `Configuration` owns one firmware-tagged settings snapshot and applies it
-  through the runtime layers. `DeviceState` is the secret-free projection
-  replicated to connected gateways.
+  Each gateway's `DeviceState.Server` owns its private firmware-slot settings,
+  sequences its secret-free public reducer, and distributes that operation
+  stream to connected peer clients.
   """
 
   use Supervisor
@@ -30,7 +26,6 @@ defmodule NervesGate.Backend do
       {DynamicSupervisor, name: NervesGate.Tailnet.DynamicSupervisor, strategy: :one_for_one},
       NervesGate.Tailnet.Observer,
       NervesGate.Cluster.Manager,
-      NervesGate.Configuration,
       NervesGate.DeviceState.Server,
       NervesGate.DeviceState.Client
     ]

@@ -14,6 +14,7 @@ defmodule NervesGateWeb.StatusLive.View do
       internet: context.internet,
       network_configuration: context.network_configuration,
       tailnet: context.tailnet,
+      subnet_router: local.data.subnet_router,
       cluster: cluster_view(context.cluster),
       diagnostics: context.diagnostics,
       people_count: context.people_count,

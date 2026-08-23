@@ -53,8 +53,7 @@ defmodule NervesGate.MixProject do
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.2"},
       {:phoenix_pubsub, "~> 2.2"},
-      {:tailscale,
-       github: "sid2baker/tailscale_ex", ref: "c0ed65b74b262d4b4f2c905d2f8ae2e47932c267"},
+      {:tailscale, github: "sid2baker/tailscale_ex"},
 
       # Dependencies for all targets
       {:nerves, "~> 1.13", runtime: false},

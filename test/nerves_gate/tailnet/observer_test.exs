@@ -19,7 +19,16 @@ defmodule NervesGate.Tailnet.ObserverTest do
     assert normalized.ipv4 == "100.64.0.10"
 
     assert Map.keys(normalized) |> Enum.sort() ==
-             Enum.sort([:authenticated, :error, :hostname, :ipv4, :nodes, :online, :peers])
+             Enum.sort([
+               :authenticated,
+               :error,
+               :hostname,
+               :ipv4,
+               :nodes,
+               :online,
+               :peers,
+               :subnet_router
+             ])
 
     assert Enum.count(normalized.peers) == 3
     assert Enum.count(normalized.nodes) == 3
@@ -31,6 +40,31 @@ defmodule NervesGate.Tailnet.ObserverTest do
 
     refute normalized.online
     assert normalized.ipv4 == nil
+  end
+
+  test "route advertisement and approval changes are observed centrally" do
+    Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
+    TestTailscaleClient.put({:ok, online_status()})
+    {:ok, observer} = start_observer()
+
+    assert_receive {:tailnet_changed, %{subnet_router: %{advertised: []}}}, 500
+
+    assert :ok =
+             TestTailscaleClient.set(TestTailscaleClient,
+               advertise_routes: ["192.168.10.0/24"]
+             )
+
+    Observer.poll_now(observer)
+
+    assert_receive {:tailnet_changed,
+                    %{
+                      subnet_router: %{
+                        advertised: ["192.168.10.0/24"],
+                        approved: ["192.168.10.0/24"],
+                        primary: ["192.168.10.0/24"]
+                      }
+                    }},
+                   500
   end
 
   test "loss and recovery of Tailscale are broadcast without crashing observers" do

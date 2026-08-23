@@ -9,8 +9,8 @@ defmodule NervesGate.DeviceState.Data do
   order while messages remain small.
 
   `apply_operation/2` has no direct side effects. It returns actions for the
-  authoritative process to execute; current operations request a local state
-  notification. Clients always discard actions.
+  authoritative process to execute, including local notifications and runtime
+  route application. Client replicas always discard actions.
 
   Boot identifiers, revisions, connection freshness, monitors, retries, and
   buffered messages are replication transport metadata and never belong to
@@ -31,6 +31,15 @@ defmodule NervesGate.DeviceState.Data do
       hostname: nil,
       ipv4: nil
     },
+    subnet_router: %{
+      status: :disabled,
+      enabled: false,
+      routes: [],
+      advertised: [],
+      approved: [],
+      primary: [],
+      error: nil
+    },
     cluster: %{
       status: :disabled,
       runtime_status: :disabled,
@@ -43,7 +52,8 @@ defmodule NervesGate.DeviceState.Data do
   ]
 
   @type layer_status :: :online | :offline | :failed | :blocked | :disabled
-  @type origin :: :bootstrap | :device | :internet | :tailnet | :cluster | :alarms
+  @type origin ::
+          :bootstrap | :device | :internet | :tailnet | :subnet_router | :cluster | :alarms
 
   @type internet :: %{
           status: :online | :failed,
@@ -56,6 +66,16 @@ defmodule NervesGate.DeviceState.Data do
           authenticated: boolean() | :unknown,
           hostname: String.t() | nil,
           ipv4: String.t() | nil
+        }
+
+  @type subnet_router :: %{
+          status: layer_status(),
+          enabled: boolean(),
+          routes: [String.t()],
+          advertised: [String.t()],
+          approved: [String.t()],
+          primary: [String.t()],
+          error: atom() | nil
         }
 
   @type cluster :: %{
@@ -79,6 +99,7 @@ defmodule NervesGate.DeviceState.Data do
           firmware_version: String.t(),
           internet: internet(),
           tailnet: tailnet(),
+          subnet_router: subnet_router(),
           cluster: cluster(),
           alarms: [alarm()]
         }
@@ -87,11 +108,15 @@ defmodule NervesGate.DeviceState.Data do
           {:set_name, origin(), String.t()}
           | {:set_internet, origin(), map()}
           | {:set_tailnet, origin(), map()}
+          | {:set_subnet_router, origin(), map()}
+          | {:configure_subnet_router, origin(), map()}
+          | {:observe_subnet_router, origin(), map()}
+          | {:fail_subnet_router, origin(), atom()}
           | {:set_cluster, origin(), map()}
           | {:set_alarm, origin(), map()}
           | {:clear_alarm, origin(), String.t()}
 
-  @type action :: :broadcast
+  @type action :: :broadcast | {:apply_subnet_router, boolean(), [String.t()]}
 
   @doc "Returns fresh canonical data for one device."
   @spec new(keyword()) :: t()
@@ -103,6 +128,7 @@ defmodule NervesGate.DeviceState.Data do
         :firmware_version,
         internet: %{status: :failed, reason: :starting},
         tailnet: %{},
+        subnet_router: %{},
         cluster: %{},
         alarms: []
       ])
@@ -116,6 +142,7 @@ defmodule NervesGate.DeviceState.Data do
     operations = [
       {:set_internet, :bootstrap, options[:internet]},
       {:set_tailnet, :bootstrap, options[:tailnet]},
+      {:set_subnet_router, :bootstrap, options[:subnet_router]},
       {:set_cluster, :bootstrap, options[:cluster]}
     ]
 
@@ -159,6 +186,46 @@ defmodule NervesGate.DeviceState.Data do
       |> apply_dependencies()
       |> wrap_ok(:broadcast)
     end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:set_subnet_router, :bootstrap, subnet_router})
+      when is_map(subnet_router) do
+    with {:ok, subnet_router} <- normalize_subnet_router(subnet_router) do
+      data
+      |> Map.put(:subnet_router, subnet_router)
+      |> apply_dependencies()
+      |> wrap_ok(:broadcast)
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:configure_subnet_router, :subnet_router, desired})
+      when is_map(desired) do
+    with {:ok, desired} <- normalize_subnet_router_desired(desired) do
+      data
+      |> Map.update!(:subnet_router, &Map.merge(&1, desired))
+      |> apply_dependencies()
+      |> wrap_ok([:broadcast, {:apply_subnet_router, desired.enabled, desired.routes}])
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:observe_subnet_router, :subnet_router, observed})
+      when is_map(observed) do
+    with {:ok, observed} <- normalize_subnet_router_observed(observed) do
+      data =
+        data
+        |> Map.update!(:subnet_router, &Map.merge(&1, observed))
+        |> apply_dependencies()
+
+      wrap_ok(data, [:broadcast | subnet_router_actions(data.subnet_router)])
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:fail_subnet_router, :subnet_router, reason})
+      when is_atom(reason) and not is_nil(reason) do
+    data
+    |> Map.update!(:subnet_router, &Map.put(&1, :error, reason))
+    |> apply_dependencies()
+    |> wrap_ok(:broadcast)
   end
 
   def apply_operation(%__MODULE__{} = data, {:set_cluster, origin, cluster})
@@ -230,6 +297,61 @@ defmodule NervesGate.DeviceState.Data do
     end
   end
 
+  defp normalize_subnet_router(subnet_router) do
+    enabled = Map.get(subnet_router, :enabled, false)
+    routes = Map.get(subnet_router, :routes, [])
+    advertised = Map.get(subnet_router, :advertised, [])
+    approved = Map.get(subnet_router, :approved, [])
+    primary = Map.get(subnet_router, :primary, [])
+    error = Map.get(subnet_router, :error)
+
+    if only_keys?(subnet_router, [
+         :enabled,
+         :routes,
+         :advertised,
+         :approved,
+         :primary,
+         :error
+       ]) and is_boolean(enabled) and routes?(routes) and routes?(advertised) and
+         routes?(approved) and routes?(primary) and is_atom(error) do
+      {:ok,
+       %{
+         status: subnet_router_status(enabled, routes, advertised, error),
+         enabled: enabled,
+         routes: routes,
+         advertised: advertised,
+         approved: approved,
+         primary: primary,
+         error: error
+       }}
+    else
+      :error
+    end
+  end
+
+  defp normalize_subnet_router_desired(desired) do
+    enabled = Map.get(desired, :enabled)
+    routes = Map.get(desired, :routes)
+
+    if only_keys?(desired, [:enabled, :routes]) and is_boolean(enabled) and routes?(routes),
+      do: {:ok, %{enabled: enabled, routes: routes}},
+      else: :error
+  end
+
+  defp normalize_subnet_router_observed(observed) do
+    advertised = Map.get(observed, :advertised, [])
+    approved = Map.get(observed, :approved, [])
+    primary = Map.get(observed, :primary, [])
+    error = Map.get(observed, :error)
+
+    if only_keys?(observed, [:advertised, :approved, :primary, :error]) and
+         routes?(advertised) and routes?(approved) and routes?(primary) and is_atom(error) do
+      {:ok, %{advertised: advertised, approved: approved, primary: primary, error: error}}
+    else
+      :error
+    end
+  end
+
   defp normalize_cluster(cluster) do
     enabled = Map.get(cluster, :enabled, false)
     default_status = if enabled, do: :failed, else: :disabled
@@ -269,9 +391,27 @@ defmodule NervesGate.DeviceState.Data do
         true -> data.cluster.runtime_status
       end
 
+    subnet_router_status =
+      cond do
+        not data.subnet_router.enabled ->
+          :disabled
+
+        tailnet_status != :online ->
+          :blocked
+
+        true ->
+          subnet_router_status(
+            true,
+            data.subnet_router.routes,
+            data.subnet_router.advertised,
+            data.subnet_router.error
+          )
+      end
+
     %{
       data
       | tailnet: Map.put(data.tailnet, :status, tailnet_status),
+        subnet_router: Map.put(data.subnet_router, :status, subnet_router_status),
         cluster: Map.put(data.cluster, :status, cluster_status)
     }
   end
@@ -281,6 +421,23 @@ defmodule NervesGate.DeviceState.Data do
     data
   end
 
+  defp subnet_router_actions(%{enabled: false, advertised: [], error: nil}), do: []
+
+  defp subnet_router_actions(%{enabled: true, routes: routes, advertised: routes, error: nil}),
+    do: []
+
+  defp subnet_router_actions(subnet_router) do
+    [{:apply_subnet_router, subnet_router.enabled, subnet_router.routes}]
+  end
+
+  defp subnet_router_status(false, _routes, _advertised, _error), do: :disabled
+  defp subnet_router_status(true, _routes, _advertised, error) when not is_nil(error), do: :failed
+  defp subnet_router_status(true, routes, routes, nil), do: :online
+  defp subnet_router_status(true, _routes, _advertised, nil), do: :failed
+
+  defp routes?(routes), do: is_list(routes) and Enum.all?(routes, &is_binary/1)
+
+  defp wrap_ok(data, actions) when is_list(actions), do: {:ok, data, actions}
   defp wrap_ok(data, action), do: {:ok, data, [action]}
   defp optional_string?(value), do: is_nil(value) or is_binary(value)
   defp only_keys?(map, allowed), do: Enum.all?(Map.keys(map), &(&1 in allowed))

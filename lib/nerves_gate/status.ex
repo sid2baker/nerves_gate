@@ -2,7 +2,6 @@ defmodule NervesGate.Status do
   @moduledoc "Compatibility projection over canonical local device data and remote copies."
 
   alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.Configuration
   alias NervesGate.DeviceState.Client
   alias NervesGate.DeviceState.Data
   alias NervesGate.DeviceState.Server
@@ -27,7 +26,7 @@ defmodule NervesGate.Status do
       device: compatibility_device(data),
       identity: Identity.get(),
       configuration:
-        safe(Configuration, :status, %{configured: false, pending: nil, last_error: nil}),
+        safe(Server, :configuration, %{configured: false, pending: nil, last_error: nil}),
       network: %{
         configuration: safe(InternetManager, :status, %{}),
         connectivity: compatibility_internet(data, internet_diagnostics),
@@ -82,6 +81,7 @@ defmodule NervesGate.Status do
       ipv4: data.tailnet.ipv4,
       peers: Map.get(diagnostics, :peers, []),
       nodes: Map.get(diagnostics, :nodes, []),
+      subnet_router: data.subnet_router,
       error: if(data.tailnet.status == :online, do: nil, else: data.tailnet.status)
     }
   end
@@ -182,7 +182,5 @@ defmodule NervesGate.Status do
     %{interface: nil, online: false, ready: false, reason: :unavailable, checks: %{}}
   end
 
-  defp offline_tailnet do
-    %{peers: [], nodes: []}
-  end
+  defp offline_tailnet, do: %{peers: [], nodes: []}
 end

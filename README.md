@@ -23,10 +23,11 @@ retagged for B; the reverse applies when A
 is newly installed. This preserves a known configuration for each firmware
 rollback target.
 
-## Configuration transaction
+## Remote-access transaction
 
-`NervesGate.Configuration` is the only settings owner. `/commissioning` builds
-one complete candidate through Internet, Tailnet, and cluster steps:
+`NervesGate.DeviceState.Server` is the sole local settings and public-state
+authority. `/commissioning` builds one complete remote-access candidate through
+Internet, Tailnet, and cluster steps:
 
 ```text
 /data/settings-candidate.json
@@ -58,16 +59,21 @@ Tailnet.Manager  → Tailnet.Observer
         ↓
 Cluster.Manager
         ↓
-Configuration
-        ↓
 DeviceState.Server → DeviceState.Client
 ```
 
+Every physical gateway runs one `DeviceState.Server` as the sole writer for its
+own state and one `DeviceState.Client` holding peer replicas. The server keeps
+firmware settings, candidates, credentials, tasks, and timers private. Only its
+secret-free `DeviceState.Data` is changed through ordered pure reducer
+operations and sent to joined peers. Clients apply the same operations but never
+execute the returned local actions.
+
 The subsystem managers own runtime processes only. They do not persist their
-own configuration and do not implement independent candidate state machines.
-`Configuration` applies or restores the complete snapshot through them. A single
-configuration-change signal inhibits expected connectivity alarms while a
-candidate is active.
+own configuration or implement candidate state machines. `Gateway.Settings`,
+`Gateway.Persistence`, and `Gateway.Effects` are private helpers used by the
+server. A single change signal inhibits expected connectivity alarms while a
+remote-access candidate is active.
 
 Kernel forwarding is immutable platform policy in `/etc/sysctl.conf`, loaded by
 `nerves_runtime` before this application starts.
@@ -92,8 +98,24 @@ remain one reversible candidate. Completed Internet and Tailnet steps stay
 accessible for further editing without undoing downstream runtime changes.
 After the final step, reconnect through the candidate management path and accept
 it. Configured changes must be accepted before their countdown expires.
-Production then restricts the dashboard to Tailscale. Development firmware keeps QEMU's isolated local dashboard forwards
-available.
+Production then restricts the dashboard to Tailscale. Development firmware keeps
+QEMU's isolated local dashboard forwards available.
+
+## Subnet routing
+
+Subnet routing is an ordinary remote operation, not part of commissioning. The
+local dashboard can dynamically advertise one or more IPv4 or IPv6 CIDRs with
+`tailscale set`, update them, or withdraw all advertisements. Enabling or
+disabling the subnet router never changes the selected Tailnet profile or the
+gateway's remote-management connection.
+
+The desired enabled state and canonical routes live in the active firmware-slot
+snapshot. A successful write produces one ordered public reducer operation; its
+local action applies the routes through Tailscale. Runtime observations return
+as further operations containing advertised, approved, and primary routes.
+There is no candidate, confirmation, or revert timer. Application failures raise
+a noncritical alarm and are retried after `tailscaled` reconnects; remote gateway
+access is unchanged.
 
 ## Dashboard and replicated state
 
@@ -103,13 +125,15 @@ The main page at `http://<tailscale-ip>/` provides:
 - live, degraded, and stale connection states;
 - last-known alarms for disconnected gateways;
 - Internet → Tailnet → Cluster status;
+- dynamic local subnet-router controls and route approval status;
 - local diagnostics and device naming;
 - visible public cluster groups and automatic peer connections.
 
-Each gateway is the sole writer of its canonical `NervesGate.DeviceState.Data`.
-Accepted operations are sequenced by `DeviceState.Server` and replicated by
-`DeviceState.Client`. Credentials, candidate internals, and logger history are
-never replicated.
+Each gateway is the sole writer and sequencer for its canonical
+`NervesGate.DeviceState.Data`. Connected gateways join every peer's independent
+operation stream and retain stale snapshots after disconnection. No fleet leader
+is required because each stream mutates only its owning device. Credentials,
+candidate internals, task metadata, and logger history are never replicated.
 
 ```elixir
 NervesGate.configuration()

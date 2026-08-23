@@ -1,5 +1,5 @@
 defmodule NervesGate.Internet.Manager do
-  @moduledoc "Applies and verifies the Internet configuration selected by Configuration."
+  @moduledoc "Applies and verifies the Internet configuration selected by DeviceState.Server."
 
   use GenServer
 

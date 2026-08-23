@@ -48,6 +48,19 @@ defmodule NervesGate.DeviceState.ClientTest do
              Client.get("gate-a", context.client)
   end
 
+  test "replicas apply subnet operations without executing local actions", context do
+    operation =
+      {:configure_subnet_router, :subnet_router, %{enabled: true, routes: ["192.168.70.0/24"]}}
+
+    assert {:ok, expected, actions} = Data.apply_operation(context.initial_data, operation)
+    assert {:apply_subnet_router, true, ["192.168.70.0/24"]} in actions
+
+    send(context.client, {:device_state_operation, context.remote, "boot-a", 2, operation})
+
+    assert_eventually(fn -> Client.data("gate-a", context.client) == expected end)
+    assert Client.data("gate-a", context.client).subnet_router.routes == ["192.168.70.0/24"]
+  end
+
   test "node loss keeps canonical data unchanged and marks only metadata stale", context do
     send(context.client, {:nodedown, context.remote, []})
 

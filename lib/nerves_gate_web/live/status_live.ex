@@ -4,7 +4,6 @@ defmodule NervesGateWeb.StatusLive do
   use NervesGateWeb, :live_view
 
   alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.Configuration
   alias NervesGate.DeviceState.Client
   alias NervesGate.DeviceState.Data
   alias NervesGate.DeviceState.Server
@@ -15,11 +14,11 @@ defmodule NervesGateWeb.StatusLive do
   alias NervesGateWeb.StatusLive.Render
   alias NervesGateWeb.StatusLive.View
 
-  @context_topics ~w(configuration device internet)
+  @context_topics ~w(configuration internet tailnet)
 
   @impl true
   def mount(_params, session, socket) do
-    if Configuration.configured?() do
+    if Server.configured?() do
       mount_dashboard(session, socket)
     else
       {:ok, redirect(socket, to: ~p"/commissioning")}
@@ -71,6 +70,45 @@ defmodule NervesGateWeb.StatusLive do
   @impl true
   def handle_event("select-node", %{"device-id" => device_id}, socket) do
     {:noreply, socket |> assign(:selected_device_id, device_id) |> assign_view()}
+  end
+
+  @impl true
+  def handle_event("enable-subnet-router", %{"subnet_router" => params}, socket) do
+    routes = params |> Map.get("routes", "") |> parse_routes()
+
+    case Server.configure_subnet_router(true, routes) do
+      {:ok, _subnet_router} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Subnet router enabled.")
+         |> rejoin_local()
+         |> refresh_context()}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, subnet_router_error(reason))
+         |> rejoin_local()
+         |> refresh_context()}
+    end
+  end
+
+  def handle_event("disable-subnet-router", _params, socket) do
+    case Server.configure_subnet_router(false, []) do
+      {:ok, _subnet_router} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Subnet router disabled. Remote gateway access is unchanged.")
+         |> rejoin_local()
+         |> refresh_context()}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, subnet_router_error(reason))
+         |> rejoin_local()
+         |> refresh_context()}
+    end
   end
 
   @impl true
@@ -176,7 +214,7 @@ defmodule NervesGateWeb.StatusLive do
 
   defp load_context do
     %{
-      configuration: Configuration.status(),
+      configuration: Server.configuration(),
       internet: Monitor.status(),
       network_configuration: InternetManager.status(),
       tailnet: Observer.status(),
@@ -185,6 +223,29 @@ defmodule NervesGateWeb.StatusLive do
       diagnostics: diagnostics()
     }
   end
+
+  defp parse_routes(value) when is_binary(value) do
+    value
+    |> String.split(~r/[\s,]+/, trim: true)
+    |> Enum.uniq()
+  end
+
+  defp parse_routes(_value), do: []
+
+  defp subnet_router_error(:subnet_routes_required), do: "Enter at least one subnet route."
+
+  defp subnet_router_error(:configuration_change_in_progress),
+    do: "Finish or reject the remote-access change before editing subnet routes."
+
+  defp subnet_router_error(:invalid_subnet_routes),
+    do: "Enter valid IPv4 or IPv6 CIDRs separated by commas or spaces."
+
+  defp subnet_router_error({:subnet_router_apply_failed, _reason}),
+    do:
+      "Routes were saved but could not be applied yet. The gateway will retry without changing remote access."
+
+  defp subnet_router_error(_reason),
+    do: "The subnet-router change could not be applied. Remote gateway access is unchanged."
 
   defp diagnostics do
     {uptime, _since_last_call} = :erlang.statistics(:wall_clock)

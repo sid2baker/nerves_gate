@@ -181,6 +181,63 @@ defmodule NervesGateWeb.StatusLive.Render do
         </div>
       </.card>
 
+      <.card class="xl:col-span-2">
+        <.section_header
+          eyebrow="Tailnet routing"
+          title="Subnet router"
+          description="Advertise local networks without changing this gateway's remote-management connection."
+        >
+          <:action>
+            <.badge tone={subnet_router_tone(@view.subnet_router)}>
+              {subnet_router_label(@view.subnet_router)}
+            </.badge>
+          </:action>
+        </.section_header>
+
+        <div class="mt-5 grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.7fr)]">
+          <form id="subnet-router-form" phx-submit="enable-subnet-router" class="grid gap-4">
+            <.input
+              label="Advertised CIDRs"
+              name="subnet_router[routes]"
+              value={Enum.join(@view.subnet_router.routes, ", ")}
+              placeholder="192.168.10.0/24, 10.20.0.0/16"
+              required
+              disabled={not is_nil(@view.configuration.pending)}
+              hint="Separate multiple IPv4 or IPv6 networks with commas or spaces. Route approval remains controlled by Tailnet policy."
+            />
+
+            <div class="flex flex-wrap gap-3">
+              <.button
+                type="submit"
+                disabled={not is_nil(@view.configuration.pending)}
+                phx-disable-with="Applying routes…"
+              >
+                {if @view.subnet_router.enabled, do: "Update routes", else: "Enable subnet router"}
+              </.button>
+              <.button
+                :if={@view.subnet_router.enabled}
+                type="button"
+                tone={:danger}
+                phx-click="disable-subnet-router"
+                phx-disable-with="Withdrawing routes…"
+                data-confirm="Withdraw all advertised subnet routes? Remote access to this gateway will remain available."
+                disabled={not is_nil(@view.configuration.pending)}
+              >
+                Disable subnet router
+              </.button>
+            </div>
+
+            <p
+              :if={not is_nil(@view.configuration.pending)}
+              class="text-sm leading-6 text-amber-200"
+            >
+              Subnet routing can be changed after the remote-access configuration is accepted or rejected.
+            </p>
+          </form>
+
+          <.detail_list items={subnet_router_details(@view.subnet_router)} />
+        </div>
+      </.card>
     </div>
     """
   end
@@ -203,6 +260,11 @@ defmodule NervesGateWeb.StatusLive.Render do
       {"Tailnet hostname", node.data.tailnet.hostname || "Unavailable"},
       {"Tailnet IPv4", node.data.tailnet.ipv4 || "Unavailable"},
       {"Cluster group", node.data.cluster.group || "Singular"},
+      {"Subnet router", humanize(node.data.subnet_router.status)},
+      {"Subnet routes", route_list(node.data.subnet_router.routes)},
+      {"Advertised routes", route_list(node.data.subnet_router.advertised)},
+      {"Approved routes", route_list(node.data.subnet_router.approved)},
+      {"Primary routes", route_list(node.data.subnet_router.primary)},
       {"BEAM node", format_node(node.data.cluster.node)},
       {"Firmware", node.data.firmware_version},
       {"Revision", node.revision},
@@ -231,6 +293,27 @@ defmodule NervesGateWeb.StatusLive.Render do
       {"Memory", "#{megabytes(diagnostics.memory_bytes)} MB"}
     ]
   end
+
+  defp subnet_router_details(subnet_router) do
+    [
+      {"Configured", route_list(subnet_router.routes)},
+      {"Advertised", route_list(subnet_router.advertised)},
+      {"Approved", route_list(subnet_router.approved)},
+      {"Primary", route_list(subnet_router.primary)}
+    ]
+  end
+
+  defp subnet_router_tone(%{status: :disabled}), do: :neutral
+  defp subnet_router_tone(%{status: :online}), do: :good
+  defp subnet_router_tone(_subnet_router), do: :warning
+
+  defp subnet_router_label(%{status: :disabled}), do: "Disabled"
+  defp subnet_router_label(%{status: :online}), do: "Advertising"
+  defp subnet_router_label(%{status: :blocked}), do: "Blocked"
+  defp subnet_router_label(_subnet_router), do: "Needs attention"
+
+  defp route_list([]), do: "None"
+  defp route_list(routes), do: Enum.join(routes, ", ")
 
   defp check_value(checks, key) do
     case Map.get(checks, key, :unknown) do

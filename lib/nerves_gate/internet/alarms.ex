@@ -9,7 +9,7 @@ defmodule NervesGate.Internet.Condition.ActionableUnavailable do
 
   alarm_if do
     NervesGate.Internet.Signal.Unavailable and
-      not NervesGate.Configuration.Signal.Changing and
+      not NervesGate.DeviceState.Signal.Changing and
       not NervesGate.Commissioning.Alarm.Required
   end
 end
@@ -49,7 +49,7 @@ defmodule NervesGate.Internet.Alarm.Unstable do
 
   alarm_if do
     hold(intensity(NervesGate.Internet.Signal.Unavailable, @count, @period), @hold) and
-      not NervesGate.Configuration.Signal.Changing and
+      not NervesGate.DeviceState.Signal.Changing and
       not NervesGate.Commissioning.Alarm.Required
   end
 
@@ -60,12 +60,12 @@ defmodule NervesGate.Internet.Alarms do
   @moduledoc "Owns translation from immediate Internet health to raw conditions."
 
   alias NervesGate.Alarms
-  alias NervesGate.Configuration
+  alias NervesGate.DeviceState.Server
   alias NervesGate.Internet.Signal
 
   @spec report(map()) :: :ok
   def report(%{online: online}) do
-    unless Configuration.changing?() do
+    unless Server.changing?() do
       Alarms.toggle(Signal.Unavailable, not online, Signal.Unavailable.description())
     end
 

@@ -85,6 +85,28 @@ defmodule NervesGate.Tailnet.TailscaleTest do
     assert {:ok, "slot-a"} = NervesGate.Tailscale.current_profile_id()
   end
 
+  test "subnet routes can be enabled and withdrawn without changing profiles" do
+    TestTailscaleClient.put({:ok, %{profiles: [%{"id" => "slot-a", "selected" => true}]}})
+
+    assert {:ok, ["192.168.10.0/24", "10.20.0.0/16"]} =
+             NervesGate.Tailscale.configure_subnet_router(
+               true,
+               ["192.168.10.0/24", "10.20.0.0/16"]
+             )
+
+    assert {:ok, %{advertised: ["192.168.10.0/24", "10.20.0.0/16"]}} =
+             NervesGate.Tailscale.route_status()
+
+    assert {:ok, ["192.168.10.0/24", "10.20.0.0/16"]} =
+             NervesGate.Tailscale.configure_subnet_router(
+               false,
+               ["192.168.10.0/24", "10.20.0.0/16"]
+             )
+
+    assert {:ok, %{advertised: []}} = NervesGate.Tailscale.route_status()
+    assert {:ok, "slot-a"} = NervesGate.Tailscale.current_profile_id()
+  end
+
   test "missing or corrupt pinned binaries are rejected" do
     root = TestScenario.temporary_root(:binary)
     cli = Path.join(root, "tailscale")

@@ -4,7 +4,7 @@ defmodule NervesGate.Tailnet.Manager do
   use GenServer
 
   alias NervesGate.Backoff
-  alias NervesGate.Store
+  alias NervesGate.Storage
 
   @initial_retry 1_000
   @maximum_retry 60_000
@@ -193,8 +193,8 @@ defmodule NervesGate.Tailnet.Manager do
           name: NervesGate.Tailscale.Daemon,
           daemon_path: paths.daemon_path,
           cli_path: paths.cli_path,
-          socket_path: Path.join(Store.root(), "tailscale/tailscaled.sock"),
-          tailscale_dir: Path.join(Store.root(), "tailscale/state"),
+          socket_path: Storage.path(["tailscale", "tailscaled.sock"]),
+          tailscale_dir: Storage.path(["tailscale", "state"]),
           tun: :kernel,
           timeout: 8_000
         ]
@@ -211,7 +211,7 @@ defmodule NervesGate.Tailnet.Manager do
   end
 
   defp configure_cache do
-    cache = Path.join(Store.root(), "tailscale/cache")
+    cache = Storage.path(["tailscale", "cache"])
 
     with :ok <- File.mkdir_p(cache) do
       System.put_env("XDG_CACHE_HOME", cache)

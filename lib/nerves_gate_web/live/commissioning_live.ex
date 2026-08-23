@@ -6,7 +6,7 @@ defmodule NervesGateWeb.CommissioningLive do
   import NervesGateWeb.GatewayComponents
 
   alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.Configuration
+  alias NervesGate.DeviceState.Server
   alias NervesGate.Tailnet.Observer
   alias NervesGateWeb.FormHelpers
 
@@ -22,7 +22,7 @@ defmodule NervesGateWeb.CommissioningLive do
     if connected?(socket),
       do: Enum.each(@topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
 
-    status = Configuration.status(connection_id)
+    status = Server.configuration(connection_id)
     mode = if status.configured and is_nil(status.pending), do: :entry, else: :editor
 
     socket =
@@ -336,14 +336,14 @@ defmodule NervesGateWeb.CommissioningLive do
     result =
       case socket.assigns.configuration.pending do
         nil ->
-          Configuration.stage_internet(
+          Server.stage_internet(
             params,
             socket.assigns.connection_id,
             socket.assigns.revert_timeout
           )
 
         pending ->
-          Configuration.update_internet(pending.id, params)
+          Server.update_internet(pending.id, params)
       end
 
     case result do
@@ -362,7 +362,7 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_event("configure-tailnet", %{"candidate_id" => id} = params, socket) do
-    case Configuration.stage_tailnet(id, params) do
+    case Server.stage_tailnet(id, params) do
       {:ok, _pending} ->
         {:noreply,
          socket
@@ -378,7 +378,7 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_event("configure-cluster", %{"candidate_id" => id} = params, socket) do
-    case Configuration.stage_cluster(id, params) do
+    case Server.stage_cluster(id, params) do
       {:ok, _pending} ->
         {:noreply,
          socket
@@ -394,7 +394,7 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_event("accept-configuration", %{"id" => id}, socket) do
-    case Configuration.confirm(id, socket.assigns.connection_id) do
+    case Server.confirm(id, socket.assigns.connection_id) do
       :ok ->
         {:noreply,
          socket |> put_flash(:info, "Settings accepted.") |> assign(:mode, :entry) |> refresh()}
@@ -406,7 +406,7 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_event("revert-configuration", %{"id" => id}, socket) do
-    case Configuration.revert(id) do
+    case Server.revert(id) do
       :ok ->
         socket = socket |> put_flash(:info, "Candidate reverted.") |> refresh()
         mode = if socket.assigns.configuration.configured, do: :entry, else: :editor
@@ -439,7 +439,7 @@ defmodule NervesGateWeb.CommissioningLive do
 
   defp refresh(socket) do
     assign(socket,
-      configuration: Configuration.status(socket.assigns.connection_id),
+      configuration: Server.configuration(socket.assigns.connection_id),
       view: %{cluster: ClusterManager.status(), tailnet: Observer.status()},
       steps: @steps
     )

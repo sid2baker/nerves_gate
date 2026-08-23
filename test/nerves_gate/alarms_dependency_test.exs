@@ -4,7 +4,7 @@ defmodule NervesGate.AlarmsDependencyTest do
   alias NervesGate.Alarms
   alias NervesGate.Cluster
   alias NervesGate.Commissioning
-  alias NervesGate.Configuration
+  alias NervesGate.DeviceState
   alias NervesGate.Internet
   alias NervesGate.Tailnet
 
@@ -15,7 +15,7 @@ defmodule NervesGate.AlarmsDependencyTest do
       Cluster.Signal.Enabled,
       Cluster.Signal.Unavailable,
       Commissioning.Alarm.Required,
-      Configuration.Signal.Changing
+      DeviceState.Signal.Changing
     ]
 
     Enum.each(ids, &Alarms.clear/1)
@@ -70,8 +70,8 @@ defmodule NervesGate.AlarmsDependencyTest do
   end
 
   test "a configuration candidate inhibits expected dependency alarms" do
-    set(Configuration.Signal.Changing)
-    on_exit(fn -> Alarms.clear(Configuration.Signal.Changing) end)
+    set(DeviceState.Signal.Changing)
+    on_exit(fn -> Alarms.clear(DeviceState.Signal.Changing) end)
     set(Cluster.Signal.Enabled)
     set(Cluster.Signal.Unavailable)
     set(Tailnet.Signal.Unavailable)
@@ -84,9 +84,9 @@ defmodule NervesGate.AlarmsDependencyTest do
   end
 
   test "subsystems do not feed candidate transitions into alarm history" do
-    set(Configuration.Signal.Changing)
-    on_exit(fn -> Alarms.clear(Configuration.Signal.Changing) end)
-    wait_for(fn -> Alarmist.alarm_state(Configuration.Signal.Changing) == :set end)
+    set(DeviceState.Signal.Changing)
+    on_exit(fn -> Alarms.clear(DeviceState.Signal.Changing) end)
+    wait_for(fn -> Alarmist.alarm_state(DeviceState.Signal.Changing) == :set end)
 
     Internet.Alarms.report(%{online: false})
     Tailnet.Alarms.report(%{online: false})

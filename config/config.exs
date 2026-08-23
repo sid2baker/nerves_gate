@@ -54,8 +54,9 @@ config :alarmist,
     NervesGate.Tailnet.Signal.Unavailable => :debug,
     NervesGate.Cluster.Signal.Enabled => :debug,
     NervesGate.Cluster.Signal.Unavailable => :debug,
-    NervesGate.Configuration.Signal.Changing => :debug,
+    NervesGate.DeviceState.Signal.Changing => :debug,
     NervesGate.Storage.Alarm.Failure => :error,
+    NervesGate.SubnetRouter.Alarm.Unavailable => :warning,
     NervesGate.Commissioning.Alarm.Unavailable => :error
   }
 

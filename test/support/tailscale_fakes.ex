@@ -14,6 +14,40 @@ defmodule NervesGate.TestTailscaleClient do
   def status, do: Agent.get(__MODULE__, & &1)
   def status(_server), do: status()
   def login(_server, _auth_key), do: Agent.get(__MODULE__, &Map.get(elem(&1, 1), :login, &1))
+  def await_ready(_server, _options), do: :ok
+
+  def set(_server, advertise_routes: routes) do
+    Agent.get_and_update(__MODULE__, fn
+      {:ok, raw} -> {:ok, {:ok, Map.put(raw, :advertised_routes, routes)}}
+      error -> {error, error}
+    end)
+  end
+
+  def advertised_routes(_server) do
+    Agent.get(__MODULE__, fn
+      {:ok, raw} -> {:ok, Map.get(raw, :advertised_routes, [])}
+      error -> error
+    end)
+  end
+
+  def route_status, do: route_status(__MODULE__)
+
+  def route_status(_server) do
+    Agent.get(__MODULE__, fn
+      {:ok, raw} ->
+        advertised = Map.get(raw, :advertised_routes, [])
+
+        {:ok,
+         %{
+           advertised: advertised,
+           approved: Map.get(raw, :approved_routes, advertised),
+           primary: Map.get(raw, :primary_routes, advertised)
+         }}
+
+      error ->
+        error
+    end)
+  end
 
   def cli(_server, "switch", ["--list", "--json"]) do
     Agent.get(__MODULE__, fn

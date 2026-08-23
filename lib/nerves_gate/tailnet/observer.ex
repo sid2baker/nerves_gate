@@ -13,6 +13,7 @@ defmodule NervesGate.Tailnet.Observer do
   defstruct [
     :client,
     :repair,
+    :route_status,
     :timer,
     poll_interval: 5_000,
     retry: @initial_retry,
@@ -28,6 +29,7 @@ defmodule NervesGate.Tailnet.Observer do
           ipv4: String.t() | nil,
           peers: [map()],
           nodes: [map()],
+          subnet_router: map(),
           error: atom() | nil
         }
 
@@ -58,9 +60,12 @@ defmodule NervesGate.Tailnet.Observer do
 
   @impl true
   def init(options) do
+    client = Keyword.get(options, :client, NervesGate.Tailscale)
+
     state = %__MODULE__{
-      client: Keyword.get(options, :client, NervesGate.Tailscale),
+      client: client,
       repair: Keyword.get(options, :repair, &NervesGate.Tailnet.Manager.repair_runtime/0),
+      route_status: Keyword.get(options, :route_status, &client.route_status/0),
       repair_after:
         Keyword.get(
           options,
@@ -131,6 +136,7 @@ defmodule NervesGate.Tailnet.Observer do
       ipv4: ipv4,
       peers: peers,
       nodes: nodes,
+      subnet_router: unavailable_routes(),
       error: nil
     }
   end
@@ -140,7 +146,8 @@ defmodule NervesGate.Tailnet.Observer do
   defp poll(state) do
     case state.client.status() do
       {:ok, raw} ->
-        {normalize(raw), state.poll_interval, @initial_retry, 0}
+        status = raw |> normalize() |> observe_routes(state.route_status)
+        {status, state.poll_interval, @initial_retry, 0}
 
       {:error, _reason} ->
         failures = state.failures + 1
@@ -157,6 +164,18 @@ defmodule NervesGate.Tailnet.Observer do
   end
 
   defp maybe_repair(_state, failures), do: failures
+
+  defp observe_routes(%{online: true} = status, route_status) do
+    routes =
+      case route_status.() do
+        {:ok, routes} -> Map.put(routes, :error, nil)
+        {:error, _reason} -> unavailable_routes()
+      end
+
+    Map.put(status, :subnet_router, routes)
+  end
+
+  defp observe_routes(status, _route_status), do: status
 
   defp normalize_peer(peer, users) do
     ips = Map.get(peer, "TailscaleIPs") || []
@@ -191,8 +210,13 @@ defmodule NervesGate.Tailnet.Observer do
       ipv4: nil,
       peers: [],
       nodes: [],
+      subnet_router: unavailable_routes(),
       error: reason
     }
+  end
+
+  defp unavailable_routes do
+    %{advertised: [], approved: [], primary: [], error: :unavailable}
   end
 
   defp publish_if_changed(previous, current) when previous == current, do: :ok

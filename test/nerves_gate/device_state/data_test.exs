@@ -17,6 +17,14 @@ defmodule NervesGate.DeviceState.DataTest do
          hostname: "gate-a",
          ipv4: "100.64.0.10"
        }},
+      {:configure_subnet_router, :subnet_router, %{enabled: true, routes: ["192.168.10.0/24"]}},
+      {:observe_subnet_router, :subnet_router,
+       %{
+         advertised: ["192.168.10.0/24"],
+         approved: ["192.168.10.0/24"],
+         primary: ["192.168.10.0/24"],
+         error: nil
+       }},
       {:set_cluster, :cluster,
        %{
          runtime_status: :online,
@@ -37,6 +45,7 @@ defmodule NervesGate.DeviceState.DataTest do
     assert owner.name == "Boiler room"
     assert owner.internet.status == :online
     assert owner.tailnet.status == :online
+    assert owner.subnet_router.status == :online
     assert owner.cluster.status == :online
   end
 
@@ -54,6 +63,13 @@ defmodule NervesGate.DeviceState.DataTest do
          }}
       )
       |> apply!(
+        {:configure_subnet_router, :subnet_router, %{enabled: true, routes: ["192.168.10.0/24"]}}
+      )
+      |> apply!(
+        {:observe_subnet_router, :subnet_router,
+         %{advertised: ["192.168.10.0/24"], approved: [], primary: [], error: nil}}
+      )
+      |> apply!(
         {:set_cluster, :cluster,
          %{
            runtime_status: :online,
@@ -68,10 +84,12 @@ defmodule NervesGate.DeviceState.DataTest do
     assert data.internet.status == :failed
     assert data.tailnet.status == :blocked
     assert data.tailnet.observed_status == :online
+    assert data.subnet_router.status == :blocked
     assert data.cluster.status == :blocked
 
     recovered = apply!(data, {:set_internet, :internet, %{status: :online, reason: nil}})
     assert recovered.tailnet.status == :online
+    assert recovered.subnet_router.status == :online
     assert recovered.cluster.status == :online
   end
 
@@ -105,6 +123,43 @@ defmodule NervesGate.DeviceState.DataTest do
     assert public.cluster.group == "Plant_floor"
   end
 
+  test "subnet configuration returns a local action that replicas can discard" do
+    operation =
+      {:configure_subnet_router, :subnet_router, %{enabled: true, routes: ["192.168.10.0/24"]}}
+
+    assert {:ok, configured, actions} = Data.apply_operation(data(), operation)
+    assert :broadcast in actions
+    assert {:apply_subnet_router, true, ["192.168.10.0/24"]} in actions
+
+    assert {:ok, replica, _discarded_actions} = Data.apply_operation(data(), operation)
+    assert configured == replica
+  end
+
+  test "subnet routing accepts only canonical public fields" do
+    operation =
+      {:configure_subnet_router, :subnet_router,
+       %{
+         enabled: true,
+         routes: ["192.168.10.0/24"],
+         credential: "must-not-replicate"
+       }}
+
+    assert :error = Data.apply_operation(data(), operation)
+
+    public =
+      data()
+      |> apply!(
+        {:configure_subnet_router, :subnet_router, %{enabled: true, routes: ["192.168.10.0/24"]}}
+      )
+      |> apply!(
+        {:observe_subnet_router, :subnet_router,
+         %{advertised: [], approved: [], primary: [], error: :awaiting_approval}}
+      )
+
+    assert public.subnet_router.status == :blocked
+    refute inspect(public) =~ "must-not-replicate"
+  end
+
   test "malformed and unknown operations are rejected" do
     assert :error = Data.apply_operation(data(), {:set_internet, :internet, %{status: :maybe}})
     assert :error = Data.apply_operation(data(), {:set_name, "private-origin", "Gate A"})
@@ -117,7 +172,7 @@ defmodule NervesGate.DeviceState.DataTest do
 
   defp apply!(data, operation) do
     assert {:ok, data, actions} = Data.apply_operation(data, operation)
-    assert actions == [:broadcast]
+    assert :broadcast in actions
     data
   end
 end

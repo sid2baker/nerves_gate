@@ -37,6 +37,7 @@ defmodule NervesGateWeb.CoreComponents do
   attr(:type, :string, default: "button")
   attr(:tone, :atom, default: :primary, values: [:primary, :secondary, :danger, :ghost])
   attr(:class, :any, default: nil)
+  attr(:disabled, :boolean, default: false)
   attr(:rest, :global)
   slot(:inner_block, required: true)
 
@@ -44,6 +45,7 @@ defmodule NervesGateWeb.CoreComponents do
     ~H"""
     <button
       type={@type}
+      disabled={@disabled}
       class={[
         "inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-40 phx-submit-loading:cursor-wait phx-submit-loading:opacity-60",
         button_classes(@tone),

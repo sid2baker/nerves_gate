@@ -20,6 +20,7 @@ defmodule NervesGate.Tailscale do
     client = backend()
 
     with :ok <- ensure_started(),
+         :ok <- await_ready(client),
          result <- daemon_call(fn -> client.login(@server, auth_key) end, :authentication_failed),
          :ok <- successful(result),
          result <-
@@ -52,10 +53,41 @@ defmodule NervesGate.Tailscale do
   @spec select_profile(String.t() | nil) :: :ok | {:error, atom()}
   def select_profile(nil), do: :ok
 
-  def select_profile(profile_id) when is_binary(profile_id) do
-    with :ok <- ensure_started() do
-      switch_profile(profile_id)
+  def select_profile(profile_id) when is_binary(profile_id), do: switch_profile(profile_id)
+
+  @doc "Dynamically applies or withdraws subnet routes without changing Tailnet access."
+  @spec configure_subnet_router(boolean(), [String.t()]) ::
+          {:ok, [String.t()]} | {:error, term()}
+  def configure_subnet_router(enabled, routes)
+      when is_boolean(enabled) and is_list(routes) do
+    client = backend()
+    advertised = if enabled, do: routes, else: []
+
+    with :ok <- ensure_started(),
+         :ok <- await_ready(client),
+         :ok <-
+           daemon_call(
+             fn -> client.set(@server, advertise_routes: advertised) end,
+             :route_update_failed
+           ),
+         {:ok, applied} <-
+           daemon_call(fn -> client.advertised_routes(@server) end, :route_status_unavailable),
+         true <- applied == advertised or enabled do
+      {:ok, if(enabled, do: applied, else: routes)}
+    else
+      false -> {:error, :route_withdrawal_failed}
+      {:error, _reason} = error -> error
+      _failure -> {:error, :route_update_failed}
     end
+  end
+
+  def configure_subnet_router(_enabled, _routes), do: {:error, :invalid_routes}
+
+  @doc "Returns advertised, approved, and primary subnet route state."
+  @spec route_status() :: {:ok, map()} | {:error, term()}
+  def route_status do
+    client = backend()
+    daemon_call(fn -> client.route_status(@server) end, :route_status_unavailable)
   end
 
   @doc "Logs into a temporary account profile and returns rollback metadata."
@@ -77,6 +109,7 @@ defmodule NervesGate.Tailscale do
     ]
 
     with :ok <- ensure_started(),
+         :ok <- await_ready(client),
          result <-
            daemon_call(fn -> client.cli(@server, "login", arguments) end, :authentication_failed),
          :ok <- successful(result),
@@ -145,6 +178,7 @@ defmodule NervesGate.Tailscale do
     client = backend()
 
     with :ok <- ensure_started(),
+         :ok <- await_ready(client),
          result <-
            daemon_call(
              fn -> client.cli(@server, "switch", ["--list", "--json"]) end,
@@ -160,17 +194,23 @@ defmodule NervesGate.Tailscale do
   defp switch_profile(profile_id) do
     client = backend()
 
-    client
-    |> daemon_cli("switch", [profile_id], :tailnet_rollback_failed)
-    |> successful()
+    with :ok <- ensure_started(),
+         :ok <- await_ready(client) do
+      client
+      |> daemon_cli("switch", [profile_id], :tailnet_rollback_failed)
+      |> successful()
+    end
   end
 
   defp remove_profile(profile_id) do
     client = backend()
 
-    client
-    |> daemon_cli("switch", ["remove", profile_id], :tailnet_profile_cleanup_failed)
-    |> successful()
+    with :ok <- ensure_started(),
+         :ok <- await_ready(client) do
+      client
+      |> daemon_cli("switch", ["remove", profile_id], :tailnet_profile_cleanup_failed)
+      |> successful()
+    end
   end
 
   defp maybe_remove_candidate(candidate, previous)
@@ -181,6 +221,13 @@ defmodule NervesGate.Tailscale do
 
   defp daemon_cli(client, command, arguments, fallback) do
     daemon_call(fn -> client.cli(@server, command, arguments) end, fallback)
+  end
+
+  defp await_ready(client) do
+    daemon_call(
+      fn -> client.await_ready(@server, timeout: 10_000) end,
+      :daemon_not_ready
+    )
   end
 
   defp backend, do: Application.get_env(:nerves_gate, :tailscale_backend, Elixir.Tailscale)
