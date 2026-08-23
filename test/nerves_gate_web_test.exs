@@ -98,11 +98,13 @@ defmodule NervesGateWebTest do
     end)
   end
 
-  test "acceptance from a fresh Tailnet request redirects to status" do
+  test "acceptance redirects both the fresh request and an open editor to status" do
     with_acceptance_candidate(fn id ->
+      {:ok, editor, _html} = live(build_conn(), "/commissioning")
       connection = build_conn() |> get("/commissioning?accept=#{id}")
 
       assert redirected_to(connection) == "/"
+      assert_redirect(editor, "/")
       assert Server.configured?()
       assert Server.configuration().pending == nil
     end)
@@ -237,6 +239,25 @@ defmodule NervesGateWebTest do
   test "ordinary uplink addresses cannot visit management routes" do
     connection = %{build_conn() | remote_ip: {192, 168, 1, 50}}
     assert connection |> get("/api/status") |> response(403)
+  end
+
+  test "development setup network can observe status but not peer discovery" do
+    previous = Application.get_env(:nerves_gate, :local_dashboard)
+    Application.put_env(:nerves_gate, :local_dashboard, true)
+
+    try do
+      with_configured(true, fn ->
+        connection = %{build_conn() | remote_ip: {192, 168, 77, 2}}
+        assert connection |> get("/api/status") |> json_response(200)
+
+        connection = %{build_conn() | remote_ip: {192, 168, 77, 2}}
+        assert connection |> get("/api/discovery") |> response(403)
+      end)
+    after
+      if is_nil(previous),
+        do: Application.delete_env(:nerves_gate, :local_dashboard),
+        else: Application.put_env(:nerves_gate, :local_dashboard, previous)
+    end
   end
 
   test "status API exposes the slot configuration without credentials" do
@@ -384,7 +405,6 @@ defmodule NervesGateWebTest do
       |> Map.put(:subnet_router, subnet_router)
       |> Map.put(:ssh, fn _enabled -> :ok end)
       |> Map.put(:tailnet_restore, fn _profile -> :ok end)
-      |> Map.put(:poll_tailnet, fn -> :ok end)
 
     :sys.replace_state(Server, fn state ->
       %{state | root: root, current: current, pending: nil, ops: ops}

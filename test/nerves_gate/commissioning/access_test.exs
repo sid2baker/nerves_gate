@@ -26,6 +26,10 @@ defmodule NervesGate.Commissioning.AccessTest do
     assert Enum.all?(active, &String.starts_with?(&1.address, "192.168."))
     assert Enum.find(active, &(&1.interface == "wlan0")).ssid =~ "NervesGate-"
 
+    calls = TestInternetAdapter.state().calls
+    assert {:ok, ^active} = Access.enable(:commissioning, "eth0", pid)
+    assert TestInternetAdapter.state().calls == calls
+
     assert :ok = Access.release("eth1", pid)
     assert Enum.map(Access.status(pid).active, & &1.interface) == ["wlan0"]
     assert :ok = Access.disable(pid)

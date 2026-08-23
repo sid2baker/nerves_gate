@@ -83,6 +83,7 @@ defmodule NervesGate.Status do
       peers: Map.get(diagnostics, :peers, []),
       nodes: Map.get(diagnostics, :nodes, []),
       subnet_router: data.subnet_router,
+      health: Map.get(diagnostics, :health),
       error: if(data.tailnet.status == :online, do: nil, else: data.tailnet.status)
     }
   end

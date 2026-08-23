@@ -513,6 +513,8 @@ defmodule NervesGate.DeviceState.Data do
 
   defp subnet_router_actions(%{enabled: false, advertised: [], error: nil}), do: []
 
+  defp subnet_router_actions(%{enabled: false, advertised: []}), do: []
+
   defp subnet_router_actions(%{enabled: true, routes: routes, advertised: routes, error: nil}),
     do: []
 

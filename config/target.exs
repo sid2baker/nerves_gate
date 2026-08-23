@@ -12,12 +12,10 @@ config :logger, backends: [RingLogger]
 
 config :shoehorn, init: [:nerves_runtime, :vintage_net]
 
-# Enable the system startup guard to check that all OTP applications
-# started. If they didn't and you're on a Nerves system that supports
-# test runs of new firmware, the firmware will automatically roll
-# back to the previous version. Delete this if implementing your own
-# way of validating that firmware is good.
-config :nerves_runtime, startup_guard_enabled: true
+# This custom GRUB system does not yet implement trial-boot validation or
+# automatic fallback. Enabling StartupGuard makes a normal QEMU boot exhaust
+# validation retries and reboot, so leave it disabled until GRUB supports it.
+config :nerves_runtime, startup_guard_enabled: false
 
 # Erlinit can be configured without a rootfs_overlay. See
 # https://github.com/nerves-project/erlinit/ for more information on

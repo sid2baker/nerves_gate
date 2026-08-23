@@ -436,6 +436,13 @@ defmodule NervesGateWeb.CommissioningLive do
     {:noreply, socket}
   end
 
+  def handle_info(
+        {:configuration_changed, %{configured: true, pending: nil}},
+        %{assigns: %{mode: :editor}} = socket
+      ) do
+    {:noreply, redirect(socket, to: ~p"/")}
+  end
+
   def handle_info(_event, socket), do: {:noreply, refresh(socket)}
 
   defp refresh(socket) do

@@ -1,118 +1,109 @@
 defmodule NervesGate.TestTailscaleClient do
   @moduledoc false
 
-  def start_link(initial \\ {:error, :offline}) do
-    Agent.start_link(fn -> initial end, name: __MODULE__)
+  alias Tailscale.Preferences
+  alias Tailscale.Profile
+  alias Tailscale.Status
+
+  def start_link(initial \\ %{}) do
+    Agent.start_link(fn -> defaults() |> Map.merge(initial) end, name: __MODULE__)
   end
 
-  def reset(initial) do
+  def reset(initial \\ %{}) do
     if Process.whereis(__MODULE__), do: Agent.stop(__MODULE__)
     start_link(initial)
   end
 
-  def put(result), do: Agent.update(__MODULE__, fn _old -> result end)
-  def status, do: Agent.get(__MODULE__, & &1)
-  def status(_server), do: status()
-  def login(_server, _auth_key), do: Agent.get(__MODULE__, &Map.get(elem(&1, 1), :login, &1))
-  def await_ready(_server, _options), do: :ok
+  def state, do: Agent.get(__MODULE__, & &1)
+  def put(key, value), do: Agent.update(__MODULE__, &Map.put(&1, key, value))
 
-  def set(_server, advertise_routes: routes) do
-    Agent.get_and_update(__MODULE__, fn
-      {:ok, raw} -> {:ok, {:ok, Map.put(raw, :advertised_routes, routes)}}
-      error -> {error, error}
+  def await_ready(_options), do: result(:await_ready)
+  def await_online(_options), do: result(:await_online)
+
+  def login(options) do
+    Agent.get_and_update(__MODULE__, fn state ->
+      case state.login do
+        :ok ->
+          profiles =
+            state.profiles
+            |> Enum.map(&%{&1 | selected?: false})
+            |> then(
+              &[
+                %Profile{
+                  id: "candidate-profile",
+                  nickname: Keyword.get(options, :nickname),
+                  selected?: true
+                }
+                | &1
+              ]
+            )
+
+          {:ok, %{state | profiles: profiles}}
+
+        error ->
+          {error, state}
+      end
     end)
   end
 
-  def advertised_routes(_server) do
-    Agent.get(__MODULE__, fn
-      {:ok, raw} -> {:ok, Map.get(raw, :advertised_routes, [])}
-      error -> error
+  def profiles, do: Agent.get(__MODULE__, &{:ok, &1.profiles})
+
+  def current_profile do
+    Agent.get(__MODULE__, fn state ->
+      case Enum.filter(state.profiles, & &1.selected?) do
+        [profile] -> {:ok, profile}
+        [] -> {:error, :no_current_profile}
+        _profiles -> {:error, :multiple_current_profiles}
+      end
     end)
   end
 
-  def route_status, do: route_status(__MODULE__)
-
-  def route_status(_server) do
-    Agent.get(__MODULE__, fn
-      {:ok, raw} ->
-        advertised = Map.get(raw, :advertised_routes, [])
-
-        {:ok,
-         %{
-           advertised: advertised,
-           approved: Map.get(raw, :approved_routes, advertised),
-           primary: Map.get(raw, :primary_routes, advertised)
-         }}
-
-      error ->
-        error
+  def switch_profile(profile_id) do
+    Agent.update(__MODULE__, fn state ->
+      %{state | profiles: Enum.map(state.profiles, &%{&1 | selected?: &1.id == profile_id})}
     end)
   end
 
-  def cli(_server, "switch", ["--list", "--json"]) do
-    Agent.get(__MODULE__, fn
-      {:ok, raw} -> {:ok, Map.get(raw, :profiles, [])}
-      error -> error
+  def remove_profile(profile_id) do
+    Agent.update(__MODULE__, fn state ->
+      %{state | profiles: Enum.reject(state.profiles, &(&1.id == profile_id))}
     end)
   end
 
-  def cli(_server, "login", arguments) do
-    nickname =
-      arguments
-      |> Enum.find(&String.starts_with?(&1, "--nickname="))
-      |> then(fn
-        nil -> "candidate"
-        value -> String.replace_prefix(value, "--nickname=", "")
-      end)
+  def set(changes) do
+    Agent.update(__MODULE__, fn state ->
+      preferences =
+        Enum.reduce(changes, state.preferences, fn
+          {:hostname, value}, preferences -> %{preferences | hostname: value}
+          {:accept_dns, value}, preferences -> %{preferences | accept_dns: value}
+          {:ssh, value}, preferences -> %{preferences | ssh: value}
+          {:advertise_routes, value}, preferences -> %{preferences | advertised_routes: value}
+        end)
 
-    Agent.update(__MODULE__, fn {:ok, raw} ->
-      profiles =
-        raw
-        |> Map.get(:profiles, [])
-        |> Enum.map(&Map.put(&1, "selected", false))
-        |> then(
-          &[%{"id" => "candidate-profile", "nickname" => nickname, "selected" => true} | &1]
-        )
-
-      {:ok, raw |> Map.put(:profiles, profiles) |> Map.put("Self", %{"Online" => true})}
+      %{state | preferences: preferences}
     end)
-
-    {:ok, "ok"}
   end
 
-  def cli(_server, "switch", ["remove", profile_id]) do
-    Agent.update(__MODULE__, fn {:ok, raw} ->
-      {:ok,
-       Map.update(
-         raw,
-         :profiles,
-         [],
-         &Enum.reject(&1, fn profile -> profile["id"] == profile_id end)
-       )}
-    end)
+  def status, do: Agent.get(__MODULE__, &{:ok, &1.status})
+  def advertised_routes, do: Agent.get(__MODULE__, &{:ok, &1.preferences.advertised_routes})
 
-    {:ok, "ok"}
+  def route_status do
+    Agent.get(__MODULE__, fn state ->
+      routes = state.preferences.advertised_routes
+      {:ok, %{advertised: routes, approved: routes, primary: routes}}
+    end)
   end
 
-  def cli(_server, "switch", [profile_id]) do
-    Agent.update(__MODULE__, fn {:ok, raw} ->
-      profiles =
-        raw
-        |> Map.get(:profiles, [])
-        |> Enum.map(&Map.put(&1, "selected", &1["id"] == profile_id))
+  defp result(key), do: Agent.get(__MODULE__, &Map.fetch!(&1, key))
 
-      {:ok, Map.put(raw, :profiles, profiles)}
-    end)
-
-    {:ok, "ok"}
+  defp defaults do
+    %{
+      await_ready: :ok,
+      await_online: :ok,
+      login: :ok,
+      profiles: [],
+      preferences: %Preferences{},
+      status: %Status{}
+    }
   end
-
-  def cli(_server, _command, _arguments), do: {:ok, "ok"}
-end
-
-defmodule NervesGate.TestTailscaleManager do
-  @moduledoc false
-
-  def ensure_started, do: :ok
-  def repair, do: :ok
 end

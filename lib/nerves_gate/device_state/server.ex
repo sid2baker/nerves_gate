@@ -509,22 +509,12 @@ defmodule NervesGate.DeviceState.Server do
     state =
       state
       |> apply_valid_local_operation({:set_tailnet, :tailnet, tailnet_data(status)})
-      |> restore_tailnet_profile()
       |> apply_valid_local_operation(
         {:observe_subnet_router, :subnet_router, subnet_router_observation(status)}
       )
 
     {:noreply, state}
   end
-
-  defp restore_tailnet_profile(%{pending: nil} = state) do
-    case state.ops.tailnet_restore.(tailnet_profile(state.current)) do
-      :ok -> clear_tailnet_activation_error(state)
-      {:error, reason} -> %{state | last_error: {:tailnet_activation_failed, reason}}
-    end
-  end
-
-  defp restore_tailnet_profile(state), do: state
 
   defp maybe_apply_local_operation(state, nil), do: state
 
@@ -581,7 +571,6 @@ defmodule NervesGate.DeviceState.Server do
               |> apply_valid_local_operation({:fail_subnet_router, :subnet_router, :apply_failed})
           end
 
-        state.ops.poll_tailnet.()
         state
 
       {:configure_ssh, enabled}, state ->
@@ -692,25 +681,6 @@ defmodule NervesGate.DeviceState.Server do
     %{advertised: [], approved: [], primary: [], error: :unavailable}
   end
 
-  defp clear_tailnet_activation_error(
-         %{last_error: {:tailnet_activation_failed, _reason}} = state
-       ),
-       do: %{state | last_error: nil}
-
-  defp clear_tailnet_activation_error(%{last_error: {:activation_failed, failures}} = state) do
-    case Keyword.drop(failures, [:tailnet, :subnet_router]) do
-      [] -> %{state | last_error: nil}
-      remaining -> %{state | last_error: {:activation_failed, remaining}}
-    end
-  end
-
-  defp clear_tailnet_activation_error(
-         %{last_error: {:subnet_router_activation_failed, _reason}} = state
-       ),
-       do: %{state | last_error: nil}
-
-  defp clear_tailnet_activation_error(state), do: state
-
   defp subnet_router_error(state, reason),
     do: %{state | last_error: {:subnet_router_activation_failed, reason}}
 
@@ -738,7 +708,6 @@ defmodule NervesGate.DeviceState.Server do
     case Persistence.write_candidate(candidate, state.root) do
       :ok ->
         cleanup_result = cleanup_replaced_tailnet(state, pending.candidate, candidate)
-        state.ops.poll_tailnet.()
         next_phase = if pending.phase == :tailnet, do: :cluster, else: pending.phase
 
         state =

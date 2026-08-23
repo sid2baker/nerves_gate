@@ -40,7 +40,6 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
         send(owner, {:rollback_tailnet, metadata})
         :ok
       end,
-      poll_tailnet: fn -> :ok end,
       subnet_router: fn enabled, routes ->
         send(owner, {:subnet_router, enabled, routes})
 
@@ -265,7 +264,7 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
   test "subnet settings are durable before their reducer action executes", context do
     owner = self()
 
-    subnet_router = fn enabled, routes ->
+    subnet_router = fn _enabled, routes ->
       {:ok, settings} =
         Storage.read_json(
           Persistence.settings_path("a", context.root),
@@ -421,6 +420,26 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
              Path.wildcard(Persistence.settings_path("a", context.root) <> ".corrupt-*")
   end
 
+  test "Tailnet observations do not reselect the accepted profile", context do
+    server = start_server(context)
+    :ok = accept_initial(server)
+    flush_tailnet_restores()
+
+    send(server, {
+      :tailnet_changed,
+      %{
+        online: true,
+        authenticated: true,
+        hostname: "nervesgate-test",
+        ipv4: "100.84.12.7",
+        subnet_router: %{advertised: [], approved: [], primary: [], error: nil}
+      }
+    })
+
+    assert_eventually(fn -> Server.data(server).tailnet.ipv4 == "100.84.12.7" end)
+    refute_receive {:tailnet_restore, _profile_id}, 100
+  end
+
   test "a newly booted firmware slot inherits and retags the other slot", context do
     server = start_server(context)
     {:ok, pending} = stage_complete(server)
@@ -496,6 +515,14 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
 
   defp tag(slot, uuid), do: %{"slot" => slot, "uuid" => uuid, "version" => "1.0.0"}
   defp tailnet_connection(id), do: %{id: id, tailnet?: true}
+
+  defp flush_tailnet_restores do
+    receive do
+      {:tailnet_restore, _profile_id} -> flush_tailnet_restores()
+    after
+      0 -> :ok
+    end
+  end
 
   defp settings(root, slot) do
     {:ok, value} =

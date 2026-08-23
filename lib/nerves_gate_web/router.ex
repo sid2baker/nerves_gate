@@ -44,8 +44,12 @@ defmodule NervesGateWeb.Router do
   end
 
   scope "/api", NervesGateWeb do
-    pipe_through([:api, :tailnet])
+    pipe_through([:api, :home_access])
     get("/status", StatusController, :show)
+  end
+
+  scope "/api", NervesGateWeb do
+    pipe_through([:api, :tailnet])
     get("/discovery", DiscoveryController, :show)
   end
 

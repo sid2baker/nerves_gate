@@ -26,10 +26,15 @@ defmodule NervesGate.SSH.ConfigurationTest do
     refute target_config =~ ":nerves_pack"
   end
 
-  test "the Tailscale boundary never enables Tailscale SSH" do
-    tailscale_boundary = File.read!("lib/nerves_gate/tailscale.ex")
+  test "Tailnet effects explicitly keep Tailscale SSH disabled" do
+    enrollment = File.read!("lib/nerves_gate/tailnet/enrollment.ex")
+    effects = File.read!("lib/nerves_gate/gateway/effects.ex")
+    sources = enrollment <> effects
 
-    refute tailscale_boundary =~ "--ssh"
-    refute tailscale_boundary =~ "RunSSH"
+    assert enrollment =~ "client.set(ssh: false)"
+    assert effects =~ "Tailscale.set(ssh: false"
+    refute sources =~ "ssh: true"
+    refute sources =~ "--ssh"
+    refute sources =~ "RunSSH"
   end
 end

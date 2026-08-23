@@ -2,59 +2,50 @@ defmodule NervesGate.Tailnet.ObserverTest do
   use ExUnit.Case
 
   alias NervesGate.Tailnet.Observer
-  alias NervesGate.TestTailscaleClient
+  alias Tailscale.Peer
+  alias Tailscale.Status
 
-  setup do
-    {:ok, _pid} = TestTailscaleClient.reset({:error, :offline})
+  test "projects typed self and peer state for NervesGate consumers" do
+    projected = Observer.project(online_status())
 
-    on_exit(fn -> stop_if_running(TestTailscaleClient) end)
-
-    :ok
+    assert projected.online
+    assert projected.authenticated
+    assert projected.ipv4 == "100.64.0.10"
+    assert [_, _, _] = projected.peers
+    assert [_, _, _] = projected.nodes
+    assert Enum.any?(projected.nodes, &(&1.hostname == "nervesgate-m02"))
+    refute Enum.any?(projected.nodes, &(&1.hostname == "technician-laptop"))
   end
 
-  test "normalizes self state and keeps peers as diagnostics only" do
-    normalized = Observer.normalize(online_status())
+  test "unknown and invalid addresses remain safely offline" do
+    projected = Observer.project(%Status{backend_state: :starting})
+    refute projected.online
+    assert projected.authenticated == :unknown
+    assert projected.peers == []
+    assert projected.nodes == []
 
-    assert normalized.online
-    assert normalized.ipv4 == "100.64.0.10"
-
-    assert Map.keys(normalized) |> Enum.sort() ==
-             Enum.sort([
-               :authenticated,
-               :error,
-               :hostname,
-               :ipv4,
-               :nodes,
-               :online,
-               :peers,
-               :subnet_router
-             ])
-
-    assert Enum.count(normalized.peers) == 3
-    assert Enum.count(normalized.nodes) == 3
+    projected = Observer.project(%Status{online: true, ipv4: "192.168.1.10"})
+    refute projected.online
+    assert projected.ipv4 == nil
+    assert projected.error == :address_unavailable
   end
 
-  test "partially populated status during daemon startup is safe" do
-    raw = put_in(online_status(), ["Self", "TailscaleIPs"], nil)
-    normalized = Observer.normalize(raw)
-
-    refute normalized.online
-    assert normalized.ipv4 == nil
-  end
-
-  test "route advertisement and approval changes are observed centrally" do
+  test "subscribed status and explicit route refreshes are broadcast" do
     Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
-    TestTailscaleClient.put({:ok, online_status()})
-    {:ok, observer} = start_observer()
+    {:ok, routes} = Agent.start_link(fn -> [] end)
 
-    assert_receive {:tailnet_changed, %{subnet_router: %{advertised: []}}}, 500
+    route_status = fn ->
+      current = Agent.get(routes, & &1)
+      {:ok, %{advertised: current, approved: current, primary: current}}
+    end
 
-    assert :ok =
-             TestTailscaleClient.set(TestTailscaleClient,
-               advertise_routes: ["192.168.10.0/24"]
-             )
+    {:ok, observer} = start_observer(route_status: route_status)
+    send(observer, {:tailscale, :status_changed, 1, online_status()})
 
-    Observer.poll_now(observer)
+    assert_receive {:tailnet_changed, %{online: true, subnet_router: %{advertised: []}}}, 500
+
+    Agent.update(routes, fn _old -> ["192.168.10.0/24"] end)
+    Observer.refresh(observer)
 
     assert_receive {:tailnet_changed,
                     %{
@@ -67,62 +58,55 @@ defmodule NervesGate.Tailnet.ObserverTest do
                    500
   end
 
-  test "loss and recovery of Tailscale are broadcast without crashing observers" do
+  test "loss and recovery are driven by normalized library subscriptions" do
     Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
-    TestTailscaleClient.put({:ok, online_status()})
     {:ok, observer} = start_observer()
 
+    send(observer, {:tailscale, :status_changed, 1, online_status()})
     assert_receive {:tailnet_changed, %{online: true}}, 500
-    TestTailscaleClient.put({:error, :daemon_crashed})
-    Observer.poll_now(observer)
+
+    send(observer, {:tailscale, :status_changed, 2, Status.unknown()})
     assert_receive {:tailnet_changed, %{online: false, error: :status_unavailable}}, 500
 
-    TestTailscaleClient.put({:ok, online_status()})
-    Observer.poll_now(observer)
+    send(observer, {:tailscale, :status_changed, 3, online_status()})
     assert_receive {:tailnet_changed, %{online: true}}, 500
   end
 
-  defp stop_if_running(name) do
-    if pid = Process.whereis(name), do: GenServer.stop(pid)
-  catch
-    :exit, _reason -> :ok
-  end
-
-  defp start_observer do
+  defp start_observer(options \\ []) do
     name = String.to_atom("tailscale_observer_#{System.unique_integer([:positive])}")
-    Observer.start_link(name: name, client: TestTailscaleClient, poll_interval: 60_000)
+
+    Observer.start_link(Keyword.merge([name: name, enabled: true, subscribe: false], options))
   end
 
   defp online_status do
-    %{
-      "BackendState" => "Running",
-      "Self" => %{
-        "Online" => true,
-        "HostName" => "nervesgate-m01",
-        "TailscaleIPs" => ["100.64.0.10", "fd7a:115c:a1e0::10"]
-      },
-      "Peer" => %{
-        "peer-1" => %{
-          "Online" => true,
-          "HostName" => "nervesgate-m02",
-          "DNSName" => "nervesgate-m02.example.ts.net.",
-          "TailscaleIPs" => ["100.64.0.11"]
+    %Status{
+      backend_state: :running,
+      authenticated: true,
+      online: true,
+      hostname: "nervesgate-m01",
+      ipv4: "100.64.0.10",
+      ipv6: "fd7a:115c:a1e0::10",
+      peers: [
+        %Peer{
+          id: "peer-1",
+          online: true,
+          hostname: "nervesgate-m02",
+          dns_name: "nervesgate-m02.example.ts.net.",
+          ipv4: "100.64.0.11"
         },
-        "peer-2" => %{
-          "Online" => false,
-          "HostName" => "nervesgate-m03",
-          "TailscaleIPs" => ["100.64.0.12"]
+        %Peer{
+          id: "peer-2",
+          online: false,
+          hostname: "nervesgate-m03",
+          ipv4: "100.64.0.12"
         },
-        "laptop" => %{
-          "Online" => true,
-          "HostName" => "technician-laptop",
-          "UserID" => 42,
-          "TailscaleIPs" => ["100.64.0.20"]
+        %Peer{
+          id: "laptop",
+          online: true,
+          hostname: "technician-laptop",
+          ipv4: "100.64.0.20"
         }
-      },
-      "User" => %{
-        "42" => %{"DisplayName" => "Ada Operator", "LoginName" => "ada@example.com"}
-      }
+      ]
     }
   end
 end

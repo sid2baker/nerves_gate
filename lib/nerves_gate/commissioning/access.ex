@@ -42,31 +42,15 @@ defmodule NervesGate.Commissioning.Access do
 
   @impl true
   def handle_call({:enable, mode, uplink}, _from, state) do
-    Enum.each(state.active, &state.adapter.clear(&1.interface))
+    desired = desired_configurations(state.hardware.(), uplink)
 
-    interfaces = state.hardware.()
-    candidates = commissioning_candidates(interfaces, uplink)
-
-    active =
-      candidates
-      |> Enum.with_index()
-      |> Enum.flat_map(fn {interface, index} ->
-        options = commissioning_options(interface, index)
-
-        case state.adapter.configure_commissioning(interface.name, options) do
-          :ok -> [Map.put(options, :interface, interface.name)]
-          {:error, _reason} -> []
-        end
-      end)
-
-    case active do
-      [] ->
-        Alarms.unavailable(true)
-        {:reply, {:error, :no_interface}, %{state | active: [], mode: mode}}
-
-      available ->
-        Alarms.unavailable(false)
-        {:reply, {:ok, available}, %{state | active: available, mode: mode}}
+    if desired != [] and state.mode == mode and state.active == desired do
+      Alarms.unavailable(false)
+      {:reply, {:ok, desired}, state}
+    else
+      Enum.each(state.active, &state.adapter.clear(&1.interface))
+      active = configure_available(desired, state.adapter)
+      reply_enabled(active, mode, state)
     end
   end
 
@@ -99,6 +83,35 @@ defmodule NervesGate.Commissioning.Access do
   defp ethernet_priority(%{name: "eth1"}), do: 0
   defp ethernet_priority(%{name: "eth2"}), do: 1
   defp ethernet_priority(%{name: name}), do: {2, name}
+
+  defp desired_configurations(interfaces, uplink) do
+    interfaces
+    |> commissioning_candidates(uplink)
+    |> Enum.with_index()
+    |> Enum.map(fn {interface, index} ->
+      interface
+      |> commissioning_options(index)
+      |> Map.put(:interface, interface.name)
+    end)
+  end
+
+  defp configure_available(configurations, adapter) do
+    Enum.filter(configurations, fn configuration ->
+      %{interface: interface} = configuration
+      options = Map.delete(configuration, :interface)
+      adapter.configure_commissioning(interface, options) == :ok
+    end)
+  end
+
+  defp reply_enabled([], mode, state) do
+    Alarms.unavailable(true)
+    {:reply, {:error, :no_interface}, %{state | active: [], mode: mode}}
+  end
+
+  defp reply_enabled(active, mode, state) do
+    Alarms.unavailable(false)
+    {:reply, {:ok, active}, %{state | active: active, mode: mode}}
+  end
 
   defp commissioning_options(%{kind: kind}, index) do
     third_octet = 77 + index

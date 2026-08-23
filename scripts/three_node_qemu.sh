@@ -17,14 +17,9 @@ index_of() {
 }
 
 print_location() {
-  local node=$1 state=$2 i tailnet_file="$STATE/$1.tailnet-ip"
+  local node=$1 state=$2 i
   i=$(index_of "$node")
-
-  if test -s "$tailnet_file"; then
-    echo "$node $state; local dashboard: http://127.0.0.1:${ports[$i]}/; tailnet dashboard: http://$(tr -d '\r\n' <"$tailnet_file")/"
-  else
-    echo "$node $state; local setup/dashboard: http://127.0.0.1:${ports[$i]}/"
-  fi
+  echo "$node $state; local setup/dashboard: http://127.0.0.1:${ports[$i]}/"
 }
 
 prepare_node() {
@@ -38,11 +33,12 @@ prepare_node() {
 }
 
 start_node() {
-  local node=$1 i port disk pidfile accel=()
+  local node=$1 i port disk pidfile serial_socket accel=()
   i=$(index_of "$node")
   port=${ports[$i]}
   disk="$STATE/$node.img"
   pidfile="$STATE/$node.pid"
+  serial_socket="$STATE/$node.serial.sock"
   prepare_node "$node"
 
   if test -f "$pidfile" && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
@@ -51,9 +47,11 @@ start_node() {
   fi
 
   test -r /dev/kvm && accel=(-enable-kvm)
+  rm -f "$serial_socket"
 
   "$QEMU" "${accel[@]}" -machine q35 -m 1024 -smp 2 -display none -monitor none \
-    -serial "file:$STATE/$node.serial.log" -no-reboot -uuid "${uuids[$i]}" \
+    -chardev "socket,id=serial$i,path=$serial_socket,server=on,wait=off,logfile=$STATE/$node.serial.log,logappend=on" \
+    -serial "chardev:serial$i" -no-reboot -uuid "${uuids[$i]}" \
     -drive "file=$disk,if=virtio,format=raw" \
     -netdev "user,id=uplink$i" \
     -device "virtio-net-pci,netdev=uplink$i,mac=${macs[$i]}" \
@@ -75,6 +73,7 @@ stop_node() {
     done
     rm -f "$pidfile"
   fi
+  rm -f "$STATE/$node.serial.sock"
   echo "$node stopped"
 }
 
@@ -91,8 +90,8 @@ case "$command" in
   reset)
     for node in "${selected[@]}"; do
       stop_node "$node"
-      rm -f "$STATE/$node.img" "$STATE/$node.serial.log" "$STATE/$node.qemu.log" \
-        "$STATE/$node.tailnet-ip"
+      rm -f "$STATE/$node.img" "$STATE/$node.serial.log" "$STATE/$node.serial.sock" \
+        "$STATE/$node.qemu.log"
       prepare_node "$node"
     done
     ;;

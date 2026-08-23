@@ -139,6 +139,17 @@ defmodule NervesGate.DeviceState.DataTest do
     assert configured == replica
   end
 
+  test "disabled subnet routing does not reapply an empty withdrawal on observations" do
+    operation =
+      {:observe_subnet_router, :subnet_router,
+       %{advertised: [], approved: [], primary: [], error: :unavailable}}
+
+    assert {:ok, observed, actions} = Data.apply_operation(data(), operation)
+    assert observed.subnet_router.status == :disabled
+    assert :broadcast in actions
+    refute Enum.any?(actions, &match?({:apply_subnet_router, _, _}, &1))
+  end
+
   test "SSH configuration returns a local action that replicas can discard" do
     operation = {:configure_ssh, :ssh, %{enabled: true}}
 

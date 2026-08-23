@@ -79,7 +79,6 @@ config :nerves_gate,
   },
   distribution_port: 43_769,
   cluster_poll_interval: 5_000,
-  tailnet_repair_failures: 6,
   alarm_timings: %{
     failure_debounce: 30_000,
     flapping_count: 4,

@@ -55,7 +55,7 @@ Commissioning.Access
         ↓
 Internet.Manager → Internet.Monitor
         ↓
-Tailnet.Manager  → Tailnet.Observer → SSH.Manager
+tailscale_ex → Tailnet.Observer → SSH.Manager
         ↓
 Cluster.Manager
         ↓
@@ -69,11 +69,12 @@ secret-free `DeviceState.Data` is changed through ordered pure reducer
 operations and sent to joined peers. Clients apply the same operations but never
 execute the returned local actions.
 
-The subsystem managers own runtime processes only. They do not persist their
-own configuration or implement candidate state machines. `Gateway.Settings`,
-`Gateway.Persistence`, and `Gateway.Effects` are private helpers used by the
-server. A single change signal inhibits expected connectivity alarms while a
-remote-access candidate is active.
+`tailscale_ex` owns `tailscaled`, command scheduling, typed status, health,
+profiles, preferences, readiness, and subscriptions. `Tailnet.Observer` is only
+a small projection into NervesGate's public state and PubSub topics; it does not
+poll or repair the daemon. `Gateway.Settings`, `Gateway.Persistence`, and
+`Gateway.Effects` are private helpers used by the server. A single change signal
+inhibits expected connectivity alarms while a remote-access candidate is active.
 
 Kernel forwarding is immutable platform policy in `/etc/sysctl.conf`, loaded by
 `nerves_runtime` before this application starts.
@@ -182,6 +183,9 @@ boot fallback remains separate system-level work.
 ```sh
 mix nerves_gate.qemu setup
 mix nerves_gate.qemu status
+mix nerves_gate.qemu observe   # runtime, discovery, distribution, and replicas
+mix nerves_gate.qemu observe --json
+mix nerves_gate.qemu logs      # follow all serial logs
 mix nerves_gate.qemu stop
 mix nerves_gate.qemu restart   # preserves disks and settings slots
 mix nerves_gate.qemu reset     # deletes disks
@@ -197,9 +201,13 @@ M03  http://127.0.0.1:4003/   commissioning: http://127.0.0.1:4003/commissioning
 
 Each VM has unique identifiers, a NAT uplink, an isolated commissioning NIC, and
 a persistent disk under `tmp/qemu`. Gateways discover peers over the Tailnet and
-connect when their public groups match. Tailscale grants must allow gateway tags
-to reach TCP ports `4369` and `43769` while ordinary dashboard clients should
-not receive those grants.
+connect when their public groups match. `observe` reads each development VM's
+secret-free status API through its local forward; use
+`watch -n 2 mix nerves_gate.qemu observe` to follow convergence.
+
+Tailscale grants must allow gateway tags to reach other gateways on TCP port `80`
+for group discovery and ports `4369` and `43769` for Erlang distribution.
+Ordinary dashboard clients should not receive the distribution-port grants.
 
 ## Verification
 
