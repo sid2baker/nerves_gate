@@ -10,6 +10,7 @@ defmodule NervesGate.StatusTest do
     assert snapshot.device_state.local.device_id == data.device_id
     assert snapshot.device["name"] == data.name
     assert snapshot.alarms == data.alarms
+    assert snapshot.ssh == data.ssh
     refute Map.has_key?(snapshot.device_state.local, :cookie)
     assert Map.has_key?(snapshot.device_state.local.cluster, :group)
   end

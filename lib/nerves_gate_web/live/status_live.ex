@@ -9,6 +9,7 @@ defmodule NervesGateWeb.StatusLive do
   alias NervesGate.DeviceState.Server
   alias NervesGate.Internet.Manager, as: InternetManager
   alias NervesGate.Internet.Monitor
+  alias NervesGate.SSH
   alias NervesGate.Tailnet.Observer
   alias NervesGateWeb.Presence
   alias NervesGateWeb.StatusLive.Render
@@ -108,6 +109,32 @@ defmodule NervesGateWeb.StatusLive do
          |> put_flash(:error, subnet_router_error(reason))
          |> rejoin_local()
          |> refresh_context()}
+    end
+  end
+
+  def handle_event("enable-ssh", _params, socket) do
+    case SSH.enable() do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Remote IEx enabled for Tailnet clients.")
+         |> rejoin_local()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, ssh_error(reason))}
+    end
+  end
+
+  def handle_event("disable-ssh", _params, socket) do
+    case SSH.disable() do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Remote IEx disabled.")
+         |> rejoin_local()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, ssh_error(reason))}
     end
   end
 
@@ -246,6 +273,11 @@ defmodule NervesGateWeb.StatusLive do
 
   defp subnet_router_error(_reason),
     do: "The subnet-router change could not be applied. Remote gateway access is unchanged."
+
+  defp ssh_error(:configuration_change_in_progress),
+    do: "Finish or reject the remote-access change before changing Remote IEx."
+
+  defp ssh_error(_reason), do: "Remote IEx could not be changed."
 
   defp diagnostics do
     {uptime, _since_last_call} = :erlang.statistics(:wall_clock)

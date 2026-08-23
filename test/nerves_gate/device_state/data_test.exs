@@ -25,6 +25,9 @@ defmodule NervesGate.DeviceState.DataTest do
          primary: ["192.168.10.0/24"],
          error: nil
        }},
+      {:configure_ssh, :ssh, %{enabled: true}},
+      {:observe_ssh, :ssh,
+       %{enabled: true, state: :listening, address: {100, 64, 0, 10}, port: 22}},
       {:set_cluster, :cluster,
        %{
          runtime_status: :online,
@@ -46,6 +49,7 @@ defmodule NervesGate.DeviceState.DataTest do
     assert owner.internet.status == :online
     assert owner.tailnet.status == :online
     assert owner.subnet_router.status == :online
+    assert owner.ssh.state == :listening
     assert owner.cluster.status == :online
   end
 
@@ -133,6 +137,50 @@ defmodule NervesGate.DeviceState.DataTest do
 
     assert {:ok, replica, _discarded_actions} = Data.apply_operation(data(), operation)
     assert configured == replica
+  end
+
+  test "SSH configuration returns a local action that replicas can discard" do
+    operation = {:configure_ssh, :ssh, %{enabled: true}}
+
+    assert {:ok, configured, actions} = Data.apply_operation(data(), operation)
+    assert :broadcast in actions
+    assert {:configure_ssh, true} in actions
+    assert configured.ssh.enabled
+    assert configured.ssh.state == :waiting_for_tailnet
+
+    assert {:ok, replica, _discarded_actions} = Data.apply_operation(data(), operation)
+    assert configured == replica
+  end
+
+  test "SSH observations reject wildcard and non-Tailscale listeners" do
+    data =
+      data()
+      |> apply!(
+        {:set_tailnet, :tailnet,
+         %{
+           observed_status: :online,
+           authenticated: true,
+           hostname: "gate-a",
+           ipv4: "100.84.12.7"
+         }}
+      )
+      |> apply!({:configure_ssh, :ssh, %{enabled: true}})
+
+    for address <- [:any, {0, 0, 0, 0}, {192, 168, 1, 20}] do
+      operation =
+        {:observe_ssh, :ssh, %{enabled: true, state: :listening, address: address, port: 22}}
+
+      assert :error = Data.apply_operation(data, operation)
+    end
+
+    online =
+      apply!(
+        data,
+        {:observe_ssh, :ssh,
+         %{enabled: true, state: :listening, address: {100, 84, 12, 7}, port: 22}}
+      )
+
+    assert online.ssh.address == {100, 84, 12, 7}
   end
 
   test "subnet routing accepts only canonical public fields" do

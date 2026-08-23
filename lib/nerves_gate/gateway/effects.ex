@@ -4,6 +4,7 @@ defmodule NervesGate.Gateway.Effects do
   alias NervesGate.Cluster.Manager, as: ClusterManager
   alias NervesGate.Commissioning.Access
   alias NervesGate.Internet.Manager, as: InternetManager
+  alias NervesGate.SSH.Manager, as: SSHManager
   alias NervesGate.Tailnet.Observer
   alias NervesGate.Tailscale
 
@@ -18,6 +19,7 @@ defmodule NervesGate.Gateway.Effects do
       rollback_tailnet: &Tailscale.rollback_enrollment/1,
       poll_tailnet: &Observer.poll_now/0,
       subnet_router: &Tailscale.configure_subnet_router/2,
+      ssh: &SSHManager.set_enabled/1,
       cluster: &ClusterManager.configure/1,
       access: &Access.enable/2,
       disable_access: &Access.disable/0

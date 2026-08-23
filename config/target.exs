@@ -10,7 +10,7 @@ config :logger, backends: [RingLogger]
 # library documentation for more control in ordering how OTP
 # applications are started and handling failures.
 
-config :shoehorn, init: [:nerves_runtime, :nerves_pack]
+config :shoehorn, init: [:nerves_runtime, :vintage_net]
 
 # Enable the system startup guard to check that all OTP applications
 # started. If they didn't and you're on a Nerves system that supports
@@ -25,27 +25,6 @@ config :nerves_runtime, startup_guard_enabled: true
 
 # Advance the system clock on devices without a real-time clock.
 config :nerves, :erlinit, update_clock: true
-
-# Configure the device for SSH IEx prompt access and firmware updates
-#
-# * See https://nerves-ssh.hexdocs.pm/readme.html for general SSH configuration
-# * See https://ssh-subsystem-fwup.hexdocs.pm/readme.html for firmware updates
-
-keys =
-  System.user_home!()
-  |> Path.join(".ssh/id_{rsa,ecdsa,ed25519}.pub")
-  |> Path.wildcard()
-
-if keys == [],
-  do:
-    Mix.raise("""
-    No SSH public keys found in ~/.ssh. An ssh authorized key is needed to
-    log into the Nerves device and update firmware on it using ssh.
-    See your project's config.exs for this error message.
-    """)
-
-config :nerves_ssh,
-  authorized_keys: Enum.map(keys, &File.read!/1)
 
 # Configure the network using vintage_net
 #
@@ -72,19 +51,8 @@ config :mdns_lite,
   hosts: [:hostname, "nerves"],
   ttl: 120,
 
-  # Advertise the following services over mDNS.
-  services: [
-    %{
-      protocol: "ssh",
-      transport: "tcp",
-      port: 22
-    },
-    %{
-      protocol: "sftp-ssh",
-      transport: "tcp",
-      port: 22
-    }
-  ]
+  # SSH is a Tailnet-only service and must never be advertised on the LAN.
+  services: []
 
 # Import target specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

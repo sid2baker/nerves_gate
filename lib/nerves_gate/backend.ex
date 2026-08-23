@@ -25,6 +25,7 @@ defmodule NervesGate.Backend do
       NervesGate.Tailnet.Manager,
       {DynamicSupervisor, name: NervesGate.Tailnet.DynamicSupervisor, strategy: :one_for_one},
       NervesGate.Tailnet.Observer,
+      NervesGate.SSH,
       NervesGate.Cluster.Manager,
       NervesGate.DeviceState.Server,
       NervesGate.DeviceState.Client

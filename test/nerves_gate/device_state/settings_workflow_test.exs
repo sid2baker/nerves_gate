@@ -52,6 +52,10 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
 
         {:ok, canonical}
       end,
+      ssh: fn enabled ->
+        send(owner, {:ssh, enabled})
+        :ok
+      end,
       cluster: fn group ->
         send(owner, {:cluster, group})
         :ok
@@ -82,6 +86,8 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
     assert Server.configured?(server) == false
     assert settings(context.root, "a")["firmware"] == tag("a", "firmware-a")
     assert settings(context.root, "b")["firmware"] == tag("b", "firmware-b")
+    refute settings(context.root, "a")["ssh_enabled"]
+    refute settings(context.root, "b")["ssh_enabled"]
     refute File.exists?(Persistence.candidate_path(context.root))
   end
 
@@ -302,6 +308,38 @@ defmodule NervesGate.DeviceState.SettingsWorkflowTest do
     assert Server.data(server).subnet_router.routes == ["192.168.40.0/24"]
     assert Server.data(server).subnet_router.error == :apply_failed
     assert Server.data(server).subnet_router.status == :blocked
+  end
+
+  test "SSH enablement is persisted and restored without persisting listener state", context do
+    server = start_server(context)
+    accept_initial(server)
+    assert_receive {:ssh, false}
+
+    assert :ok = Server.configure_ssh(true, server)
+    assert_receive {:ssh, true}
+    assert settings(context.root, "a")["ssh_enabled"]
+    refute Map.has_key?(settings(context.root, "a"), "ssh_address")
+    assert Server.data(server).ssh.enabled
+    assert Server.data(server).ssh.state == :waiting_for_tailnet
+
+    GenServer.stop(server)
+    _restarted = start_server(context)
+    assert_receive {:ssh, true}
+  end
+
+  test "SSH enablement cannot race a guarded remote-access change", context do
+    server = start_server(context)
+    accept_initial(server)
+
+    assert {:ok, _pending} =
+             Server.stage_internet(
+               internet_params(),
+               "connection-a",
+               60_000,
+               server
+             )
+
+    assert {:error, :configuration_change_in_progress} = Server.configure_ssh(true, server)
   end
 
   test "subnet routing cannot race a guarded remote-access change", context do

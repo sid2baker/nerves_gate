@@ -18,6 +18,8 @@ defmodule NervesGate.DeviceState.Data do
   stored nor accepted by its operations.
   """
 
+  alias NervesGate.Tailnet.Address
+
   @enforce_keys [:device_id, :name, :firmware_version]
   defstruct [
     :device_id,
@@ -40,6 +42,12 @@ defmodule NervesGate.DeviceState.Data do
       primary: [],
       error: nil
     },
+    ssh: %{
+      enabled: false,
+      state: :disabled,
+      address: nil,
+      port: 22
+    },
     cluster: %{
       status: :disabled,
       runtime_status: :disabled,
@@ -53,7 +61,7 @@ defmodule NervesGate.DeviceState.Data do
 
   @type layer_status :: :online | :offline | :failed | :blocked | :disabled
   @type origin ::
-          :bootstrap | :device | :internet | :tailnet | :subnet_router | :cluster | :alarms
+          :bootstrap | :device | :internet | :tailnet | :subnet_router | :ssh | :cluster | :alarms
 
   @type internet :: %{
           status: :online | :failed,
@@ -78,6 +86,13 @@ defmodule NervesGate.DeviceState.Data do
           error: atom() | nil
         }
 
+  @type ssh :: %{
+          enabled: boolean(),
+          state: :disabled | :waiting_for_tailnet | :listening | :error,
+          address: :inet.ip4_address() | nil,
+          port: 22
+        }
+
   @type cluster :: %{
           status: layer_status(),
           runtime_status: :online | :failed | :disabled,
@@ -100,6 +115,7 @@ defmodule NervesGate.DeviceState.Data do
           internet: internet(),
           tailnet: tailnet(),
           subnet_router: subnet_router(),
+          ssh: ssh(),
           cluster: cluster(),
           alarms: [alarm()]
         }
@@ -112,11 +128,17 @@ defmodule NervesGate.DeviceState.Data do
           | {:configure_subnet_router, origin(), map()}
           | {:observe_subnet_router, origin(), map()}
           | {:fail_subnet_router, origin(), atom()}
+          | {:set_ssh, origin(), map()}
+          | {:configure_ssh, origin(), map()}
+          | {:observe_ssh, origin(), map()}
           | {:set_cluster, origin(), map()}
           | {:set_alarm, origin(), map()}
           | {:clear_alarm, origin(), String.t()}
 
-  @type action :: :broadcast | {:apply_subnet_router, boolean(), [String.t()]}
+  @type action ::
+          :broadcast
+          | {:apply_subnet_router, boolean(), [String.t()]}
+          | {:configure_ssh, boolean()}
 
   @doc "Returns fresh canonical data for one device."
   @spec new(keyword()) :: t()
@@ -129,6 +151,7 @@ defmodule NervesGate.DeviceState.Data do
         internet: %{status: :failed, reason: :starting},
         tailnet: %{},
         subnet_router: %{},
+        ssh: %{},
         cluster: %{},
         alarms: []
       ])
@@ -143,6 +166,7 @@ defmodule NervesGate.DeviceState.Data do
       {:set_internet, :bootstrap, options[:internet]},
       {:set_tailnet, :bootstrap, options[:tailnet]},
       {:set_subnet_router, :bootstrap, options[:subnet_router]},
+      {:set_ssh, :bootstrap, options[:ssh]},
       {:set_cluster, :bootstrap, options[:cluster]}
     ]
 
@@ -226,6 +250,40 @@ defmodule NervesGate.DeviceState.Data do
     |> Map.update!(:subnet_router, &Map.put(&1, :error, reason))
     |> apply_dependencies()
     |> wrap_ok(:broadcast)
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:set_ssh, :bootstrap, ssh})
+      when is_map(ssh) do
+    with {:ok, ssh} <- normalize_ssh(ssh) do
+      data
+      |> Map.put(:ssh, ssh)
+      |> apply_dependencies()
+      |> wrap_ok(:broadcast)
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:configure_ssh, :ssh, %{enabled: enabled} = desired})
+      when map_size(desired) == 1 and is_boolean(enabled) do
+    ssh =
+      cond do
+        not enabled -> %{enabled: false, state: :disabled, address: nil, port: 22}
+        data.ssh.enabled -> data.ssh
+        true -> %{enabled: true, state: :waiting_for_tailnet, address: nil, port: 22}
+      end
+
+    data
+    |> Map.put(:ssh, ssh)
+    |> apply_dependencies()
+    |> wrap_ok([:broadcast, {:configure_ssh, enabled}])
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:observe_ssh, :ssh, ssh}) when is_map(ssh) do
+    with {:ok, ssh} <- normalize_ssh(ssh) do
+      data
+      |> Map.put(:ssh, ssh)
+      |> apply_dependencies()
+      |> wrap_ok(:broadcast)
+    end
   end
 
   def apply_operation(%__MODULE__{} = data, {:set_cluster, origin, cluster})
@@ -352,6 +410,28 @@ defmodule NervesGate.DeviceState.Data do
     end
   end
 
+  defp normalize_ssh(ssh) do
+    enabled = Map.get(ssh, :enabled, false)
+    state = Map.get(ssh, :state, if(enabled, do: :waiting_for_tailnet, else: :disabled))
+    address = Map.get(ssh, :address)
+    port = Map.get(ssh, :port, 22)
+
+    if only_keys?(ssh, [:enabled, :state, :address, :port]) and
+         valid_ssh?(enabled, state, address, port) do
+      {:ok, %{enabled: enabled, state: state, address: address, port: port}}
+    else
+      :error
+    end
+  end
+
+  defp valid_ssh?(false, :disabled, nil, 22), do: true
+
+  defp valid_ssh?(true, state, nil, 22) when state in [:waiting_for_tailnet, :error],
+    do: true
+
+  defp valid_ssh?(true, :listening, address, 22), do: Address.ipv4?(address)
+  defp valid_ssh?(_enabled, _state, _address, _port), do: false
+
   defp normalize_cluster(cluster) do
     enabled = Map.get(cluster, :enabled, false)
     default_status = if enabled, do: :failed, else: :disabled
@@ -408,13 +488,23 @@ defmodule NervesGate.DeviceState.Data do
           )
       end
 
+    ssh = apply_ssh_dependency(data.ssh, data.tailnet.observed_status)
+
     %{
       data
       | tailnet: Map.put(data.tailnet, :status, tailnet_status),
         subnet_router: Map.put(data.subnet_router, :status, subnet_router_status),
+        ssh: ssh,
         cluster: Map.put(data.cluster, :status, cluster_status)
     }
   end
+
+  defp apply_ssh_dependency(%{enabled: true} = ssh, observed_status)
+       when observed_status != :online do
+    %{ssh | state: :waiting_for_tailnet, address: nil}
+  end
+
+  defp apply_ssh_dependency(ssh, _observed_status), do: ssh
 
   defp apply_valid_operation!(operation, data) do
     {:ok, data, _actions} = apply_operation(data, operation)

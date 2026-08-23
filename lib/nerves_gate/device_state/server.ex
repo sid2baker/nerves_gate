@@ -25,6 +25,7 @@ defmodule NervesGate.DeviceState.Server do
   alias NervesGate.Identity
   alias NervesGate.Internet.Config
   alias NervesGate.Internet.Monitor
+  alias NervesGate.SSH
   alias NervesGate.Storage
   alias NervesGate.Storage.Alarms, as: StorageAlarms
   alias NervesGate.SubnetRouter.Alarms, as: SubnetRouterAlarms
@@ -143,6 +144,12 @@ defmodule NervesGate.DeviceState.Server do
   def configure_subnet_router(enabled, routes, server \\ __MODULE__)
       when is_boolean(enabled) and is_list(routes) do
     GenServer.call(server, {:configure_subnet_router, enabled, routes}, 30_000)
+  end
+
+  @doc false
+  @spec configure_ssh(boolean(), GenServer.server()) :: :ok | {:error, term()}
+  def configure_ssh(enabled, server \\ __MODULE__) when is_boolean(enabled) do
+    GenServer.call(server, {:configure_ssh, enabled}, 30_000)
   end
 
   @spec changing?() :: boolean()
@@ -370,6 +377,23 @@ defmodule NervesGate.DeviceState.Server do
     {:reply, {:error, :gateway_not_configured}, state}
   end
 
+  def handle_call({:configure_ssh, _enabled}, _from, %{pending: pending} = state)
+      when not is_nil(pending) do
+    {:reply, {:error, :configuration_change_in_progress}, state}
+  end
+
+  def handle_call(
+        {:configure_ssh, enabled},
+        _from,
+        %{current: %{"configured" => true}} = state
+      ) do
+    persist_ssh(state, enabled)
+  end
+
+  def handle_call({:configure_ssh, _enabled}, _from, state) do
+    {:reply, {:error, :gateway_not_configured}, state}
+  end
+
   def handle_call(
         {:confirm, id, connection_id},
         _from,
@@ -445,6 +469,11 @@ defmodule NervesGate.DeviceState.Server do
 
   def handle_info({:cluster_changed, status}, state) do
     operation = {:set_cluster, :cluster, cluster_data(status)}
+    {:noreply, apply_valid_local_operation(state, operation)}
+  end
+
+  def handle_info({:ssh_changed, status}, state) do
+    operation = {:observe_ssh, :ssh, status}
     {:noreply, apply_valid_local_operation(state, operation)}
   end
 
@@ -544,6 +573,10 @@ defmodule NervesGate.DeviceState.Server do
 
         state.ops.poll_tailnet.()
         state
+
+      {:configure_ssh, enabled}, state ->
+        :ok = state.ops.ssh.(enabled)
+        state
     end)
   end
 
@@ -569,6 +602,7 @@ defmodule NervesGate.DeviceState.Server do
       internet: internet_data(Monitor.status()),
       tailnet: tailnet_data(tailnet),
       subnet_router: subnet_router_data(settings, tailnet),
+      ssh: SSH.status(),
       cluster: cluster_data(ClusterManager.status()),
       alarms: Alarms.active()
     )
@@ -639,7 +673,7 @@ defmodule NervesGate.DeviceState.Server do
   end
 
   defp subscribe_sources do
-    Enum.each(~w(internet tailnet cluster), fn topic ->
+    Enum.each(~w(internet tailnet ssh cluster), fn topic ->
       Phoenix.PubSub.subscribe(NervesGate.PubSub, topic)
     end)
   end
@@ -738,6 +772,23 @@ defmodule NervesGate.DeviceState.Server do
     end
   end
 
+  defp persist_ssh(state, enabled) do
+    updated = Settings.bump(state.current, %{"ssh_enabled" => enabled})
+
+    case Persistence.write_slot(updated, state.firmware.active, state.root) do
+      :ok ->
+        state =
+          %{state | current: updated, last_error: nil}
+          |> apply_valid_local_operation({:configure_ssh, :ssh, %{enabled: enabled}})
+
+        publish(state)
+        {:reply, :ok, state}
+
+      {:error, reason} ->
+        {:reply, {:error, {:settings_write_failed, reason}}, state}
+    end
+  end
+
   defp update_cluster_runtime(state, pending, candidate, group) do
     case state.ops.cluster.(group) do
       :ok -> persist_cluster_candidate(state, pending, candidate)
@@ -822,6 +873,7 @@ defmodule NervesGate.DeviceState.Server do
       internet: ops.internet_restore.(internet(current)),
       tailnet: ops.rollback_tailnet.(tailnet_metadata(current, candidate)),
       subnet_router: restore_subnet_router(current, ops),
+      ssh: ops.ssh.(ssh_enabled(current)),
       cluster: ops.cluster.(cluster_group(current))
     ]
 
@@ -848,6 +900,7 @@ defmodule NervesGate.DeviceState.Server do
       internet: state.ops.internet_restore.(internet(state.current)),
       tailnet: state.ops.tailnet_restore.(tailnet_profile(state.current)),
       subnet_router: restore_subnet_router(state.current, state.ops),
+      ssh: state.ops.ssh.(ssh_enabled(state.current)),
       cluster: state.ops.cluster.(cluster_group(state.current))
     ]
 
@@ -1033,6 +1086,7 @@ defmodule NervesGate.DeviceState.Server do
   defp tailnet_profile(settings), do: Settings.tailnet_profile(settings)
   defp subnet_router(settings), do: Settings.subnet_router(settings)
   defp subnet_routes(settings), do: Settings.subnet_routes(settings)
+  defp ssh_enabled(settings), do: Settings.ssh_enabled(settings)
   defp cluster_group(settings), do: Settings.cluster_group(settings)
 
   defp blank_nil(nil), do: nil

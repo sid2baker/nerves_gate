@@ -183,6 +183,43 @@ defmodule NervesGateWeb.StatusLive.Render do
 
       <.card class="xl:col-span-2">
         <.section_header
+          eyebrow="Remote access"
+          title="Remote IEx"
+          description="NervesSSH listens only on this gateway's concrete Tailscale IPv4 address."
+        >
+          <:action>
+            <.badge tone={ssh_tone(@view.ssh)}>{ssh_label(@view.ssh)}</.badge>
+          </:action>
+        </.section_header>
+
+        <div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
+          <.detail_list items={ssh_details(@view.ssh)} />
+          <div class="flex flex-wrap gap-3">
+            <.button
+              :if={not @view.ssh.enabled}
+              type="button"
+              phx-click="enable-ssh"
+              phx-disable-with="Enabling Remote IEx…"
+              disabled={not is_nil(@view.configuration.pending)}
+            >
+              Enable Remote IEx
+            </.button>
+            <.button
+              :if={@view.ssh.enabled}
+              type="button"
+              tone={:danger}
+              phx-click="disable-ssh"
+              phx-disable-with="Disabling Remote IEx…"
+              disabled={not is_nil(@view.configuration.pending)}
+            >
+              Disable Remote IEx
+            </.button>
+          </div>
+        </div>
+      </.card>
+
+      <.card class="xl:col-span-2">
+        <.section_header
           eyebrow="Tailnet routing"
           title="Subnet router"
           description="Advertise local networks without changing this gateway's remote-management connection."
@@ -265,6 +302,8 @@ defmodule NervesGateWeb.StatusLive.Render do
       {"Advertised routes", route_list(node.data.subnet_router.advertised)},
       {"Approved routes", route_list(node.data.subnet_router.approved)},
       {"Primary routes", route_list(node.data.subnet_router.primary)},
+      {"Remote IEx", ssh_label(node.data.ssh)},
+      {"SSH address", ssh_address(node.data.ssh)},
       {"BEAM node", format_node(node.data.cluster.node)},
       {"Firmware", node.data.firmware_version},
       {"Revision", node.revision},
@@ -301,6 +340,28 @@ defmodule NervesGateWeb.StatusLive.Render do
       {"Approved", route_list(subnet_router.approved)},
       {"Primary", route_list(subnet_router.primary)}
     ]
+  end
+
+  defp ssh_details(ssh) do
+    [
+      {"SSH", if(ssh.enabled, do: "Enabled ●", else: "○ Disabled")},
+      {"Status", ssh_label(ssh)},
+      {"Address", ssh_address(ssh)},
+      {"Access", "Tailnet only"}
+    ]
+  end
+
+  defp ssh_tone(%{state: :listening}), do: :good
+  defp ssh_tone(%{state: :disabled}), do: :neutral
+  defp ssh_tone(_ssh), do: :warning
+
+  defp ssh_label(%{state: :waiting_for_tailnet}), do: "Waiting for Tailnet"
+  defp ssh_label(%{state: state}), do: humanize(state)
+
+  defp ssh_address(%{address: nil}), do: "Unavailable"
+
+  defp ssh_address(%{address: address, port: port}) do
+    "#{address |> :inet.ntoa() |> to_string()}:#{port}"
   end
 
   defp subnet_router_tone(%{status: :disabled}), do: :neutral

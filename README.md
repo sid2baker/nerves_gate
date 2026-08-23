@@ -55,7 +55,7 @@ Commissioning.Access
         ↓
 Internet.Manager → Internet.Monitor
         ↓
-Tailnet.Manager  → Tailnet.Observer
+Tailnet.Manager  → Tailnet.Observer → SSH.Manager
         ↓
 Cluster.Manager
         ↓
@@ -117,6 +117,19 @@ There is no candidate, confirmation, or revert timer. Application failures raise
 a noncritical alarm and are retried after `tailscaled` reconnects; remote gateway
 access is unchanged.
 
+## Remote IEx
+
+The dashboard can enable or disable a NervesSSH IEx console. Only the boolean
+`ssh_enabled` setting is persisted. NervesSSH is started by `SSH.Manager` only
+after `Tailnet.Observer` reports a concrete IPv4 address in Tailscale's
+`100.64.0.0/10` range, and it binds port 22 to that exact address. Tailnet loss
+stops the listener; reconnection or an address change reconciles it automatically.
+
+Client authentication is delegated to Tailnet policy with OTP SSH's
+`no_auth_needed` option. No developer public key is embedded in firmware,
+Tailscale SSH is never enabled, and wildcard or LAN/WLAN keyless listeners are
+rejected before NervesSSH starts.
+
 ## Dashboard and replicated state
 
 The main page at `http://<tailscale-ip>/` provides:
@@ -126,6 +139,7 @@ The main page at `http://<tailscale-ip>/` provides:
 - last-known alarms for disconnected gateways;
 - Internet → Tailnet → Cluster status;
 - dynamic local subnet-router controls and route approval status;
+- Tailnet-only Remote IEx controls and listener status;
 - local diagnostics and device naming;
 - visible public cluster groups and automatic peer connections.
 

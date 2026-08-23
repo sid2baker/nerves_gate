@@ -33,6 +33,7 @@ defmodule NervesGate.Status do
         interfaces: Hardware.interfaces()
       },
       tailnet: compatibility_tailnet(data, tailnet_diagnostics),
+      ssh: data.ssh,
       layers: layers(data),
       people_count: safe(NervesGateWeb.Presence, :count, 0),
       distribution: Map.take(cluster, [:online, :node, :connected]),

@@ -33,6 +33,7 @@ defmodule NervesGate.Gateway.Settings do
          :ok <- validate_updated_at(Map.get(settings, "updated_at")),
          {:ok, internet} <- validate_internet(persisted_internet, configured),
          {:ok, subnet_router} <- validate_subnet_router(Map.get(settings, "subnet_router")),
+         {:ok, ssh_enabled} <- validate_ssh_enabled(Map.get(settings, "ssh_enabled", false)),
          {:ok, group} <- ClusterManager.validate_group(group),
          {:ok, name} <- valid_name(name) do
       {:ok,
@@ -46,12 +47,14 @@ defmodule NervesGate.Gateway.Settings do
          "internet",
          "tailnet",
          "subnet_router",
+         "ssh_enabled",
          "cluster",
          "name"
        ])
        |> Map.put("internet", if(internet, do: Config.to_persisted(internet)))
        |> Map.put("tailnet", %{"profile_id" => profile_id})
        |> Map.put("subnet_router", subnet_router)
+       |> Map.put("ssh_enabled", ssh_enabled)
        |> Map.put("cluster", %{"group" => group})
        |> Map.put("name", name)
        |> Map.put_new("updated_at", nil)}
@@ -71,6 +74,7 @@ defmodule NervesGate.Gateway.Settings do
       "internet" => nil,
       "tailnet" => %{"profile_id" => nil},
       "subnet_router" => default_subnet_router(),
+      "ssh_enabled" => false,
       "cluster" => %{"group" => nil},
       "name" => Identity.get().hostname
     }
@@ -116,6 +120,7 @@ defmodule NervesGate.Gateway.Settings do
       internet: Config.to_public(internet(settings)),
       tailnet_configured: is_binary(tailnet_profile(settings)),
       subnet_router: public_subnet_router(settings),
+      ssh_enabled: ssh_enabled(settings),
       cluster_group: cluster_group(settings),
       name: settings["name"]
     }
@@ -149,6 +154,7 @@ defmodule NervesGate.Gateway.Settings do
   def tailnet_profile(settings), do: get_in(settings, ["tailnet", "profile_id"])
   def subnet_router(settings), do: Map.get(settings, "subnet_router", default_subnet_router())
   def subnet_routes(settings), do: subnet_router(settings)["routes"]
+  def ssh_enabled(settings), do: Map.get(settings, "ssh_enabled", false)
   def cluster_group(settings), do: get_in(settings, ["cluster", "group"])
 
   @spec validate_subnet_router(term()) :: {:ok, map()} | {:error, term()}
@@ -188,6 +194,9 @@ defmodule NervesGate.Gateway.Settings do
     subnet_router = subnet_router(settings)
     %{enabled: subnet_router["enabled"], routes: subnet_router["routes"]}
   end
+
+  defp validate_ssh_enabled(enabled) when is_boolean(enabled), do: {:ok, enabled}
+  defp validate_ssh_enabled(_enabled), do: {:error, :invalid_ssh_enabled}
 
   defp validate_profile_id(nil, false), do: :ok
   defp validate_profile_id(nil, true), do: {:error, :tailnet_profile_required}

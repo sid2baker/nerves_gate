@@ -3,6 +3,17 @@ defmodule NervesGate.Gateway.SettingsTest do
 
   alias NervesGate.Gateway.Settings
 
+  test "older settings snapshots default SSH to disabled" do
+    settings =
+      %{"slot" => "a", "uuid" => "firmware-a", "version" => "1.0.0"}
+      |> Settings.default()
+      |> Map.delete("ssh_enabled")
+
+    assert {:ok, validated} = Settings.validate(settings)
+    refute validated["ssh_enabled"]
+    refute Settings.public(validated).ssh_enabled
+  end
+
   test "subnet routes are canonicalized and deduplicated before persistence" do
     assert {:ok, subnet_router} =
              Settings.validate_subnet_router(%{

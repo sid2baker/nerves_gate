@@ -65,8 +65,19 @@ defmodule NervesGate.MixProject do
       # See config/host.exs for usage.
       {:nerves_runtime, "~> 0.13.12"},
 
-      # Dependencies for all targets except :host
-      {:nerves_pack, "~> 0.7.1", targets: @all_targets},
+      # NervesSSH is supervised explicitly by NervesGate on every target so its
+      # lifecycle and bind address can be tested on the host.
+      {:nerves_ssh, "~> 1.3.1"},
+
+      # Device services previously pulled in by nerves_pack. Keeping these
+      # explicit prevents nerves_pack from starting NervesSSH during Shoehorn.
+      {:mdns_lite, "~> 0.9.2", targets: @all_targets},
+      {:nerves_motd, "~> 0.1.17", targets: @all_targets},
+      {:nerves_time, "~> 0.4.12", targets: @all_targets},
+      {:vintage_net, "~> 0.13.12", targets: @all_targets},
+      {:vintage_net_direct, "~> 0.10.8", targets: @all_targets},
+      {:vintage_net_ethernet, "~> 0.11.2", targets: @all_targets},
+      {:vintage_net_wifi, "~> 0.12.11", targets: @all_targets},
 
       # Dependencies for specific targets
       # NOTE: It's generally low risk and recommended to follow minor version

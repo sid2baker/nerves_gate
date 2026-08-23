@@ -103,6 +103,8 @@ defmodule NervesGateWebTest do
     assert body =~ "Known gateways"
     assert body =~ "Active alarms"
     assert body =~ "Internet checks"
+    assert body =~ "Remote IEx"
+    assert body =~ "Tailnet only"
     assert body =~ "Subnet router"
     assert body =~ ~s(phx-submit="enable-subnet-router")
     assert body =~ ~s(href="/commissioning")
@@ -135,6 +137,25 @@ defmodule NervesGateWebTest do
                "enabled" => false,
                "routes" => ["192.168.50.0/24", "10.20.0.0/16"]
              }
+    end)
+  end
+
+  test "Remote IEx can be enabled and disabled from the dashboard" do
+    with_subnet_dashboard(fn ->
+      {:ok, view, html} = live(build_conn(), "/")
+      assert html =~ "Enable Remote IEx"
+      assert html =~ "Disabled"
+
+      html = view |> element(~s(button[phx-click="enable-ssh"])) |> render_click()
+      assert html =~ "Remote IEx enabled for Tailnet clients."
+      assert html =~ "Waiting for Tailnet"
+      assert html =~ "Disable Remote IEx"
+      assert Server.current()["ssh_enabled"]
+
+      html = view |> element(~s(button[phx-click="disable-ssh"])) |> render_click()
+      assert html =~ "Remote IEx disabled."
+      assert html =~ "Enable Remote IEx"
+      refute Server.current()["ssh_enabled"]
     end)
   end
 
@@ -189,6 +210,9 @@ defmodule NervesGateWebTest do
 
     assert is_map(body["configuration"])
     assert is_map(body["configuration"]["current"]["subnet_router"])
+    assert is_boolean(body["configuration"]["current"]["ssh_enabled"])
+    assert is_map(body["device_state"]["local"]["ssh"])
+    assert is_map(body["ssh"])
     assert is_map(body["tailnet"]["subnet_router"])
     assert is_map(body["device"])
     refute inspect(body) =~ "auth_token"
@@ -235,6 +259,7 @@ defmodule NervesGateWebTest do
       |> Map.put("configured", true)
       |> Map.put("internet", persisted_dhcp())
       |> Map.put("subnet_router", %{"enabled" => false, "routes" => []})
+      |> Map.put("ssh_enabled", false)
       |> put_in(["tailnet", "profile_id"], "profile-1")
 
     :ok = NervesGate.Storage.initialize(root)
@@ -253,6 +278,7 @@ defmodule NervesGateWebTest do
     ops =
       original.ops
       |> Map.put(:subnet_router, subnet_router)
+      |> Map.put(:ssh, fn _enabled -> :ok end)
       |> Map.put(:tailnet_restore, fn _profile -> :ok end)
       |> Map.put(:poll_tailnet, fn -> :ok end)
 
