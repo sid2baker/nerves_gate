@@ -72,7 +72,7 @@ execute the returned local actions.
 `tailscale_ex` owns `tailscaled`, command scheduling, typed status, health,
 profiles, preferences, readiness, and subscriptions. `Tailnet.Observer` is only
 a small projection into NervesGate's public state and PubSub topics; it does not
-poll or repair the daemon. `Gateway.Settings`, `Gateway.Persistence`, and
+own daemon polling or repair. `Gateway.Settings`, `Gateway.Persistence`, and
 `Gateway.Effects` are private helpers used by the server. A single change signal
 inhibits expected connectivity alarms while a remote-access candidate is active.
 
@@ -116,8 +116,8 @@ snapshot. A successful write produces one ordered public reducer operation; its
 local action applies the routes through Tailscale. Runtime observations return
 as further operations containing advertised, approved, and primary routes.
 There is no candidate, confirmation, or revert timer. Application failures raise
-a noncritical alarm and are retried after `tailscaled` reconnects; remote gateway
-access is unchanged.
+a noncritical alarm and a bounded remedy reapplies only the accepted routes after
+Tailnet recovery; remote gateway access is unchanged.
 
 ## Remote IEx
 
@@ -126,6 +126,27 @@ The dashboard can enable or disable a NervesSSH IEx console. Only the boolean
 after `Tailnet.Observer` reports a concrete IPv4 address in Tailscale's
 `100.64.0.0/10` range, and it binds port 22 to that exact address. Tailnet loss
 stops the listener; reconnection or an address change reconciles it automatically.
+
+Persistent listener failures raise an SSH alarm only while Internet and Tailnet
+are healthy. Its remedy reapplies the accepted `ssh_enabled` intent; it cannot
+change the listener address policy or any Tailnet setting.
+
+## Alarms and healing
+
+Each subsystem owns its raw signals, managed conditions, public alarms, and
+bounded heal callbacks. The dependency graph reports the highest actionable
+root cause: Internet suppresses Tailnet and every downstream alarm; Tailnet
+suppresses cluster, SSH, and subnet-router alarms; storage, commissioning, and
+active configuration changes suppress expected operational alarms. Raw signals
+remain truthful while public alarms are inhibited. Remedy declarations are
+registered by the alarm runtime rather than compiled into alarm definitions.
+
+Alarm remedies never clear alarms directly. They reapply accepted state and
+request a fresh observation; only that observation can clear the alarm. Internet,
+cluster, SSH, subnet routing, and commissioning access have idempotent remedies.
+Storage failure, Internet instability, and required commissioning remain human
+actions. Tailnet healing is limited to a fresh typed observation—login, profile
+switching, `down`, and daemon manipulation remain prohibited.
 
 Client authentication is delegated to Tailnet policy with OTP SSH's
 `no_auth_needed` option. No developer public key is embedded in firmware,
@@ -218,8 +239,9 @@ hostnames such as `http://m01.localhost:4001/`; commissioning is available at
 Each VM has unique identifiers, a NAT uplink, an isolated commissioning NIC,
 QMP and serial sockets, and a persistent disk under `tmp/qemu`. Gateways discover
 peers over the Tailnet and connect when their public groups match. `observe`
-reads each development VM's secret-free status API through its local forward;
-use `watch -n 2 mix nerves_gate.qemu observe` to follow convergence. Loss,
+reads each development VM's versioned, secret-free `nerves_gate.status.v1`
+projection through its local forward; use `watch -n 2 mix nerves_gate.qemu observe`
+to follow convergence. Loss,
 latency, and blackhole semantics are reserved for the future isolated TAP/netem
 uplink layer; deterministic QMP link-down faults work with the current SLIRP
 networking.

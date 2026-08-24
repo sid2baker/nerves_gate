@@ -20,8 +20,9 @@ defmodule NervesGate.SSH.ManagerTest do
     end
 
     publisher = fn status -> send(owner, {:ssh_changed, status}) end
+    alarm_reporter = fn _status -> :ok end
 
-    %{starter: starter, stopper: stopper, publisher: publisher}
+    %{starter: starter, stopper: stopper, publisher: publisher, alarm_reporter: alarm_reporter}
   end
 
   test "disabled SSH never starts with or without Tailnet", context do
@@ -156,7 +157,8 @@ defmodule NervesGate.SSH.ManagerTest do
         tailnet: tailnet,
         starter: context.starter,
         stopper: context.stopper,
-        publisher: context.publisher
+        publisher: context.publisher,
+        alarm_reporter: context.alarm_reporter
       )
 
     on_exit(fn ->

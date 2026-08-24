@@ -9,6 +9,7 @@ defmodule NervesGate.SSH.Manager do
 
   use GenServer
 
+  alias NervesGate.SSH.Alarms
   alias NervesGate.Storage
   alias NervesGate.Tailnet.Address
   alias NervesGate.Tailnet.Observer
@@ -21,6 +22,7 @@ defmodule NervesGate.SSH.Manager do
     :starter,
     :stopper,
     :publisher,
+    :alarm_reporter,
     :tailnet,
     :listener,
     :monitor,
@@ -68,10 +70,13 @@ defmodule NervesGate.SSH.Manager do
       tailnet: tailnet,
       starter: Keyword.get(options, :starter, &start_daemon/1),
       stopper: Keyword.get(options, :stopper, &stop_daemon/1),
-      publisher: Keyword.get(options, :publisher, &publish/1)
+      publisher: Keyword.get(options, :publisher, &publish/1),
+      alarm_reporter: Keyword.get(options, :alarm_reporter, &Alarms.report/1)
     }
 
-    {:ok, reconcile(state)}
+    state = reconcile(state)
+    state.alarm_reporter.(public_status(state))
+    {:ok, state}
   end
 
   @impl true
@@ -225,6 +230,7 @@ defmodule NervesGate.SSH.Manager do
 
   defp publish_if_changed(previous, state) do
     current = public_status(state)
+    state.alarm_reporter.(current)
     if current != previous, do: state.publisher.(current)
     :ok
   end

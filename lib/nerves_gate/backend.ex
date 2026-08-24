@@ -21,7 +21,7 @@ defmodule NervesGate.Backend do
     children =
       [
         {Task.Supervisor, name: NervesGate.TaskSupervisor},
-        NervesGate.Alarms.Reporter,
+        NervesGate.Alarms.Runtime,
         NervesGate.Commissioning.Access,
         NervesGate.Internet.Manager,
         NervesGate.Internet.Monitor

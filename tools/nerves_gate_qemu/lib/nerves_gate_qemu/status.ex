@@ -43,11 +43,24 @@ defmodule NervesGateQEMU.Status do
     gateway_status(device, vm, link, fault, gateway)
   end
 
-  defp gateway_status(device, vm, link, fault, {:ok, status}) do
-    internet = status |> get_in(["network", "connectivity", "online"]) |> online_state()
-    tailnet = status |> get_in(["tailnet", "online"]) |> online_state()
-    cluster = status |> get_in(["cluster", "online"]) |> online_state()
-    replicas = status |> get_in(["device_state", "replicas"]) |> map_or_empty()
+  @doc false
+  @spec project_gateway(Runner.device(), atom(), atom(), atom(), map()) :: map()
+  def project_gateway(device, vm, link, fault, status) do
+    gateway_status(device, vm, link, fault, {:ok, status})
+  end
+
+  defp gateway_status(
+         device,
+         vm,
+         link,
+         fault,
+         {:ok, %{"schema" => "nerves_gate.status.v1"} = status}
+       ) do
+    data = status |> get_in(["local", "data"]) |> map_or_empty()
+    internet = data |> get_in(["internet", "status"]) |> layer_state()
+    tailnet = data |> get_in(["tailnet", "status"]) |> layer_state()
+    cluster = data |> get_in(["cluster", "status"]) |> layer_state()
+    replicas = status |> Map.get("replicas") |> map_or_empty()
     connected = Enum.count(replicas, fn {_id, replica} -> replica["connected"] == true end)
 
     base_device(device, vm, link, fault)
@@ -56,14 +69,18 @@ defmodule NervesGateQEMU.Status do
       internet: internet,
       tailnet: tailnet,
       cluster: cluster,
-      tailnet_ip: get_in(status, ["tailnet", "ipv4"]),
-      daemon: get_in(status, ["tailnet", "health", "daemon"]),
+      tailnet_ip: get_in(data, ["tailnet", "ipv4"]),
+      daemon: get_in(status, ["runtime", "tailscale", "daemon"]),
       replicas: map_size(replicas),
       connected_replicas: connected,
       stale_replicas: map_size(replicas) - connected,
-      alarms: Map.get(status, "alarms", []),
+      alarms: Map.get(data, "alarms", []),
       error: nil
     })
+  end
+
+  defp gateway_status(device, vm, link, fault, {:ok, _unsupported}) do
+    gateway_status(device, vm, link, fault, {:error, :unsupported_status_schema})
   end
 
   defp gateway_status(device, vm, link, fault, {:error, reason}) do
@@ -107,9 +124,12 @@ defmodule NervesGateQEMU.Status do
     end
   end
 
-  defp online_state(true), do: :online
-  defp online_state(false), do: :offline
-  defp online_state(_value), do: :unknown
+  defp layer_state("online"), do: :online
+
+  defp layer_state(status) when status in ["offline", "failed", "blocked", "disabled"],
+    do: :offline
+
+  defp layer_state(_value), do: :unknown
 
   defp map_or_empty(value) when is_map(value), do: value
   defp map_or_empty(_value), do: %{}

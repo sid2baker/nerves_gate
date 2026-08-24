@@ -9,7 +9,4 @@ defmodule NervesGate do
 
   @doc "Return local replicas of currently or previously connected devices."
   defdelegate replicas(), to: NervesGate.DeviceState.Client
-
-  @doc "Return the temporary web compatibility projection."
-  defdelegate status(), to: NervesGate.Status, as: :snapshot
 end

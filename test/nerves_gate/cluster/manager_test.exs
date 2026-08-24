@@ -133,17 +133,6 @@ defmodule NervesGate.Cluster.ManagerTest do
     assert %{enabled: false, online: false, connected: []} = Manager.status(manager)
   end
 
-  test "the compatibility API snapshot exposes the configured public group" do
-    group = "Api_public_group"
-
-    try do
-      assert :ok = Manager.configure(group)
-      assert inspect(NervesGate.Status.api_snapshot()) =~ group
-    after
-      Manager.configure(nil)
-    end
-  end
-
   test "invalid group input never reaches runtime or atom conversion", %{manager: manager} do
     assert {:error, :invalid_cluster_group} = Manager.configure("bad group!", manager)
     refute_receive {:distribution_start, _, _}

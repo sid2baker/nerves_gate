@@ -221,6 +221,13 @@ defmodule NervesGate.DeviceState.DataTest do
 
   test "malformed and unknown operations are rejected" do
     assert :error = Data.apply_operation(data(), {:set_internet, :internet, %{status: :maybe}})
+
+    assert :error =
+             Data.apply_operation(
+               data(),
+               {:set_internet, :internet, %{status: :failed, reason: {:private, "secret"}}}
+             )
+
     assert :error = Data.apply_operation(data(), {:set_name, "private-origin", "Gate A"})
     assert :error = Data.apply_operation(data(), {:unknown, :test})
   end

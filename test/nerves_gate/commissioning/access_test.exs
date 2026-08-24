@@ -53,5 +53,22 @@ defmodule NervesGate.Commissioning.AccessTest do
     assert Access.commissioning_candidates([%{name: "eth0", kind: :ethernet}], nil) == []
   end
 
+  test "healing rescans hardware and reapplies only the remembered access request" do
+    {:ok, interfaces} = Agent.start_link(fn -> [%{name: "eth0", kind: :ethernet}] end)
+    hardware = fn -> Agent.get(interfaces, & &1) end
+
+    {:ok, access} =
+      Access.start_link(name: unique_name(), adapter: TestInternetAdapter, hardware: hardware)
+
+    assert {:error, :no_interface} = Access.enable(:commissioning, "eth0", access)
+
+    Agent.update(interfaces, fn _current ->
+      [%{name: "eth0", kind: :ethernet}, %{name: "eth1", kind: :ethernet}]
+    end)
+
+    assert :ok = Access.heal(access)
+    assert [%{interface: "eth1"}] = Access.status(access).active
+  end
+
   defp unique_name, do: String.to_atom("access_#{System.unique_integer([:positive])}")
 end

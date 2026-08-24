@@ -3,6 +3,23 @@ defmodule NervesGate.DeviceState.Signal.Changing do
   def description, do: "Configuration change in progress"
 end
 
+defmodule NervesGate.DeviceState.Alarms do
+  @moduledoc "Owns DeviceState signals used to inhibit expected operational alarms."
+
+  alias NervesGate.Alarms
+  alias NervesGate.DeviceState.Signal
+
+  def managed_alarms, do: []
+  def public_alarms, do: []
+  def alarm_levels, do: %{Signal.Changing => :debug}
+  def remedies, do: []
+
+  @spec changing(boolean()) :: :ok
+  def changing(active) do
+    Alarms.report_sync(Signal.Changing, active, Signal.Changing.description())
+  end
+end
+
 defmodule NervesGate.DeviceState.Server do
   @moduledoc """
   Owns this gateway's private settings machinery and canonical public data.
@@ -18,6 +35,7 @@ defmodule NervesGate.DeviceState.Server do
   alias NervesGate.Alarms
   alias NervesGate.Cluster.Manager, as: ClusterManager
   alias NervesGate.Commissioning.Alarms, as: CommissioningAlarms
+  alias NervesGate.DeviceState.Alarms, as: DeviceStateAlarms
   alias NervesGate.DeviceState.Data
   alias NervesGate.Gateway.Effects
   alias NervesGate.Gateway.Persistence
@@ -55,6 +73,13 @@ defmodule NervesGate.DeviceState.Server do
           data: Data.t()
         }
 
+  @type observation :: %{
+          boot_id: String.t(),
+          revision: non_neg_integer(),
+          data: Data.t(),
+          configuration: map()
+        }
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
     name = Keyword.get(options, :name, __MODULE__)
@@ -72,16 +97,14 @@ defmodule NervesGate.DeviceState.Server do
     GenServer.call(server, {:join, client})
   end
 
+  @doc "Returns an atomic public observation of configuration and canonical device data."
+  @spec observation(GenServer.server()) :: observation()
+  def observation(server \\ __MODULE__), do: GenServer.call(server, :observation)
+
   @doc false
   @spec apply_operation(Data.operation(), GenServer.server()) :: :ok | :error
   def apply_operation(operation, server \\ __MODULE__) do
     GenServer.call(server, {:apply_operation, operation})
-  end
-
-  @spec alarm_transition(Alarmist.Event.t()) :: :ok
-  def alarm_transition(%Alarmist.Event{} = event) do
-    if Process.whereis(__MODULE__), do: GenServer.cast(__MODULE__, {:alarm_transition, event})
-    :ok
   end
 
   @spec configured?(GenServer.server()) :: boolean()
@@ -154,9 +177,13 @@ defmodule NervesGate.DeviceState.Server do
     GenServer.call(server, {:configure_ssh, enabled}, 30_000)
   end
 
-  @spec changing?() :: boolean()
-  def changing? do
-    Alarmist.alarm_state(NervesGate.DeviceState.Signal.Changing) == :set
+  @type heal_target :: :internet | :cluster | :ssh | :subnet_router
+
+  @doc "Reapplies one runtime subsystem strictly from accepted settings."
+  @spec heal(heal_target(), GenServer.server()) :: :ok | {:error, term()}
+  def heal(target, server \\ __MODULE__)
+      when target in [:internet, :cluster, :ssh, :subnet_router] do
+    GenServer.call(server, {:heal, target}, 45_000)
   end
 
   @impl true
@@ -188,7 +215,7 @@ defmodule NervesGate.DeviceState.Server do
         firmware = hydration.firmware
         current = hydration.current
         candidate = hydration.candidate
-        Alarms.clear(NervesGate.DeviceState.Signal.Changing)
+        DeviceStateAlarms.changing(false)
         subscribe_sources()
 
         state = %__MODULE__{
@@ -222,6 +249,11 @@ defmodule NervesGate.DeviceState.Server do
   def handle_call(:data, _from, state), do: {:reply, state.data, state}
   def handle_call(:snapshot, _from, state), do: {:reply, snapshot_from(state), state}
 
+  def handle_call(:observation, _from, state) do
+    observation = snapshot_from(state) |> Map.put(:configuration, public_configuration(state))
+    {:reply, observation, state}
+  end
+
   def handle_call({:join, client}, _from, state) do
     state = monitor_client(state, client)
     {:reply, {:ok, snapshot_from(state)}, state}
@@ -242,6 +274,20 @@ defmodule NervesGate.DeviceState.Server do
 
   def handle_call(:configuration, _from, state) do
     {:reply, public_configuration(state), state}
+  end
+
+  def handle_call({:heal, _target}, _from, %{pending: pending} = state)
+      when not is_nil(pending) do
+    {:reply, {:error, :configuration_change_in_progress}, state}
+  end
+
+  def handle_call({:heal, target}, _from, state) do
+    reply =
+      if state.current["configured"],
+        do: heal_runtime(target, state),
+        else: {:error, :not_configured}
+
+    {:reply, reply, state}
   end
 
   def handle_call(
@@ -460,7 +506,7 @@ defmodule NervesGate.DeviceState.Server do
   end
 
   @impl true
-  def handle_cast({:alarm_transition, event}, state) do
+  def handle_info(%Alarmist.Event{} = event, state) do
     operation =
       case Alarms.public_event(event) do
         {:set, alarm} -> {:set_alarm, :alarms, alarm}
@@ -471,7 +517,6 @@ defmodule NervesGate.DeviceState.Server do
     {:noreply, maybe_apply_local_operation(state, operation)}
   end
 
-  @impl true
   def handle_info({:internet_changed, status}, state) do
     operation = {:set_internet, :internet, internet_data(status)}
     {:noreply, apply_valid_local_operation(state, operation)}
@@ -675,7 +720,35 @@ defmodule NervesGate.DeviceState.Server do
     Enum.each(~w(internet tailnet ssh cluster), fn topic ->
       Phoenix.PubSub.subscribe(NervesGate.PubSub, topic)
     end)
+
+    Alarms.subscribe_public()
   end
+
+  defp heal_runtime(:internet, state) do
+    with :ok <- heal_effect(state.ops.internet_restore.(internet(state.current))) do
+      heal_effect(state.ops.internet_observe.())
+    end
+  end
+
+  defp heal_runtime(:cluster, state) do
+    state.ops.cluster.(cluster_group(state.current)) |> heal_effect()
+  end
+
+  defp heal_runtime(:ssh, state) do
+    state.ops.ssh.(ssh_enabled(state.current)) |> heal_effect()
+  end
+
+  defp heal_runtime(:subnet_router, state) do
+    case apply_subnet_router(subnet_router(state.current), state.ops) do
+      {:ok, _routes} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp heal_effect(:ok), do: :ok
+  defp heal_effect({:ok, _value}), do: :ok
+  defp heal_effect({:error, _reason} = error), do: error
+  defp heal_effect(invalid), do: {:error, {:invalid_heal_result, invalid}}
 
   defp unavailable_subnet_router do
     %{advertised: [], approved: [], primary: [], error: :unavailable}
@@ -993,14 +1066,8 @@ defmodule NervesGate.DeviceState.Server do
     end
   end
 
-  defp begin_change do
-    Alarms.set(
-      NervesGate.DeviceState.Signal.Changing,
-      NervesGate.DeviceState.Signal.Changing.description()
-    )
-  end
-
-  defp finish_change, do: Alarms.clear(NervesGate.DeviceState.Signal.Changing)
+  defp begin_change, do: DeviceStateAlarms.changing(true)
+  defp finish_change, do: DeviceStateAlarms.changing(false)
 
   defp apply_name_change(state, %{"name" => name}, %{"name" => name}), do: state
 

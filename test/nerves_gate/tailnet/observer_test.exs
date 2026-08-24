@@ -58,6 +58,19 @@ defmodule NervesGate.Tailnet.ObserverTest do
                    500
   end
 
+  test "explicit healing refresh reads fresh typed status without lifecycle mutations" do
+    Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
+
+    {:ok, observer} =
+      start_observer(
+        read_status: fn -> {:ok, online_status()} end,
+        route_status: fn -> {:ok, %{advertised: [], approved: [], primary: []}} end
+      )
+
+    assert :ok = Observer.refresh(observer)
+    assert_receive {:tailnet_changed, %{online: true, ipv4: "100.64.0.10"}}, 500
+  end
+
   test "loss and recovery are driven by normalized library subscriptions" do
     Phoenix.PubSub.subscribe(NervesGate.PubSub, "tailnet")
     {:ok, observer} = start_observer()

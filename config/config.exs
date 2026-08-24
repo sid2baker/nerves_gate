@@ -37,28 +37,16 @@ config :tailwind,
   ]
 
 config :logger, :default_formatter,
-  metadata: [:alarm, :alarm_id, :alarm_state, :alarm_level, :alarm_description]
-
-config :alarmist,
-  managed_alarms: [
-    NervesGate.Internet.Condition.ActionableUnavailable,
-    NervesGate.Internet.Alarm.Unavailable,
-    NervesGate.Internet.Alarm.Unstable,
-    NervesGate.Tailnet.Condition.ActionableUnavailable,
-    NervesGate.Tailnet.Alarm.Unavailable,
-    NervesGate.Cluster.Condition.ActionableUnavailable,
-    NervesGate.Cluster.Alarm.Unavailable
-  ],
-  alarm_levels: %{
-    NervesGate.Internet.Signal.Unavailable => :debug,
-    NervesGate.Tailnet.Signal.Unavailable => :debug,
-    NervesGate.Cluster.Signal.Enabled => :debug,
-    NervesGate.Cluster.Signal.Unavailable => :debug,
-    NervesGate.DeviceState.Signal.Changing => :debug,
-    NervesGate.Storage.Alarm.Failure => :error,
-    NervesGate.SubnetRouter.Alarm.Unavailable => :warning,
-    NervesGate.Commissioning.Alarm.Unavailable => :error
-  }
+  metadata: [
+    :alarm,
+    :alarm_id,
+    :alarm_state,
+    :alarm_level,
+    :alarm_description,
+    :heal,
+    :heal_result,
+    :heal_duration_ms
+  ]
 
 config :nerves_gate,
   data_dir: "/data",

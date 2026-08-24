@@ -65,7 +65,7 @@ defmodule NervesGate.DeviceState.Data do
 
   @type internet :: %{
           status: :online | :failed,
-          reason: term()
+          reason: atom() | nil
         }
 
   @type tailnet :: %{
@@ -326,8 +326,11 @@ defmodule NervesGate.DeviceState.Data do
   defp normalize_internet(internet) do
     status = Map.get(internet, :status, :failed)
 
-    if only_keys?(internet, [:status, :reason]) and status in [:online, :failed] do
-      {:ok, %{status: status, reason: Map.get(internet, :reason)}}
+    reason = Map.get(internet, :reason)
+
+    if only_keys?(internet, [:status, :reason]) and status in [:online, :failed] and
+         is_atom(reason) do
+      {:ok, %{status: status, reason: reason}}
     else
       :error
     end

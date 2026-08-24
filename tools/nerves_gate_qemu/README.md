@@ -12,4 +12,6 @@ mix nerves_gate.dev
 Then open `http://qemu.localhost:4000/dev/qemu`.
 
 The root `mix nerves_gate.qemu ...` task delegates lifecycle and observation
-commands to this project. When working here directly, use `mix qemu ...`.
+commands to this project. Observations accept only the versioned,
+secret-free `nerves_gate.status.v1` gateway API. When working here directly,
+use `mix qemu ...`.

@@ -9,15 +9,7 @@ defmodule NervesGate.Internet.Monitor do
 
   @check_order [:physical_link, :ip_address, :default_route, :dns, :internet_https]
 
-  defstruct [
-    :timer,
-    :last,
-    :last_repair,
-    interval: 10_000,
-    repair_interval: 60_000,
-    repair: &Manager.reapply/0,
-    verifier: &Connectivity.verify/1
-  ]
+  defstruct [:timer, :last, interval: 10_000, verifier: &Connectivity.verify/1]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -28,6 +20,10 @@ defmodule NervesGate.Internet.Monitor do
   @spec status(GenServer.server()) :: map()
   def status(server \\ __MODULE__), do: GenServer.call(server, :status)
 
+  @doc "Requests an immediate connectivity observation without changing configuration."
+  @spec poll_now(GenServer.server()) :: :ok
+  def poll_now(server \\ __MODULE__), do: GenServer.cast(server, :poll_now)
+
   @impl true
   def init(options) do
     state = %__MODULE__{
@@ -37,8 +33,6 @@ defmodule NervesGate.Internet.Monitor do
           :interval,
           Application.get_env(:nerves_gate, :internet_poll_interval, 10_000)
         ),
-      repair: Keyword.get(options, :repair, &Manager.reapply/0),
-      repair_interval: Keyword.get(options, :repair_interval, 60_000),
       verifier: Keyword.get(options, :verifier, &Connectivity.verify/1)
     }
 
@@ -49,10 +43,15 @@ defmodule NervesGate.Internet.Monitor do
   def handle_call(:status, _from, state), do: {:reply, state.last || offline(:starting), state}
 
   @impl true
+  def handle_cast(:poll_now, state) do
+    if state.timer, do: Process.cancel_timer(state.timer)
+    {:noreply, schedule(%{state | timer: nil}, 0)}
+  end
+
+  @impl true
   def handle_info(:poll, state) do
     result = current_result(state.verifier)
-    state = maybe_repair(state, result)
-    Alarms.report(result)
+    Alarms.report(result, state.last)
 
     if result != state.last do
       publish(result)
@@ -102,20 +101,6 @@ defmodule NervesGate.Internet.Monitor do
   defp offline(reason) do
     %{interface: nil, online: false, ready: false, reason: reason, checks: %{}}
   end
-
-  defp maybe_repair(state, %{reason: reason})
-       when reason in [:no_ipv4_address, :missing_default_route] do
-    now = System.monotonic_time(:millisecond)
-
-    if is_nil(state.last_repair) or now - state.last_repair >= state.repair_interval do
-      state.repair.()
-      %{state | last_repair: now}
-    else
-      state
-    end
-  end
-
-  defp maybe_repair(state, _result), do: state
 
   defp publish(result) do
     Phoenix.PubSub.local_broadcast(NervesGate.PubSub, "internet", {:internet_changed, result})

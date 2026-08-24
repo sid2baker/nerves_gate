@@ -18,7 +18,7 @@ defmodule NervesGate.Tailnet.Observer do
           error: atom() | nil
         }
 
-  defstruct [:source, :health, :route_status, :route_retry, status: nil]
+  defstruct [:source, :health, :read_status, :route_status, :route_retry, status: nil]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -56,6 +56,7 @@ defmodule NervesGate.Tailnet.Observer do
     state = %__MODULE__{
       source: source,
       health: health,
+      read_status: Keyword.get(options, :read_status, &Tailscale.status/0),
       route_status: Keyword.get(options, :route_status, &Tailscale.route_status/0),
       status: status
     }
@@ -74,7 +75,13 @@ defmodule NervesGate.Tailnet.Observer do
 
   @impl true
   def handle_cast(:refresh, state) do
-    {:noreply, observe(state, state.source)}
+    source =
+      case state.read_status.() do
+        {:ok, %Tailscale.Status{} = source} -> source
+        {:error, _reason} -> state.source
+      end
+
+    {:noreply, observe(state, source)}
   end
 
   @impl true

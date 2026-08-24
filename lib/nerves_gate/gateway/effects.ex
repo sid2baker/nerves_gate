@@ -13,6 +13,7 @@ defmodule NervesGate.Gateway.Effects do
     %{
       internet: &InternetManager.configure/1,
       internet_restore: &InternetManager.restore/1,
+      internet_observe: &NervesGate.Internet.Monitor.poll_now/0,
       stage_tailnet: &Enrollment.stage/3,
       tailnet_restore: &Enrollment.select/1,
       commit_tailnet: &Enrollment.commit/1,

@@ -7,7 +7,7 @@ defmodule NervesGate.Commissioning.Access do
   alias NervesGate.Identity
   alias NervesGate.Internet.Hardware
 
-  defstruct [:adapter, :hardware, active: [], mode: :disabled]
+  defstruct [:adapter, :hardware, :uplink, active: [], mode: :disabled]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -30,6 +30,10 @@ defmodule NervesGate.Commissioning.Access do
   @spec status(GenServer.server()) :: map()
   def status(server \\ __MODULE__), do: GenServer.call(server, :status)
 
+  @doc "Rescans hardware and reapplies the last requested commissioning access."
+  @spec heal(GenServer.server()) :: :ok | {:error, :no_interface}
+  def heal(server \\ __MODULE__), do: GenServer.call(server, :heal)
+
   @impl true
   def init(options) do
     {:ok,
@@ -42,21 +46,22 @@ defmodule NervesGate.Commissioning.Access do
 
   @impl true
   def handle_call({:enable, mode, uplink}, _from, state) do
-    desired = desired_configurations(state.hardware.(), uplink)
+    {reply, state} = enable_access(mode, uplink, state)
+    {:reply, reply, state}
+  end
 
-    if desired != [] and state.mode == mode and state.active == desired do
-      Alarms.unavailable(false)
-      {:reply, {:ok, desired}, state}
-    else
-      Enum.each(state.active, &state.adapter.clear(&1.interface))
-      active = configure_available(desired, state.adapter)
-      reply_enabled(active, mode, state)
-    end
+  def handle_call(:heal, _from, %{mode: :disabled} = state), do: {:reply, :ok, state}
+
+  def handle_call(:heal, _from, state) do
+    {reply, state} = enable_access(state.mode, state.uplink, state)
+    reply = if match?({:ok, _active}, reply), do: :ok, else: reply
+    {:reply, reply, state}
   end
 
   def handle_call(:disable, _from, state) do
     Enum.each(state.active, &state.adapter.clear(&1.interface))
-    {:reply, :ok, %{state | active: [], mode: :disabled}}
+    Alarms.unavailable(false)
+    {:reply, :ok, %{state | active: [], mode: :disabled, uplink: nil}}
   end
 
   def handle_call({:release, interface}, _from, state) do
@@ -66,6 +71,20 @@ defmodule NervesGate.Commissioning.Access do
 
   def handle_call(:status, _from, state) do
     {:reply, %{active: state.active, mode: state.mode}, state}
+  end
+
+  defp enable_access(mode, uplink, state) do
+    desired = desired_configurations(state.hardware.(), uplink)
+    state = %{state | mode: mode, uplink: uplink}
+
+    if desired != [] and state.active == desired do
+      Alarms.unavailable(false)
+      {{:ok, desired}, state}
+    else
+      Enum.each(state.active, &state.adapter.clear(&1.interface))
+      active = configure_available(desired, state.adapter)
+      reply_enabled(active, state)
+    end
   end
 
   @spec commissioning_candidates([map()], String.t() | nil) :: [map()]
@@ -103,14 +122,14 @@ defmodule NervesGate.Commissioning.Access do
     end)
   end
 
-  defp reply_enabled([], mode, state) do
+  defp reply_enabled([], state) do
     Alarms.unavailable(true)
-    {:reply, {:error, :no_interface}, %{state | active: [], mode: mode}}
+    {{:error, :no_interface}, %{state | active: []}}
   end
 
-  defp reply_enabled(active, mode, state) do
+  defp reply_enabled(active, state) do
     Alarms.unavailable(false)
-    {:reply, {:ok, active}, %{state | active: active, mode: mode}}
+    {{:ok, active}, %{state | active: active}}
   end
 
   defp commissioning_options(%{kind: kind}, index) do

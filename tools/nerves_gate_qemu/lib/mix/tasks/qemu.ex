@@ -146,19 +146,20 @@ defmodule Mix.Tasks.Qemu do
     end
   end
 
-  defp print_summary(node, url, status) do
+  defp print_summary(node, url, %{"schema" => "nerves_gate.status.v1"} = status) do
     configuration = Map.get(status, "configuration", %{})
-    internet = Map.get(status, "network", %{}) |> Map.get("connectivity", %{})
-    tailnet = Map.get(status, "tailnet", %{})
-    tailnet_health = Map.get(tailnet, "health") || %{}
-    cluster = Map.get(status, "cluster", %{})
-    replicas = status |> get_in(["device_state", "replicas"]) |> value_map()
-    candidates = Map.get(cluster, "candidates", [])
-    alarms = Map.get(status, "alarms", [])
+    data = status |> get_in(["local", "data"]) |> value_map()
+    internet = Map.get(data, "internet", %{})
+    tailnet = Map.get(data, "tailnet", %{})
+    cluster = Map.get(data, "cluster", %{})
+    tailnet_health = status |> get_in(["runtime", "tailscale"]) |> value_map()
+    replicas = status |> Map.get("replicas") |> value_map()
+    candidates = status |> get_in(["runtime", "cluster", "candidates"]) |> value_list()
+    alarms = Map.get(data, "alarms", [])
 
     connected_replicas = Enum.count(replicas, fn {_id, replica} -> replica["connected"] end)
     stale_replicas = map_size(replicas) - connected_replicas
-    pending = configuration |> Map.get("pending") |> pending_phase()
+    pending = configuration |> Map.get("change") |> pending_phase()
 
     Mix.shell().info("""
     #{node} #{url}
@@ -168,6 +169,10 @@ defmodule Mix.Tasks.Qemu do
       replicas=#{map_size(replicas)} connected=#{connected_replicas} stale=#{stale_replicas}
     #{format_candidates(candidates)}#{format_alarms(alarms)}
     """)
+  end
+
+  defp print_summary(node, url, _unsupported) do
+    Mix.shell().error("#{node} #{url}\n  unavailable: unsupported status schema")
   end
 
   defp format_candidates([]), do: "  candidates=none\n"
@@ -198,12 +203,19 @@ defmodule Mix.Tasks.Qemu do
   defp pending_phase(nil), do: "none"
   defp pending_phase(pending), do: Map.get(pending, "phase", "unknown")
 
-  defp online_state(%{"online" => true}), do: "online"
-  defp online_state(%{"online" => false}), do: "offline"
+  defp online_state(%{"status" => "online"}), do: "online"
+
+  defp online_state(%{"status" => status})
+       when status in ["offline", "failed", "blocked", "disabled"],
+       do: "offline"
+
   defp online_state(_status), do: "unknown"
 
   defp value_map(value) when is_map(value), do: value
   defp value_map(_value), do: %{}
+
+  defp value_list(value) when is_list(value), do: value
+  defp value_list(_value), do: []
 
   defp format_value(nil), do: "unknown"
   defp format_value(value) when is_binary(value), do: value

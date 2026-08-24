@@ -260,18 +260,43 @@ defmodule NervesGateWebTest do
     end
   end
 
-  test "status API exposes the slot configuration without credentials" do
+  test "status API exposes one versioned, canonical, secret-free schema" do
     body = build_conn() |> get("/api/status") |> json_response(200)
 
-    assert is_map(body["configuration"])
+    assert body["schema"] == "nerves_gate.status.v1"
+    assert is_binary(body["observed_at"])
     assert is_map(body["configuration"]["current"]["subnet_router"])
     assert is_boolean(body["configuration"]["current"]["ssh_enabled"])
-    assert is_map(body["device_state"]["local"]["ssh"])
-    assert is_map(body["ssh"])
-    assert is_map(body["tailnet"]["subnet_router"])
-    assert is_map(body["device"])
+    refute Map.has_key?(body["configuration"], "last_error")
+    refute Map.has_key?(body["configuration"], "pending")
+    assert is_map(body["local"]["data"]["ssh"])
+    assert is_list(body["local"]["data"]["alarms"])
+    assert is_map(body["replicas"])
+    assert is_map(body["runtime"]["tailscale"])
+    refute Map.has_key?(body["runtime"]["tailscale"], "last_error")
+    refute Map.has_key?(body["runtime"]["tailscale"], "last_daemon_exit")
+    refute Map.has_key?(body, "device_state")
+    refute Map.has_key?(body, "network")
     refute inspect(body) =~ "auth_token"
     refute inspect(body) =~ "password"
+  end
+
+  test "status API explicitly serializes the canonical SSH address" do
+    original = :sys.get_state(Server)
+
+    data = %{
+      original.data
+      | ssh: %{enabled: true, state: :listening, address: {100, 64, 0, 10}, port: 22}
+    }
+
+    :sys.replace_state(Server, &%{&1 | data: data})
+
+    try do
+      body = build_conn() |> get("/api/status") |> json_response(200)
+      assert get_in(body, ["local", "data", "ssh", "address"]) == "100.64.0.10"
+    after
+      :sys.replace_state(Server, fn _state -> original end)
+    end
   end
 
   test "discovery API exposes the public cluster group" do
@@ -442,7 +467,6 @@ defmodule NervesGateWebTest do
 
   defp dashboard_view(replicas \\ %{}, selected_device_id \\ nil) do
     snapshot = NervesGate.DeviceState.Server.snapshot()
-    status = NervesGate.Status.snapshot()
 
     state = %{
       data: snapshot.data,
@@ -452,13 +476,18 @@ defmodule NervesGateWebTest do
     }
 
     context = %{
-      configuration: status.configuration,
-      internet: status.network.connectivity,
-      network_configuration: status.network.configuration,
+      configuration: NervesGate.DeviceState.Server.configuration(),
+      internet: NervesGate.Internet.Monitor.status(),
+      network_configuration: NervesGate.Internet.Manager.status(),
       tailnet: NervesGate.Tailnet.Observer.status(),
       cluster: NervesGate.Cluster.Manager.status(),
-      people_count: status.people_count,
-      diagnostics: status.diagnostics
+      people_count: NervesGateWeb.Presence.count(),
+      diagnostics: %{
+        target: Nerves.Runtime.mix_target(),
+        uptime_seconds: 0,
+        otp_release: List.to_string(:erlang.system_info(:otp_release)),
+        memory_bytes: :erlang.memory(:total)
+      }
     }
 
     NervesGateWeb.StatusLive.View.build(
