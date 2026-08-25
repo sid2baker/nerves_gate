@@ -130,7 +130,7 @@ defmodule NervesGateWeb.StatusLive.Render do
                   description={alarm_description(@view.selected)}
                 />
                 <div class="mt-4">
-                  <.alarm_list alarms={@view.selected.data.alarms} stale={@view.selected.stale} />
+                  <.alarm_list alarms={@view.selected.alarms} stale={@view.selected.stale} />
                 </div>
               </.card>
 
@@ -163,21 +163,10 @@ defmodule NervesGateWeb.StatusLive.Render do
         <.section_header
           eyebrow="Local diagnostics"
           title="Internet checks"
-          description="Detailed checks remain local and are not replicated."
+          description="Connectivity evidence published in canonical device state."
         />
         <div class="mt-5">
           <.detail_list items={internet_details(@view.internet)} />
-        </div>
-      </.card>
-
-      <.card>
-        <.section_header
-          eyebrow="Runtime"
-          title="System"
-          description="Local runtime diagnostics are deliberately not replicated."
-        />
-        <div class="mt-5">
-          <.detail_list items={system_details(@view.diagnostics)} />
         </div>
       </.card>
 
@@ -286,7 +275,7 @@ defmodule NervesGateWeb.StatusLive.Render do
   end
 
   defp alarm_description(node) do
-    count = length(node.data.alarms)
+    count = length(node.alarms)
     suffix = if node.stale, do: " in the last-known state", else: ""
     "#{count} actionable alarm#{if count == 1, do: "", else: "s"}#{suffix}."
   end
@@ -294,18 +283,18 @@ defmodule NervesGateWeb.StatusLive.Render do
   defp device_details(node) do
     [
       {"Machine ID", node.id},
-      {"Tailnet hostname", node.data.tailnet.hostname || "Unavailable"},
-      {"Tailnet IPv4", node.data.tailnet.ipv4 || "Unavailable"},
-      {"Cluster group", node.data.cluster.group || "Singular"},
-      {"Subnet router", humanize(node.data.subnet_router.status)},
-      {"Subnet routes", route_list(node.data.subnet_router.routes)},
-      {"Advertised routes", route_list(node.data.subnet_router.advertised)},
-      {"Approved routes", route_list(node.data.subnet_router.approved)},
-      {"Primary routes", route_list(node.data.subnet_router.primary)},
-      {"Remote IEx", ssh_label(node.data.ssh)},
-      {"SSH address", ssh_address(node.data.ssh)},
-      {"BEAM node", format_node(node.data.cluster.node)},
-      {"Firmware", node.data.firmware_version},
+      {"Tailnet hostname", node.tailnet.hostname || "Unavailable"},
+      {"Tailnet IPv4", node.tailnet.ipv4 || "Unavailable"},
+      {"Cluster group", node.cluster.group || "Singular"},
+      {"Subnet router", humanize(node.subnet_router.state)},
+      {"Subnet routes", route_list(node.subnet_router.routes)},
+      {"Advertised routes", route_list(observed_routes(node.subnet_router, :advertised))},
+      {"Approved routes", route_list(observed_routes(node.subnet_router, :approved))},
+      {"Primary routes", route_list(observed_routes(node.subnet_router, :primary))},
+      {"Remote IEx", ssh_label(node.ssh)},
+      {"SSH address", ssh_address(node.ssh)},
+      {"BEAM node", format_node(node.cluster.node)},
+      {"Firmware", node.firmware_version},
       {"Revision", node.revision},
       {"Connection", if(node.connected, do: "Connected", else: "Stale")}
     ]
@@ -324,21 +313,12 @@ defmodule NervesGateWeb.StatusLive.Render do
     ]
   end
 
-  defp system_details(diagnostics) do
-    [
-      {"Target", diagnostics.target},
-      {"OTP release", diagnostics.otp_release},
-      {"Uptime", duration(diagnostics.uptime_seconds)},
-      {"Memory", "#{megabytes(diagnostics.memory_bytes)} MB"}
-    ]
-  end
-
   defp subnet_router_details(subnet_router) do
     [
       {"Configured", route_list(subnet_router.routes)},
-      {"Advertised", route_list(subnet_router.advertised)},
-      {"Approved", route_list(subnet_router.approved)},
-      {"Primary", route_list(subnet_router.primary)}
+      {"Advertised", route_list(observed_routes(subnet_router, :advertised))},
+      {"Approved", route_list(observed_routes(subnet_router, :approved))},
+      {"Primary", route_list(observed_routes(subnet_router, :primary))}
     ]
   end
 
@@ -355,23 +335,31 @@ defmodule NervesGateWeb.StatusLive.Render do
   defp ssh_tone(%{state: :disabled}), do: :neutral
   defp ssh_tone(_ssh), do: :warning
 
-  defp ssh_label(%{state: :waiting_for_tailnet}), do: "Waiting for Tailnet"
+  defp ssh_label(%{state: :blocked}), do: "Waiting for Tailnet"
+  defp ssh_label(%{state: :reconciling}), do: "Reconciling"
+  defp ssh_label(%{state: :backoff}), do: "Retry scheduled"
   defp ssh_label(%{state: state}), do: humanize(state)
 
   defp ssh_address(%{address: nil}), do: "Unavailable"
+
+  defp ssh_address(%{address: address, port: port}) when is_binary(address),
+    do: "#{address}:#{port}"
 
   defp ssh_address(%{address: address, port: port}) do
     "#{address |> :inet.ntoa() |> to_string()}:#{port}"
   end
 
-  defp subnet_router_tone(%{status: :disabled}), do: :neutral
-  defp subnet_router_tone(%{status: :online}), do: :good
+  defp subnet_router_tone(%{state: :disabled}), do: :neutral
+  defp subnet_router_tone(%{state: :active}), do: :good
   defp subnet_router_tone(_subnet_router), do: :warning
 
-  defp subnet_router_label(%{status: :disabled}), do: "Disabled"
-  defp subnet_router_label(%{status: :online}), do: "Advertising"
-  defp subnet_router_label(%{status: :blocked}), do: "Blocked"
+  defp subnet_router_label(%{state: :disabled}), do: "Disabled"
+  defp subnet_router_label(%{state: :active}), do: "Advertising"
+  defp subnet_router_label(%{state: :blocked}), do: "Blocked"
   defp subnet_router_label(_subnet_router), do: "Needs attention"
+
+  defp observed_routes(subnet_router, kind),
+    do: subnet_router |> Map.get(:observed, %{}) |> Map.get(kind, [])
 
   defp route_list([]), do: "None"
   defp route_list(routes), do: Enum.join(routes, ", ")
@@ -393,7 +381,4 @@ defmodule NervesGateWeb.StatusLive.Render do
 
   defp humanize(value),
     do: value |> to_string() |> String.replace("_", " ") |> String.capitalize()
-
-  defp duration(seconds), do: "#{div(seconds, 3600)}h #{div(rem(seconds, 3600), 60)}m"
-  defp megabytes(bytes), do: Float.round(bytes / 1_048_576, 1)
 end

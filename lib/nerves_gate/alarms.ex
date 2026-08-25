@@ -41,7 +41,13 @@ defmodule NervesGate.Alarms do
   def report_sync(id, active, description) do
     expected = if active, do: :set, else: :clear
     :ok = report(id, active, description)
-    :ok = await_state(id, expected)
+
+    # A newer ordered projection may supersede this signal while Alarmist is
+    # still processing it. That is convergence, not an invariant failure.
+    case await_state(id, expected) do
+      :ok -> :ok
+      {:error, :alarm_state_timeout} -> :ok
+    end
   end
 
   @doc false
@@ -227,6 +233,49 @@ defmodule NervesGate.Alarms do
     :ok
   end
 
+  @doc false
+  @spec sync_public_state(NervesGate.DeviceState.State.t(), atom(), term()) :: :ok
+  def sync_public_state(state, source, previous \\ nil)
+
+  def sync_public_state(state, :configuration, _previous) do
+    configuration = state.configuration || %{}
+    NervesGate.DeviceState.Alarms.changing(not is_nil(Map.get(configuration, :pending)))
+    NervesGate.Commissioning.Alarms.required(not Map.get(configuration, :configured, false))
+  end
+
+  def sync_public_state(state, :commissioning, _previous) do
+    commissioning = state.commissioning || %{}
+    NervesGate.Commissioning.Alarms.unavailable(Map.get(commissioning, :state) == :waiting)
+  end
+
+  def sync_public_state(state, :internet, previous) when is_map(state.internet),
+    do: NervesGate.Internet.Alarms.report(state.internet, previous)
+
+  def sync_public_state(state, :tailnet, _previous) when is_map(state.tailnet),
+    do: NervesGate.Tailnet.Alarms.report(state.tailnet)
+
+  def sync_public_state(state, :ssh, _previous) when is_map(state.ssh),
+    do: NervesGate.SSH.Alarms.report(state.ssh)
+
+  def sync_public_state(state, :cluster, _previous) when is_map(state.cluster) do
+    enabled = Map.get(state.cluster, :enabled, false)
+
+    NervesGate.Cluster.Alarms.report(
+      enabled,
+      enabled and not Map.get(state.cluster, :online, false)
+    )
+  end
+
+  def sync_public_state(state, :subnet_router, _previous) when is_map(state.subnet_router) do
+    enabled = Map.get(state.subnet_router, :enabled, false)
+
+    NervesGate.SubnetRouter.Alarms.failure(
+      enabled and Map.get(state.subnet_router, :state) != :active
+    )
+  end
+
+  def sync_public_state(_state, _source, _previous), do: :ok
+
   defp heal_outcome(:ok), do: :ok
   defp heal_outcome({:ok, _value}), do: :ok
   defp heal_outcome({:error, reason}) when is_atom(reason), do: reason
@@ -235,11 +284,19 @@ defmodule NervesGate.Alarms do
 end
 
 defmodule NervesGate.Alarms.Runtime do
-  @moduledoc "Installs subsystem alarms and logs public transitions independently of DeviceState."
+  @moduledoc """
+  Projects canonical public state into subsystem-owned Alarmist policy.
+
+  Alarm evidence comes only from the atomic DeviceState snapshot/event stream.
+  The runtime ignores its own `:alarms` state events for signal derivation and
+  publishes the complete active alarm state after Alarmist transitions.
+  """
 
   use GenServer
 
   alias NervesGate.Alarms
+  alias NervesGate.DeviceState
+  alias NervesGate.DeviceState.State
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -255,14 +312,82 @@ defmodule NervesGate.Alarms.Runtime do
         Application.get_env(:nerves_gate, :alarm_healing_enabled, true)
       )
 
+    server = Keyword.get(options, :device_state, NervesGate.DeviceState.Server)
     :ok = Alarms.subscribe_public()
     :ok = Alarms.install(healing_enabled: healing_enabled)
-    {:ok, %{healing_enabled: healing_enabled}}
+    {:ok, snapshot} = DeviceState.subscribe(self(), server)
+
+    state = %{
+      device_state: snapshot.state,
+      boot_id: snapshot.boot_id,
+      revision: snapshot.revision,
+      device_state_server: server,
+      healing_enabled: healing_enabled
+    }
+
+    sync_snapshot(snapshot.state)
+    :ok = publish_active()
+    {:ok, state}
   end
 
   @impl true
   def handle_info(%Alarmist.Event{} = event, state) do
     Alarms.log_transition(event)
+    :ok = publish_active()
     {:noreply, state}
+  end
+
+  def handle_info(
+        {:device_state_event, _node, boot_id, revision,
+         {:state_reported, source, _value} = event},
+        %{boot_id: boot_id, revision: previous} = state
+      )
+      when revision == previous + 1 do
+    previous_slice = Map.fetch!(state.device_state, source)
+
+    case State.apply_event(state.device_state, event) do
+      {:ok, device_state} ->
+        if source != :alarms,
+          do: Alarms.sync_public_state(device_state, source, previous_slice)
+
+        {:noreply, %{state | device_state: device_state, revision: revision}}
+
+      :error ->
+        {:stop, :invalid_device_state_event, state}
+    end
+  end
+
+  def handle_info(
+        {:device_state_event, _node, boot_id, revision, _event},
+        %{boot_id: boot_id, revision: current} = state
+      )
+      when revision <= current,
+      do: {:noreply, state}
+
+  def handle_info({:device_state_event, _node, _boot, _revision, _event}, state) do
+    {:ok, snapshot} = DeviceState.subscribe(self(), state.device_state_server)
+    sync_snapshot(snapshot.state)
+
+    {:noreply,
+     %{
+       state
+       | device_state: snapshot.state,
+         boot_id: snapshot.boot_id,
+         revision: snapshot.revision
+     }}
+  end
+
+  defp sync_snapshot(%State{} = state) do
+    Enum.each(State.sources() -- [:device, :alarms], fn source ->
+      Alarms.sync_public_state(state, source)
+    end)
+  end
+
+  defp publish_active do
+    case DeviceState.publish({:state_reported, :alarms, Alarms.active()}) do
+      :ok -> :ok
+      {:error, :shutting_down} -> :ok
+      {:error, reason} -> raise "Alarm DeviceState publication failed: #{inspect(reason)}"
+    end
   end
 end

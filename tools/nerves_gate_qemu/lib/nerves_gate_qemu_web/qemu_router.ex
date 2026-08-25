@@ -16,8 +16,8 @@ defmodule NervesGateQEMUWeb.Router do
     })
   end
 
-  scope "/dev", NervesGateQEMUWeb do
+  scope "/", NervesGateQEMUWeb do
     pipe_through(:browser)
-    live("/qemu", QemuLive, :index)
+    live("/", QemuLive, :index)
   end
 end

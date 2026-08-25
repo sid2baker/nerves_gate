@@ -39,7 +39,7 @@ defmodule NervesGate.SubnetRouter.Alarms do
   @moduledoc "Owns route-application truth, Tailnet inhibition, and accepted-state healing."
 
   alias NervesGate.Alarms
-  alias NervesGate.DeviceState.Server
+  alias NervesGate.SubnetRouter
   alias NervesGate.SubnetRouter.Alarm
   alias NervesGate.SubnetRouter.Signal
 
@@ -64,6 +64,6 @@ defmodule NervesGate.SubnetRouter.Alarms do
 
   @spec heal() :: :ok | {:error, term()}
   def heal do
-    Alarms.heal(Alarm.Unavailable, fn -> Server.heal(:subnet_router) end)
+    Alarms.heal(Alarm.Unavailable, &SubnetRouter.heal/0)
   end
 end

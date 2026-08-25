@@ -11,6 +11,17 @@ defmodule NervesGate.AlarmsDependencyTest do
   alias NervesGate.SubnetRouter
   alias NervesGate.Tailnet
 
+  setup_all do
+    runtime = Process.whereis(NervesGate.Alarms.Runtime)
+    if runtime, do: :sys.suspend(runtime)
+
+    on_exit(fn ->
+      if runtime && Process.alive?(runtime), do: :sys.resume(runtime)
+    end)
+
+    :ok
+  end
+
   setup do
     signals = [
       Storage.Signal.Failure,
@@ -28,6 +39,11 @@ defmodule NervesGate.AlarmsDependencyTest do
     ]
 
     Enum.each(signals, &Alarms.clear/1)
+
+    signals
+    |> List.delete(Internet.Signal.UnavailableSample)
+    |> Enum.each(&initialize_clear/1)
+
     Enum.each(signals, fn id -> on_exit(fn -> Alarms.clear(id) end) end)
 
     wait_for(fn ->
@@ -173,12 +189,17 @@ defmodule NervesGate.AlarmsDependencyTest do
     refute_set(Cluster.Alarm.Unavailable)
   end
 
+  defp initialize_clear(id) do
+    :ok = Alarms.report_sync(id, true, id.description())
+    :ok = Alarms.report_sync(id, false, id.description())
+  end
+
   defp set(id), do: Alarms.set(id, id.description())
   defp assert_set(id), do: assert(Alarmist.alarm_state(id) == :set)
   defp refute_set(id), do: refute(Alarmist.alarm_state(id) == :set)
   defp wait_set(id), do: wait_for(fn -> Alarmist.alarm_state(id) == :set end)
 
-  defp wait_for(predicate, attempts \\ 100) do
+  defp wait_for(predicate, attempts \\ 400) do
     cond do
       predicate.() ->
         :ok

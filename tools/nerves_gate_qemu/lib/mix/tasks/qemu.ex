@@ -1,45 +1,41 @@
 defmodule Mix.Tasks.Qemu do
   @shortdoc "Runs and observes a local NervesGate QEMU topology"
 
+  @usage """
+  Usage:
+    mix qemu setup [--count N] [--rebuild]
+    mix qemu add
+    mix qemu remove DEVICE
+    mix qemu start|stop|restart|reset [DEVICE|all]
+    mix qemu status [DEVICE|all]
+    mix qemu observe [DEVICE|all] [--json]
+    mix qemu logs [DEVICE|all]
+    mix qemu prepare [DEVICE|all]
+    mix qemu help
+
+  With no command, `setup --count 3` is used. Pass `--rebuild` to build current
+  source before recreating every disk. Start, stop, and restart preserve disks.
+  """
+
   @moduledoc """
-  Starts a fresh environment for commissioning (three machines by default):
+  Runs and observes a local NervesGate QEMU topology.
 
-      mix qemu setup
-      mix qemu setup --count 5
-      mix qemu add
-      mix qemu remove M05
-
-  Start, stop, and restart preserve current disks and settings slots. Reset
-  recreates selected disks:
-
-      mix qemu start
-      mix qemu status
-      mix qemu stop
-      mix qemu restart
-      mix qemu reset
-
-  Inspect public runtime state from every local dashboard:
-
-      mix qemu observe
-      mix qemu observe M02
-      mix qemu observe --json
-      watch -n 2 mix qemu observe
-
-  Follow the serial logs for all gateways or one gateway:
-
-      mix qemu logs
-      mix qemu logs M03
+  #{@usage}
   """
 
   use Mix.Task
 
   @lifecycle ~w(start stop restart reset status prepare)
+  @help_arguments ~w(help --help -h)
 
   alias NervesGateQEMU.Runner
 
   @impl Mix.Task
   def run(arguments) do
     case List.first(arguments) || "setup" do
+      help when help in @help_arguments ->
+        Mix.shell().info(@usage)
+
       "setup" ->
         fresh_environment(Enum.drop(arguments, 1))
 
@@ -58,14 +54,14 @@ defmodule Mix.Tasks.Qemu do
       action when action in @lifecycle ->
         lifecycle(action, Enum.at(arguments, 1, "all"))
 
-      _other ->
-        Mix.raise("expected setup, add, remove, observe, logs, or #{Enum.join(@lifecycle, ", ")}")
+      other ->
+        Mix.raise("unknown QEMU command #{inspect(other)}; run `mix qemu help` for usage")
     end
   end
 
   defp fresh_environment(arguments) do
-    count = setup_count(arguments)
-    ensure_firmware!()
+    {count, rebuild?} = setup_options(arguments)
+    if rebuild?, do: build_firmware!(), else: ensure_firmware!()
     run!(fn -> Runner.setup(count: count) end)
     ports = Enum.map_join(Runner.devices(), ", ", & &1.port)
     Mix.shell().info("Fresh commissioning pages ready on ports #{ports} at /commissioning")
@@ -146,26 +142,26 @@ defmodule Mix.Tasks.Qemu do
     end
   end
 
-  defp print_summary(node, url, %{"schema" => "nerves_gate.status.v1"} = status) do
-    configuration = Map.get(status, "configuration", %{})
-    data = status |> get_in(["local", "data"]) |> value_map()
-    internet = Map.get(data, "internet", %{})
-    tailnet = Map.get(data, "tailnet", %{})
-    cluster = Map.get(data, "cluster", %{})
-    tailnet_health = status |> get_in(["runtime", "tailscale"]) |> value_map()
+  defp print_summary(node, url, %{"schema" => "nerves_gate.status.v2"} = status) do
+    state = status |> get_in(["local", "state"]) |> value_map()
+    configuration = state |> Map.get("configuration") |> value_map()
+    internet = state |> Map.get("internet") |> value_map()
+    tailnet = state |> Map.get("tailnet") |> value_map()
+    cluster = state |> Map.get("cluster") |> value_map()
+    tailnet_health = tailnet |> Map.get("health") |> value_map()
     replicas = status |> Map.get("replicas") |> value_map()
-    candidates = status |> get_in(["runtime", "cluster", "candidates"]) |> value_list()
-    alarms = Map.get(data, "alarms", [])
+    candidates = cluster |> Map.get("candidates") |> value_list()
+    alarms = Map.get(state, "alarms", [])
 
     connected_replicas = Enum.count(replicas, fn {_id, replica} -> replica["connected"] end)
     stale_replicas = map_size(replicas) - connected_replicas
-    pending = configuration |> Map.get("change") |> pending_phase()
+    pending = configuration |> Map.get("pending") |> pending_phase()
 
     Mix.shell().info("""
     #{node} #{url}
       configured=#{configuration["configured"]} pending=#{pending}
-      internet=#{online_state(internet)} tailnet=#{online_state(tailnet)} #{tailnet["ipv4"] || "no-ip"} daemon=#{tailnet_health["daemon"] || "unknown"} socket=#{tailnet_health["socket"] || "unknown"}
-      cluster=#{online_state(cluster)} group=#{cluster["group"] || "disabled"} connected=#{length(Map.get(cluster, "connected", []))}
+      internet=#{layer_state(internet)} tailnet=#{layer_state(tailnet)} #{tailnet["ipv4"] || "no-ip"} daemon=#{tailnet_health["daemon"] || "unknown"} socket=#{tailnet_health["socket"] || "unknown"}
+      cluster=#{layer_state(cluster)} group=#{cluster["group"] || "disabled"} connected=#{length(Map.get(cluster, "connected", []))}
       replicas=#{map_size(replicas)} connected=#{connected_replicas} stale=#{stale_replicas}
     #{format_candidates(candidates)}#{format_alarms(alarms)}
     """)
@@ -203,13 +199,8 @@ defmodule Mix.Tasks.Qemu do
   defp pending_phase(nil), do: "none"
   defp pending_phase(pending), do: Map.get(pending, "phase", "unknown")
 
-  defp online_state(%{"status" => "online"}), do: "online"
-
-  defp online_state(%{"status" => status})
-       when status in ["offline", "failed", "blocked", "disabled"],
-       do: "offline"
-
-  defp online_state(_status), do: "unknown"
+  defp layer_state(%{"state" => state}) when is_binary(state), do: state
+  defp layer_state(_status), do: "unknown"
 
   defp value_map(value) when is_map(value), do: value
   defp value_map(_value), do: %{}
@@ -298,39 +289,39 @@ defmodule Mix.Tasks.Qemu do
     end
   end
 
-  defp setup_count(arguments) do
-    case arguments do
-      ["--count", count] -> parse_count!(count)
-      ["--count=" <> count] -> parse_count!(count)
-      [] -> 3
-      _other -> Mix.raise("usage: mix qemu setup [--count N]")
-    end
-  end
+  defp setup_options(arguments) do
+    case OptionParser.parse(arguments, strict: [count: :integer, rebuild: :boolean]) do
+      {options, [], []} ->
+        count = Keyword.get(options, :count, 3)
 
-  defp parse_count!(count) do
-    case Integer.parse(count) do
-      {value, ""} when value in 1..12 -> value
-      _invalid -> Mix.raise("QEMU machine count must be between 1 and 12")
+        if count in 1..12,
+          do: {count, Keyword.get(options, :rebuild, false)},
+          else: Mix.raise("QEMU machine count must be between 1 and 12")
+
+      _invalid ->
+        Mix.raise("usage: mix qemu setup [--count N] [--rebuild]")
     end
   end
 
   defp qemu_path(file), do: Path.join(Runner.state_root(), file)
 
   defp ensure_firmware! do
+    unless File.exists?(Runner.firmware_path()), do: build_firmware!()
+  end
+
+  defp build_firmware! do
     firmware = Runner.firmware_path()
+    File.mkdir_p!(Path.dirname(firmware))
+    Mix.shell().info("Building current x86_64 firmware at #{firmware}…")
 
-    unless File.exists?(firmware) do
-      Mix.shell().info("Building x86_64 firmware first…")
-
-      case System.cmd("mix", ["firmware"],
-             cd: Runner.project_root(),
-             env: [{"MIX_TARGET", "x86_64"}],
-             into: IO.stream(),
-             stderr_to_stdout: true
-           ) do
-        {_output, 0} -> :ok
-        {_output, status} -> Mix.raise("firmware build failed with status #{status}")
-      end
+    case System.cmd("mix", ["firmware", "--output", firmware],
+           cd: Runner.project_root(),
+           env: [{"MIX_TARGET", "x86_64"}],
+           into: IO.stream(),
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> :ok
+      {_output, status} -> Mix.raise("firmware build failed with status #{status}")
     end
   end
 end

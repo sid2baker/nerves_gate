@@ -305,6 +305,21 @@ defmodule NervesGateQEMUWeb.QemuLive do
   defp format_error(reason), do: inspect(reason)
 
   defp status_tone(value) when value in [:running, :up, :online, :none], do: :good
-  defp status_tone(value) when value in [:paused, :unknown], do: :warning
+  defp status_tone(value) when value in [:disabled, :unconfigured], do: :neutral
+
+  defp status_tone(value)
+       when value in [
+              :paused,
+              :unknown,
+              :applying,
+              :backoff,
+              :needs_auth,
+              :connecting,
+              :observing,
+              :reconciling,
+              :blocked
+            ],
+       do: :warning
+
   defp status_tone(_value), do: :bad
 end

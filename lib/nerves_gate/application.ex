@@ -7,6 +7,7 @@ defmodule NervesGate.Application do
     children = [
       {Phoenix.PubSub, name: NervesGate.PubSub},
       NervesGate.Backend,
+      NervesGate.StartupGate,
       NervesGateWeb.Presence,
       NervesGateWeb.Endpoint
     ]

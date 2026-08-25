@@ -45,7 +45,7 @@ defmodule NervesGate.SSH.Alarms do
   @moduledoc "Owns SSH listener signals, dependency inhibition, and accepted-state healing."
 
   alias NervesGate.Alarms
-  alias NervesGate.DeviceState.Server
+  alias NervesGate.SSH
   alias NervesGate.SSH.Alarm
   alias NervesGate.SSH.Signal
 
@@ -72,13 +72,13 @@ defmodule NervesGate.SSH.Alarms do
 
     Alarms.report(
       Signal.Unavailable,
-      enabled and state == :error,
+      enabled and state != :listening,
       Signal.Unavailable.description()
     )
   end
 
   @spec heal() :: :ok | {:error, term()}
   def heal do
-    Alarms.heal(Alarm.Unavailable, fn -> Server.heal(:ssh) end)
+    Alarms.heal(Alarm.Unavailable, &SSH.heal/0)
   end
 end

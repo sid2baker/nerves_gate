@@ -1,16 +1,12 @@
 defmodule NervesGateWeb.CommissioningLive do
-  @moduledoc "Edits the complete firmware-slot configuration in dependency order."
+  @moduledoc "Commissions a gateway or applies one guarded settings change."
 
   use NervesGateWeb, :live_view
 
   import NervesGateWeb.GatewayComponents
 
-  alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.DeviceState.Server
-  alias NervesGate.Tailnet.Observer
   alias NervesGateWeb.FormHelpers
 
-  @topics ~w(configuration internet_configuration internet tailnet cluster)
   @steps [:internet, :tailnet, :cluster]
   @default_revert_minutes 1
   @maximum_revert_minutes 60
@@ -31,10 +27,12 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   defp mount_editor(socket, connection_id, loopback_access, flash) do
-    if connected?(socket),
-      do: Enum.each(@topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
+    {:ok, snapshot} =
+      if connected?(socket),
+        do: NervesGate.subscribe(),
+        else: {:ok, NervesGate.snapshot()}
 
-    status = Server.configuration()
+    status = snapshot.state.configuration
     mode = if status.configured and is_nil(status.pending), do: :entry, else: :editor
 
     socket =
@@ -45,12 +43,14 @@ defmodule NervesGateWeb.CommissioningLive do
         mode: mode,
         editor_step: current_step(status),
         tick_timer: nil,
+        public_snapshot: snapshot,
+        change_scope: :tailnet,
         revert_minutes: @default_revert_minutes,
         revert_timeout:
           if(status.configured, do: :timer.minutes(@default_revert_minutes), else: nil)
       )
       |> maybe_put_accept_error(flash)
-      |> refresh()
+      |> refresh(snapshot)
       |> schedule_tick()
 
     {:ok, socket}
@@ -65,8 +65,8 @@ defmodule NervesGateWeb.CommissioningLive do
           <p class="text-xs font-black uppercase tracking-[0.22em] text-emerald-400">NervesGate</p>
           <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white">Change settings</h1>
           <p class="mt-2 text-sm leading-6 text-zinc-400">
-            A candidate is applied temporarily. If it is not accepted from a fresh connection,
-            this firmware slot restores its current settings automatically.
+            Choose one area to change. It is applied temporarily and restored automatically
+            unless accepted from a fresh connection.
           </p>
         </header>
 
@@ -74,6 +74,17 @@ defmodule NervesGateWeb.CommissioningLive do
 
         <.card class="mt-6">
           <form phx-submit="change-settings" class="grid gap-5">
+            <label class="grid gap-2 text-sm font-medium text-zinc-300">
+              <span>Settings to change</span>
+              <select
+                name="configuration[scope]"
+                class="min-h-11 rounded-xl border border-white/10 bg-zinc-950/80 px-3.5 text-zinc-100 outline-none focus:border-emerald-400/70"
+              >
+                <option value="tailnet" selected={@change_scope == :tailnet}>Tailnet only</option>
+                <option value="cluster" selected={@change_scope == :cluster}>Cluster only</option>
+                <option value="complete" selected={@change_scope == :complete}>All settings</option>
+              </select>
+            </label>
             <.input
               label="Auto-revert after"
               name="configuration[revert_minutes]"
@@ -85,7 +96,7 @@ defmodule NervesGateWeb.CommissioningLive do
               required
               hint="Minutes. Defaults to 1; the maximum is 60."
             />
-            <.button type="submit" class="w-full">Change settings</.button>
+            <.button type="submit" class="w-full">Start change</.button>
           </form>
         </.card>
 
@@ -102,8 +113,7 @@ defmodule NervesGateWeb.CommissioningLive do
               {if @configuration.configured, do: "Change settings", else: "Configure gateway"}
             </h1>
             <p class="mt-2 max-w-2xl text-sm leading-6 text-zinc-400">
-              Configure Internet, Tailnet, and clustering in order. They remain one reversible
-              settings candidate until accepted.
+              {change_description(@configuration)}
             </p>
           </div>
           <.link_button :if={@configuration.configured} href={~p"/"} class="shrink-0">
@@ -113,7 +123,11 @@ defmodule NervesGateWeb.CommissioningLive do
 
         <div class="mt-5"><.flash_group flash={@flash} /></div>
 
-        <ol class="mt-7 grid grid-cols-3 gap-1" aria-label="Commissioning progress">
+        <ol
+          :if={complete_flow?(@configuration)}
+          class="mt-7 grid grid-cols-3 gap-1"
+          aria-label="Commissioning progress"
+        >
           <li
             :for={{phase, index} <- Enum.with_index(@steps, 1)}
             aria-current={if @editor_step == phase, do: "step"}
@@ -144,11 +158,10 @@ defmodule NervesGateWeb.CommissioningLive do
                 Unconfirmed configuration
               </p>
               <h2 class="mt-2 text-xl font-semibold text-white">
-                {pending_title(@configuration.pending.phase)}
+                {pending_title(@configuration.pending)}
               </h2>
               <p class="mt-2 text-sm leading-6 text-zinc-300">
-                The active slot file is unchanged until all three steps are complete and the
-                candidate is accepted.
+                The active slot file is unchanged until this change is accepted.
               </p>
               <p
                 :if={@configuration.pending.remaining_seconds}
@@ -264,7 +277,7 @@ defmodule NervesGateWeb.CommissioningLive do
               hint={tailnet_hint(@configuration)}
             />
             <.button type="submit" class="w-full" phx-disable-with="Joining tailnet…">
-              Join Tailnet and continue
+              {tailnet_button_label(@configuration)}
             </.button>
           </form>
         </.card>
@@ -308,7 +321,7 @@ defmodule NervesGateWeb.CommissioningLive do
               </ul>
             </div>
             <.button type="submit" class="w-full" phx-disable-with="Applying cluster settings…">
-              Apply complete candidate
+              {cluster_button_label(@configuration)}
             </.button>
           </form>
         </.card>
@@ -319,18 +332,13 @@ defmodule NervesGateWeb.CommissioningLive do
 
   @impl true
   def handle_event("change-settings", %{"configuration" => params}, socket) do
-    case parse_revert_minutes(params["revert_minutes"]) do
-      {:ok, minutes} ->
-        {:noreply,
-         assign(socket,
-           mode: :editor,
-           editor_step: :internet,
-           revert_minutes: minutes,
-           revert_timeout: :timer.minutes(minutes)
-         )}
-
+    with {:ok, minutes} <- parse_revert_minutes(params["revert_minutes"]),
+         {:ok, scope} <- parse_change_scope(params["scope"]) do
+      start_change(socket, scope, minutes)
+    else
       :error ->
-        {:noreply, put_flash(socket, :error, "Choose a time between 1 and 60 minutes.")}
+        {:noreply,
+         put_flash(socket, :error, "Choose settings and a time between 1 and 60 minutes.")}
     end
   end
 
@@ -349,14 +357,14 @@ defmodule NervesGateWeb.CommissioningLive do
     result =
       case socket.assigns.configuration.pending do
         nil ->
-          Server.stage_internet(
+          NervesGate.stage_internet(
             params,
             socket.assigns.connection_id,
             socket.assigns.revert_timeout
           )
 
         pending ->
-          Server.update_internet(pending.id, params)
+          NervesGate.update_internet(pending.id, params)
       end
 
     case result do
@@ -375,13 +383,18 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_event("configure-tailnet", %{"candidate_id" => id} = params, socket) do
-    case Server.stage_tailnet(id, params) do
-      {:ok, _pending} ->
+    case NervesGate.stage_tailnet(id, params) do
+      {:ok, pending} ->
+        message =
+          if pending.phase == :confirmation,
+            do: "Tailnet change applied. Accept it through the Tailnet to finish.",
+            else: "Tailnet ready. Choose the cluster mode."
+
         {:noreply,
          socket
-         |> put_flash(:info, "Tailnet ready. Choose the cluster mode.")
+         |> put_flash(:info, message)
          |> refresh()
-         |> assign(:editor_step, :cluster)
+         |> assign(:editor_step, pending.phase)
          |> schedule_tick()}
 
       {:error, reason} ->
@@ -391,7 +404,7 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_event("configure-cluster", %{"candidate_id" => id} = params, socket) do
-    case Server.stage_cluster(id, params) do
+    case NervesGate.stage_cluster(id, params) do
       {:ok, _pending} ->
         {:noreply,
          socket
@@ -407,7 +420,7 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_event("revert-configuration", %{"id" => id}, socket) do
-    case Server.revert(id) do
+    case NervesGate.revert(id) do
       :ok ->
         socket = socket |> put_flash(:info, "Candidate reverted.") |> refresh()
         mode = if socket.assigns.configuration.configured, do: :entry, else: :editor
@@ -437,22 +450,87 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_info(
-        {:configuration_changed, %{configured: true, pending: nil}},
+        {:device_state_event, _node, _boot_id, _revision,
+         {:state_reported, :configuration, %{configured: true, pending: nil}}},
         %{assigns: %{mode: :editor}} = socket
       ) do
     {:noreply, redirect(socket, to: ~p"/")}
   end
 
+  def handle_info(
+        {:device_state_event, _node, _boot_id, _revision,
+         {:state_reported, :configuration, %{pending: nil}}},
+        socket
+      ) do
+    socket = socket |> refresh() |> assign(:editor_step, :internet)
+    {:noreply, socket}
+  end
+
+  def handle_info(
+        {:device_state_event, _node, boot_id, revision, event},
+        %{assigns: %{public_snapshot: %{boot_id: boot_id, revision: previous} = snapshot}} =
+          socket
+      )
+      when revision == previous + 1 do
+    case NervesGate.apply_event(snapshot.state, event) do
+      {:ok, state} ->
+        snapshot = %{snapshot | state: state, revision: revision}
+        {:noreply, refresh(socket, snapshot)}
+
+      :error ->
+        {:noreply, refresh(socket)}
+    end
+  end
+
   def handle_info(_event, socket), do: {:noreply, refresh(socket)}
 
-  defp refresh(socket) do
-    configuration = Server.configuration()
-    tailnet = Observer.status()
+  defp start_change(socket, :complete, minutes) do
+    {:noreply,
+     assign(socket,
+       mode: :editor,
+       editor_step: :internet,
+       change_scope: :complete,
+       revert_minutes: minutes,
+       revert_timeout: :timer.minutes(minutes)
+     )}
+  end
+
+  defp start_change(socket, scope, minutes) when scope in [:tailnet, :cluster] do
+    timeout = :timer.minutes(minutes)
+
+    case NervesGate.begin_change(scope, socket.assigns.connection_id, timeout) do
+      {:ok, pending} ->
+        {:noreply,
+         socket
+         |> assign(
+           mode: :editor,
+           editor_step: pending.phase,
+           change_scope: scope,
+           revert_minutes: minutes,
+           revert_timeout: timeout
+         )
+         |> refresh()
+         |> schedule_tick()}
+
+      {:error, reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not start change: #{FormHelpers.format_error(reason)}")}
+    end
+  end
+
+  defp refresh(socket, snapshot \\ NervesGate.snapshot()) do
+    configuration =
+      snapshot.state.configuration ||
+        %{configured: false, current: %{}, pending: nil, last_error: nil}
+
+    tailnet = snapshot.state.tailnet || %{ipv4: nil}
+    cluster = snapshot.state.cluster || %{group: nil, groups: [], candidates: []}
 
     assign(socket,
+      public_snapshot: snapshot,
       configuration: configuration,
       view: %{
-        cluster: ClusterManager.status(),
+        cluster: cluster,
         tailnet: tailnet,
         acceptance_url: acceptance_url(configuration, tailnet, socket.assigns.loopback_access)
       },
@@ -499,9 +577,33 @@ defmodule NervesGateWeb.CommissioningLive do
   defp step_label(:tailnet), do: "Tailnet"
   defp step_label(:cluster), do: "Cluster"
 
-  defp pending_title(:tailnet), do: "Internet verified"
-  defp pending_title(:cluster), do: "Tailnet ready"
-  defp pending_title(:confirmation), do: "Ready to accept"
+  defp pending_title(%{scope: :tailnet, phase: :tailnet}), do: "Ready to change Tailnet"
+  defp pending_title(%{scope: :cluster, phase: :cluster}), do: "Ready to change Cluster"
+  defp pending_title(%{phase: :tailnet}), do: "Internet verified"
+  defp pending_title(%{phase: :cluster}), do: "Tailnet ready"
+  defp pending_title(%{phase: :confirmation}), do: "Ready to accept"
+
+  defp complete_flow?(%{configured: false}), do: true
+  defp complete_flow?(%{pending: %{scope: scope}}), do: scope == :complete
+  defp complete_flow?(_configuration), do: false
+
+  defp change_description(%{configured: false}),
+    do: "Configure Internet, Tailnet, and clustering in order."
+
+  defp change_description(%{pending: %{scope: :tailnet}}),
+    do: "Change only the Tailnet profile. Internet and cluster settings stay unchanged."
+
+  defp change_description(%{pending: %{scope: :cluster}}),
+    do: "Change only the cluster group. Internet and Tailnet settings stay unchanged."
+
+  defp change_description(_configuration),
+    do: "Configure Internet, Tailnet, and clustering in order."
+
+  defp tailnet_button_label(%{pending: %{scope: :tailnet}}), do: "Apply Tailnet change"
+  defp tailnet_button_label(_configuration), do: "Join Tailnet and continue"
+
+  defp cluster_button_label(%{pending: %{scope: :cluster}}), do: "Apply Cluster change"
+  defp cluster_button_label(_configuration), do: "Apply complete candidate"
 
   defp tailnet_hint(configuration) do
     if editing_settings(configuration).tailnet_configured,
@@ -528,7 +630,7 @@ defmodule NervesGateWeb.CommissioningLive do
 
   defp maybe_accept(%{"accept" => id}, connection_id, tailnet_access)
        when is_binary(id) do
-    case Server.confirm(id, %{id: connection_id, tailnet?: tailnet_access}) do
+    case NervesGate.confirm(id, %{id: connection_id, tailnet?: tailnet_access}) do
       :ok -> :accepted
       {:error, reason} -> {:continue, "Accept failed: #{FormHelpers.format_error(reason)}"}
     end
@@ -557,6 +659,11 @@ defmodule NervesGateWeb.CommissioningLive do
   defp loopback_access?(%{"remote_ip" => "127." <> _rest}), do: true
   defp loopback_access?(%{"remote_ip" => "::1"}), do: true
   defp loopback_access?(_session), do: false
+
+  defp parse_change_scope("tailnet"), do: {:ok, :tailnet}
+  defp parse_change_scope("cluster"), do: {:ok, :cluster}
+  defp parse_change_scope("complete"), do: {:ok, :complete}
+  defp parse_change_scope(_scope), do: :error
 
   defp parse_revert_minutes(value) do
     case Integer.parse(to_string(value)) do

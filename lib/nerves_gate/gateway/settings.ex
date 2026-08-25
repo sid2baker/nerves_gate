@@ -3,7 +3,7 @@ defmodule NervesGate.Gateway.Settings do
 
   import Bitwise
 
-  alias NervesGate.Cluster.Manager, as: ClusterManager
+  alias NervesGate.Cluster, as: Cluster
   alias NervesGate.Identity
   alias NervesGate.Internet.Config
 
@@ -34,7 +34,9 @@ defmodule NervesGate.Gateway.Settings do
          {:ok, internet} <- validate_internet(persisted_internet, configured),
          {:ok, subnet_router} <- validate_subnet_router(Map.get(settings, "subnet_router")),
          {:ok, ssh_enabled} <- validate_ssh_enabled(Map.get(settings, "ssh_enabled", false)),
-         {:ok, group} <- ClusterManager.validate_group(group),
+         {:ok, resource_changes} <-
+           validate_resource_changes(Map.get(settings, "resource_changes", %{})),
+         {:ok, group} <- Cluster.validate_group(group),
          {:ok, name} <- valid_name(name) do
       {:ok,
        settings
@@ -48,6 +50,7 @@ defmodule NervesGate.Gateway.Settings do
          "tailnet",
          "subnet_router",
          "ssh_enabled",
+         "resource_changes",
          "cluster",
          "name"
        ])
@@ -55,6 +58,7 @@ defmodule NervesGate.Gateway.Settings do
        |> Map.put("tailnet", %{"profile_id" => profile_id})
        |> Map.put("subnet_router", subnet_router)
        |> Map.put("ssh_enabled", ssh_enabled)
+       |> Map.put("resource_changes", resource_changes)
        |> Map.put("cluster", %{"group" => group})
        |> Map.put("name", name)
        |> Map.put_new("updated_at", nil)}
@@ -75,6 +79,7 @@ defmodule NervesGate.Gateway.Settings do
       "tailnet" => %{"profile_id" => nil},
       "subnet_router" => default_subnet_router(),
       "ssh_enabled" => false,
+      "resource_changes" => %{},
       "cluster" => %{"group" => nil},
       "name" => Identity.get().hostname
     }
@@ -157,6 +162,38 @@ defmodule NervesGate.Gateway.Settings do
   def ssh_enabled(settings), do: Map.get(settings, "ssh_enabled", false)
   def cluster_group(settings), do: get_in(settings, ["cluster", "group"])
 
+  @spec put_resource_change(
+          map(),
+          :ssh | :subnet_router,
+          String.t(),
+          :pending | :applied | :failed
+        ) ::
+          map()
+  def put_resource_change(settings, resource, id, status)
+      when resource in [:ssh, :subnet_router] and is_binary(id) and
+             status in [:pending, :applied, :failed] do
+    put_in(
+      settings,
+      [Access.key("resource_changes", %{}), Atom.to_string(resource)],
+      %{"id" => id, "status" => Atom.to_string(status)}
+    )
+  end
+
+  @spec pending_resource_change(map()) ::
+          nil | {:ssh | :subnet_router, String.t()}
+  def pending_resource_change(settings) do
+    settings
+    |> Map.get("resource_changes", %{})
+    |> Enum.find_value(fn
+      {resource, %{"id" => id, "status" => "pending"}}
+      when resource in ["ssh", "subnet_router"] and is_binary(id) ->
+        {String.to_existing_atom(resource), id}
+
+      _other ->
+        nil
+    end)
+  end
+
   @spec validate_subnet_router(term()) :: {:ok, map()} | {:error, term()}
   def validate_subnet_router(nil), do: {:ok, default_subnet_router()}
 
@@ -197,6 +234,23 @@ defmodule NervesGate.Gateway.Settings do
 
   defp validate_ssh_enabled(enabled) when is_boolean(enabled), do: {:ok, enabled}
   defp validate_ssh_enabled(_enabled), do: {:error, :invalid_ssh_enabled}
+
+  defp validate_resource_changes(changes) when is_map(changes) do
+    valid? =
+      Enum.all?(changes, fn
+        {resource, %{"id" => id, "status" => status}}
+        when resource in ["ssh", "subnet_router"] and is_binary(id) and
+               byte_size(id) in 8..128 and status in ["pending", "applied", "failed"] ->
+          true
+
+        _invalid ->
+          false
+      end)
+
+    if valid?, do: {:ok, changes}, else: {:error, :invalid_resource_changes}
+  end
+
+  defp validate_resource_changes(_changes), do: {:error, :invalid_resource_changes}
 
   defp validate_profile_id(nil, false), do: :ok
   defp validate_profile_id(nil, true), do: {:error, :tailnet_profile_required}

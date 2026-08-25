@@ -9,7 +9,7 @@ defmodule NervesGateQEMU.StatusTest do
     assert projected.configured
     assert projected.internet == :online
     assert projected.tailnet == :online
-    assert projected.cluster == :offline
+    assert projected.cluster == :blocked
     assert projected.tailnet_ip == "100.64.0.10"
     assert projected.daemon == "running"
     assert projected.replicas == 2
@@ -17,6 +17,19 @@ defmodule NervesGateQEMU.StatusTest do
     assert projected.stale_replicas == 1
     assert projected.alarms == [%{"id" => "cluster_unavailable"}]
     assert projected.error == nil
+  end
+
+  test "preserves explicit disabled and unconfigured subsystem states" do
+    status =
+      gateway_status()
+      |> put_in(["local", "state", "configuration", "configured"], false)
+      |> put_in(["local", "state", "internet", "state"], "unconfigured")
+      |> put_in(["local", "state", "cluster", "state"], "disabled")
+
+    projected = Status.project_gateway(device(), :running, :up, :none, status)
+
+    assert projected.internet == :unconfigured
+    assert projected.cluster == :disabled
   end
 
   test "rejects unknown gateway status schemas" do
@@ -37,21 +50,24 @@ defmodule NervesGateQEMU.StatusTest do
 
   defp gateway_status do
     %{
-      "schema" => "nerves_gate.status.v1",
-      "configuration" => %{"configured" => true},
+      "schema" => "nerves_gate.status.v2",
       "local" => %{
-        "data" => %{
-          "internet" => %{"status" => "online"},
-          "tailnet" => %{"status" => "online", "ipv4" => "100.64.0.10"},
-          "cluster" => %{"status" => "blocked"},
+        "state" => %{
+          "configuration" => %{"configured" => true},
+          "internet" => %{"state" => "online"},
+          "tailnet" => %{
+            "state" => "online",
+            "ipv4" => "100.64.0.10",
+            "health" => %{"daemon" => "running"}
+          },
+          "cluster" => %{"state" => "blocked"},
           "alarms" => [%{"id" => "cluster_unavailable"}]
         }
       },
       "replicas" => %{
         "gate-a" => %{"connected" => true},
         "gate-b" => %{"connected" => false}
-      },
-      "runtime" => %{"tailscale" => %{"daemon" => "running"}}
+      }
     }
   end
 end

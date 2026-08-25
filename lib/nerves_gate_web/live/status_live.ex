@@ -3,23 +3,13 @@ defmodule NervesGateWeb.StatusLive do
 
   use NervesGateWeb, :live_view
 
-  alias NervesGate.Cluster.Manager, as: ClusterManager
-  alias NervesGate.DeviceState.Client
-  alias NervesGate.DeviceState.Data
-  alias NervesGate.DeviceState.Server
-  alias NervesGate.Internet.Manager, as: InternetManager
-  alias NervesGate.Internet.Monitor
-  alias NervesGate.SSH
-  alias NervesGate.Tailnet.Observer
   alias NervesGateWeb.Presence
   alias NervesGateWeb.StatusLive.Render
   alias NervesGateWeb.StatusLive.View
 
-  @context_topics ~w(configuration internet tailnet)
-
   @impl true
   def mount(_params, session, socket) do
-    if Server.configured?() do
+    if NervesGate.configured?() do
       mount_dashboard(session, socket)
     else
       {:ok, redirect(socket, to: ~p"/commissioning")}
@@ -27,35 +17,22 @@ defmodule NervesGateWeb.StatusLive do
   end
 
   defp mount_dashboard(session, socket) do
+    {:ok, fleet} =
+      if connected?(socket),
+        do: NervesGate.subscribe_fleet(),
+        else: {:ok, NervesGate.fleet()}
+
+    model = dashboard_model(fleet)
     remote_ip = Map.get(session, "remote_ip", "unknown")
-    dashboard_access = Map.get(session, "dashboard_access", false)
-    actor = Observer.actor_for_ip(remote_ip)
-
-    if connected?(socket) do
-      Phoenix.PubSub.subscribe(NervesGate.PubSub, "device_state")
-      Enum.each(@context_topics, &Phoenix.PubSub.subscribe(NervesGate.PubSub, &1))
-    end
-
-    {:ok, snapshot} =
-      if connected?(socket), do: Server.join(self()), else: {:ok, Server.snapshot()}
-
-    state = %{
-      data: snapshot.data,
-      boot_id: snapshot.boot_id,
-      revision: snapshot.revision,
-      replicas: Client.replicas()
-    }
-
-    context = load_context()
 
     socket =
       socket
       |> assign(
-        dashboard_access: dashboard_access,
-        selected_device_id: state.data.device_id,
+        dashboard_access: Map.get(session, "dashboard_access", false),
+        selected_device_id: model.local.id,
         presence_tracked: false
       )
-      |> assign_private(state: state, context: context, actor: actor)
+      |> assign_private(fleet: fleet, actor: NervesGate.actor_for_ip(remote_ip))
       |> assign_view()
       |> maybe_track_presence()
 
@@ -73,52 +50,47 @@ defmodule NervesGateWeb.StatusLive do
     {:noreply, socket |> assign(:selected_device_id, device_id) |> assign_view()}
   end
 
-  @impl true
   def handle_event("enable-subnet-router", %{"subnet_router" => params}, socket) do
     routes = params |> Map.get("routes", "") |> parse_routes()
 
-    case Server.configure_subnet_router(true, routes) do
+    case NervesGate.configure_subnet_router(true, routes) do
       {:ok, _subnet_router} ->
         {:noreply,
          socket
          |> put_flash(:info, "Subnet router enabled.")
-         |> rejoin_local()
-         |> refresh_context()}
+         |> refresh_dashboard()}
 
       {:error, reason} ->
         {:noreply,
          socket
          |> put_flash(:error, subnet_router_error(reason))
-         |> rejoin_local()
-         |> refresh_context()}
+         |> refresh_dashboard()}
     end
   end
 
   def handle_event("disable-subnet-router", _params, socket) do
-    case Server.configure_subnet_router(false, []) do
+    case NervesGate.configure_subnet_router(false, []) do
       {:ok, _subnet_router} ->
         {:noreply,
          socket
          |> put_flash(:info, "Subnet router disabled. Remote gateway access is unchanged.")
-         |> rejoin_local()
-         |> refresh_context()}
+         |> refresh_dashboard()}
 
       {:error, reason} ->
         {:noreply,
          socket
          |> put_flash(:error, subnet_router_error(reason))
-         |> rejoin_local()
-         |> refresh_context()}
+         |> refresh_dashboard()}
     end
   end
 
   def handle_event("enable-ssh", _params, socket) do
-    case SSH.enable() do
+    case NervesGate.configure_ssh(true) do
       :ok ->
         {:noreply,
          socket
          |> put_flash(:info, "Remote IEx enabled for Tailnet clients.")
-         |> rejoin_local()}
+         |> refresh_dashboard()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, ssh_error(reason))}
@@ -126,12 +98,12 @@ defmodule NervesGateWeb.StatusLive do
   end
 
   def handle_event("disable-ssh", _params, socket) do
-    case SSH.disable() do
+    case NervesGate.configure_ssh(false) do
       :ok ->
         {:noreply,
          socket
          |> put_flash(:info, "Remote IEx disabled.")
-         |> rejoin_local()}
+         |> refresh_dashboard()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, ssh_error(reason))}
@@ -140,86 +112,36 @@ defmodule NervesGateWeb.StatusLive do
 
   @impl true
   def handle_info(
-        {:device_state_operation, _owner_node, boot_id, revision, operation},
-        socket
-      ) do
-    {:noreply, apply_operation(socket, boot_id, revision, operation)}
-  end
-
-  def handle_info({:local_state_changed, data}, socket) do
-    if data == socket.private.state.data,
-      do: {:noreply, socket},
-      else: {:noreply, rejoin_local(socket)}
-  end
-
-  def handle_info({:replica_changed, _device_id, _replica}, socket) do
-    state = %{socket.private.state | replicas: Client.replicas()}
-    {:noreply, socket |> assign_private(state: state) |> assign_view()}
-  end
-
-  def handle_info(_context_or_presence_event, socket) do
-    {:noreply, refresh_context(socket)}
-  end
-
-  defp apply_operation(socket, boot_id, revision, operation) do
-    state = socket.private.state
-
-    case operation_position(state, boot_id, revision) do
-      :next -> apply_next_operation(socket, state, revision, operation)
-      :duplicate -> socket
-      :resync -> rejoin_local(socket)
-    end
-  end
-
-  defp apply_next_operation(socket, state, revision, operation) do
-    case Data.apply_operation(state.data, operation) do
-      {:ok, data, _actions} ->
-        state = %{state | data: data, revision: revision}
-        socket |> assign_private(state: state) |> assign_view()
+        {:device_state_event, _node, boot_id, revision, event},
+        %{private: %{fleet: %{local: %{boot_id: boot_id, revision: previous} = local} = fleet}} =
+          socket
+      )
+      when revision == previous + 1 do
+    case NervesGate.apply_event(local.state, event) do
+      {:ok, state} ->
+        local = %{local | state: state, revision: revision}
+        {:noreply, refresh_dashboard(socket, %{fleet | local: local})}
 
       :error ->
-        rejoin_local(socket)
+        {:noreply, refresh_dashboard(socket)}
     end
   end
 
-  defp operation_position(%{boot_id: boot_id, revision: current}, boot_id, revision)
-       when revision == current + 1,
-       do: :next
-
-  defp operation_position(%{boot_id: boot_id, revision: current}, boot_id, revision)
-       when revision <= current,
-       do: :duplicate
-
-  defp operation_position(_state, _boot_id, _revision), do: :resync
-
-  defp rejoin_local(socket) do
-    {:ok, snapshot} = Server.join(self())
-
-    state = %{
-      data: snapshot.data,
-      boot_id: snapshot.boot_id,
-      revision: snapshot.revision,
-      replicas: Client.replicas()
-    }
-
-    socket |> assign_private(state: state) |> assign_view()
+  def handle_info(_backend_or_presence_event, socket) do
+    {:noreply, refresh_dashboard(socket)}
   end
 
-  defp refresh_context(socket) do
+  defp refresh_dashboard(socket, fleet \\ NervesGate.fleet()) do
     socket
-    |> assign_private(context: load_context())
+    |> assign_private(fleet: fleet)
     |> assign_view()
     |> maybe_track_presence()
   end
 
-  defp assign_view(socket) do
-    view =
-      View.build(
-        socket.private.state,
-        socket.private.context,
-        socket.assigns.selected_device_id
-      )
+  defp dashboard_model(fleet), do: View.build(fleet, Presence.count(), nil)
 
+  defp assign_view(socket) do
+    view = View.build(socket.private.fleet, Presence.count(), socket.assigns.selected_device_id)
     assign(socket, view: view)
   end
 
@@ -228,27 +150,10 @@ defmodule NervesGateWeb.StatusLive do
          socket.assigns.view.configuration.configured and not socket.assigns.presence_tracked do
       Phoenix.PubSub.subscribe(NervesGate.PubSub, Presence.topic())
       Presence.track_visitor(self(), socket.private.actor)
-      socket |> assign(:presence_tracked, true) |> refresh_people_count()
+      socket |> assign(:presence_tracked, true) |> refresh_dashboard()
     else
       socket
     end
-  end
-
-  defp refresh_people_count(socket) do
-    context = Map.put(socket.private.context, :people_count, Presence.count())
-    socket |> assign_private(context: context) |> assign_view()
-  end
-
-  defp load_context do
-    %{
-      configuration: Server.configuration(),
-      internet: Monitor.status(),
-      network_configuration: InternetManager.status(),
-      tailnet: Observer.status(),
-      cluster: ClusterManager.status(),
-      people_count: Presence.count(),
-      diagnostics: diagnostics()
-    }
   end
 
   defp parse_routes(value) when is_binary(value) do
@@ -278,17 +183,6 @@ defmodule NervesGateWeb.StatusLive do
     do: "Finish or reject the remote-access change before changing Remote IEx."
 
   defp ssh_error(_reason), do: "Remote IEx could not be changed."
-
-  defp diagnostics do
-    {uptime, _since_last_call} = :erlang.statistics(:wall_clock)
-
-    %{
-      target: Nerves.Runtime.mix_target(),
-      uptime_seconds: div(uptime, 1_000),
-      otp_release: List.to_string(:erlang.system_info(:otp_release)),
-      memory_bytes: :erlang.memory(:total)
-    }
-  end
 
   defp assign_private(socket, assigns) do
     Enum.reduce(assigns, socket, fn {key, value}, socket ->

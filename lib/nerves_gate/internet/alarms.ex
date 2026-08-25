@@ -69,9 +69,8 @@ defmodule NervesGate.Internet.Alarms do
   @moduledoc "Owns truthful Internet signals, public alarms, flapping history, and healing."
 
   alias NervesGate.Alarms
-  alias NervesGate.DeviceState.Server
+  alias NervesGate.Internet
   alias NervesGate.Internet.Alarm
-  alias NervesGate.Internet.Monitor
   alias NervesGate.Internet.Signal
 
   def managed_alarms do
@@ -113,16 +112,16 @@ defmodule NervesGate.Internet.Alarms do
   @spec heal() :: :ok | {:error, term()}
   def heal do
     Alarms.heal(Alarm.Unavailable, fn ->
-      case Monitor.status() do
+      case Internet.status() do
         %{reason: :no_carrier} ->
-          Monitor.poll_now()
+          Internet.poll_now()
           {:error, :physical_link_down}
 
         %{reason: :not_configured} ->
           {:error, :not_configured}
 
         _status ->
-          Server.heal(:internet)
+          Internet.heal()
       end
     end)
   end

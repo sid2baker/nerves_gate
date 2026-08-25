@@ -50,6 +50,22 @@ defmodule NervesGate.Tailnet.EnrollmentTest do
     refute Enum.any?(TestTailscaleClient.state().profiles, &(&1.id == "orphan-profile"))
   end
 
+  test "initial rollback removes all profiles when no accepted profile exists" do
+    TestTailscaleClient.put(:profiles, [
+      %Profile{id: "candidate-profile", selected?: true},
+      %Profile{id: "stale-profile", selected?: false}
+    ])
+
+    assert :ok =
+             Enrollment.rollback(%{
+               "previous_profile_id" => nil,
+               "candidate_profile_id" => "candidate-profile"
+             })
+
+    assert {:ok, nil} = Enrollment.current_profile_id()
+    assert TestTailscaleClient.state().profiles == []
+  end
+
   test "staged enrollment switches back to the previous profile" do
     TestTailscaleClient.put(:profiles, [
       %Profile{id: "old-profile", nickname: "known-good", selected?: true}
@@ -62,6 +78,17 @@ defmodule NervesGate.Tailnet.EnrollmentTest do
     assert :ok = Enrollment.rollback(metadata)
     assert {:ok, "old-profile"} = Enrollment.current_profile_id()
     refute Enum.any?(TestTailscaleClient.state().profiles, &(&1.id == "candidate-profile"))
+  end
+
+  test "unconfigured accepted settings remove every untracked profile" do
+    TestTailscaleClient.put(:profiles, [
+      %Profile{id: "orphan-profile", selected?: true},
+      %Profile{id: "stale-profile", selected?: false}
+    ])
+
+    assert :ok = Enrollment.select(nil)
+    assert {:ok, nil} = Enrollment.current_profile_id()
+    assert TestTailscaleClient.state().profiles == []
   end
 
   test "accepted settings can restore and commit their selected profile" do
@@ -85,7 +112,7 @@ defmodule NervesGate.Tailnet.EnrollmentTest do
   test "failed online readiness returns rollback metadata" do
     TestTailscaleClient.put(:await_online, {:error, :online_timeout})
 
-    assert {:error, :tailnet_candidate_unavailable, metadata} =
+    assert {:error, :tailnet_online_timeout, metadata} =
              Enrollment.stage("tskey-auth-candidate", "change-123", nil)
 
     assert metadata["candidate_profile_id"] == "candidate-profile"

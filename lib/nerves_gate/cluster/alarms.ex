@@ -45,9 +45,9 @@ defmodule NervesGate.Cluster.Alarms do
   @moduledoc "Owns cluster signals, dependency inhibition, and accepted-state healing."
 
   alias NervesGate.Alarms
+  alias NervesGate.Cluster
   alias NervesGate.Cluster.Alarm
   alias NervesGate.Cluster.Signal
-  alias NervesGate.DeviceState.Server
 
   def managed_alarms do
     [NervesGate.Cluster.Condition.ActionableUnavailable, Alarm.Unavailable]
@@ -78,6 +78,6 @@ defmodule NervesGate.Cluster.Alarms do
 
   @spec heal() :: :ok | {:error, term()}
   def heal do
-    Alarms.heal(Alarm.Unavailable, fn -> Server.heal(:cluster) end)
+    Alarms.heal(Alarm.Unavailable, &Cluster.heal/0)
   end
 end

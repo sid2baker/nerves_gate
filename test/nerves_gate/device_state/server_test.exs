@@ -1,71 +1,111 @@
 defmodule NervesGate.DeviceState.ServerTest do
   use ExUnit.Case, async: true
 
-  alias NervesGate.DeviceState.Data
-  alias NervesGate.DeviceState.Server
+  alias NervesGate.DeviceState
+  alias NervesGate.DeviceState.{Server, State}
+  alias NervesGate.Secret
 
   setup do
-    name = String.to_atom("device_state_server_#{System.unique_integer([:positive])}")
-    data = Data.new(device_id: "gate-a", name: "Gate A", firmware_version: "1.0.0")
+    owner = self()
 
     {:ok, server} =
       Server.start_link(
-        name: name,
+        name: nil,
         boot_id: "boot-a",
-        initial_data: data,
-        subscribe: false
+        initial_state: State.new(),
+        device: %{device_id: "gate-a", name: "Gate A", firmware_version: "1.0.0"},
+        owners: %{ssh: owner, internet: owner, alarms: owner}
       )
 
-    on_exit(fn -> if Process.alive?(server), do: GenServer.stop(server) end)
     %{server: server}
   end
 
-  test "join returns canonical data followed by ordered operations", %{server: server} do
-    assert {:ok, snapshot} = Server.join(self(), server)
+  test "subscription atomically returns a snapshot followed by ordered events", %{server: server} do
+    assert {:ok, snapshot} = Server.subscribe(self(), server)
     assert snapshot.boot_id == "boot-a"
     assert snapshot.revision == 0
-    assert snapshot.data.name == "Gate A"
+    assert snapshot.state.device.name == "Gate A"
 
-    operation = {:set_name, :device, "Boiler room"}
-    assert :ok = Server.apply_operation(operation, server)
+    event = {:state_reported, :ssh, ssh("100.64.0.10")}
+    assert :ok = DeviceState.publish(event, server)
 
-    assert_receive {:device_state_operation, _owner_node, "boot-a", 1, ^operation}
-    assert {:ok, client_data, _actions} = Data.apply_operation(snapshot.data, operation)
+    assert_receive {:device_state_event, _node, "boot-a", 1, ^event}
+    assert {:ok, client_state} = State.apply_event(snapshot.state, event)
+    assert Server.snapshot(server).state == client_state
+  end
 
+  test "identical reports do not consume revisions", %{server: server} do
+    assert {:ok, _snapshot} = Server.subscribe(self(), server)
+
+    event =
+      {:state_reported, :internet,
+       %NervesGate.Internet.Status{
+         state: :offline,
+         interface: nil,
+         online: false,
+         ready: false,
+         reason: :offline,
+         checks: %{}
+       }}
+
+    assert :ok = DeviceState.publish(event, server)
+    assert_receive {:device_state_event, _node, "boot-a", 1, ^event}
+
+    assert :ok = DeviceState.publish(event, server)
+    refute_receive {:device_state_event, _node, _boot, _revision, _event}
     assert Server.snapshot(server).revision == 1
-    assert Server.data(server) == client_data
-    assert client_data.name == "Boiler room"
   end
 
-  test "idempotent operations do not consume revisions", %{server: server} do
-    assert {:ok, _snapshot} = Server.join(self(), server)
-    assert :ok = Server.apply_operation({:set_name, :device, "Gate A"}, server)
-    refute_receive {:device_state_operation, _, _, _, _}
+  test "publication is authenticated against the current owner", %{server: server} do
+    parent = self()
+
+    spawn(fn ->
+      send(
+        parent,
+        {:result, DeviceState.publish({:state_reported, :ssh, %{state: :fake}}, server)}
+      )
+    end)
+
+    assert_receive {:result, {:error, :not_owner}}
     assert Server.snapshot(server).revision == 0
   end
 
-  test "invalid or non-public operations are rejected and never broadcast", %{server: server} do
-    assert {:ok, _snapshot} = Server.join(self(), server)
-    assert :error = Server.apply_operation({:unknown, :test}, server)
+  test "private and secret-bearing state is rejected", %{server: server} do
+    assert {:error, :secret_detected} =
+             DeviceState.publish(
+               {:state_reported, :ssh, ssh(Secret.new("secret"))},
+               server
+             )
 
-    operation =
-      {:set_cluster, :cluster,
-       %{enabled: true, runtime_status: :online, connected: [], credential: "private-value"}}
+    assert {:error, :invalid_state} =
+             DeviceState.publish(
+               {:state_reported, :ssh, ssh(self())},
+               server
+             )
 
-    assert :error = Server.apply_operation(operation, server)
-    refute_receive {:device_state_operation, _, _, _, _}
     assert Server.snapshot(server).revision == 0
-    refute inspect(Server.data(server)) =~ "private-value"
+    refute inspect(Server.state(server)) =~ "secret"
   end
 
-  test "client monitors remain outside canonical data", %{server: server} do
+  test "subscriber monitors remain outside canonical state", %{server: server} do
     client = spawn(fn -> Process.sleep(:infinity) end)
-    assert {:ok, _snapshot} = Server.join(client, server)
-    assert map_size(:sys.get_state(server).clients) == 1
+    assert {:ok, _snapshot} = Server.subscribe(client, server)
+    assert map_size(:sys.get_state(server).subscribers) == 1
 
     Process.exit(client, :kill)
-    assert_eventually(fn -> map_size(:sys.get_state(server).clients) == 0 end)
-    refute Map.has_key?(Data.to_map(Server.data(server)), :clients)
+    assert_eventually(fn -> map_size(:sys.get_state(server).subscribers) == 0 end)
+    refute Map.has_key?(State.to_map(Server.state(server)), :subscribers)
+  end
+
+  defp ssh(address) do
+    %NervesGate.SSH.Status{
+      enabled: true,
+      state: :listening,
+      address: address,
+      port: 22,
+      applied_change_id: nil,
+      failed_change_id: nil
+    }
   end
 
   defp assert_eventually(predicate, attempts \\ 50) do

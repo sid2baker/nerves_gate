@@ -1,10 +1,10 @@
 defmodule NervesGate.Backend do
   @moduledoc """
-  Supervises the gateway backend in dependency order.
+  Supervises private gateway processes in dependency order.
 
-  Each gateway's `DeviceState.Server` owns its private firmware-slot settings,
-  sequences its secret-free public reducer, and distributes that operation
-  stream to connected peer clients.
+  `NervesGate` is the only application-facing API. Configuration owns private
+  settings transactions, while `DeviceState.Server` owns the canonical
+  secret-free reducer and replication stream.
   """
 
   use Supervisor
@@ -18,21 +18,30 @@ defmodule NervesGate.Backend do
 
   @impl true
   def init(_options) do
+    # Runtime infrastructure precedes the restartable public-state subtree.
+    # DeviceState precedes every publisher so a rest-for-one restart produces
+    # an empty projection followed by deterministic owner hydration.
     children =
       [
-        {Task.Supervisor, name: NervesGate.TaskSupervisor},
-        NervesGate.Alarms.Runtime,
-        NervesGate.Commissioning.Access,
-        NervesGate.Internet.Manager,
-        NervesGate.Internet.Monitor
+        {Registry, keys: :unique, name: NervesGate.EffectRegistry},
+        {Task.Supervisor, name: NervesGate.TaskSupervisor}
       ] ++
         tailnet_children() ++
         [
-          NervesGate.Tailnet.Observer,
-          NervesGate.SSH,
-          NervesGate.Cluster.Manager,
           NervesGate.DeviceState.Server,
-          NervesGate.DeviceState.Client
+          {NervesGate.Commissioning,
+           payload: NervesGate.Commissioning.new(), name: NervesGate.Commissioning},
+          {NervesGate.Internet, payload: NervesGate.Internet.new(), name: NervesGate.Internet},
+          {NervesGate.Tailnet, payload: NervesGate.Tailnet.new(), name: NervesGate.Tailnet},
+          NervesGate.SSH.Supervisor,
+          {NervesGate.SubnetRouter,
+           payload: NervesGate.SubnetRouter.new(), name: NervesGate.SubnetRouter},
+          NervesGate.Cluster.Supervisor,
+          {NervesGate.Gateway.Configuration,
+           payload: NervesGate.Gateway.Configuration.new(), name: NervesGate.Gateway.Configuration},
+          NervesGate.Dependencies,
+          NervesGate.Alarms.Runtime,
+          NervesGate.DeviceState.Replica.Supervisor
         ]
 
     Supervisor.init(children, strategy: :rest_for_one)

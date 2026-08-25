@@ -27,14 +27,15 @@ defmodule NervesGateQEMUWeb.QemuLiveTest do
     :ok
   end
 
-  test "host endpoint does not expose gateway pages" do
-    assert get(build_conn(), "/").status == 404
+  test "host endpoint exposes only the control plane at its root" do
+    assert get(build_conn(), "/").status == 200
+    assert get(build_conn(), "/dev/qemu").status == 404
     assert get(build_conn(), "/commissioning").status == 404
     assert get(build_conn(), "/api/status").status == 404
   end
 
   test "host control plane permits isolated localhost dashboard frames" do
-    connection = get(build_conn(), "/dev/qemu")
+    connection = get(build_conn(), "/")
     [policy] = Plug.Conn.get_resp_header(connection, "content-security-policy")
 
     assert policy =~ "frame-src http://*.localhost:* http://localhost:*"
@@ -42,7 +43,7 @@ defmodule NervesGateQEMUWeb.QemuLiveTest do
   end
 
   test "host development route renders the variable topology" do
-    {:ok, _view, html} = live(build_conn(), "/dev/qemu")
+    {:ok, _view, html} = live(build_conn(), "/")
 
     assert html =~ "QEMU Test Setup"
     assert html =~ "M01"

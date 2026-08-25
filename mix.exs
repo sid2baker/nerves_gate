@@ -11,11 +11,16 @@ defmodule NervesGate.MixProject do
       version: @version,
       elixir: "~> 1.20",
       archives: [nerves_bootstrap: "~> 1.17"],
+      compilers: [:finitomata | Mix.compilers()],
       listeners: listeners(Mix.target(), Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       releases: [{@app, release()}],
       dialyzer: [plt_add_apps: [:ex_unit, :mix]],
+      docs: [
+        main: "readme",
+        extras: ["README.md", "docs/lifecycle-machines.md"]
+      ],
       aliases: aliases(),
       test_ignore_filters: [&String.starts_with?(&1, "test/support/")]
     ]
@@ -36,6 +41,7 @@ defmodule NervesGate.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:ex_doc, "~> 0.40.3", only: :dev, runtime: false},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
@@ -48,6 +54,7 @@ defmodule NervesGate.MixProject do
       # Runtime dependencies
       {:alarmist, "~> 0.4.2"},
       {:bandit, "~> 1.12"},
+      {:finitomata, "~> 0.43.0"},
       {:jason, "~> 1.4"},
       {:muontrap, "~> 1.0"},
       {:phoenix, "~> 1.8"},

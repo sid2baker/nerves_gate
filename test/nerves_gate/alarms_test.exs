@@ -88,11 +88,11 @@ defmodule NervesGate.AlarmsTest do
   end
 
   defp public_alarm_present?(id) do
-    Enum.any?(NervesGate.DeviceState.Server.data().alarms, &(&1.id == id))
+    Enum.any?(NervesGate.DeviceState.Server.state().alarms, &(&1.id == id))
   end
 
   defp public_alarm_absent?(id) do
-    Enum.all?(NervesGate.DeviceState.Server.data().alarms, &(&1.id != id))
+    Enum.all?(NervesGate.DeviceState.Server.state().alarms, &(&1.id != id))
   end
 
   defp assert_eventually(predicate, attempts \\ 50) do

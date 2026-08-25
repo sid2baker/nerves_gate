@@ -6,7 +6,25 @@ defmodule NervesGateQEMU.Status do
 
   @timeout 2_000
 
-  @type state :: :online | :offline | :unknown
+  @layer_states ~w(
+    unconfigured applying online offline backoff
+    disabled needs_auth connecting observing
+    reconciling blocked
+  )a
+
+  @type state ::
+          :unconfigured
+          | :applying
+          | :online
+          | :offline
+          | :backoff
+          | :disabled
+          | :needs_auth
+          | :connecting
+          | :observing
+          | :reconciling
+          | :blocked
+          | :unknown
 
   @spec all() :: %{devices: [map()], observed_at: DateTime.t()}
   def all do
@@ -54,27 +72,27 @@ defmodule NervesGateQEMU.Status do
          vm,
          link,
          fault,
-         {:ok, %{"schema" => "nerves_gate.status.v1"} = status}
+         {:ok, %{"schema" => "nerves_gate.status.v2"} = status}
        ) do
-    data = status |> get_in(["local", "data"]) |> map_or_empty()
-    internet = data |> get_in(["internet", "status"]) |> layer_state()
-    tailnet = data |> get_in(["tailnet", "status"]) |> layer_state()
-    cluster = data |> get_in(["cluster", "status"]) |> layer_state()
+    state = status |> get_in(["local", "state"]) |> map_or_empty()
+    internet = state |> get_in(["internet", "state"]) |> layer_state()
+    tailnet = state |> get_in(["tailnet", "state"]) |> layer_state()
+    cluster = state |> get_in(["cluster", "state"]) |> layer_state()
     replicas = status |> Map.get("replicas") |> map_or_empty()
     connected = Enum.count(replicas, fn {_id, replica} -> replica["connected"] == true end)
 
     base_device(device, vm, link, fault)
     |> Map.merge(%{
-      configured: get_in(status, ["configuration", "configured"]) == true,
+      configured: get_in(state, ["configuration", "configured"]) == true,
       internet: internet,
       tailnet: tailnet,
       cluster: cluster,
-      tailnet_ip: get_in(data, ["tailnet", "ipv4"]),
-      daemon: get_in(status, ["runtime", "tailscale", "daemon"]),
+      tailnet_ip: get_in(state, ["tailnet", "ipv4"]),
+      daemon: get_in(state, ["tailnet", "health", "daemon"]),
       replicas: map_size(replicas),
       connected_replicas: connected,
       stale_replicas: map_size(replicas) - connected,
-      alarms: Map.get(data, "alarms", []),
+      alarms: Map.get(state, "alarms", []),
       error: nil
     })
   end
@@ -124,10 +142,9 @@ defmodule NervesGateQEMU.Status do
     end
   end
 
-  defp layer_state("online"), do: :online
-
-  defp layer_state(status) when status in ["offline", "failed", "blocked", "disabled"],
-    do: :offline
+  defp layer_state(status) when is_binary(status) do
+    Enum.find(@layer_states, :unknown, &(Atom.to_string(&1) == status))
+  end
 
   defp layer_state(_value), do: :unknown
 

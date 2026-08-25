@@ -17,6 +17,8 @@ config :shoehorn, init: [:nerves_runtime, :vintage_net]
 # validation retries and reboot, so leave it disabled until GRUB supports it.
 config :nerves_runtime, startup_guard_enabled: false
 
+config :nerves_gate, startup_gate_enabled: true
+
 config :nerves_gate,
   frame_ancestors:
     if(config_env() == :dev and Mix.target() == :x86_64,

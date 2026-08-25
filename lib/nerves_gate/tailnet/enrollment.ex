@@ -37,6 +37,8 @@ defmodule NervesGate.Tailnet.Enrollment do
            :ok <- client.set(ssh: false) do
         {:ok, metadata}
       else
+        {:error, :online_timeout} -> {:error, :tailnet_online_timeout, metadata}
+        {:error, {:online_timeout, _status}} -> {:error, :tailnet_online_timeout, metadata}
         {:error, _reason} -> {:error, :tailnet_candidate_unavailable, metadata}
       end
     else
@@ -48,7 +50,7 @@ defmodule NervesGate.Tailnet.Enrollment do
     do: {:error, :authentication_failed}
 
   @spec select(String.t() | nil) :: :ok | {:error, term()}
-  def select(nil), do: :ok
+  def select(nil), do: cleanup_untracked_profile(client(), nil)
   def select(profile_id) when is_binary(profile_id), do: client().switch_profile(profile_id)
 
   @spec commit(map()) :: :ok | {:error, term()}
@@ -76,7 +78,7 @@ defmodule NervesGate.Tailnet.Enrollment do
         end
 
       {nil, candidate} when is_binary(candidate) ->
-        case client().remove_profile(candidate) do
+        case cleanup_untracked_profile(client(), nil) do
           :ok -> :ok
           _failure -> {:error, :tailnet_rollback_failed}
         end
@@ -102,11 +104,19 @@ defmodule NervesGate.Tailnet.Enrollment do
   defp cleanup_untracked_profile(_client, previous) when is_binary(previous), do: :ok
 
   defp cleanup_untracked_profile(client, nil) do
-    case client.current_profile() do
-      {:ok, profile} -> client.remove_profile(profile.id)
-      {:error, :no_current_profile} -> :ok
+    case client.profiles() do
+      {:ok, profiles} -> remove_profiles(client, profiles)
       {:error, _reason} = error -> error
     end
+  end
+
+  defp remove_profiles(client, profiles) do
+    Enum.reduce_while(profiles, :ok, fn profile, :ok ->
+      case client.remove_profile(profile.id) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   defp maybe_remove_candidate(candidate, previous)

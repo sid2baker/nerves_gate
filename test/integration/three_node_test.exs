@@ -19,7 +19,7 @@ defmodule NervesGate.ThreeNodeIntegrationTest do
 
       assert_eventually(fn ->
         replicas =
-          :erpc.call(node, NervesGate.DeviceState.Client, :replicas, [], 10_000)
+          :erpc.call(node, NervesGate, :replicas, [], 10_000)
 
         connected_gateways =
           replicas

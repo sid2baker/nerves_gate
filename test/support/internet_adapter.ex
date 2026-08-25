@@ -7,8 +7,19 @@ defmodule NervesGate.TestInternetAdapter do
   end
 
   def reset do
-    if Process.whereis(__MODULE__), do: Agent.stop(__MODULE__)
-    start_link()
+    case Process.whereis(__MODULE__) do
+      nil ->
+        start_link()
+
+      pid ->
+        try do
+          GenServer.stop(pid)
+        catch
+          :exit, _reason -> :ok
+        end
+
+        reset()
+    end
   end
 
   def state, do: Agent.get(__MODULE__, & &1)

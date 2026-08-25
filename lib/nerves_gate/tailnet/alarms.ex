@@ -38,8 +38,8 @@ defmodule NervesGate.Tailnet.Alarms do
   @moduledoc "Owns truthful Tailnet state, upstream inhibition, and non-mutating healing."
 
   alias NervesGate.Alarms
+  alias NervesGate.Tailnet
   alias NervesGate.Tailnet.Alarm
-  alias NervesGate.Tailnet.Observer
   alias NervesGate.Tailnet.Signal
 
   def managed_alarms do
@@ -63,6 +63,6 @@ defmodule NervesGate.Tailnet.Alarms do
 
   @spec heal() :: :ok | {:error, term()}
   def heal do
-    Alarms.heal(Alarm.Unavailable, &Observer.refresh/0)
+    Alarms.heal(Alarm.Unavailable, &Tailnet.heal/0)
   end
 end

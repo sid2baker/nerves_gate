@@ -4,8 +4,6 @@ defmodule NervesGateWebTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
-  alias NervesGate.DeviceState.Server
-
   @endpoint NervesGateWeb.Endpoint
 
   test "unconfigured gateways start the three-step commissioning flow with Internet" do
@@ -25,24 +23,50 @@ defmodule NervesGateWebTest do
     end)
   end
 
-  test "configured gateways start with only change settings and a revert time" do
+  test "configured gateways can open a Tailnet-only change" do
     with_configured(true, fn ->
       {:ok, view, html} = live(build_conn(), "/commissioning")
 
       assert html =~ "Change settings"
+      assert html =~ "Settings to change"
+      assert html =~ "Tailnet only"
+      assert html =~ "Cluster only"
       assert html =~ "Auto-revert after"
       assert html =~ ~s(value="1")
-      refute html =~ "Apply configuration"
 
       html =
         view
-        |> form("form", %{"configuration" => %{"revert_minutes" => "3"}})
+        |> form("form", %{
+          "configuration" => %{"scope" => "tailnet", "revert_minutes" => "3"}
+        })
         |> render_submit()
 
-      assert html =~ "Connect to the Internet"
-      assert html =~ ~s(phx-submit="configure-internet")
-      refute html =~ "Tailscale auth key"
+      assert html =~ "Change only the Tailnet profile"
+      assert html =~ "Tailscale auth key"
+      assert html =~ "Apply Tailnet change"
+      refute html =~ "Connect to the Internet"
       refute html =~ "Cluster group"
+      refute html =~ "Commissioning progress"
+    end)
+  end
+
+  test "configured gateways can open a Cluster-only change" do
+    with_configured(true, fn ->
+      {:ok, view, _html} = live(build_conn(), "/commissioning")
+
+      html =
+        view
+        |> form("form", %{
+          "configuration" => %{"scope" => "cluster", "revert_minutes" => "2"}
+        })
+        |> render_submit()
+
+      assert html =~ "Change only the cluster group"
+      assert html =~ "Cluster group"
+      assert html =~ "Apply Cluster change"
+      refute html =~ "Connect to the Internet"
+      refute html =~ "Tailscale auth key"
+      refute html =~ "Commissioning progress"
     end)
   end
 
@@ -105,8 +129,8 @@ defmodule NervesGateWebTest do
 
       assert redirected_to(connection) == "/"
       assert_redirect(editor, "/")
-      assert Server.configured?()
-      assert Server.configuration().pending == nil
+      assert NervesGate.configured?()
+      assert NervesGate.snapshot().state.configuration.pending == nil
     end)
   end
 
@@ -169,7 +193,7 @@ defmodule NervesGateWebTest do
       assert html =~ "Subnet router disabled. Remote gateway access is unchanged."
       assert html =~ "Enable subnet router"
 
-      assert Server.current()["subnet_router"] == %{
+      assert NervesGate.Gateway.Configuration.current()["subnet_router"] == %{
                "enabled" => false,
                "routes" => ["192.168.50.0/24", "10.20.0.0/16"]
              }
@@ -186,36 +210,42 @@ defmodule NervesGateWebTest do
       assert html =~ "Remote IEx enabled for Tailnet clients."
       assert html =~ "Waiting for Tailnet"
       assert html =~ "Disable Remote IEx"
-      assert Server.current()["ssh_enabled"]
+      assert NervesGate.Gateway.Configuration.current()["ssh_enabled"]
 
       html = view |> element(~s(button[phx-click="disable-ssh"])) |> render_click()
       assert html =~ "Remote IEx disabled."
       assert html =~ "Enable Remote IEx"
-      refute Server.current()["ssh_enabled"]
+      refute NervesGate.Gateway.Configuration.current()["ssh_enabled"]
     end)
   end
 
   test "stale replicas expose last-known alarms with an explicit warning" do
     alarm = %{id: "Remote.Alarm", description: "Remote gateway needs attention", level: :warning}
 
-    remote_data =
-      NervesGate.DeviceState.Data.new(
-        device_id: "remote-gateway",
-        name: "Remote gateway",
-        firmware_version: "1.0.0",
-        subnet_router: %{
+    local_state = NervesGate.snapshot().state
+
+    remote_state = %{
+      local_state
+      | device: %{
+          device_id: "remote-gateway",
+          name: "Remote gateway",
+          firmware_version: "1.0.0"
+        },
+        subnet_router: %NervesGate.SubnetRouter.Status{
+          state: :active,
           enabled: true,
           routes: ["192.168.60.0/24"],
-          advertised: ["192.168.60.0/24"],
-          approved: ["192.168.60.0/24"],
-          primary: ["192.168.60.0/24"],
-          error: nil
+          observed: %{
+            advertised: ["192.168.60.0/24"],
+            approved: ["192.168.60.0/24"],
+            primary: ["192.168.60.0/24"]
+          }
         },
         alarms: [alarm]
-      )
+    }
 
     replica = %{
-      data: remote_data,
+      state: remote_state,
       node: :"nervesgate@100.64.0.20",
       boot_id: "remote-boot",
       revision: 7,
@@ -263,40 +293,37 @@ defmodule NervesGateWebTest do
   test "status API exposes one versioned, canonical, secret-free schema" do
     body = build_conn() |> get("/api/status") |> json_response(200)
 
-    assert body["schema"] == "nerves_gate.status.v1"
-    assert is_binary(body["observed_at"])
-    assert is_map(body["configuration"]["current"]["subnet_router"])
-    assert is_boolean(body["configuration"]["current"]["ssh_enabled"])
-    refute Map.has_key?(body["configuration"], "last_error")
-    refute Map.has_key?(body["configuration"], "pending")
-    assert is_map(body["local"]["data"]["ssh"])
-    assert is_list(body["local"]["data"]["alarms"])
+    assert body["schema"] == "nerves_gate.status.v2"
+    assert is_boolean(body["local"]["hydrated"])
+    assert is_map(body["local"]["state"]["configuration"]["current"]["subnet_router"])
+    assert is_boolean(body["local"]["state"]["configuration"]["current"]["ssh_enabled"])
+    assert is_map(body["local"]["state"]["ssh"])
+    assert is_list(body["local"]["state"]["alarms"])
     assert is_map(body["replicas"])
-    assert is_map(body["runtime"]["tailscale"])
-    refute Map.has_key?(body["runtime"]["tailscale"], "last_error")
-    refute Map.has_key?(body["runtime"]["tailscale"], "last_daemon_exit")
-    refute Map.has_key?(body, "device_state")
-    refute Map.has_key?(body, "network")
+    refute Map.has_key?(body, "configuration")
+    refute Map.has_key?(body, "runtime")
+    refute Map.has_key?(body["local"], "data")
     refute inspect(body) =~ "auth_token"
     refute inspect(body) =~ "password"
   end
 
   test "status API explicitly serializes the canonical SSH address" do
-    original = :sys.get_state(Server)
+    fleet = NervesGate.fleet()
 
-    data = %{
-      original.data
-      | ssh: %{enabled: true, state: :listening, address: {100, 64, 0, 10}, port: 22}
+    public_state = %{
+      fleet.local.state
+      | ssh: %NervesGate.SSH.Status{
+          enabled: true,
+          state: :listening,
+          address: "100.64.0.10",
+          port: 22
+        }
     }
 
-    :sys.replace_state(Server, &%{&1 | data: data})
+    fleet = put_in(fleet, [:local, :state], public_state)
+    body = fleet |> NervesGate.status() |> Jason.encode!() |> Jason.decode!()
 
-    try do
-      body = build_conn() |> get("/api/status") |> json_response(200)
-      assert get_in(body, ["local", "data", "ssh", "address"]) == "100.64.0.10"
-    after
-      :sys.replace_state(Server, fn _state -> original end)
-    end
+    assert get_in(body, ["local", "state", "ssh", "address"]) == "100.64.0.10"
   end
 
   test "discovery API exposes the public cluster group" do
@@ -307,27 +334,43 @@ defmodule NervesGateWebTest do
   end
 
   defp with_tailnet_ipv4(ipv4, function) do
-    observer = NervesGate.Tailnet.Observer
-    original = :sys.get_state(observer)
+    machine = NervesGate.Tailnet
+    original = :sys.get_state(machine)
 
-    :sys.replace_state(observer, fn state ->
-      %{state | status: state.status |> Map.put(:online, true) |> Map.put(:ipv4, ipv4)}
+    :sys.replace_state(machine, fn state ->
+      source = %Tailscale.Status{online: true, authenticated: true, ipv4: ipv4}
+      observed = state.payload.observed |> Map.put(:online, true) |> Map.put(:ipv4, ipv4)
+
+      payload = %{
+        state.payload
+        | desired: %{enabled: true},
+          source: source,
+          observed: observed,
+          read_status: fn -> {:ok, source} end
+      }
+
+      %{state | current: :online, payload: payload}
     end)
+
+    :ok = NervesGate.Tailnet.refresh()
 
     try do
       function.()
     after
-      :sys.replace_state(observer, fn _state -> original end)
+      :sys.replace_state(machine, fn _state -> original end)
+      :ok = NervesGate.Tailnet.refresh()
     end
   end
 
   defp with_acceptance_candidate(function) do
-    original = :sys.get_state(Server)
+    machine = NervesGate.Gateway.Configuration
+    original = :sys.get_state(machine)
+    payload = original.payload
     root = NervesGate.TestScenario.temporary_root(:acceptance_redirect)
     id = "candidate-acceptance"
 
     candidate =
-      original.current
+      payload.current
       |> Map.put("configured", true)
       |> Map.put("internet", persisted_dhcp())
       |> Map.put("tailnet", %{"profile_id" => "profile-1"})
@@ -340,38 +383,41 @@ defmodule NervesGateWebTest do
       source_connection: "source-connection",
       timeout: nil,
       deadline: nil,
-      timer_token: nil,
       candidate: candidate
     }
 
     ops =
-      original.ops
+      payload.ops
       |> Map.put(:commit_tailnet, fn _metadata -> :ok end)
       |> Map.put(:subnet_router, fn _enabled, routes -> {:ok, routes} end)
       |> Map.put(:access, fn _mode, _interface -> {:ok, []} end)
       |> Map.put(:disable_access, fn -> :ok end)
 
-    active_slot = original.firmware.active
+    active_slot = payload.firmware.active
     :ok = NervesGate.Storage.initialize(root)
-    :ok = NervesGate.Gateway.Persistence.write_slot(original.current, active_slot, root)
+    :ok = NervesGate.Gateway.Persistence.write_slot(payload.current, active_slot, root)
     :ok = NervesGate.Gateway.Persistence.write_candidate(candidate, root)
 
-    :sys.replace_state(Server, fn state ->
-      %{
-        state
+    :sys.replace_state(machine, fn state ->
+      machine_payload = %{
+        state.payload
         | root: root,
           pending: pending,
-          timer: nil,
           ops: ops,
           keep_local_access: true
       }
+
+      %{state | current: :needs_confirmation, payload: machine_payload}
     end)
+
+    :ok = NervesGate.Gateway.Configuration.report_public_state()
 
     try do
       function.(id)
     after
-      :sys.replace_state(Server, fn _state -> original end)
-      NervesGate.Commissioning.Alarms.required(not original.current["configured"])
+      :sys.replace_state(machine, fn _state -> original end)
+      :ok = NervesGate.Gateway.Configuration.report_public_state()
+      NervesGate.Commissioning.Alarms.required(not payload.current["configured"])
       File.rm_rf!(root)
     end
   end
@@ -381,31 +427,42 @@ defmodule NervesGateWebTest do
   end
 
   defp with_pending_phase(phase, deadline, function) do
-    original = :sys.get_state(Server)
+    machine = NervesGate.Gateway.Configuration
+    original = :sys.get_state(machine)
 
     pending = %{
       id: "candidate-test",
       phase: phase,
       source_connection: "source-connection",
+      timeout: nil,
       deadline: deadline,
-      candidate: original.current
+      candidate: original.payload.current
     }
 
-    :sys.replace_state(Server, &%{&1 | pending: pending, timer: nil})
+    :sys.replace_state(machine, fn state ->
+      %{state | current: machine_state(phase), payload: %{state.payload | pending: pending}}
+    end)
+
+    :ok = NervesGate.Gateway.Configuration.report_public_state()
 
     try do
       function.()
     after
-      :sys.replace_state(Server, fn _state -> original end)
+      :sys.replace_state(machine, fn _state -> original end)
+      :ok = NervesGate.Gateway.Configuration.report_public_state()
     end
   end
 
   defp with_subnet_dashboard(function) do
-    original = :sys.get_state(Server)
+    machine = NervesGate.Gateway.Configuration
+    original = :sys.get_state(machine)
+    subnet_machine = NervesGate.SubnetRouter
+    original_subnet = :sys.get_state(subnet_machine)
+    {:ok, observed_routes} = Agent.start_link(fn -> [] end)
     root = NervesGate.TestScenario.temporary_root(:subnet_dashboard)
 
     current =
-      original.current
+      original.payload.current
       |> Map.put("configured", true)
       |> Map.put("internet", persisted_dhcp())
       |> Map.put("subnet_router", %{"enabled" => false, "routes" => []})
@@ -415,85 +472,125 @@ defmodule NervesGateWebTest do
     :ok = NervesGate.Storage.initialize(root)
     :ok = NervesGate.Gateway.Persistence.write_slot(current, "a", root)
 
-    subnet_router = fn enabled, routes ->
-      canonical =
-        Enum.map(routes, fn
-          "192.168.50.42/24" -> "192.168.50.0/24"
-          route -> route
-        end)
+    :sys.replace_state(
+      subnet_machine,
+      &install_subnet_test_runtime(&1, observed_routes)
+    )
 
-      {:ok, if(enabled, do: canonical, else: routes)}
+    subnet_router = fn enabled, routes, change_id ->
+      NervesGate.SubnetRouter.configure(
+        enabled,
+        routes,
+        NervesGate.SubnetRouter,
+        change_id: change_id
+      )
+    end
+
+    ssh = fn enabled, change_id ->
+      NervesGate.SSH.set_enabled(enabled, NervesGate.SSH, change_id: change_id)
     end
 
     ops =
-      original.ops
+      original.payload.ops
       |> Map.put(:subnet_router, subnet_router)
-      |> Map.put(:ssh, fn _enabled -> :ok end)
+      |> Map.put(:ssh, ssh)
       |> Map.put(:tailnet_restore, fn _profile -> :ok end)
 
-    :sys.replace_state(Server, fn state ->
-      %{state | root: root, current: current, pending: nil, ops: ops}
+    :sys.replace_state(machine, fn state ->
+      %{
+        state
+        | current: :idle,
+          payload: %{state.payload | root: root, current: current, pending: nil, ops: ops}
+      }
     end)
+
+    :ok = NervesGate.Gateway.Configuration.report_public_state()
 
     try do
       function.()
     after
-      :sys.replace_state(Server, fn _state -> original end)
+      :sys.replace_state(machine, fn _state -> original end)
+      :ok = NervesGate.Gateway.Configuration.report_public_state()
+      :sys.replace_state(subnet_machine, fn _state -> original_subnet end)
       File.rm_rf!(root)
     end
   end
 
+  defp install_subnet_test_runtime(state, observed_routes) do
+    tailnet = fn ->
+      routes = Agent.get(observed_routes, & &1)
+
+      %{
+        online: true,
+        subnet_router: %{advertised: routes, approved: routes, primary: [], error: nil}
+      }
+    end
+
+    apply = fn enabled, routes ->
+      canonical = Enum.map(routes, &canonical_test_route/1)
+      set_observed_routes(observed_routes, enabled, canonical)
+      {:ok, canonical}
+    end
+
+    payload = %{state.payload | tailnet: tailnet, apply: apply}
+    %{state | current: :disabled, payload: payload}
+  end
+
+  defp set_observed_routes(agent, true, routes), do: Agent.update(agent, fn _ -> routes end)
+  defp set_observed_routes(agent, false, _routes), do: Agent.update(agent, fn _ -> [] end)
+
+  defp canonical_test_route("192.168.50.42/24"), do: "192.168.50.0/24"
+  defp canonical_test_route(route), do: route
+
   defp with_configured(configured, function) do
-    original = :sys.get_state(Server)
+    machine = NervesGate.Gateway.Configuration
+    original = :sys.get_state(machine)
+    root = NervesGate.TestScenario.temporary_root(:configured_web)
 
     current =
-      original.current
+      original.payload.current
       |> Map.put("configured", configured)
       |> Map.put("internet", if(configured, do: persisted_dhcp(), else: nil))
       |> put_in(["tailnet", "profile_id"], if(configured, do: "profile-1"))
 
-    :sys.replace_state(Server, &%{&1 | current: current, pending: nil})
+    :ok = NervesGate.Storage.initialize(root)
+
+    :ok =
+      NervesGate.Gateway.Persistence.write_slot(current, original.payload.firmware.active, root)
+
+    :sys.replace_state(machine, fn state ->
+      payload = %{state.payload | root: root, current: current, pending: nil}
+      %{state | current: :idle, payload: payload}
+    end)
+
+    :ok = NervesGate.Gateway.Configuration.report_public_state()
 
     try do
       function.()
     after
-      :sys.replace_state(Server, fn _state -> original end)
+      :sys.replace_state(machine, fn _state -> original end)
+      :ok = NervesGate.Gateway.Configuration.report_public_state()
+      NervesGate.DeviceState.Alarms.changing(false)
+      File.rm_rf!(root)
     end
   end
+
+  defp machine_state(:tailnet), do: :needs_tailnet
+  defp machine_state(:cluster), do: :needs_cluster
+  defp machine_state(:confirmation), do: :needs_confirmation
 
   defp persisted_dhcp do
     NervesGate.TestScenario.dhcp() |> NervesGate.Internet.Config.to_persisted()
   end
 
   defp dashboard_view(replicas \\ %{}, selected_device_id \\ nil) do
-    snapshot = NervesGate.DeviceState.Server.snapshot()
-
-    state = %{
-      data: snapshot.data,
-      boot_id: snapshot.boot_id,
-      revision: snapshot.revision,
-      replicas: replicas
-    }
-
-    context = %{
-      configuration: NervesGate.DeviceState.Server.configuration(),
-      internet: NervesGate.Internet.Monitor.status(),
-      network_configuration: NervesGate.Internet.Manager.status(),
-      tailnet: NervesGate.Tailnet.Observer.status(),
-      cluster: NervesGate.Cluster.Manager.status(),
-      people_count: NervesGateWeb.Presence.count(),
-      diagnostics: %{
-        target: Nerves.Runtime.mix_target(),
-        uptime_seconds: 0,
-        otp_release: List.to_string(:erlang.system_info(:otp_release)),
-        memory_bytes: :erlang.memory(:total)
-      }
-    }
+    fleet = %{NervesGate.fleet() | replicas: replicas}
+    local_device_id = fleet.local.state.device.device_id
 
     NervesGateWeb.StatusLive.View.build(
-      state,
-      context,
-      selected_device_id || snapshot.data.device_id
+      fleet,
+      NervesGateWeb.Presence.count(),
+      selected_device_id || local_device_id
     )
   end
 end

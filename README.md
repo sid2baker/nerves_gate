@@ -25,9 +25,8 @@ rollback target.
 
 ## Remote-access transaction
 
-`NervesGate.DeviceState.Server` is the sole local settings and public-state
-authority. `/commissioning` builds one complete remote-access candidate through
-Internet, Tailnet, and cluster steps:
+`NervesGate.DeviceState.Server` is the sole local public-state authority.
+`/commissioning` builds a guarded remote-access candidate:
 
 ```text
 /data/settings-candidate.json
@@ -43,38 +42,74 @@ the running slot file; configured changes do the same when their timer expires.
 Tailscale auth keys are used once and never written to any settings file.
 
 An unconfigured gateway starts the three-step editor immediately. A configured
-gateway first shows only **Change settings** and the auto-revert time. There is
-no `/settings` route, separate setup workflow, or commissioning API.
+gateway chooses **Tailnet only**, **Cluster only**, or **All settings** together
+with the auto-revert time. Scoped changes leave every other accepted setting
+unchanged and skip unrelated commissioning steps. There is no `/settings`
+route, separate setup workflow, or commissioning API.
 
 ## Backend model
 
-`NervesGate.Backend` starts runtime layers in dependency order:
+`NervesGate.Backend` starts stable runtime infrastructure followed by a
+restartable public-state subtree:
 
 ```text
-Commissioning.Access
-        ↓
-Internet.Manager → Internet.Monitor
-        ↓
-tailscale_ex → Tailnet.Observer → SSH.Manager
-        ↓
-Cluster.Manager
-        ↓
-DeviceState.Server → DeviceState.Client
+Task/Tailscale runtime
+      ↓
+DeviceState.Server
+      ↓
+subsystem Finitomata owners → Gateway.Configuration
+      ↓                         ↓
+Dependencies                 Alarms.Runtime
+      ↓
+DeviceState.Replica × remote gateway
 ```
 
-Every physical gateway runs one `DeviceState.Server` as the sole writer for its
-own state and one `DeviceState.Client` holding peer replicas. The server keeps
-firmware settings, candidates, credentials, tasks, and timers private. Only its
-secret-free `DeviceState.Data` is changed through ordered pure reducer
-operations and sent to joined peers. Clients apply the same operations but never
-execute the returned local actions.
+The architecture uses only Command, Event, and State. Imperative commands go to
+the subsystem that owns the affected private state. Runtime completions and
+observations return as past-tense events. After each committed transition, the
+owner synchronously reports a complete secret-free public slice to
+`DeviceState.Server`, which validates ownership, deduplicates, assigns a revision,
+and broadcasts the event. Runtime effects are supervised implementation machinery,
+not another domain abstraction.
+
+Private accepted settings, candidates, credentials, effect references, and
+rollback timing never enter DeviceState. Each remote gateway replica owns its
+boot ID, revision, retry, and connection metadata. It installs one atomic
+snapshot, applies ordered public events, and requests a new snapshot immediately
+on a boot-ID change or revision gap; events are never buffered for replay.
+
+## Code organization
+
+`NervesGate` is the strict boundary between the web application and the backend.
+LiveViews and controllers request complete models and submit commands through
+that one module; they do not know about supervisors, settings files, Tailscale,
+or subsystem processes.
+
+Backend code is organized by bounded context rather than by module count:
+
+```text
+nerves_gate.ex                   public backend API
+nerves_gate/{internet,tailnet,cluster,ssh,subnet_router,commissioning}.ex
+                                 lifecycle FSM and tightly coupled runtime helpers
+nerves_gate/*/alarms.ex          subsystem-owned alarm policy and remedies
+nerves_gate/gateway/             settings transaction, validation, persistence
+nerves_gate/device_state/        pure State projection, event server, replicas
+nerves_gate/fsm.ex               Finitomata support and supervised effect machinery
+nerves_gate_web/                 rendering, forms, routing, and access policy
+```
+
+A support module stays in its subsystem file unless it is a substantial pure,
+platform, or policy boundary worth testing independently. Alarm graphs remain
+separate from state machines because they have a different concern and
+lifecycle, while still living under their owning subsystem. This keeps related
+code discoverable without mixing frontend concerns into the backend.
 
 `tailscale_ex` owns `tailscaled`, command scheduling, typed status, health,
-profiles, preferences, readiness, and subscriptions. `Tailnet.Observer` is only
-a small projection into NervesGate's public state and PubSub topics; it does not
-own daemon polling or repair. `Gateway.Settings`, `Gateway.Persistence`, and
-`Gateway.Effects` are private helpers used by the server. A single change signal
-inhibits expected connectivity alarms while a remote-access candidate is active.
+profiles, preferences, readiness, and subscriptions. `Tailnet` projects
+that typed state and owns Tailnet usability, but never repairs or restarts the
+daemon. `Gateway.Settings`, `Gateway.Persistence`, and `Gateway.Runtime` remain
+small configuration boundaries. A single change signal inhibits expected
+connectivity alarms while a remote-access candidate is active.
 
 Kernel forwarding is immutable platform policy in `/etc/sysctl.conf`, loaded by
 `nerves_runtime` before this application starts.
@@ -94,47 +129,55 @@ Commissioning follows the runtime dependencies:
 2. enroll in Tailscale with a one-use auth key;
 3. select singular cluster mode or a public Tailnet-visible cluster group.
 
-Each dependency is applied before the next step is available, while all three
-remain one reversible candidate. Completed Internet and Tailnet steps stay
-accessible for further editing without undoing downstream runtime changes.
-After the final step, **Accept settings** opens the candidate Tailnet address,
-promotes the candidate on that fresh request, and redirects directly to status.
-Configured changes must be accepted before their countdown expires. Production
-then restricts the dashboard to Tailscale. Development firmware keeps
-QEMU's isolated local dashboard forwards available.
+During first-time setup, each dependency is applied before the next step is
+available and all three remain one reversible candidate. Completed Internet and
+Tailnet steps stay accessible for further editing without undoing downstream
+runtime changes. A configured gateway may instead change only Tailnet or only
+the cluster and proceed directly to acceptance. **Accept settings** opens the
+candidate Tailnet address, promotes the candidate on that fresh request, and
+redirects directly to status. Configured changes must be accepted before their
+countdown expires. Production then restricts the dashboard to Tailscale.
+Development firmware keeps QEMU's isolated local dashboard forwards available.
 
 ## Subnet routing
 
-Subnet routing is an ordinary remote operation, not part of commissioning. The
+Subnet routing is an ordinary owner command, not part of commissioning. The
 local dashboard can dynamically advertise one or more IPv4 or IPv6 CIDRs with
 `tailscale set`, update them, or withdraw all advertisements. Enabling or
 disabling the subnet router never changes the selected Tailnet profile or the
 gateway's remote-management connection.
 
 The desired enabled state and canonical routes live in the active firmware-slot
-snapshot. A successful write produces one ordered public reducer operation; its
-local action applies the routes through Tailscale. Runtime observations return
-as further operations containing advertised, approved, and primary routes.
+snapshot. `SubnetRouter` reconciles that accepted intent and publishes
+advertised, approved, and primary state through the public event stream.
 There is no candidate, confirmation, or revert timer. Application failures raise
-a noncritical alarm and a bounded remedy reapplies only the accepted routes after
-Tailnet recovery; remote gateway access is unchanged.
+a noncritical alarm and a bounded remedy sends the machine a normal `heal` event;
+remote gateway access is unchanged.
 
 ## Remote IEx
 
 The dashboard can enable or disable a NervesSSH IEx console. Only the boolean
-`ssh_enabled` setting is persisted. NervesSSH is started by `SSH.Manager` only
-after `Tailnet.Observer` reports a concrete IPv4 address in Tailscale's
-`100.64.0.0/10` range, and it binds port 22 to that exact address. Tailnet loss
-stops the listener; reconnection or an address change reconciles it automatically.
+`ssh_enabled` setting is persisted. `SSH` starts NervesSSH only after `Tailnet`
+reports a concrete IPv4 address in Tailscale's `100.64.0.0/10`
+range, and it binds port 22 to that exact address. Tailnet loss blocks and stops
+the listener; reconnection or an address change reconciles it automatically.
 
 Persistent listener failures raise an SSH alarm only while Internet and Tailnet
 are healthy. Its remedy reapplies the accepted `ssh_enabled` intent; it cannot
 change the listener address policy or any Tailnet setting.
 
-## Alarms and healing
+## Lifecycle machines, alarms, and healing
 
-Each subsystem owns its raw signals, managed conditions, public alarms, and
-bounded heal callbacks. The dependency graph reports the highest actionable
+Internet, Tailnet, SSH, Cluster, cluster peers, subnet routing, commissioning,
+staged configuration, and remote replicas each have one Finitomata lifecycle
+owner. Their executable graphs generate [`docs/lifecycle-machines.md`](docs/lifecycle-machines.md)
+via `mix nerves_gate.fsm_docs`. `DeviceState.State.apply_event/2` remains a pure
+projection and storage remains synchronous rather than being modeled as a
+controller.
+
+`Alarms.Runtime` atomically subscribes to the same public snapshot/event stream
+as every other consumer. Each subsystem owns its raw signals, managed conditions,
+public alarms, and bounded heal callbacks. The dependency graph reports the highest actionable
 root cause: Internet suppresses Tailnet and every downstream alarm; Tailnet
 suppresses cluster, SSH, and subnet-router alarms; storage, commissioning, and
 active configuration changes suppress expected operational alarms. Raw signals
@@ -163,19 +206,19 @@ The main page at `http://<tailscale-ip>/` provides:
 - Internet → Tailnet → Cluster status;
 - dynamic local subnet-router controls and route approval status;
 - Tailnet-only Remote IEx controls and listener status;
-- local diagnostics and device naming;
+- canonical connectivity evidence and device identity;
 - visible public cluster groups and automatic peer connections.
 
-Each gateway is the sole writer and sequencer for its canonical
-`NervesGate.DeviceState.Data`. Connected gateways join every peer's independent
-operation stream and retain stale snapshots after disconnection. No fleet leader
+Each gateway is the sole sequencer for its canonical
+`NervesGate.DeviceState.State`. Connected gateways join every peer's independent
+snapshot/event stream and retain stale snapshots after disconnection. No fleet leader
 is required because each stream mutates only its owning device. Credentials,
 candidate internals, task metadata, and logger history are never replicated.
 
 ```elixir
-NervesGate.configuration()
-NervesGate.device_state()
-NervesGate.replicas()
+snapshot = NervesGate.snapshot()
+fleet = NervesGate.fleet()
+{:ok, initial_fleet} = NervesGate.subscribe_fleet()
 ```
 
 ## Firmware
@@ -208,10 +251,10 @@ The host-only control plane lives in its own Mix project under
 mix nerves_gate.dev
 ```
 
-Then open `http://qemu.localhost:4000/dev/qemu`. The task starts only the
-standalone QEMU OTP application and its endpoint, router, PubSub, session, and
-assets. It has no dependency on the gateway application or Nerves runtime stack,
-so `/`, `/commissioning`, and `/api/status` are not served on port `4000`.
+Then open `http://qemu.localhost:4000/`. The task starts only the standalone
+QEMU OTP application and its endpoint, router, PubSub, session, and assets. It
+has no dependency on the gateway application or Nerves runtime stack, so gateway
+routes such as `/commissioning` and `/api/status` are not served on port `4000`.
 
 The control plane manages a variable topology, shows combined QMP and gateway
 status, embeds isolated gateway dashboards, and can disconnect or heal each
@@ -219,7 +262,9 @@ uplink without touching its commissioning NIC. Lifecycle actions run
 asynchronously.
 
 ```sh
-mix nerves_gate.qemu setup --count 3
+mix nerves_gate.qemu help
+mix nerves_gate.qemu setup --count 3 --rebuild  # build current source, recreate disks, start
+mix nerves_gate.qemu setup --count 3            # reuse the existing firmware artifact
 mix nerves_gate.qemu add
 mix nerves_gate.qemu remove M04
 mix nerves_gate.qemu status
@@ -239,7 +284,7 @@ hostnames such as `http://m01.localhost:4001/`; commissioning is available at
 Each VM has unique identifiers, a NAT uplink, an isolated commissioning NIC,
 QMP and serial sockets, and a persistent disk under `tmp/qemu`. Gateways discover
 peers over the Tailnet and connect when their public groups match. `observe`
-reads each development VM's versioned, secret-free `nerves_gate.status.v1`
+reads each development VM's versioned, secret-free `nerves_gate.status.v2`
 projection through its local forward; use `watch -n 2 mix nerves_gate.qemu observe`
 to follow convergence. Loss,
 latency, and blackhole semantics are reserved for the future isolated TAP/netem
