@@ -9,7 +9,7 @@ defmodule NervesGateTest do
     assert is_map(replicas)
     assert is_boolean(NervesGate.configured?())
 
-    assert %{schema: "nerves_gate.status.v2", local: %{state: state}} = NervesGate.status()
+    assert %{schema: "nerves_gate.status.v3", local: %{state: state}} = NervesGate.status()
     assert is_map(state)
   end
 

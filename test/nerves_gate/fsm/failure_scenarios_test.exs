@@ -77,8 +77,8 @@ defmodule NervesGate.FSM.FailureScenariosTest do
     assert :ok = Cluster.configure("field", cluster)
 
     assert_eventually(fn -> SSH.diagnostics(ssh).state == :listening end)
-    assert SubnetRouter.diagnostics(subnet).state == :active
-    assert Cluster.diagnostics(cluster).state == :online
+    assert_eventually(fn -> SubnetRouter.diagnostics(subnet).state == :active end)
+    assert_eventually(fn -> Cluster.diagnostics(cluster).state == :online end)
 
     Agent.update(tail, fn _ -> tail_status(false) end)
     SSH.tailnet_state_changed(tail_status(false), ssh)
@@ -86,8 +86,8 @@ defmodule NervesGate.FSM.FailureScenariosTest do
     assert :ok = Cluster.reconcile(cluster)
 
     assert_eventually(fn -> SSH.diagnostics(ssh).state == :blocked end)
-    assert SubnetRouter.diagnostics(subnet).state == :blocked
-    assert Cluster.diagnostics(cluster).state == :blocked
+    assert_eventually(fn -> SubnetRouter.diagnostics(subnet).state == :blocked end)
+    assert_eventually(fn -> Cluster.diagnostics(cluster).state == :blocked end)
 
     Agent.update(tail, fn _ -> tail_status(true) end)
     SSH.tailnet_state_changed(tail_status(true), ssh)
@@ -95,8 +95,8 @@ defmodule NervesGate.FSM.FailureScenariosTest do
     assert :ok = Cluster.reconcile(cluster)
 
     assert_eventually(fn -> SSH.diagnostics(ssh).state == :listening end)
-    assert SubnetRouter.diagnostics(subnet).state == :active
-    assert Cluster.diagnostics(cluster).state == :online
+    assert_eventually(fn -> SubnetRouter.diagnostics(subnet).state == :active end)
+    assert_eventually(fn -> Cluster.diagnostics(cluster).state == :online end)
   end
 
   test "Internet failure does not force a usable Tailnet out of online" do

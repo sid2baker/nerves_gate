@@ -20,9 +20,7 @@ defmodule NervesGate.InternetTest do
     assert Internet.status(machine).online
     assert Internet.configuration_status(machine).known_good.method == :dhcp
 
-    events = Internet.diagnostics(machine).history |> Enum.map(& &1.event)
-    assert :configure in events
-    assert :configuration_completed in events
+    assert :applying in Internet.diagnostics(machine).history
   end
 
   test "verification failure rolls back to the previous accepted runtime" do

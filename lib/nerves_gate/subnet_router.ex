@@ -1,101 +1,31 @@
-defmodule NervesGate.SubnetRouter.Status do
-  @moduledoc "Secret-free public subnet-router state."
-
-  @enforce_keys [:enabled, :routes, :state, :observed]
-  defstruct [:enabled, :routes, :state, :observed, :applied_change_id, :failed_change_id]
-
-  @type t :: %__MODULE__{
-          enabled: boolean(),
-          routes: [String.t()],
-          state: :disabled | :blocked | :applying | :awaiting_approval | :active | :backoff,
-          observed: map(),
-          applied_change_id: String.t() | nil,
-          failed_change_id: String.t() | nil
-        }
-end
-
 defmodule NervesGate.SubnetRouter do
   @moduledoc """
-  Lifecycle and mutation owner for Tailscale route advertisement.
+  Owns desired Tailscale route advertisement and reconciles it asynchronously.
 
-  Route writes are serialized. A newer desired route set is coalesced while the
-  active generation runs and is applied immediately after that generation's
-  terminal event.
+  The process is a serialized desired-state reconciler, not a workflow FSM.
+  One bounded route write may run at a time; newer desired values are coalesced.
   """
 
-  alias NervesGate.FSM.{Diagnostics, Effect, Retry}
+  use GenServer
+
+  alias NervesGate.FSM.Effect
+  alias NervesGate.Retry
   alias NervesGate.SubnetRouter.{Routes, Status}
 
-  @fsm """
-  [*] --> disabled : boot
-  disabled --> applying : configure
-  disabled --> blocked : configure
-  disabled --> disabled : retry_timer_fired
-  disabled --> disabled : tailnet_state_changed
-  disabled --> disabled : heal
-  blocked --> applying : configure
-  blocked --> blocked : configure
-  blocked --> applying : retry_timer_fired
-  blocked --> applying : tailnet_state_changed
-  blocked --> applying : heal
-  blocked --> blocked : retry_timer_fired
-  blocked --> blocked : tailnet_state_changed
-  blocked --> blocked : heal
-  awaiting_approval --> applying : configure
-  awaiting_approval --> blocked : configure
-  awaiting_approval --> applying : heal
-  awaiting_approval --> active : tailnet_state_changed
-  awaiting_approval --> awaiting_approval : tailnet_state_changed
-  awaiting_approval --> blocked : tailnet_state_changed
-  awaiting_approval --> active : retry_timer_fired
-  awaiting_approval --> awaiting_approval : retry_timer_fired
-  awaiting_approval --> blocked : retry_timer_fired
-  active --> applying : configure
-  active --> blocked : configure
-  active --> applying : heal
-  active --> active : tailnet_state_changed
-  active --> awaiting_approval : tailnet_state_changed
-  active --> blocked : tailnet_state_changed
-  active --> active : retry_timer_fired
-  active --> awaiting_approval : retry_timer_fired
-  active --> blocked : retry_timer_fired
-  backoff --> applying : configure
-  backoff --> blocked : configure
-  backoff --> applying : heal
-  backoff --> applying : retry_timer_fired
-  backoff --> applying : tailnet_state_changed
-  backoff --> backoff : retry_timer_fired
-  backoff --> blocked : retry_timer_fired
-  backoff --> blocked : tailnet_state_changed
-  applying --> applying : configure
-  applying --> applying : heal
-  applying --> applying : retry_timer_fired
-  applying --> applying : tailnet_state_changed
-  applying --> applying : routes_application_completed
-  applying --> disabled : routes_application_completed
-  applying --> blocked : routes_application_completed
-  applying --> awaiting_approval : routes_application_completed
-  applying --> active : routes_application_completed
-  applying --> backoff : routes_application_completed
-  disabled --> [*] : terminate
-  """
-
-  use NervesGate.FSM, fsm: @fsm, timer: 1_000
-
   @retry_delay 30_000
+  @tick_interval 1_000
 
-  @type command :: {:configure, boolean(), [String.t()], String.t() | nil} | :heal
-  @type event ::
-          :retry_timer_fired
-          | {:tailnet_state_changed, map()}
-          | {:routes_application_completed, reference(), term()}
-  @type input :: command() | event()
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(options) do
+    state = Keyword.get_lazy(options, :payload, &new/0)
+    GenServer.start_link(__MODULE__, state, name: Keyword.get(options, :name, __MODULE__))
+  end
 
   @spec new(keyword()) :: map()
   def new(options \\ []) do
-    Diagnostics.new(%{
-      owner: __MODULE__,
-      desired: %{enabled: false, routes: [], change_id: nil},
+    %{
+      phase: :disabled,
+      desired: %{enabled: false, routes: []},
       observed: unavailable_observation(),
       tailnet_state: Keyword.get(options, :initial_tailnet),
       tailnet: Keyword.get(options, :tailnet, &NervesGate.Tailnet.status/0),
@@ -103,31 +33,30 @@ defmodule NervesGate.SubnetRouter do
       publisher: Keyword.get(options, :publisher, &publish/1),
       retry_delay: Keyword.get(options, :retry_delay, @retry_delay),
       effect_timeout: Keyword.get(options, :effect_timeout, 45_000),
-      generation: 0,
+      revision: 0,
       effect: nil,
-      applied_change_id: nil,
-      failed_change_id: nil,
-      last_result: nil
-    })
+      last_error: nil,
+      attempt: 0,
+      retry_at: nil,
+      blocked_by: nil
+    }
   end
 
   @spec configure(boolean(), [String.t()], GenServer.server(), keyword()) ::
           {:ok, [String.t()]} | {:error, term()}
-  def configure(enabled, routes, server \\ __MODULE__, options \\ [])
+  def configure(enabled, routes, server \\ __MODULE__, _options \\ [])
       when is_boolean(enabled) and is_list(routes) do
-    change_id = Keyword.get(options, :change_id)
-
-    GenServer.cast(
-      server,
-      {:configure, %{enabled: enabled, routes: routes, change_id: change_id}}
-    )
-
-    {:ok, routes}
+    case GenServer.call(server, {:configure, enabled, routes}) do
+      :ok -> {:ok, routes}
+      {:error, _reason} = error -> error
+    end
+  catch
+    :exit, _reason -> {:error, :owner_unavailable}
   end
 
   @spec heal(GenServer.server()) :: :ok
   def heal(server \\ __MODULE__) do
-    GenServer.cast(server, {:heal, nil})
+    GenServer.cast(server, :heal)
     :ok
   end
 
@@ -139,274 +68,244 @@ defmodule NervesGate.SubnetRouter do
 
   @spec status(GenServer.server()) :: Status.t()
   def status(server \\ __MODULE__) do
-    case Diagnostics.state(server) do
-      %Finitomata.State{current: state, payload: payload} -> public_status(state, payload)
-      nil -> public_status(:disabled, new())
-    end
+    GenServer.call(server, :status)
+  catch
+    :exit, _reason -> disabled_status()
   end
 
   @spec diagnostics(GenServer.server()) :: map() | nil
-  def diagnostics(server \\ __MODULE__), do: server |> Diagnostics.state() |> Diagnostics.view()
-
-  @impl Finitomata
-  def on_transition(:*, :boot, _event_payload, payload) do
-    payload = refresh_tailnet(payload)
-    finish(:*, :boot, :disabled, payload)
+  def diagnostics(server \\ __MODULE__) do
+    GenServer.call(server, :diagnostics)
+  catch
+    :exit, _reason -> nil
   end
 
-  def on_transition(state, :configure, command, payload) do
-    desired = %{enabled: command.enabled, routes: command.routes, change_id: command.change_id}
-    payload = set_desired(payload, desired)
-
-    if state == :applying,
-      do: finish(state, :configure, :applying, payload),
-      else: start_application(state, :configure, payload)
+  @impl true
+  def init(state) do
+    schedule_tick()
+    state = refresh_tailnet(state) |> resolve_observation()
+    publish_state(state)
+    {:ok, state}
   end
 
-  def on_transition(:applying, :heal, _event_payload, payload),
-    do: finish(:applying, :heal, :applying, payload)
-
-  def on_transition(state, :heal, _event_payload, payload),
-    do: start_application(state, :heal, payload)
-
-  def on_transition(state, :tailnet_state_changed, status, payload) do
-    payload = put_tailnet(payload, status)
-
-    cond do
-      state == :applying ->
-        finish(state, :tailnet_state_changed, :applying, payload)
-
-      state == :blocked and payload.desired.enabled and tailnet_online?(payload) ->
-        start_application(state, :tailnet_state_changed, payload)
-
-      state == :backoff and Retry.due?(payload.retry_at) and tailnet_online?(payload) ->
-        start_application(state, :tailnet_state_changed, payload)
-
-      true ->
-        resolve_observation(state, :tailnet_state_changed, payload)
-    end
+  @impl true
+  def handle_call({:configure, enabled, routes}, _from, state) do
+    desired = %{enabled: enabled, routes: routes}
+    state = state |> set_desired(desired) |> apply_or_block()
+    publish_state(state)
+    {:reply, :ok, state}
   end
 
-  def on_transition(:applying, :retry_timer_fired, _event_payload, payload),
-    do: finish(:applying, :retry_timer_fired, :applying, payload)
+  def handle_call(:status, _from, state), do: {:reply, public_status(state), state}
+  def handle_call(:diagnostics, _from, state), do: {:reply, diagnostic_view(state), state}
+  def handle_call(:state, _from, state), do: {:reply, state, state}
 
-  def on_transition(state, :retry_timer_fired, _event_payload, payload) do
-    payload = refresh_tailnet(payload)
-
-    cond do
-      state == :blocked and payload.desired.enabled and tailnet_online?(payload) ->
-        start_application(state, :retry_timer_fired, payload)
-
-      state == :backoff and Retry.due?(payload.retry_at) ->
-        start_application(state, :retry_timer_fired, payload)
-
-      true ->
-        resolve_observation(state, :retry_timer_fired, payload)
-    end
+  @impl true
+  def handle_cast(:heal, state) do
+    state = apply_or_block(state)
+    publish_state(state)
+    {:noreply, state}
   end
 
-  def on_transition(
-        :applying,
-        :routes_application_completed,
-        {ref, outcome},
-        %{effect: %{ref: ref, generation: generation}} = payload
+  def handle_cast({:tailnet_state_changed, status}, state) do
+    state = put_tailnet(state, status) |> reconcile_dependency()
+    publish_state(state)
+    {:noreply, state}
+  end
+
+  def handle_cast(
+        {:routes_application_completed, {ref, outcome}},
+        %{effect: %{ref: ref, revision: revision}} = state
       ) do
-    payload = %{payload | effect: nil}
-    handle_application(outcome, generation, payload)
+    state = complete_application(outcome, revision, %{state | effect: nil})
+    publish_state(state)
+    {:noreply, state}
   end
 
-  def on_transition(:applying, :routes_application_completed, {_stale, _outcome}, _payload),
-    do: {:error, :stale_effect_completion}
+  def handle_cast({:routes_application_completed, _stale}, state), do: {:noreply, state}
 
-  @impl Finitomata
-  def on_timer(_state, %Finitomata.State{payload: payload}),
-    do: {:transition, :retry_timer_fired, payload}
-
-  @doc false
-  def after_transition(state, payload) do
-    payload.publisher.(public_status(state, payload))
-    launch_application(state, payload)
+  @impl true
+  def handle_info(:tick, state) do
+    schedule_tick()
+    state = state |> refresh_tailnet() |> reconcile_dependency()
+    publish_state(state)
+    {:noreply, state}
   end
 
-  defp launch_application(:applying, %{effect: %{ref: ref, generation: generation}} = payload) do
+  defp apply_or_block(%{effect: effect} = state) when not is_nil(effect), do: state
+
+  defp apply_or_block(state) do
+    if state.desired.enabled and not tailnet_online?(state) do
+      Map.merge(state, %{phase: :blocked, blocked_by: :tailnet})
+    else
+      start_application(state)
+    end
+  end
+
+  defp start_application(state) do
+    ref = make_ref()
+    revision = state.revision
+
     case Effect.start(
            self(),
            ref,
-           fn ->
-             {generation, payload.apply.(payload.desired.enabled, payload.desired.routes)}
-           end,
+           fn -> {revision, state.apply.(state.desired.enabled, state.desired.routes)} end,
            fn ref, outcome -> {:routes_application_completed, {ref, outcome}} end,
-           timeout: payload.effect_timeout
+           timeout: state.effect_timeout
          ) do
-      {:ok, _coordinator} -> :ok
-      {:error, reason} -> raise "SubnetRouter effect launch failed: #{inspect(reason)}"
+      {:ok, _coordinator} ->
+        %{state | phase: :applying, effect: %{ref: ref, revision: revision}, blocked_by: nil}
+
+      {:error, reason} ->
+        enter_backoff(state, {:route_effect_launch_failed, Retry.public_error(reason)})
     end
   end
 
-  defp launch_application(_state, _payload), do: :ok
-
-  defp handle_application({:returned, {generation, result}}, generation, payload) do
-    if generation != payload.generation do
-      payload
-      |> begin_effect()
-      |> then(&finish(:applying, :routes_application_completed, :applying, &1))
+  defp complete_application({:returned, {revision, result}}, revision, state) do
+    if revision != state.revision do
+      apply_or_block(state)
     else
-      resolve_application_result(result, payload)
+      resolve_application_result(result, state)
     end
   end
 
-  defp handle_application(:timed_out, _generation, payload),
-    do: enter_backoff(payload, :route_application_timed_out)
+  defp complete_application(:timed_out, _revision, state),
+    do: enter_backoff(state, :route_application_timed_out)
 
-  defp handle_application(:cancelled, _generation, payload),
-    do: enter_backoff(payload, :route_application_cancelled)
+  defp complete_application(:cancelled, _revision, state),
+    do: enter_backoff(state, :route_application_cancelled)
 
-  defp handle_application({:crashed, _kind, reason, _stack}, _generation, payload),
-    do: enter_backoff(payload, {:route_application_crashed, Retry.public_error(reason)})
+  defp complete_application({:crashed, _kind, reason, _stack}, _revision, state),
+    do: enter_backoff(state, {:route_application_crashed, Retry.public_error(reason)})
 
-  defp handle_application(_invalid, _generation, payload),
-    do: enter_backoff(payload, :invalid_route_application_result)
+  defp complete_application(_invalid, _revision, state),
+    do: enter_backoff(state, :invalid_route_application_result)
 
-  defp resolve_application_result({:ok, _applied}, payload) do
-    payload = %{
-      payload
-      | applied_change_id: payload.desired.change_id,
-        failed_change_id: nil,
-        last_error: nil,
-        attempt: 0,
-        retry_at: nil
-    }
-
-    resolve_observation(:applying, :routes_application_completed, refresh_tailnet(payload))
+  defp resolve_application_result({:ok, _applied}, state) do
+    state
+    |> Map.merge(%{last_error: nil, attempt: 0, retry_at: nil})
+    |> refresh_tailnet()
+    |> resolve_observation()
   end
 
-  defp resolve_application_result({:error, reason}, payload) do
-    payload = %{payload | failed_change_id: payload.desired.change_id}
-    enter_backoff(payload, {:route_apply_failed, Retry.public_error(reason)})
-  end
+  defp resolve_application_result({:error, reason}, state),
+    do: enter_backoff(state, {:route_apply_failed, Retry.public_error(reason)})
 
-  defp resolve_application_result(invalid, payload),
-    do: enter_backoff(payload, {:invalid_route_apply_result, Retry.public_error(invalid)})
+  defp resolve_application_result(invalid, state),
+    do: enter_backoff(state, {:invalid_route_apply_result, Retry.public_error(invalid)})
 
-  defp start_application(state, event, payload) do
-    if payload.desired.enabled and not tailnet_online?(payload) do
-      payload = %{
-        payload
-        | applied_change_id: payload.desired.change_id,
-          failed_change_id: nil
-      }
+  defp reconcile_dependency(%{effect: effect} = state) when not is_nil(effect), do: state
 
-      finish(state, event, :blocked, payload, blocked_by: :tailnet)
-    else
-      payload = begin_effect(payload)
-      finish(state, event, :applying, payload, blocked_by: nil)
-    end
-  end
-
-  defp resolve_observation(state, event, payload) do
-    payload = observe_routes(payload)
-
+  defp reconcile_dependency(state) do
     cond do
-      not payload.desired.enabled ->
-        finish(state, event, :disabled, payload, error: nil, blocked_by: nil)
+      state.desired.enabled and not tailnet_online?(state) ->
+        %{resolve_observation(state) | phase: :blocked, blocked_by: :tailnet}
 
-      not tailnet_online?(payload) ->
-        finish(state, event, :blocked, payload, blocked_by: :tailnet)
+      state.phase == :blocked and state.desired.enabled ->
+        start_application(state)
 
-      state == :backoff and not Retry.due?(payload.retry_at) ->
-        finish(state, event, :backoff, payload)
-
-      routes_approved?(payload) ->
-        finish(state, event, :active, payload, error: nil, blocked_by: nil)
+      state.phase == :backoff and Retry.due?(state.retry_at) ->
+        apply_or_block(state)
 
       true ->
-        finish(state, event, :awaiting_approval, payload)
+        resolve_observation(state)
     end
   end
 
-  defp begin_effect(payload),
-    do: %{payload | effect: %{ref: make_ref(), generation: payload.generation}}
+  defp resolve_observation(state) do
+    state = %{state | observed: observation(state.tailnet_state)}
 
-  defp set_desired(payload, desired) do
-    if payload.desired == desired,
-      do: payload,
-      else: %{payload | desired: desired, generation: payload.generation + 1}
+    cond do
+      not state.desired.enabled ->
+        %{state | phase: :disabled, blocked_by: nil}
+
+      not tailnet_online?(state) ->
+        %{state | phase: :blocked, blocked_by: :tailnet}
+
+      state.phase == :backoff and not Retry.due?(state.retry_at) ->
+        state
+
+      routes_approved?(state) ->
+        %{state | phase: :active, blocked_by: nil, last_error: nil}
+
+      true ->
+        %{state | phase: :awaiting_approval, blocked_by: nil}
+    end
   end
 
-  defp put_tailnet(payload, status) do
-    %{payload | tailnet_state: status, observed: observation(status)}
+  defp set_desired(state, desired) do
+    if state.desired == desired,
+      do: state,
+      else: %{state | desired: desired, revision: state.revision + 1}
   end
 
-  defp refresh_tailnet(payload), do: put_tailnet(payload, payload.tailnet.())
+  defp put_tailnet(state, status),
+    do: %{state | tailnet_state: status, observed: observation(status)}
 
-  defp observe_routes(payload), do: %{payload | observed: observation(payload.tailnet_state)}
+  defp refresh_tailnet(state), do: put_tailnet(state, state.tailnet.())
+
   defp observation(%{subnet_router: routes}) when is_map(routes), do: routes
   defp observation(_unavailable), do: unavailable_observation()
-  defp tailnet_online?(payload), do: match?(%{online: true}, payload.tailnet_state)
+  defp tailnet_online?(state), do: match?(%{online: true}, state.tailnet_state)
 
-  defp routes_approved?(payload) do
-    approved = Map.get(payload.observed, :approved, [])
-    Enum.all?(payload.desired.routes, &(&1 in approved))
+  defp routes_approved?(state) do
+    approved = Map.get(state.observed, :approved, [])
+    Enum.all?(state.desired.routes, &(&1 in approved))
   end
 
-  defp enter_backoff(payload, error) do
-    attempt = payload.attempt + 1
-
-    finish(:applying, :routes_application_completed, :backoff, payload,
-      reason: error,
-      error: error,
-      attempt: attempt,
-      retry_at: Retry.now() + payload.retry_delay
-    )
+  defp enter_backoff(state, error) do
+    %{
+      state
+      | phase: :backoff,
+        last_error: error,
+        attempt: state.attempt + 1,
+        retry_at: Retry.now() + state.retry_delay,
+        blocked_by: nil
+    }
   end
 
-  defp finish(from, event, to, payload, options \\ []) do
-    {:ok, to, Diagnostics.record(payload, from, event, to, options)}
+  defp diagnostic_view(state) do
+    %{
+      state: state.phase,
+      desired: state.desired,
+      observed: state.observed,
+      blocked_by: state.blocked_by,
+      last_error: state.last_error,
+      attempt: state.attempt,
+      retry_at: state.retry_at,
+      effect: state.effect
+    }
   end
 
-  defp public_status(state, payload) do
+  defp public_status(state) do
     %Status{
-      enabled: payload.desired.enabled,
-      routes: payload.desired.routes,
-      state: state,
-      observed: payload.observed,
-      applied_change_id: payload.applied_change_id,
-      failed_change_id: payload.failed_change_id
+      enabled: state.desired.enabled,
+      routes: state.desired.routes,
+      state: state.phase,
+      observed: state.observed
+    }
+  end
+
+  defp disabled_status do
+    %Status{
+      enabled: false,
+      routes: [],
+      state: :disabled,
+      observed: unavailable_observation()
     }
   end
 
   defp unavailable_observation,
     do: %{advertised: [], approved: [], primary: [], error: :unavailable}
 
+  defp schedule_tick, do: Process.send_after(self(), :tick, @tick_interval)
+  defp publish_state(state), do: state.publisher.(public_status(state))
+
   defp publish(status) do
     case NervesGate.DeviceState.publish({:state_reported, :subnet_router, status}) do
       :ok -> :ok
       {:error, :shutting_down} -> :ok
       {:error, reason} -> raise "SubnetRouter DeviceState publication failed: #{inspect(reason)}"
-    end
-  end
-end
-
-defmodule NervesGate.SubnetRouter.Routes do
-  @moduledoc "Idempotent Tailscale route-advertisement boundary."
-
-  alias NervesGate.Tailnet, as: Tailnet
-
-  @spec apply(boolean(), [String.t()]) :: {:ok, [String.t()]} | {:error, term()}
-  def apply(enabled, routes) do
-    advertised = if enabled, do: routes, else: []
-
-    with :ok <-
-           Tailscale.await_online(timeout: 30_000, require: [:authenticated, :tailscale_ipv4]),
-         :ok <- Tailscale.set(ssh: false, advertise_routes: advertised),
-         {:ok, applied} <- Tailscale.advertised_routes(),
-         true <- applied == advertised or enabled do
-      Tailnet.refresh()
-      {:ok, if(enabled, do: applied, else: routes)}
-    else
-      false -> {:error, :route_withdrawal_failed}
-      {:error, _reason} = error -> error
-      _failure -> {:error, :route_update_failed}
     end
   end
 end

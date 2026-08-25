@@ -70,9 +70,7 @@ defmodule NervesGate.StartupGateTest do
       enabled: false,
       routes: [],
       state: :disabled,
-      observed: %{},
-      applied_change_id: nil,
-      failed_change_id: nil
+      observed: %{}
     }
   end
 
@@ -81,9 +79,7 @@ defmodule NervesGate.StartupGateTest do
       enabled: false,
       state: :disabled,
       address: nil,
-      port: 22,
-      applied_change_id: nil,
-      failed_change_id: nil
+      port: 22
     }
   end
 

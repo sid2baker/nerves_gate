@@ -72,7 +72,7 @@ defmodule NervesGateQEMU.Status do
          vm,
          link,
          fault,
-         {:ok, %{"schema" => "nerves_gate.status.v2"} = status}
+         {:ok, %{"schema" => "nerves_gate.status.v3"} = status}
        ) do
     state = status |> get_in(["local", "state"]) |> map_or_empty()
     internet = state |> get_in(["internet", "state"]) |> layer_state()

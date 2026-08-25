@@ -17,10 +17,6 @@ defmodule NervesGate.Gateway.Configuration do
   activating --> idle : activation_completed
   activating --> activating : tick
   activating --> activating : public_state_requested
-  activating --> activating : runtime_state_changed
-  activating --> [*] : terminate
-  idle --> awaiting_runtime_change : resume_runtime_change
-  awaiting_runtime_change --> awaiting_runtime_change : resume_runtime_change
   idle --> executing_change : stage_internet
   idle --> executing_change : begin_tailnet_change
   idle --> executing_change : begin_cluster_change
@@ -48,26 +44,14 @@ defmodule NervesGate.Gateway.Configuration do
   executing_change --> needs_confirmation : configuration_step_completed
   executing_change --> executing_change : tick
   executing_change --> executing_change : public_state_requested
-  executing_change --> [*] : terminate
-  idle --> idle : tick
   idle --> persisting_runtime_change : configure_subnet_router
   idle --> persisting_runtime_change : configure_ssh
   idle --> idle : configure_subnet_router
   idle --> idle : configure_ssh
-  idle --> idle : heal
-  idle --> awaiting_runtime_change : heal
-  idle --> idle : runtime_state_changed
-  persisting_runtime_change --> awaiting_runtime_change : runtime_change_persistence_completed
   persisting_runtime_change --> idle : runtime_change_persistence_completed
-  awaiting_runtime_change --> awaiting_runtime_change : runtime_command_finished
-  awaiting_runtime_change --> finalizing_runtime_change : runtime_command_finished
-  finalizing_runtime_change --> finalizing_runtime_change : runtime_command_finished
-  awaiting_runtime_change --> awaiting_runtime_change : runtime_state_changed
-  awaiting_runtime_change --> finalizing_runtime_change : runtime_state_changed
-  finalizing_runtime_change --> idle : runtime_change_persistence_completed
   persisting_runtime_change --> persisting_runtime_change : tick
-  awaiting_runtime_change --> awaiting_runtime_change : tick
-  finalizing_runtime_change --> finalizing_runtime_change : tick
+  idle --> idle : tick
+  idle --> idle : heal
   needs_tailnet --> needs_tailnet : heal
   needs_cluster --> needs_cluster : heal
   needs_confirmation --> needs_confirmation : heal
@@ -76,12 +60,10 @@ defmodule NervesGate.Gateway.Configuration do
   needs_cluster --> needs_cluster : public_state_requested
   needs_confirmation --> needs_confirmation : public_state_requested
   persisting_runtime_change --> persisting_runtime_change : public_state_requested
-  awaiting_runtime_change --> awaiting_runtime_change : public_state_requested
-  finalizing_runtime_change --> finalizing_runtime_change : public_state_requested
+  activating --> [*] : terminate
+  executing_change --> [*] : terminate
   idle --> [*] : terminate
   persisting_runtime_change --> [*] : terminate
-  awaiting_runtime_change --> [*] : terminate
-  finalizing_runtime_change --> [*] : terminate
   """
 
   use NervesGate.FSM, fsm: @fsm, timer: 500
@@ -106,7 +88,7 @@ defmodule NervesGate.Gateway.Configuration do
       current: hydration.current,
       recovered_candidate: hydration.candidate,
       pending: nil,
-      runtime_change: pending_runtime_change(hydration.current),
+      runtime_change: nil,
       startup_effect: %{ref: make_ref()},
       step_effect: nil,
       ops: Map.merge(Runtime.default(), Map.new(Keyword.get(options, :ops, []))),
@@ -116,7 +98,7 @@ defmodule NervesGate.Gateway.Configuration do
           :keep_local_access,
           Application.get_env(:nerves_gate, :local_dashboard, false)
         ),
-      last_result: nil,
+      reply: nil,
       effect_timeout: Keyword.get(options, :effect_timeout, 30_000),
       startup_timeout: Keyword.get(options, :startup_timeout, 120_000),
       step_timeout: Keyword.get(options, :step_timeout, 120_000),
@@ -198,14 +180,6 @@ defmodule NervesGate.Gateway.Configuration do
 
   @spec heal(GenServer.server()) :: :ok | {:error, term()}
   def heal(server \\ __MODULE__), do: command(server, :heal, %{})
-
-  @doc false
-  @spec runtime_state_changed(:ssh | :subnet_router, map(), GenServer.server()) :: :ok
-  def runtime_state_changed(source, status, server \\ __MODULE__)
-      when source in [:ssh, :subnet_router] and is_map(status) do
-    GenServer.cast(server, {:runtime_state_changed, %{source: source, status: status}})
-    :ok
-  end
 
   @spec diagnostics(GenServer.server()) :: map() | nil
   def diagnostics(server \\ __MODULE__), do: server |> Diagnostics.state() |> Diagnostics.view()
@@ -448,26 +422,6 @@ defmodule NervesGate.Gateway.Configuration do
   def on_transition(:executing_change, :configuration_step_completed, _stale, _payload),
     do: {:error, :stale_effect_completion}
 
-  def on_transition(:idle, :resume_runtime_change, _event, payload),
-    do: finish(:idle, :resume_runtime_change, :awaiting_runtime_change, payload)
-
-  def on_transition(:awaiting_runtime_change, :resume_runtime_change, _event, payload) do
-    runtime_change = %{payload.runtime_change | dispatched: true}
-
-    finish(
-      :awaiting_runtime_change,
-      :resume_runtime_change,
-      :awaiting_runtime_change,
-      %{payload | runtime_change: runtime_change}
-    )
-  end
-
-  def on_transition(:activating, :runtime_state_changed, _event, payload),
-    do: finish(:activating, :runtime_state_changed, :activating, payload)
-
-  def on_transition(:idle, :runtime_state_changed, _event, payload),
-    do: finish(:idle, :runtime_state_changed, :idle, payload)
-
   def on_transition(:idle, :configure_subnet_router, command, payload),
     do: begin_runtime_change(:subnet_router, command, payload)
 
@@ -482,40 +436,8 @@ defmodule NervesGate.Gateway.Configuration do
       ),
       do: persisted_runtime_change(event, payload)
 
-  def on_transition(
-        :finalizing_runtime_change,
-        :runtime_change_persistence_completed,
-        event,
-        payload
-      ),
-      do: finalized_runtime_change(event, payload)
-
-  def on_transition(:awaiting_runtime_change, :runtime_command_finished, event, payload),
-    do: runtime_command_finished(event, payload)
-
-  def on_transition(:finalizing_runtime_change, :runtime_command_finished, _event, payload),
-    do:
-      finish(
-        :finalizing_runtime_change,
-        :runtime_command_finished,
-        :finalizing_runtime_change,
-        payload
-      )
-
-  def on_transition(:awaiting_runtime_change, :runtime_state_changed, event, payload),
-    do: runtime_state_evidence(event, payload)
-
-  def on_transition(:idle, :heal, command, payload) do
-    case pending_runtime_change(payload.current) do
-      nil ->
-        finish(:idle, :heal, :idle, put_result(payload, command.id, :ok))
-
-      runtime_change ->
-        runtime_change = %{runtime_change | command_id: command.id}
-
-        finish(:idle, :heal, :awaiting_runtime_change, %{payload | runtime_change: runtime_change})
-    end
-  end
+  def on_transition(:idle, :heal, command, payload),
+    do: finish(:idle, :heal, :idle, put_result(payload, command.id, :ok))
 
   def on_transition(state, :heal, command, payload),
     do: finish(state, :heal, state, put_result(payload, command.id, :ok))
@@ -530,12 +452,7 @@ defmodule NervesGate.Gateway.Configuration do
     do: finish(:idle, :tick, :idle, payload)
 
   def on_transition(state, :tick, _event_payload, payload)
-      when state in [
-             :persisting_runtime_change,
-             :awaiting_runtime_change,
-             :finalizing_runtime_change,
-             :executing_change
-           ],
+      when state in [:persisting_runtime_change, :executing_change],
       do: finish(state, :tick, state, payload)
 
   def on_transition(state, :tick, _event_payload, payload) do
@@ -588,10 +505,9 @@ defmodule NervesGate.Gateway.Configuration do
   end
 
   defp after_committed(
-         state,
+         :persisting_runtime_change,
          %{runtime_change: %{effect: %{ref: ref}} = change} = payload
-       )
-       when state in [:persisting_runtime_change, :finalizing_runtime_change] do
+       ) do
     settings = change.settings
     slot = payload.firmware.active
     root = payload.root
@@ -606,18 +522,6 @@ defmodule NervesGate.Gateway.Configuration do
       {:ok, _coordinator} -> :ok
       {:error, reason} -> raise "Configuration persistence launch failed: #{inspect(reason)}"
     end
-  end
-
-  defp after_committed(:idle, %{runtime_change: %{phase: :awaiting}}) do
-    GenServer.cast(self(), {:resume_runtime_change, nil})
-  end
-
-  defp after_committed(
-         :awaiting_runtime_change,
-         %{runtime_change: %{dispatched: false} = change} = payload
-       ) do
-    result = dispatch_runtime_change(payload.ops, change)
-    GenServer.cast(self(), {:runtime_command_finished, %{id: change.id, result: result}})
   end
 
   defp after_committed(_state, _payload), do: :ok
@@ -803,22 +707,12 @@ defmodule NervesGate.Gateway.Configuration do
     do: start_runtime_change(:ssh, command.enabled, command.id, payload)
 
   defp start_runtime_change(kind, desired, command_id, payload) do
-    id = change_id()
-
-    updated =
-      payload.current
-      |> Settings.bump(runtime_setting(kind, desired))
-      |> Settings.put_resource_change(kind, id, :pending)
-
-    runtime_change = %{
-      id: id,
+    change = %{
+      id: change_id(),
       kind: kind,
       command_id: command_id,
       desired: desired,
-      settings: updated,
-      outcome: nil,
-      phase: :persisting,
-      dispatched: false,
+      settings: Settings.bump(payload.current, runtime_setting(kind, desired)),
       effect: %{ref: make_ref()}
     }
 
@@ -826,7 +720,7 @@ defmodule NervesGate.Gateway.Configuration do
       :idle,
       runtime_change_event(kind),
       :persisting_runtime_change,
-      %{payload | runtime_change: runtime_change}
+      %{payload | runtime_change: change}
     )
   end
 
@@ -836,21 +730,22 @@ defmodule NervesGate.Gateway.Configuration do
        ) do
     case persistence_result(outcome) do
       :ok ->
-        change = %{change | phase: :awaiting, effect: nil}
+        dispatch_result = dispatch_runtime_change(payload.ops, change)
 
         payload =
           payload
           |> Map.merge(%{
             current: change.settings,
-            runtime_change: change,
-            last_error: nil
+            runtime_change: nil,
+            last_error: dispatch_error(dispatch_result)
           })
+          |> put_result(change.command_id, runtime_change_result(change))
           |> refresh_diagnostics()
 
         finish(
           :persisting_runtime_change,
           :runtime_change_persistence_completed,
-          :awaiting_runtime_change,
+          :idle,
           payload
         )
 
@@ -874,171 +769,15 @@ defmodule NervesGate.Gateway.Configuration do
   defp persisted_runtime_change({_ref, _outcome}, _payload),
     do: {:error, :stale_runtime_change_completion}
 
-  defp runtime_command_finished(
-         %{id: id, result: result},
-         %{runtime_change: %{id: id} = change} = payload
-       ) do
-    case result do
-      :ok ->
-        await_runtime_evidence(payload, change)
+  defp runtime_change_result(%{kind: :ssh}), do: :ok
 
-      {:ok, _value} ->
-        await_runtime_evidence(payload, change)
-
-      {:error, reason} ->
-        begin_runtime_finalization(
-          payload,
-          :failed,
-          {:owner_command_failed, reason},
-          :runtime_command_finished
-        )
-
-      invalid ->
-        begin_runtime_finalization(
-          payload,
-          :failed,
-          {:invalid_owner_command_result, invalid},
-          :runtime_command_finished
-        )
-    end
-  end
-
-  defp runtime_command_finished(_stale, payload),
-    do:
-      finish(
-        :awaiting_runtime_change,
-        :runtime_command_finished,
-        :awaiting_runtime_change,
-        payload
-      )
-
-  defp await_runtime_evidence(payload, change) do
-    change = %{change | dispatched: true}
-
-    finish(
-      :awaiting_runtime_change,
-      :runtime_command_finished,
-      :awaiting_runtime_change,
-      %{payload | runtime_change: change}
-    )
-  end
-
-  defp runtime_state_evidence(
-         %{source: kind, status: status},
-         %{runtime_change: %{kind: kind, id: id}} = payload
-       ) do
-    cond do
-      Map.get(status, :applied_change_id) == id ->
-        begin_runtime_finalization(payload, :applied, nil, :runtime_state_changed)
-
-      Map.get(status, :failed_change_id) == id ->
-        begin_runtime_finalization(
-          payload,
-          :failed,
-          :owner_reported_failure,
-          :runtime_state_changed
-        )
-
-      true ->
-        finish(
-          :awaiting_runtime_change,
-          :runtime_state_changed,
-          :awaiting_runtime_change,
-          payload
-        )
-    end
-  end
-
-  defp runtime_state_evidence(_unrelated, payload),
-    do:
-      finish(
-        :awaiting_runtime_change,
-        :runtime_state_changed,
-        :awaiting_runtime_change,
-        payload
-      )
-
-  defp begin_runtime_finalization(payload, outcome, reason, event) do
-    change = payload.runtime_change
-
-    settings =
-      Settings.put_resource_change(
-        payload.current,
-        change.kind,
-        change.id,
-        outcome
-      )
-
-    change = %{
-      change
-      | settings: settings,
-        outcome: outcome,
-        phase: :finalizing,
-        effect: %{ref: make_ref()}
-    }
-
-    payload = %{
-      payload
-      | runtime_change: change,
-        last_error: if(outcome == :failed, do: {:runtime_change_failed, reason})
-    }
-
-    finish(
-      :awaiting_runtime_change,
-      event,
-      :finalizing_runtime_change,
-      payload
-    )
-  end
-
-  defp finalized_runtime_change(
-         {ref, outcome},
-         %{runtime_change: %{effect: %{ref: ref}} = change} = payload
-       ) do
-    case persistence_result(outcome) do
-      :ok ->
-        result = runtime_change_result(change)
-
-        payload =
-          payload
-          |> Map.merge(%{current: change.settings, runtime_change: nil})
-          |> put_result(change.command_id, result)
-          |> refresh_diagnostics()
-
-        finish(
-          :finalizing_runtime_change,
-          :runtime_change_persistence_completed,
-          :idle,
-          payload
-        )
-
-      {:error, reason} ->
-        error = {:settings_write_failed, reason}
-
-        payload =
-          payload
-          |> Map.merge(%{runtime_change: nil, last_error: error})
-          |> put_result(change.command_id, {:error, error})
-
-        finish(
-          :finalizing_runtime_change,
-          :runtime_change_persistence_completed,
-          :idle,
-          payload
-        )
-    end
-  end
-
-  defp finalized_runtime_change({_ref, _outcome}, _payload),
-    do: {:error, :stale_runtime_change_completion}
-
-  defp runtime_change_result(%{outcome: :applied, kind: :ssh}), do: :ok
-
-  defp runtime_change_result(%{outcome: :applied, kind: :subnet_router, settings: settings}),
+  defp runtime_change_result(%{kind: :subnet_router, settings: settings}),
     do: {:ok, Settings.public(settings).subnet_router}
 
-  defp runtime_change_result(%{outcome: :failed}),
-    do: {:error, :runtime_change_failed}
+  defp dispatch_error(:ok), do: nil
+  defp dispatch_error({:ok, _value}), do: nil
+  defp dispatch_error({:error, reason}), do: {:runtime_dispatch_failed, reason}
+  defp dispatch_error(invalid), do: {:invalid_runtime_dispatch_result, invalid}
 
   defp persistence_result({:returned, :ok}), do: :ok
   defp persistence_result({:returned, {:error, reason}}), do: {:error, reason}
@@ -1051,33 +790,6 @@ defmodule NervesGate.Gateway.Configuration do
   defp runtime_setting(:subnet_router, requested), do: %{"subnet_router" => requested}
   defp runtime_change_event(:ssh), do: :configure_ssh
   defp runtime_change_event(:subnet_router), do: :configure_subnet_router
-
-  defp pending_runtime_change(settings) do
-    case Settings.pending_resource_change(settings) do
-      {:ssh, id} ->
-        recovered_runtime_change(:ssh, id, Settings.ssh_enabled(settings), settings)
-
-      {:subnet_router, id} ->
-        recovered_runtime_change(:subnet_router, id, Settings.subnet_router(settings), settings)
-
-      nil ->
-        nil
-    end
-  end
-
-  defp recovered_runtime_change(kind, id, desired, settings) do
-    %{
-      id: id,
-      kind: kind,
-      command_id: nil,
-      desired: desired,
-      settings: settings,
-      outcome: nil,
-      phase: :awaiting,
-      dispatched: false,
-      effect: nil
-    }
-  end
 
   defp dispatch_runtime_change(ops, %{kind: :ssh, desired: enabled, id: id}),
     do: invoke_ssh(ops, enabled, id)
@@ -1100,7 +812,7 @@ defmodule NervesGate.Gateway.Configuration do
   end
 
   defp command(server, event, payload, timeout \\ 45_000),
-    do: Diagnostics.command(server, event, payload, timeout)
+    do: Diagnostics.request(server, event, payload, timeout)
 
   defp complete_configuration_step(
          {:returned, {:ok, to, completed_payload}},
@@ -1347,7 +1059,7 @@ defmodule NervesGate.Gateway.Configuration do
   defp not_found(payload, id),
     do: put_result(payload, id, {:error, :configuration_change_not_found})
 
-  defp put_result(payload, id, result), do: %{payload | last_result: {id, result}}
+  defp put_result(payload, relay, result), do: %{payload | reply: {relay, result}}
 
   defp finish(from, event, to, payload, options \\ []) do
     {:ok, to, Diagnostics.record(payload, from, event, to, options)}
@@ -1394,94 +1106,5 @@ defmodule NervesGate.Gateway.Configuration do
       end)
 
     %{active: active, slots: slots}
-  end
-end
-
-defmodule NervesGate.Gateway.Configuration.Context do
-  @moduledoc "Pure public projections and timing helpers for staged gateway configuration."
-
-  alias NervesGate.Gateway.Settings
-  alias NervesGate.Internet.Config
-
-  @spec public(map()) :: map()
-  def public(payload) do
-    %{
-      configured: payload.current["configured"],
-      current: Settings.public(payload.current),
-      pending: if(payload.pending, do: public_pending(payload.pending)),
-      last_error: public_error(payload.last_error)
-    }
-  end
-
-  @spec public_pending(map()) :: map()
-  def public_pending(pending) do
-    %{
-      id: pending.id,
-      phase: pending.phase,
-      scope: Map.get(pending, :scope, :complete),
-      candidate: Settings.public(pending.candidate),
-      remaining_seconds: remaining_seconds(pending.deadline)
-    }
-  end
-
-  defp public_error(nil), do: nil
-  defp public_error(reason) when is_atom(reason), do: reason
-  defp public_error({reason, _private}) when is_atom(reason), do: reason
-  defp public_error(_private), do: :configuration_failed
-
-  @spec remaining_seconds(integer() | nil) :: non_neg_integer() | nil
-  def remaining_seconds(nil), do: nil
-
-  def remaining_seconds(deadline) do
-    max(0, div(deadline - System.monotonic_time(:millisecond) + 999, 1_000))
-  end
-
-  @spec active_interface(map()) :: String.t() | nil
-  def active_interface(settings) do
-    case Settings.internet(settings) do
-      %Config{interface: interface} -> interface
-      nil -> nil
-    end
-  end
-
-  @spec tailnet_metadata(map(), map()) :: map()
-  def tailnet_metadata(current, candidate) do
-    %{
-      "previous_profile_id" => Settings.tailnet_profile(current),
-      "candidate_profile_id" => Settings.tailnet_profile(candidate)
-    }
-  end
-end
-
-defmodule NervesGate.Gateway.Runtime do
-  @moduledoc "Explicit owner-command boundaries used by the configuration workflow."
-
-  alias NervesGate.Cluster, as: Cluster
-  alias NervesGate.Commissioning, as: Commissioning
-  alias NervesGate.Internet, as: Internet
-  alias NervesGate.SSH, as: SSH
-  alias NervesGate.SubnetRouter, as: SubnetRouter
-  alias NervesGate.Tailnet.Enrollment
-
-  @spec default() :: map()
-  def default do
-    %{
-      internet: &Internet.configure/1,
-      internet_restore: &Internet.restore/1,
-      internet_observe: &Internet.poll_now/0,
-      stage_tailnet: &Enrollment.stage/3,
-      tailnet_restore: &Enrollment.select/1,
-      commit_tailnet: &Enrollment.commit/1,
-      rollback_tailnet: &Enrollment.rollback/1,
-      subnet_router: fn enabled, routes, change_id ->
-        SubnetRouter.configure(enabled, routes, SubnetRouter, change_id: change_id)
-      end,
-      ssh: fn enabled, change_id ->
-        SSH.set_enabled(enabled, SSH, change_id: change_id)
-      end,
-      cluster: &Cluster.configure/1,
-      access: &Commissioning.enable/2,
-      disable_access: &Commissioning.disable/0
-    }
   end
 end

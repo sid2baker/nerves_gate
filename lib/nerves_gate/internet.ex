@@ -1,19 +1,3 @@
-defmodule NervesGate.Internet.Status do
-  @moduledoc "Secret-free public uplink reality; private observation phases are excluded."
-
-  @enforce_keys [:state, :interface, :online, :ready, :reason, :checks]
-  defstruct [:state, :interface, :online, :ready, :reason, :checks]
-
-  @type t :: %__MODULE__{
-          state: :unconfigured | :applying | :online | :offline | :backoff,
-          interface: String.t() | nil,
-          online: boolean(),
-          ready: boolean(),
-          reason: atom() | nil,
-          checks: map()
-        }
-end
-
 defmodule NervesGate.Internet do
   @moduledoc """
   Lifecycle and sole mutation owner for the uplink interface.
@@ -23,33 +7,43 @@ defmodule NervesGate.Internet do
   coalesced while that generation owns the interface.
   """
 
-  alias NervesGate.FSM.{Diagnostics, Effect, Retry}
+  alias NervesGate.FSM.{Diagnostics, Effect}
   alias NervesGate.Internet.{Config, Connectivity, Status}
+  alias NervesGate.Retry
 
   @fsm """
   [*] --> unconfigured : boot
+  unconfigured --> unconfigured : configure
   unconfigured --> applying : configure
+  unconfigured --> unconfigured : restore
   unconfigured --> applying : restore
   unconfigured --> unconfigured : heal
-  unconfigured --> observing : observe
-  unconfigured --> observing : tick
+  unconfigured --> unconfigured : observe
+  unconfigured --> unconfigured : tick
+  online --> online : configure
   online --> applying : configure
+  online --> online : restore
   online --> applying : restore
+  online --> online : heal
   online --> applying : heal
-  online --> observing : observe
-  online --> observing : tick
+  online --> online : observe
+  online --> online : tick
+  offline --> offline : configure
   offline --> applying : configure
+  offline --> offline : restore
   offline --> applying : restore
-  offline --> applying : heal
   offline --> offline : heal
-  offline --> observing : observe
-  offline --> observing : tick
+  offline --> applying : heal
+  offline --> offline : observe
+  offline --> offline : tick
+  backoff --> backoff : configure
   backoff --> applying : configure
+  backoff --> backoff : restore
   backoff --> applying : restore
+  backoff --> backoff : heal
   backoff --> applying : heal
-  backoff --> applying : tick
+  backoff --> backoff : observe
   backoff --> backoff : tick
-  backoff --> observing : observe
   applying --> applying : configure
   applying --> applying : restore
   applying --> applying : heal
@@ -60,22 +54,27 @@ defmodule NervesGate.Internet do
   applying --> online : configuration_completed
   applying --> offline : configuration_completed
   applying --> backoff : configuration_completed
-  observing --> observing : configure
-  observing --> observing : restore
-  observing --> observing : heal
-  observing --> observing : observe
-  observing --> observing : tick
-  observing --> applying : observation_completed
-  observing --> unconfigured : observation_completed
-  observing --> online : observation_completed
-  observing --> offline : observation_completed
-  observing --> backoff : observation_completed
+  unconfigured --> applying : observation_completed
+  unconfigured --> unconfigured : observation_completed
+  unconfigured --> online : observation_completed
+  unconfigured --> offline : observation_completed
+  online --> applying : observation_completed
+  online --> unconfigured : observation_completed
+  online --> online : observation_completed
+  online --> offline : observation_completed
+  offline --> applying : observation_completed
+  offline --> unconfigured : observation_completed
+  offline --> online : observation_completed
+  offline --> offline : observation_completed
+  backoff --> applying : observation_completed
+  backoff --> unconfigured : observation_completed
+  backoff --> online : observation_completed
+  backoff --> offline : observation_completed
   unconfigured --> [*] : terminate
   online --> [*] : terminate
   offline --> [*] : terminate
   backoff --> [*] : terminate
   applying --> [*] : terminate
-  observing --> [*] : terminate
   """
 
   use NervesGate.FSM, fsm: @fsm, timer: 1_000
@@ -104,7 +103,7 @@ defmodule NervesGate.Internet do
       current: current,
       pending: nil,
       checks: %{},
-      last_result: nil,
+      reply: nil,
       publisher: Keyword.get(options, :publisher, &publish/1),
       effect_timeout: Keyword.get(options, :effect_timeout, 45_000),
       generation: 0,
@@ -116,21 +115,21 @@ defmodule NervesGate.Internet do
   def configure(%Config{} = config, options \\ []) do
     server = Keyword.get(options, :server, __MODULE__)
     timeout = Keyword.get(options, :timeout, 30_000)
-    Diagnostics.command(server, :configure, %{config: config, timeout: timeout}, timeout + 5_000)
+    Diagnostics.request(server, :configure, %{config: config, timeout: timeout}, timeout + 5_000)
   end
 
   @spec restore(Config.t() | nil, GenServer.server()) :: :ok | {:error, term()}
   def restore(config, server \\ __MODULE__),
-    do: Diagnostics.command(server, :restore, %{config: config, timeout: 0}, 35_000)
+    do: Diagnostics.request(server, :restore, %{config: config, timeout: 0}, 35_000)
 
   @spec reapply(GenServer.server()) :: :ok | {:error, term()}
   def reapply(server \\ __MODULE__), do: heal(server)
 
   @spec heal(GenServer.server()) :: :ok | {:error, term()}
-  def heal(server \\ __MODULE__), do: Diagnostics.command(server, :heal, %{}, 35_000)
+  def heal(server \\ __MODULE__), do: Diagnostics.request(server, :heal, %{}, 35_000)
 
   @spec poll_now(GenServer.server()) :: :ok | {:error, term()}
-  def poll_now(server \\ __MODULE__), do: Diagnostics.command(server, :observe, %{}, 10_000)
+  def poll_now(server \\ __MODULE__), do: Diagnostics.request(server, :observe, %{}, 10_000)
 
   @spec status(GenServer.server()) :: Status.t()
   def status(server \\ __MODULE__) do
@@ -183,7 +182,7 @@ defmodule NervesGate.Internet do
 
     payload = set_pending(payload, pending)
 
-    if state in [:applying, :observing],
+    if state == :applying or payload.effect,
       do: finish(state, event, state, payload),
       else: begin_configuration(state, event, payload)
   end
@@ -219,7 +218,7 @@ defmodule NervesGate.Internet do
 
     payload = set_pending(payload, pending)
 
-    if state in [:applying, :observing],
+    if state == :applying or payload.effect,
       do: finish(state, :heal, state, payload),
       else: begin_configuration(state, :heal, payload)
   end
@@ -236,18 +235,17 @@ defmodule NervesGate.Internet do
   def on_transition(:applying, :tick, _event_payload, payload),
     do: finish(:applying, :tick, :applying, payload)
 
-  def on_transition(:observing, :observe, command, payload),
-    do: finish(:observing, :observe, :observing, result(payload, command.id, :ok))
+  def on_transition(state, :observe, command, %{effect: nil} = payload),
+    do: begin_observation(state, :observe, payload, command.id)
 
-  def on_transition(:observing, :tick, _event_payload, payload),
-    do: finish(:observing, :tick, :observing, payload)
-
-  def on_transition(state, event, command, payload) when event in [:observe] do
-    begin_observation(state, event, payload, command.id)
-  end
+  def on_transition(state, :observe, command, payload),
+    do: finish(state, :observe, state, result(payload, command.id, :ok))
 
   def on_transition(state, :tick, _event_payload, payload) do
     cond do
+      payload.effect ->
+        finish(state, :tick, state, payload)
+
       (state == :backoff and payload.current) && Retry.due?(payload.retry_at) ->
         pending = %{
           id: nil,
@@ -283,16 +281,23 @@ defmodule NervesGate.Internet do
     do: {:error, :stale_effect_completion}
 
   def on_transition(
-        :observing,
+        state,
         :observation_completed,
         {ref, outcome},
-        %{effect: %{ref: ref, generation: generation, command_id: command_id}} = payload
+        %{
+          effect: %{
+            kind: :observation,
+            ref: ref,
+            generation: generation,
+            command_id: command_id
+          }
+        } = payload
       ) do
     payload = %{payload | effect: nil}
-    complete_observation(outcome, generation, command_id, payload)
+    complete_observation(state, outcome, generation, command_id, payload)
   end
 
-  def on_transition(:observing, :observation_completed, _stale, _payload),
+  def on_transition(_state, :observation_completed, _stale, _payload),
     do: {:error, :stale_effect_completion}
 
   @impl Finitomata
@@ -303,13 +308,13 @@ defmodule NervesGate.Internet do
   def after_transition(state, payload) do
     payload.publisher.(public_status(state, payload))
 
-    case {state, payload.effect} do
-      {:applying, %{ref: ref, generation: generation}} ->
+    case payload.effect do
+      %{kind: :configuration, ref: ref, generation: generation} ->
         start_effect(payload, ref, fn -> transact(payload, generation) end, fn ref, outcome ->
           {:configuration_completed, {ref, outcome}}
         end)
 
-      {:observing, %{ref: ref, generation: generation}} ->
+      %{kind: :observation, ref: ref, generation: generation} ->
         start_effect(payload, ref, fn -> observe_runtime(payload, generation) end, fn ref,
                                                                                       outcome ->
           {:observation_completed, {ref, outcome}}
@@ -403,6 +408,7 @@ defmodule NervesGate.Internet do
     do: configuration_backoff(payload, :invalid_configuration_result)
 
   defp complete_observation(
+         from,
          {:returned, {generation, current, checks}},
          generation,
          command_id,
@@ -418,25 +424,39 @@ defmodule NervesGate.Internet do
         |> put_observation(observed)
         |> result(command_id, :ok)
 
-      finish(:observing, :observation_completed, to, payload)
+      finish(from, :observation_completed, to, payload)
     else
+      payload = result(payload, command_id, :ok)
+
       payload
       |> begin_effect(:configuration)
-      |> then(&finish(:observing, :observation_completed, :applying, &1))
+      |> then(&finish(from, :observation_completed, :applying, &1))
     end
   end
 
-  defp complete_observation(:timed_out, _generation, command_id, payload),
-    do: observation_failure(payload, command_id, :observation_timed_out)
+  defp complete_observation(from, :timed_out, _generation, command_id, payload),
+    do: observation_failure(from, payload, command_id, :observation_timed_out)
 
-  defp complete_observation(:cancelled, _generation, command_id, payload),
-    do: observation_failure(payload, command_id, :observation_cancelled)
+  defp complete_observation(from, :cancelled, _generation, command_id, payload),
+    do: observation_failure(from, payload, command_id, :observation_cancelled)
 
-  defp complete_observation({:crashed, _kind, reason, _stack}, _generation, command_id, payload),
-    do: observation_failure(payload, command_id, {:observation_crashed, public_error(reason)})
+  defp complete_observation(
+         from,
+         {:crashed, _kind, reason, _stack},
+         _generation,
+         command_id,
+         payload
+       ),
+       do:
+         observation_failure(
+           from,
+           payload,
+           command_id,
+           {:observation_crashed, public_error(reason)}
+         )
 
-  defp complete_observation(_invalid, _generation, command_id, payload),
-    do: observation_failure(payload, command_id, :invalid_observation_result)
+  defp complete_observation(from, _invalid, _generation, command_id, payload),
+    do: observation_failure(from, payload, command_id, :invalid_observation_result)
 
   defp resolve_terminal({:applied, pending, checks}, payload) do
     observed = observation(pending.config, checks)
@@ -510,10 +530,10 @@ defmodule NervesGate.Internet do
     )
   end
 
-  defp observation_failure(payload, command_id, error) do
+  defp observation_failure(from, payload, command_id, error) do
     observed = with_state(payload.observed, :offline) |> Map.put(:reason, error)
     payload = payload |> put_observation(observed) |> result(command_id, {:error, error})
-    finish(:observing, :observation_completed, :offline, payload, error: error)
+    finish(from, :observation_completed, :offline, payload, error: error)
   end
 
   defp set_pending(payload, pending) do
@@ -537,12 +557,18 @@ defmodule NervesGate.Internet do
   end
 
   defp begin_observation(from, event, payload, command_id) do
-    effect = %{ref: make_ref(), generation: payload.generation, command_id: command_id}
-    finish(from, event, :observing, %{payload | effect: effect})
+    effect = %{
+      kind: :observation,
+      ref: make_ref(),
+      generation: payload.generation,
+      command_id: command_id
+    }
+
+    finish(from, event, from, %{payload | effect: effect})
   end
 
   defp begin_effect(payload, :configuration) do
-    %{payload | effect: %{ref: make_ref(), generation: payload.generation}}
+    %{payload | effect: %{kind: :configuration, ref: make_ref(), generation: payload.generation}}
   end
 
   defp verify_until(verifier, pending) do
@@ -605,7 +631,7 @@ defmodule NervesGate.Internet do
   end
 
   defp result(payload, nil, _result), do: payload
-  defp result(payload, id, value), do: %{payload | last_result: {id, value}}
+  defp result(payload, relay, value), do: %{payload | reply: {relay, value}}
 
   defp command_error(%{mode: :configure}, checks, _error),
     do: {:error, {:verification_failed, checks}}
@@ -656,10 +682,6 @@ defmodule NervesGate.Internet do
     }
   end
 
-  # Passive observations do not replace known public reality with an internal
-  # worker phase. This keeps routine polling from publishing online/observing
-  # oscillations while preserving :observing in private diagnostics.
-  defp public_status(:observing, payload), do: payload.observed
   defp public_status(state, payload), do: with_state(payload.observed, state)
 
   defp with_state(%Status{} = status, state), do: %{status | state: state}

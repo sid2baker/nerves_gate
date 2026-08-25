@@ -76,17 +76,14 @@ defmodule NervesGate.Dependencies do
   end
 
   defp project_snapshot(state) do
-    Enum.each([:tailnet, :ssh, :subnet_router], fn source ->
-      case Map.get(state.device_state, source) do
-        nil -> :ok
-        status -> state.dispatch.(source, status)
-      end
-    end)
+    case state.device_state.tailnet do
+      nil -> :ok
+      status -> state.dispatch.(:tailnet, status)
+    end
   end
 
-  defp project_event(state, {:state_reported, source, status})
-       when source in [:tailnet, :ssh, :subnet_router],
-       do: state.dispatch.(source, status)
+  defp project_event(state, {:state_reported, :tailnet, status}),
+    do: state.dispatch.(:tailnet, status)
 
   # Alarm state is output from policy and never evidence for signal derivation.
   defp project_event(_state, {:state_reported, :alarms, _alarms}), do: :ok
@@ -99,11 +96,6 @@ defmodule NervesGate.Dependencies do
       do: NervesGate.SubnetRouter.tailnet_state_changed(status)
 
     transition_if_running(NervesGate.Cluster, :tick)
-  end
-
-  defp dispatch(source, status) when source in [:ssh, :subnet_router] do
-    if GenServer.whereis(NervesGate.Gateway.Configuration),
-      do: NervesGate.Gateway.Configuration.runtime_state_changed(source, status)
   end
 
   defp transition_if_running(name, event) do

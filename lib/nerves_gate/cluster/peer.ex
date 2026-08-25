@@ -2,7 +2,7 @@ defmodule NervesGate.Cluster.Peer do
   @moduledoc "Independent discovery, connection, retry, and diagnosis for one gateway peer."
 
   alias NervesGate.FSM.Diagnostics
-  alias NervesGate.FSM.Retry
+  alias NervesGate.Retry
 
   @fsm """
   [*] --> discovering : boot

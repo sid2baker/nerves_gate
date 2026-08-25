@@ -102,9 +102,7 @@ defmodule NervesGate.DeviceState.ServerTest do
       enabled: true,
       state: :listening,
       address: address,
-      port: 22,
-      applied_change_id: nil,
-      failed_change_id: nil
+      port: 22
     }
   end
 

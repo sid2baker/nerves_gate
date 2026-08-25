@@ -57,20 +57,21 @@ Task/Tailscale runtime
       ↓
 DeviceState.Server
       ↓
-subsystem Finitomata owners → Gateway.Configuration
-      ↓                         ↓
-Dependencies                 Alarms.Runtime
+resource owners → Gateway.Configuration FSM
+      ↓                 ↓
+Dependencies         Alarms.Runtime
       ↓
-DeviceState.Replica × remote gateway
+DeviceState.Replica FSM × remote gateway
 ```
 
 The architecture uses only Command, Event, and State. Imperative commands go to
 the subsystem that owns the affected private state. Runtime completions and
-observations return as past-tense events. After each committed transition, the
-owner synchronously reports a complete secret-free public slice to
-`DeviceState.Server`, which validates ownership, deduplicates, assigns a revision,
-and broadcasts the event. Runtime effects are supervised implementation machinery,
-not another domain abstraction.
+observations return as past-tense events. Owners report complete secret-free
+public slices to `DeviceState.Server`, which validates ownership, deduplicates,
+assigns a revision, and broadcasts the event. Runtime effects are supervised
+implementation machinery, not another domain abstraction. Finitomata is reserved
+for protocols with meaningful legal phases; ordinary observers and reconcilers
+are supervised GenServers.
 
 Private accepted settings, candidates, credentials, effect references, and
 rollback timing never enter DeviceState. Each remote gateway replica owns its
@@ -90,11 +91,15 @@ Backend code is organized by bounded context rather than by module count:
 ```text
 nerves_gate.ex                   public backend API
 nerves_gate/{internet,tailnet,cluster,ssh,subnet_router,commissioning}.ex
-                                 lifecycle FSM and tightly coupled runtime helpers
+                                 one resource owner per subsystem
+nerves_gate/*/{status,runtime}.ex
+                                 public projections and imperative boundaries
 nerves_gate/*/alarms.ex          subsystem-owned alarm policy and remedies
-nerves_gate/gateway/             settings transaction, validation, persistence
+nerves_gate/gateway/             guarded settings FSM, validation, persistence
 nerves_gate/device_state/        pure State projection, event server, replicas
-nerves_gate/fsm.ex               Finitomata support and supervised effect machinery
+nerves_gate/fsm.ex               small Finitomata defaults
+nerves_gate/fsm/{listener,effect,diagnostics}.ex
+                                 commit hooks, bounded effects, and FSM queries
 nerves_gate_web/                 rendering, forms, routing, and access policy
 ```
 
@@ -148,11 +153,11 @@ disabling the subnet router never changes the selected Tailnet profile or the
 gateway's remote-management connection.
 
 The desired enabled state and canonical routes live in the active firmware-slot
-snapshot. `SubnetRouter` reconciles that accepted intent and publishes
-advertised, approved, and primary state through the public event stream.
-There is no candidate, confirmation, or revert timer. Application failures raise
-a noncritical alarm and a bounded remedy sends the machine a normal `heal` event;
-remote gateway access is unchanged.
+snapshot. Persistence is the acceptance boundary; `SubnetRouter` then converges
+asynchronously and publishes advertised, approved, and primary state through the
+public event stream. There is no resource-change saga, candidate, confirmation,
+or revert timer. Application failures raise a noncritical alarm and a bounded
+remedy asks the owner to reconcile again; remote gateway access is unchanged.
 
 ## Remote IEx
 
@@ -168,12 +173,14 @@ change the listener address policy or any Tailnet setting.
 
 ## Lifecycle machines, alarms, and healing
 
-Internet, Tailnet, SSH, Cluster, cluster peers, subnet routing, commissioning,
-staged configuration, and remote replicas each have one Finitomata lifecycle
-owner. Their executable graphs generate [`docs/lifecycle-machines.md`](docs/lifecycle-machines.md)
-via `mix nerves_gate.fsm_docs`. `DeviceState.State.apply_event/2` remains a pure
-projection and storage remains synchronous rather than being modeled as a
-controller.
+Only staged configuration, Internet application, cluster-peer protocols, and
+remote replica synchronization use Finitomata. Finitomata embeds each executable
+state diagram in its module documentation, and ExDoc renders those declarations
+as Mermaid diagrams during `mix docs`. Tailnet, SSH, Cluster coordination,
+subnet routing, commissioning, and replica scanning are ordinary GenServers
+because their state is observed or reconciled reality rather than a transition
+protocol. `DeviceState.State.apply_event/2` remains a pure projection and
+storage remains synchronous rather than being modeled as a controller.
 
 `Alarms.Runtime` atomically subscribes to the same public snapshot/event stream
 as every other consumer. Each subsystem owns its raw signals, managed conditions,
@@ -284,10 +291,10 @@ hostnames such as `http://m01.localhost:4001/`; commissioning is available at
 Each VM has unique identifiers, a NAT uplink, an isolated commissioning NIC,
 QMP and serial sockets, and a persistent disk under `tmp/qemu`. Gateways discover
 peers over the Tailnet and connect when their public groups match. `observe`
-reads each development VM's versioned, secret-free `nerves_gate.status.v2`
+reads each development VM's versioned, secret-free `nerves_gate.status.v3`
 projection through its local forward; use `watch -n 2 mix nerves_gate.qemu observe`
-to follow convergence. Loss,
-latency, and blackhole semantics are reserved for the future isolated TAP/netem
+to follow convergence. Loss, latency, and blackhole semantics are reserved for
+an isolated TAP/netem
 uplink layer; deterministic QMP link-down faults work with the current SLIRP
 networking.
 

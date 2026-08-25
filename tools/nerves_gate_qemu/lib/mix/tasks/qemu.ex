@@ -31,33 +31,22 @@ defmodule Mix.Tasks.Qemu do
   alias NervesGateQEMU.Runner
 
   @impl Mix.Task
-  def run(arguments) do
-    case List.first(arguments) || "setup" do
-      help when help in @help_arguments ->
-        Mix.shell().info(@usage)
+  def run(arguments), do: dispatch(List.first(arguments) || "setup", arguments)
 
-      "setup" ->
-        fresh_environment(Enum.drop(arguments, 1))
+  defp dispatch(help, _arguments) when help in @help_arguments,
+    do: Mix.shell().info(@usage)
 
-      "add" ->
-        run!(&Runner.add/0)
+  defp dispatch("setup", arguments), do: fresh_environment(Enum.drop(arguments, 1))
+  defp dispatch("add", _arguments), do: run!(&Runner.add/0)
+  defp dispatch("remove", arguments), do: run!(fn -> Runner.remove(Enum.at(arguments, 1, "")) end)
+  defp dispatch("observe", arguments), do: observe(Enum.drop(arguments, 1))
+  defp dispatch("logs", arguments), do: logs(Enum.at(arguments, 1, "all"))
 
-      "remove" ->
-        run!(fn -> Runner.remove(Enum.at(arguments, 1, "")) end)
+  defp dispatch(action, arguments) when action in @lifecycle,
+    do: lifecycle(action, Enum.at(arguments, 1, "all"))
 
-      "observe" ->
-        observe(Enum.drop(arguments, 1))
-
-      "logs" ->
-        logs(Enum.at(arguments, 1, "all"))
-
-      action when action in @lifecycle ->
-        lifecycle(action, Enum.at(arguments, 1, "all"))
-
-      other ->
-        Mix.raise("unknown QEMU command #{inspect(other)}; run `mix qemu help` for usage")
-    end
-  end
+  defp dispatch(other, _arguments),
+    do: Mix.raise("unknown QEMU command #{inspect(other)}; run `mix qemu help` for usage")
 
   defp fresh_environment(arguments) do
     {count, rebuild?} = setup_options(arguments)
@@ -142,7 +131,7 @@ defmodule Mix.Tasks.Qemu do
     end
   end
 
-  defp print_summary(node, url, %{"schema" => "nerves_gate.status.v2"} = status) do
+  defp print_summary(node, url, %{"schema" => "nerves_gate.status.v3"} = status) do
     state = status |> get_in(["local", "state"]) |> value_map()
     configuration = state |> Map.get("configuration") |> value_map()
     internet = state |> Map.get("internet") |> value_map()

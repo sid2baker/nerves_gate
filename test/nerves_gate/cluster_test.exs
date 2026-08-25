@@ -2,7 +2,6 @@ defmodule NervesGate.ClusterTest do
   use ExUnit.Case
 
   alias NervesGate.Cluster
-  alias NervesGate.FSM.Diagnostics
 
   setup do
     owner = self()
@@ -80,26 +79,26 @@ defmodule NervesGate.ClusterTest do
   end
 
   test "distribution failures use backoff and heal retries", context do
-    state = Diagnostics.state(context.machine)
-    failing_ops = %{state.payload.ops | start: fn _ip, _cookie -> {:error, :epmd} end}
-    :sys.replace_state(context.machine, &%{&1 | payload: %{&1.payload | ops: failing_ops}})
+    state = :sys.get_state(context.machine)
+    failing_ops = %{state.ops | start: fn _ip, _cookie -> {:error, :epmd} end}
+    :sys.replace_state(context.machine, &%{&1 | ops: failing_ops})
     Agent.update(context.tailnet, fn _ -> online("100.64.0.10") end)
 
     assert :ok = Cluster.configure("field", context.machine)
     assert Cluster.diagnostics(context.machine).state == :backoff
     assert Cluster.diagnostics(context.machine).last_error == {:distribution_start_failed, :epmd}
 
-    state = Diagnostics.state(context.machine)
+    state = :sys.get_state(context.machine)
 
     good_ops = %{
-      state.payload.ops
+      state.ops
       | start: fn _ip, _cookie ->
           Agent.update(context.runtime, &%{&1 | alive: true})
           {:ok, :"nervesgate@100.64.0.10"}
         end
     }
 
-    :sys.replace_state(context.machine, &%{&1 | payload: %{&1.payload | ops: good_ops}})
+    :sys.replace_state(context.machine, &%{&1 | ops: good_ops})
 
     assert :ok = Cluster.heal(context.machine)
     assert Cluster.status(context.machine).online

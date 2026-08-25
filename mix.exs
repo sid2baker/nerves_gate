@@ -19,7 +19,8 @@ defmodule NervesGate.MixProject do
       dialyzer: [plt_add_apps: [:ex_unit, :mix]],
       docs: [
         main: "readme",
-        extras: ["README.md", "docs/lifecycle-machines.md"]
+        extras: ["README.md", "docs/command-event-state-implementation-plan.md"],
+        before_closing_body_tag: &before_closing_body_tag/1
       ],
       aliases: aliases(),
       test_ignore_filters: [&String.starts_with?(&1, "test/support/")]
@@ -105,6 +106,54 @@ defmodule NervesGate.MixProject do
       strip_beams: Mix.env() == :prod or [keep: ["Docs"]]
     ]
   end
+
+  defp before_closing_body_tag(:html) do
+    """
+    <script defer src="https://cdn.jsdelivr.net/npm/mermaid@10.2.3/dist/mermaid.min.js"></script>
+    <script>
+      let mermaidInitialized = false;
+      let mermaidGraphId = 0;
+
+      window.addEventListener("exdoc:loaded", () => {
+        if (!mermaidInitialized) {
+          mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.className.includes("dark") ? "dark" : "default"
+          });
+          mermaidInitialized = true;
+        }
+
+        for (const codeEl of document.querySelectorAll("pre code.mermaid, pre code.plant_uml")) {
+          const preEl = codeEl.parentElement;
+          if (preEl.dataset.mermaidState) continue;
+          preEl.dataset.mermaidState = "rendering";
+
+          let graphDefinition = codeEl.textContent;
+          if (codeEl.classList.contains("plant_uml")) {
+            graphDefinition = "stateDiagram-v2\\n" + graphDefinition
+              .replace(/^\\s*@startuml\\s*/, "")
+              .replace(/\\s*@enduml\\s*$/, "");
+          }
+
+          const graphEl = document.createElement("div");
+          const graphId = "mermaid-graph-" + mermaidGraphId++;
+
+          mermaid.render(graphId, graphDefinition).then(({svg, bindFunctions}) => {
+            graphEl.innerHTML = svg;
+            bindFunctions?.(graphEl);
+            preEl.insertAdjacentElement("afterend", graphEl);
+            preEl.remove();
+          }).catch((error) => {
+            preEl.dataset.mermaidState = "failed";
+            console.warn("Failed to render Mermaid graph", error);
+          });
+        }
+      });
+    </script>
+    """
+  end
+
+  defp before_closing_body_tag(:epub), do: ""
 
   # Uncomment the following line if using Phoenix > 1.8.
   # defp listeners(:host, :dev), do: [Phoenix.CodeReloader]

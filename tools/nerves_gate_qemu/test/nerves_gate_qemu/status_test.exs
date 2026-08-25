@@ -50,7 +50,7 @@ defmodule NervesGateQEMU.StatusTest do
 
   defp gateway_status do
     %{
-      "schema" => "nerves_gate.status.v2",
+      "schema" => "nerves_gate.status.v3",
       "local" => %{
         "state" => %{
           "configuration" => %{"configured" => true},

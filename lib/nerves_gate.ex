@@ -99,7 +99,7 @@ defmodule NervesGate do
   @doc "Returns the versioned, secret-free canonical status document."
   def status(fleet \\ fleet()) do
     %{
-      schema: "nerves_gate.status.v2",
+      schema: "nerves_gate.status.v3",
       local: public_snapshot(fleet.local),
       replicas:
         Map.new(fleet.replicas, fn {id, replica} ->

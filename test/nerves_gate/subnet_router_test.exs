@@ -63,7 +63,7 @@ defmodule NervesGate.SubnetRouterTest do
 
   test "local application failure reaches backoff and heal starts another generation", context do
     failing = fn _enabled, _routes -> {:error, :daemon} end
-    :sys.replace_state(context.machine, &%{&1 | payload: %{&1.payload | apply: failing}})
+    :sys.replace_state(context.machine, &%{&1 | apply: failing})
     status = online([], [])
     Agent.update(context.tailnet, fn _ -> status end)
     SubnetRouter.tailnet_state_changed(status, context.machine)
@@ -74,7 +74,7 @@ defmodule NervesGate.SubnetRouterTest do
     assert_eventually(fn -> SubnetRouter.diagnostics(context.machine).state == :backoff end)
 
     apply = fn _enabled, routes -> {:ok, routes} end
-    :sys.replace_state(context.machine, &put_in(&1.payload.apply, apply))
+    :sys.replace_state(context.machine, &%{&1 | apply: apply})
     assert :ok = SubnetRouter.heal(context.machine)
 
     assert_eventually(fn ->
@@ -90,7 +90,7 @@ defmodule NervesGate.SubnetRouterTest do
       receive do: (:complete -> {:ok, routes})
     end
 
-    :sys.replace_state(context.machine, &put_in(&1.payload.apply, apply))
+    :sys.replace_state(context.machine, &%{&1 | apply: apply})
     status = online([], [])
     Agent.update(context.tailnet, fn _ -> status end)
     SubnetRouter.tailnet_state_changed(status, context.machine)

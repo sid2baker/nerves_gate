@@ -37,26 +37,12 @@ defmodule NervesGate.Gateway.ConfigurationTest do
         send(owner, {:rollback_tailnet, metadata})
         :ok
       end,
-      subnet_router: fn enabled, routes, change_id ->
+      subnet_router: fn enabled, routes, _change_id ->
         send(owner, {:subnet_router, enabled, routes})
-
-        Configuration.runtime_state_changed(
-          :subnet_router,
-          %{applied_change_id: change_id, failed_change_id: nil},
-          self()
-        )
-
         {:ok, routes}
       end,
-      ssh: fn enabled, change_id ->
+      ssh: fn enabled, _change_id ->
         send(owner, {:ssh, enabled})
-
-        Configuration.runtime_state_changed(
-          :ssh,
-          %{applied_change_id: change_id, failed_change_id: nil},
-          self()
-        )
-
         :ok
       end,
       cluster: fn group ->
@@ -261,18 +247,11 @@ defmodule NervesGate.Gateway.ConfigurationTest do
   test "subnet desired state is durable before runtime reconciliation", context do
     owner = self()
 
-    effect = fn _enabled, routes, change_id ->
+    effect = fn _enabled, routes, _change_id ->
       {:ok, persisted} =
         Storage.read_json(Persistence.settings_path("a", context.root), &Settings.validate/1, nil)
 
       send(owner, {:effect_saw, persisted["subnet_router"]})
-
-      Configuration.runtime_state_changed(
-        :subnet_router,
-        %{applied_change_id: change_id, failed_change_id: nil},
-        self()
-      )
-
       {:ok, routes}
     end
 
@@ -286,87 +265,55 @@ defmodule NervesGate.Gateway.ConfigurationTest do
     assert_receive {:effect_saw, %{"enabled" => true, "routes" => ["192.168.30.0/24"]}}
   end
 
-  test "failed subnet reconciliation retains durable accepted intent", context do
-    effect = fn
-      true, _routes, change_id ->
-        Configuration.runtime_state_changed(
-          :subnet_router,
-          %{applied_change_id: nil, failed_change_id: change_id},
-          self()
-        )
-
-        :ok
-
-      false, routes, _change_id ->
-        {:ok, routes}
-    end
-
+  test "runtime dispatch failure does not roll back durable desired intent", context do
+    effect = fn _enabled, _routes, _change_id -> {:error, :daemon} end
     context = %{context | ops: Keyword.put(context.ops, :subnet_router, effect)}
     machine = start_machine(context)
     accept_initial(machine)
 
-    assert {:error, :runtime_change_failed} =
+    assert {:ok, %{enabled: true}} =
              Configuration.configure_subnet_router(true, ["192.168.40.0/24"], machine)
 
     assert Configuration.current(machine)["subnet_router"] == %{
              "enabled" => true,
              "routes" => ["192.168.40.0/24"]
            }
+
+    assert Configuration.configuration(machine).last_error == :runtime_dispatch_failed
   end
 
-  test "restart resumes one outstanding resource change with its durable change ID", context do
+  test "restart reapplies durable desired state without a resource-change saga", context do
     owner = self()
 
-    pending_effect = fn enabled, routes, change_id ->
+    effect = fn enabled, routes, change_id ->
       send(owner, {:runtime_change, enabled, routes, change_id})
-      :ok
+      {:ok, routes}
     end
 
-    context = %{context | ops: Keyword.put(context.ops, :subnet_router, pending_effect)}
+    context = %{context | ops: Keyword.put(context.ops, :subnet_router, effect)}
     machine = start_machine(context)
     accept_initial(machine)
     flush_messages()
 
-    task =
-      Task.async(fn ->
-        Configuration.configure_subnet_router(true, ["10.40.0.0/16"], machine)
-      end)
+    assert {:ok, %{enabled: true}} =
+             Configuration.configure_subnet_router(true, ["10.40.0.0/16"], machine)
 
     assert_receive {:runtime_change, true, ["10.40.0.0/16"], change_id}
     assert is_binary(change_id)
-
-    assert settings(context.root, "a")["resource_changes"]["subnet_router"] == %{
-             "id" => change_id,
-             "status" => "pending"
-           }
+    refute Map.has_key?(settings(context.root, "a"), "resource_changes")
 
     GenServer.stop(machine)
-    assert {:error, :owner_unavailable} = Task.await(task)
 
     recovering_effect = fn enabled, routes, recovered_id ->
       send(owner, {:recovered_runtime_change, enabled, routes, recovered_id})
-
-      Configuration.runtime_state_changed(
-        :subnet_router,
-        %{applied_change_id: recovered_id, failed_change_id: nil},
-        self()
-      )
-
-      :ok
+      {:ok, routes}
     end
 
     context = %{context | ops: Keyword.put(context.ops, :subnet_router, recovering_effect)}
     restarted = start_machine(context)
 
-    assert_receive {:recovered_runtime_change, true, ["10.40.0.0/16"], ^change_id}
-
-    assert_eventually(fn ->
-      Configuration.diagnostics(restarted).state == :idle and
-        settings(context.root, "a")["resource_changes"]["subnet_router"] == %{
-          "id" => change_id,
-          "status" => "applied"
-        }
-    end)
+    assert_receive {:recovered_runtime_change, true, ["10.40.0.0/16"], nil}
+    assert_eventually(fn -> Configuration.diagnostics(restarted).state == :idle end)
   end
 
   test "candidate persistence failure never starts a configuration transaction", context do

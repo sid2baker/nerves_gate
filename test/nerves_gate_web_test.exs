@@ -293,7 +293,7 @@ defmodule NervesGateWebTest do
   test "status API exposes one versioned, canonical, secret-free schema" do
     body = build_conn() |> get("/api/status") |> json_response(200)
 
-    assert body["schema"] == "nerves_gate.status.v2"
+    assert body["schema"] == "nerves_gate.status.v3"
     assert is_boolean(body["local"]["hydrated"])
     assert is_map(body["local"]["state"]["configuration"]["current"]["subnet_router"])
     assert is_boolean(body["local"]["state"]["configuration"]["current"]["ssh_enabled"])
@@ -339,17 +339,16 @@ defmodule NervesGateWebTest do
 
     :sys.replace_state(machine, fn state ->
       source = %Tailscale.Status{online: true, authenticated: true, ipv4: ipv4}
-      observed = state.payload.observed |> Map.put(:online, true) |> Map.put(:ipv4, ipv4)
+      observed = state.observed |> Map.put(:online, true) |> Map.put(:ipv4, ipv4)
 
-      payload = %{
-        state.payload
-        | desired: %{enabled: true},
+      %{
+        state
+        | phase: :online,
+          desired: %{enabled: true},
           source: source,
           observed: observed,
           read_status: fn -> {:ok, source} end
       }
-
-      %{state | current: :online, payload: payload}
     end)
 
     :ok = NervesGate.Tailnet.refresh()
@@ -532,8 +531,7 @@ defmodule NervesGateWebTest do
       {:ok, canonical}
     end
 
-    payload = %{state.payload | tailnet: tailnet, apply: apply}
-    %{state | current: :disabled, payload: payload}
+    %{state | phase: :disabled, tailnet: tailnet, apply: apply}
   end
 
   defp set_observed_routes(agent, true, routes), do: Agent.update(agent, fn _ -> routes end)

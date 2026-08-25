@@ -57,9 +57,7 @@ defmodule NervesGate.DeviceState.StateTest do
          enabled: false,
          routes: [],
          state: :disabled,
-         observed: %{},
-         applied_change_id: nil,
-         failed_change_id: nil
+         observed: %{}
        }},
       {:state_reported, :ssh, ssh(:disabled)},
       {:state_reported, :cluster, cluster(false)},
@@ -113,9 +111,7 @@ defmodule NervesGate.DeviceState.StateTest do
       enabled: state != :disabled,
       state: state,
       address: if(state == :listening, do: "100.64.0.10"),
-      port: 22,
-      applied_change_id: nil,
-      failed_change_id: nil
+      port: 22
     }
   end
 

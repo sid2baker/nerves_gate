@@ -1,7 +1,6 @@
 defmodule NervesGate.SSHTest do
   use ExUnit.Case, async: false
 
-  alias NervesGate.FSM.Diagnostics
   alias NervesGate.SSH
 
   setup do
@@ -66,14 +65,9 @@ defmodule NervesGate.SSHTest do
   end
 
   test "start failures enter backoff and heal starts a new generation", context do
-    state = Diagnostics.state(context.machine)
-
-    payload = %{
-      state.payload
-      | runtime: %{state.payload.runtime | start: fn _ -> {:error, :busy} end}
-    }
-
-    :sys.replace_state(context.machine, &%{&1 | payload: payload})
+    state = :sys.get_state(context.machine)
+    runtime = %{state.runtime | start: fn _ -> {:error, :busy} end}
+    :sys.replace_state(context.machine, &%{&1 | runtime: runtime})
     SSH.tailnet_state_changed(online("100.84.12.7"), context.machine)
 
     assert :ok = SSH.set_enabled(true, context.machine)
@@ -89,7 +83,7 @@ defmodule NervesGate.SSHTest do
         {:ok, pid}
       end
 
-      put_in(state.payload.runtime.start, starter)
+      %{state | runtime: %{state.runtime | start: starter}}
     end)
 
     assert :ok = SSH.heal(context.machine)
@@ -169,12 +163,12 @@ defmodule NervesGate.SSHTest do
 
     assert :ok = SSH.set_enabled(true, machine)
     assert_receive {:start_requested, worker, _address}
-    active_ref = Diagnostics.state(machine).payload.effect.ref
+    active_ref = :sys.get_state(machine).effect.ref
 
     GenServer.cast(machine, {:reconciliation_completed, {make_ref(), {:returned, {:ok, nil}}}})
     Process.sleep(10)
 
-    assert Diagnostics.state(machine).payload.effect.ref == active_ref
+    assert :sys.get_state(machine).effect.ref == active_ref
     assert SSH.status(machine).state == :reconciling
     send(worker, :complete)
   end
@@ -235,7 +229,7 @@ defmodule NervesGate.SSHTest do
     assert Agent.get(starts, & &1) == 1
   end
 
-  test "diagnostic transition history is bounded" do
+  test "periodic reconciliation keeps only current diagnostic state" do
     machine =
       start_machine(
         SSH.new(
@@ -246,7 +240,8 @@ defmodule NervesGate.SSHTest do
       )
 
     Enum.each(1..60, fn _ -> transition(machine, :retry_timer_fired) end)
-    assert Enum.count(SSH.diagnostics(machine).history) == 30
+    refute Map.has_key?(SSH.diagnostics(machine), :history)
+    assert SSH.diagnostics(machine).state == :disabled
   end
 
   defp start_machine(payload) do
@@ -255,8 +250,10 @@ defmodule NervesGate.SSHTest do
     machine
   end
 
-  defp transition(machine, event) do
-    assert {:ok, _state} = Diagnostics.transition(machine, event)
+  defp transition(machine, :retry_timer_fired) do
+    send(machine, :tick)
+    _state = :sys.get_state(machine)
+    :ok
   end
 
   defp assert_eventually(predicate, attempts \\ 100) do

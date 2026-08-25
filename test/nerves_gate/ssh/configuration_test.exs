@@ -28,7 +28,7 @@ defmodule NervesGate.SSH.ConfigurationTest do
 
   test "Tailnet effects explicitly keep Tailscale SSH disabled" do
     enrollment = File.read!("lib/nerves_gate/tailnet/enrollment.ex")
-    routes = File.read!("lib/nerves_gate/subnet_router.ex")
+    routes = File.read!("lib/nerves_gate/subnet_router/routes.ex")
     sources = enrollment <> routes
 
     assert enrollment =~ "client.set(ssh: false)"
