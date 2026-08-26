@@ -110,9 +110,14 @@ defmodule NervesGateQEMU.Gateway do
   end
 
   defp command_url(status_url, command) do
+    encoded_command =
+      command
+      |> String.split("/", trim: true)
+      |> Enum.map_join("/", &URI.encode/1)
+
     status_url
     |> URI.parse()
-    |> Map.put(:path, "/api/configuration/#{URI.encode(command)}")
+    |> Map.put(:path, "/api/configuration/#{encoded_command}")
     |> Map.put(:query, nil)
     |> URI.to_string()
   end

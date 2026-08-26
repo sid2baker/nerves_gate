@@ -17,6 +17,66 @@ defmodule NervesGateQEMU.ResilienceIntegrationTest do
     end)
   end
 
+  test "an unkept backend settings update rolls back and rejoins the mesh", %{
+    cluster: cluster
+  } do
+    victim = hd(cluster.devices)
+    before = Harness.fetch!(victim)
+    accepted_revision = Gateway.accepted_revision(before)
+
+    accepted_group =
+      get_in(before, ["local", "state", "configuration", "current", "cluster_group"])
+
+    temporary_group = "#{accepted_group}_temporary"
+
+    assert :ok =
+             Gateway.command(victim, "update/cluster", %{
+               "cluster" => %{"group" => temporary_group},
+               "connection_id" => "qemu-temporary-update",
+               "timeout" => 2_000
+             })
+
+    temporary =
+      Harness.await!("#{victim.id} temporary cluster settings", fn ->
+        case Gateway.fetch(victim) do
+          {:ok, status} ->
+            state = Gateway.state(status)
+            pending = get_in(state, ["configuration", "pending"])
+
+            if get_in(pending || %{}, ["candidate", "cluster_group"]) == temporary_group and
+                 get_in(state, ["cluster", "group"]) == temporary_group,
+               do: {:ok, status},
+               else: {:retry, Gateway.summary(status)}
+
+          {:error, reason} ->
+            {:retry, reason}
+        end
+      end)
+
+    assert get_in(temporary, ["local", "state", "configuration", "current", "cluster_group"]) ==
+             accepted_group
+
+    restored =
+      Harness.await!("#{victim.id} automatic settings rollback", fn ->
+        case Gateway.fetch(victim) do
+          {:ok, status} ->
+            state = Gateway.state(status)
+
+            if is_nil(get_in(state, ["configuration", "pending"])) and
+                 get_in(state, ["cluster", "group"]) == accepted_group and
+                 Gateway.ready?(status),
+               do: {:ok, status},
+               else: {:retry, Gateway.summary(status)}
+
+          {:error, reason} ->
+            {:retry, reason}
+        end
+      end)
+
+    assert Gateway.accepted_revision(restored) == accepted_revision
+    Harness.await_mesh!(cluster)
+  end
+
   test "uplink loss preserves accepted settings, marks replicas stale, and heals", %{
     cluster: cluster
   } do

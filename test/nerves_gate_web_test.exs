@@ -11,7 +11,7 @@ defmodule NervesGateWebTest do
       {:ok, view, html} = live(build_conn(), "/commissioning")
 
       assert html =~ "Configure gateway"
-      assert html =~ "Gateway name"
+      assert html =~ "Gateway display name"
       assert html =~ "Connect to the Internet"
       assert html =~ ~s(phx-submit="configure-internet")
       assert html =~ ~s(phx-disable-with="Verifying Internet…")
@@ -23,112 +23,163 @@ defmodule NervesGateWebTest do
     end)
   end
 
-  test "configured gateways can open a Tailnet-only change" do
+  test "configured gateways open directly on inert connection settings" do
     with_configured(true, fn ->
-      {:ok, view, html} = live(build_conn(), "/commissioning")
+      before = local_snapshot().state.configuration
+      {:ok, _view, html} = live(build_conn(), "/commissioning")
 
-      assert html =~ "Change settings"
-      assert html =~ "Settings to change"
-      assert html =~ "Tailnet only"
-      assert html =~ "Cluster only"
-      assert html =~ "Auto-revert after"
-      assert html =~ ~s(value="1")
-
-      html =
-        view
-        |> form("form", %{
-          "configuration" => %{"scope" => "tailnet", "revert_minutes" => "3"}
-        })
-        |> render_submit()
-
-      assert html =~ "Change only the Tailnet profile"
-      assert html =~ "Tailscale auth key"
-      assert html =~ "Apply Tailnet change"
-      refute html =~ "Connect to the Internet"
-      refute html =~ "Cluster group"
-      refute html =~ "Commissioning progress"
+      assert html =~ "Connection settings"
+      assert html =~ "Nothing changes until you press an Update button"
+      assert html =~ ~s(id="internet-settings-form")
+      assert html =~ ~s(id="tailnet-settings-form")
+      assert html =~ ~s(id="cluster-settings-form")
+      assert html =~ "Update Internet"
+      assert html =~ "Update Tailnet"
+      assert html =~ "Update Cluster"
+      assert html =~ "Revert unless kept after"
+      assert [_label] = Regex.scan(~r/Revert unless kept after/, html)
+      assert html =~ ~s(aria-controls="settings-static-fields")
+      assert html =~ ~s(id="settings-static-fields")
+      assert html =~ "Friendly label shown in NervesGate dashboards"
+      assert html =~ ~s(id="gateway-reconnecting-notification")
+      assert html =~ "phx-disconnected:block"
+      refute html =~ "Temporary changes"
+      assert local_snapshot().state.configuration == before
     end)
   end
 
-  test "configured gateways can open a Cluster-only change" do
+  test "static IPv4 selection controls the complete static-address form" do
+    with_configured(true, fn ->
+      {:ok, _view, html} = live(build_conn(), "/commissioning")
+      script = File.read!("priv/static/app.js")
+
+      assert html =~ ~s(aria-controls="settings-static-fields")
+      assert html =~ ~s(id="settings-static-fields")
+      assert html =~ ~s(name="internet[ip_address]")
+      assert html =~ ~s(name="internet[prefix_length]")
+      assert html =~ ~s(name="internet[gateway]")
+      assert html =~ ~s(name="internet[dns]")
+      assert script =~ "fields.hidden = !staticAddressing"
+      assert script =~ ~s(document.addEventListener("change")
+    end)
+  end
+
+  test "the configured gateway name is a dashboard label, not its network identity" do
+    fleet = current_fleet()
+    state = fleet.local.state
+
+    state = put_in(state.configuration.current.name, "Pump room gateway")
+    device = %{state.device | name: "nervesgate-stable-id"}
+    tailnet = %{state.tailnet | hostname: "nervesgate-tailnet-id"}
+    state = %{state | device: device, tailnet: tailnet}
+    fleet = %{fleet | local: %{fleet.local | state: state}}
+
+    view = NervesGateWeb.StatusLive.View.build(fleet, 0, nil)
+
+    assert view.local.name == "Pump room gateway"
+    assert view.local.hostname == "nervesgate-tailnet-id"
+  end
+
+  test "Update applies one scope and Keep settings promotes it from a fresh session" do
     with_configured(true, fn ->
       {:ok, view, _html} = live(build_conn(), "/commissioning")
 
       html =
         view
-        |> form("form", %{
-          "configuration" => %{"scope" => "cluster", "revert_minutes" => "2"}
-        })
-        |> render_submit()
+        |> form("#rollback-timeout-form", %{"revert_minutes" => "2"})
+        |> render_change()
 
-      assert html =~ "Change only the cluster group"
-      assert html =~ "Cluster group"
-      assert html =~ "Apply Cluster change"
-      refute html =~ "Connect to the Internet"
-      refute html =~ "Tailscale auth key"
-      refute html =~ "Commissioning progress"
+      hidden_timeouts =
+        Regex.scan(
+          ~r/<input(?=[^>]*type="hidden")(?=[^>]*name="revert_minutes")(?=[^>]*value="2")[^>]*>/,
+          html
+        )
+
+      assert [_internet, _tailnet, _cluster] = hidden_timeouts
+
+      view
+      |> form("#cluster-settings-form", %{
+        "cluster" => %{"group" => "Updated_group"}
+      })
+      |> render_submit()
+
+      assert_redirect(view, "/commissioning")
+      pending = local_snapshot().state.configuration.pending
+      assert pending.scope == :cluster
+      assert pending.candidate.cluster_group == "Updated_group"
+
+      {:ok, keep_view, html} = live(build_conn(), "/commissioning")
+      assert html =~ ~s(id="temporary-settings-notification")
+      assert html =~ "Temporary changes"
+      assert html =~ "Keep changes"
+      assert html =~ "Revert changes"
+      assert html =~ ~s(id="cluster-settings-form")
+      assert html =~ ~r/<fieldset(?=[^>]*disabled)[^>]*>/
+
+      keep_view
+      |> element(~s(button[phx-click="keep-settings"]))
+      |> render_click()
+
+      assert_redirect(keep_view, "/")
+      assert local_snapshot().state.configuration.current.cluster_group == "Updated_group"
+      assert local_snapshot().state.configuration.pending == nil
     end)
   end
 
-  test "completed Internet and Tailnet settings remain accessible" do
+  test "commissioning advances forward without editing already applied steps" do
     with_pending_phase(:tailnet, fn ->
-      {:ok, view, html} = live(build_conn(), "/commissioning")
+      {:ok, _view, html} = live(build_conn(), "/commissioning")
 
       assert html =~ "Join the tailnet"
-      assert html =~ "Tailscale auth key"
       assert html =~ ~s(phx-submit="configure-tailnet")
-      refute html =~ "Cluster group"
-
-      html = view |> element(~s(button[phx-value-step="internet"])) |> render_click()
-      assert html =~ "Connect to the Internet"
+      refute html =~ ~s(phx-submit="configure-internet")
+      refute html =~ ~s(phx-click="edit-step")
     end)
 
     with_pending_phase(:cluster, fn ->
-      {:ok, view, html} = live(build_conn(), "/commissioning")
+      {:ok, _view, html} = live(build_conn(), "/commissioning")
 
       assert html =~ "Choose cluster mode"
-      assert html =~ "Cluster group"
       assert html =~ ~s(phx-submit="configure-cluster")
-
-      html = view |> element(~s(button[phx-value-step="tailnet"])) |> render_click()
-      assert html =~ "Tailscale auth key"
-
-      html = view |> element(~s(button[phx-value-step="internet"])) |> render_click()
-      assert html =~ "Connect to the Internet"
+      refute html =~ ~s(phx-submit="configure-tailnet")
+      refute html =~ ~s(phx-click="edit-step")
     end)
   end
 
-  test "a complete candidate has one Tailnet acceptance action" do
+  test "a complete candidate has one explicit Keep settings action" do
     with_pending_phase(:confirmation, fn ->
       {:ok, _view, html} = live(build_conn(), "/commissioning")
 
-      assert html =~ "Ready to accept"
-      assert html =~ "Accept settings"
-      assert html =~ ~s(href="/commissioning?accept=candidate-test")
-      refute html =~ "Reconnect to accept"
-      refute html =~ ~s(phx-click="accept-configuration")
+      assert html =~ "Ready to keep"
+      assert html =~ "Keep settings"
+      assert html =~ ~s(phx-click="keep-settings")
+      refute html =~ "Accept settings"
+      refute html =~ "?accept="
     end)
   end
 
-  test "commissioning access accepts through the candidate Tailnet address" do
+  test "commissioning reopens through the candidate Tailnet without mutating on GET" do
     with_tailnet_ipv4("100.84.12.7", fn ->
       with_pending_phase(:confirmation, fn ->
         connection = %{build_conn() | remote_ip: {192, 168, 77, 20}}
         {:ok, _view, html} = live(connection, "/commissioning")
 
-        assert html =~
-                 ~s(href="http://100.84.12.7/commissioning?accept=candidate-test")
+        assert html =~ ~s(href="http://100.84.12.7/commissioning")
+        refute html =~ "?accept="
       end)
     end)
   end
 
-  test "acceptance redirects both the fresh request and an open editor to status" do
-    with_acceptance_candidate(fn id ->
-      {:ok, editor, _html} = live(build_conn(), "/commissioning")
+  test "GET never keeps settings and the Keep settings button does" do
+    with_keep_candidate(fn id ->
       connection = build_conn() |> get("/commissioning?accept=#{id}")
+      assert html_response(connection, 200) =~ "Ready to keep"
+      refute configured?()
 
-      assert redirected_to(connection) == "/"
-      assert_redirect(editor, "/")
+      {:ok, view, _html} = live(build_conn(), "/commissioning")
+      view |> element(~s(button[phx-click="keep-settings"])) |> render_click()
+
+      assert_redirect(view, "/")
       assert configured?()
       assert local_snapshot().state.configuration.pending == nil
     end)
@@ -156,6 +207,34 @@ defmodule NervesGateWebTest do
       |> json_response(422)
 
     assert body == %{"error" => ":candidate_required", "ok" => false}
+  end
+
+  test "the backend API updates one scope and keeps it explicitly" do
+    with_configured(true, fn ->
+      accepted_group = local_snapshot().state.configuration.current.cluster_group
+
+      assert %{"ok" => true} =
+               build_conn()
+               |> post("/api/configuration/update/cluster", %{
+                 "cluster" => %{"group" => "API_group"},
+                 "connection_id" => "api-update",
+                 "timeout" => 60_000
+               })
+               |> json_response(200)
+
+      pending = local_snapshot().state.configuration.pending
+      assert pending.scope == :cluster
+      assert pending.candidate.cluster_group == "API_group"
+      assert local_snapshot().state.configuration.current.cluster_group == accepted_group
+
+      assert %{"ok" => true} =
+               build_conn()
+               |> post("/api/configuration/keep", %{"candidate_id" => pending.id})
+               |> json_response(200)
+
+      assert local_snapshot().state.configuration.pending == nil
+      assert local_snapshot().state.configuration.current.cluster_group == "API_group"
+    end)
   end
 
   test "the status page redirects unconfigured gateways to commissioning" do
@@ -373,12 +452,12 @@ defmodule NervesGateWebTest do
     end
   end
 
-  defp with_acceptance_candidate(function) do
+  defp with_keep_candidate(function) do
     machine = NervesGate.Gateway.Configuration
     original = :sys.get_state(machine)
     payload = original.payload
-    root = NervesGate.TestScenario.temporary_root(:acceptance_redirect)
-    id = "candidate-acceptance"
+    root = NervesGate.TestScenario.temporary_root(:keep_settings)
+    id = "candidate-keep"
 
     candidate =
       payload.current
@@ -569,7 +648,8 @@ defmodule NervesGateWebTest do
       NervesGate.Gateway.Persistence.write_slot(current, original.payload.firmware.active, root)
 
     :sys.replace_state(machine, fn state ->
-      payload = %{state.payload | root: root, current: current, pending: nil}
+      ops = Map.put(state.payload.ops, :cluster, fn _group -> :ok end)
+      payload = %{state.payload | root: root, current: current, pending: nil, ops: ops}
       %{state | current: :idle, payload: payload}
     end)
 

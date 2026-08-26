@@ -56,6 +56,7 @@ defmodule NervesGateWeb.StatusLive.View do
   defp node_view(state, metadata) do
     connected = Keyword.fetch!(metadata, :connected)
     device = state.device || empty_device()
+    display_name = configuration_name(state.configuration, device.name)
     tailnet = state.tailnet || empty_tailnet()
     cluster = state.cluster || empty_cluster()
     internet = state.internet || empty_internet()
@@ -73,7 +74,7 @@ defmodule NervesGateWeb.StatusLive.View do
       ssh: ssh,
       cluster: cluster,
       alarms: alarms,
-      name: device.name,
+      name: display_name,
       firmware_version: device.firmware_version,
       hostname: tailnet.hostname || device.name,
       ipv4: tailnet.ipv4,
@@ -94,6 +95,9 @@ defmodule NervesGateWeb.StatusLive.View do
       ]
     }
   end
+
+  defp configuration_name(%{current: %{name: name}}, _fallback) when is_binary(name), do: name
+  defp configuration_name(_configuration, fallback), do: fallback
 
   defp node_status(_internet, _tailnet, _cluster, false), do: :stale
 

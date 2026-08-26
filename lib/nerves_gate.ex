@@ -47,16 +47,13 @@ defmodule NervesGate do
   @spec status(GenServer.server()) :: map()
   defdelegate status(session), to: Session
 
-  @doc "Begins a Tailnet-only or Cluster-only guarded settings change."
-  def begin_change(scope, connection_id, timeout),
-    do: Configuration.begin_change(scope, connection_id, timeout)
+  @doc "Applies one guarded connection-settings update pending an explicit Keep command."
+  def update_settings(scope, params, connection_id, timeout),
+    do: Configuration.update_settings(scope, params, connection_id, timeout)
 
   @doc "Stages Internet settings during complete commissioning."
   def stage_internet(params, connection_id, timeout),
     do: Configuration.stage_internet(params, connection_id, timeout)
-
-  @doc "Updates Internet settings in a complete candidate."
-  def update_internet(id, params), do: Configuration.update_internet(id, params)
 
   @doc "Stages Tailnet settings in the active candidate."
   def stage_tailnet(id, params), do: Configuration.stage_tailnet(id, params)
@@ -64,8 +61,8 @@ defmodule NervesGate do
   @doc "Stages Cluster settings in the active candidate."
   def stage_cluster(id, params), do: Configuration.stage_cluster(id, params)
 
-  @doc "Accepts a complete candidate from a fresh Tailnet connection."
-  def confirm(id, connection), do: Configuration.confirm(id, connection)
+  @doc "Keeps a guarded candidate from a fresh Tailnet connection."
+  def keep_settings(id, connection), do: Configuration.confirm(id, connection)
 
   @doc "Rejects the active candidate and restores accepted settings."
   def revert(id), do: Configuration.revert(id)

@@ -95,21 +95,6 @@ defmodule NervesGate.Gateway.Settings do
     end
   end
 
-  @spec update_internet(map(), map()) :: {:ok, map()} | {:error, term()}
-  def update_internet(candidate, params) do
-    internet_params = Map.get(params, "internet", %{})
-    name = params |> get_in(["device", "name"]) || candidate["name"]
-
-    with {:ok, internet} <- Config.new(normalize_internet(internet_params)),
-         {:ok, name} <- valid_name(name) do
-      {:ok,
-       candidate
-       |> Map.put("internet", Config.to_persisted(internet))
-       |> Map.put("name", name)
-       |> touch()}
-    end
-  end
-
   @spec public(map()) :: map()
   def public(settings) do
     %{

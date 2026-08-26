@@ -48,9 +48,10 @@ default `nerves-gate-integration` group.
 The suite verifies a fully replicated mesh, heartbeat-based offline detection
 within ten seconds of uplink loss, disconnect/reconnect healing, retained
 last-known snapshots, hard-restart boot-ID resynchronization, and stop/start
-persistence without recommissioning. Cleanup restores every VM and QMP link. The
-auth key is held only long enough to fill the Tailnet form; it is never persisted
-or included in diagnostics.
+persistence without recommissioning, plus automatic rollback of an unkept scoped
+settings update. Cleanup restores every VM and QMP link. The auth key is held
+only long enough to submit the Tailnet backend command; it is never persisted or
+included in diagnostics.
 
 Requirements: QEMU, `fwup`, and Tailnet grants for gateway-to-gateway TCP `80`,
 `4369`, and `43769`.

@@ -71,12 +71,29 @@ defmodule NervesGateWeb.ConfigurationController do
 
   def cluster(connection, _params), do: command_result(connection, {:error, :candidate_required})
 
-  def confirm(connection, %{"candidate_id" => id}) do
-    actor = %{id: command_id(), tailnet?: LocalAccess.tailnet?(connection.remote_ip)}
-    command_result(connection, NervesGate.confirm(id, actor))
+  def update(connection, %{"scope" => scope} = params) do
+    with {:ok, scope} <- settings_scope(scope),
+         timeout when is_integer(timeout) and timeout > 0 <- Map.get(params, "timeout", 60_000) do
+      command_result(
+        connection,
+        NervesGate.update_settings(
+          scope,
+          Map.drop(params, ["scope", "timeout", "connection_id"]),
+          Map.get(params, "connection_id", command_id()),
+          timeout
+        )
+      )
+    else
+      _invalid -> command_result(connection, {:error, :invalid_settings_update})
+    end
   end
 
-  def confirm(connection, _params), do: command_result(connection, {:error, :candidate_required})
+  def keep(connection, %{"candidate_id" => id}) do
+    actor = %{id: command_id(), tailnet?: LocalAccess.tailnet?(connection.remote_ip)}
+    command_result(connection, NervesGate.keep_settings(id, actor))
+  end
+
+  def keep(connection, _params), do: command_result(connection, {:error, :candidate_required})
 
   defp command_result(connection, :ok), do: json(connection, %{ok: true})
   defp command_result(connection, {:ok, _value}), do: json(connection, %{ok: true})
@@ -86,6 +103,11 @@ defmodule NervesGateWeb.ConfigurationController do
     |> put_status(:unprocessable_entity)
     |> json(%{ok: false, error: inspect(reason)})
   end
+
+  defp settings_scope("internet"), do: {:ok, :internet}
+  defp settings_scope("tailnet"), do: {:ok, :tailnet}
+  defp settings_scope("cluster"), do: {:ok, :cluster}
+  defp settings_scope(_scope), do: {:error, :invalid_settings_scope}
 
   defp command_id do
     18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)

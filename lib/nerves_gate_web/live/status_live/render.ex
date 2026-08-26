@@ -257,7 +257,7 @@ defmodule NervesGateWeb.StatusLive.Render do
               :if={not is_nil(@view.configuration.pending)}
               class="text-sm leading-6 text-amber-200"
             >
-              Subnet routing can be changed after the remote-access configuration is accepted or rejected.
+              Subnet routing can be changed after the temporary connection settings are kept or reverted.
             </p>
           </form>
 

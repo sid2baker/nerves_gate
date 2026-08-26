@@ -31,8 +31,8 @@ are legal and the graph explains important temporal behavior.
 
 Current FSMs:
 
-- `NervesGate.Gateway.Configuration` — candidate staging, confirmation, timeout,
-  promotion, and rollback.
+- `NervesGate.Gateway.Configuration` — explicit scoped updates, candidate
+  staging, Keep confirmation, timeout, promotion, and retrying rollback.
 - `NervesGate.Internet` — apply, verify, restore, and retry transaction.
 - `NervesGate.Cluster.Peer` — discovery, group classification, connection, and
   backoff for one peer.
@@ -103,7 +103,10 @@ owner retries until they converge or a newer desired value supersedes the old
 one.
 
 The guarded candidate workflow remains transactional because it temporarily
-changes remote access and must support confirmation and rollback.
+changes remote access and must support explicit Keep confirmation and rollback.
+Opening `/commissioning` is inert: only a submitted scoped Update command creates
+a candidate. Unkept candidates revert on their deadline, and failed rollback
+effects retain the candidate and retry rather than declaring success.
 
 ## Runtime effects
 

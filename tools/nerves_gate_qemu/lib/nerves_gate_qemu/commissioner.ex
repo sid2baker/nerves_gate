@@ -51,7 +51,7 @@ defmodule NervesGateQEMU.Commissioner do
 
       configuration["pending"]["phase"] == "confirmation" ->
         tailnet_ipv4 = get_in(status, ["local", "state", "tailnet", "ipv4"])
-        confirm!(device, tailnet_ipv4, configuration["pending"]["id"])
+        keep!(device, tailnet_ipv4, configuration["pending"]["id"])
         await_configured(device, 60_000)
 
       true ->
@@ -99,19 +99,19 @@ defmodule NervesGateQEMU.Commissioner do
     end
   end
 
-  defp confirm!(device, tailnet_ipv4, candidate_id) when is_binary(tailnet_ipv4) do
+  defp keep!(device, tailnet_ipv4, candidate_id) when is_binary(tailnet_ipv4) do
     case Gateway.command_at(
            "http://#{tailnet_ipv4}/",
-           "confirm",
+           "keep",
            %{"candidate_id" => candidate_id}
          ) do
       :ok -> :ok
-      {:error, reason} -> raise "#{device.id} confirm command failed: #{inspect(reason)}"
+      {:error, reason} -> raise "#{device.id} keep command failed: #{inspect(reason)}"
     end
   end
 
-  defp confirm!(device, _tailnet_ipv4, _candidate_id) do
-    raise "#{device.id} candidate has no Tailnet address for guarded confirmation"
+  defp keep!(device, _tailnet_ipv4, _candidate_id) do
+    raise "#{device.id} candidate has no Tailnet address for guarded acceptance"
   end
 
   defp fetch!(device) do

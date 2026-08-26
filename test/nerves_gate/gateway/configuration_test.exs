@@ -106,29 +106,31 @@ defmodule NervesGate.Gateway.ConfigurationTest do
     assert_receive {:commit_tailnet, _metadata}
   end
 
-  test "configured gateways can change only Tailnet", context do
+  test "a configured Tailnet update starts only when submitted and waits to be kept", context do
     machine = start_machine(context)
     accept_initial(machine)
     accepted_cluster = Configuration.current(machine)["cluster"]
     flush_messages()
 
-    assert {:ok, pending} =
-             Configuration.begin_change(:tailnet, "change-a", 60_000, machine)
-
-    assert pending.phase == :tailnet
-    assert pending.scope == :tailnet
-    assert Configuration.diagnostics(machine).state == :needs_tailnet
+    assert Configuration.configuration(machine).pending == nil
 
     assert {:ok, pending} =
-             Configuration.stage_tailnet(pending.id, tailnet_params(), machine)
+             Configuration.update_settings(
+               :tailnet,
+               tailnet_params(),
+               "change-a",
+               60_000,
+               machine
+             )
 
     assert pending.phase == :confirmation
     assert pending.scope == :tailnet
+    assert Configuration.diagnostics(machine).state == :needs_confirmation
     assert_receive {:stage_tailnet, "tskey-auth-candidate", "candidate-profile"}
     refute_receive {:cluster, _group}
 
-    assert {:error, :configuration_change_outside_scope} =
-             Configuration.stage_cluster(pending.id, cluster_params(), machine)
+    assert {:error, :fresh_connection_required} =
+             Configuration.confirm(pending.id, connection("change-a"), machine)
 
     assert :ok = Configuration.confirm(pending.id, connection("change-b"), machine)
     assert_receive {:commit_tailnet, _metadata}
@@ -137,29 +139,20 @@ defmodule NervesGate.Gateway.ConfigurationTest do
     assert Configuration.current(machine)["cluster"] == accepted_cluster
   end
 
-  test "configured gateways can change only their cluster group", context do
+  test "a configured Cluster update applies exactly one submitted scope", context do
     machine = start_machine(context)
     accept_initial(machine)
     accepted_internet = Configuration.current(machine)["internet"]
     accepted_profile = Configuration.current(machine)["tailnet"]["profile_id"]
     flush_messages()
 
-    assert {:ok, pending} =
-             Configuration.begin_change(:cluster, "change-a", 60_000, machine)
-
-    assert pending.phase == :cluster
-    assert pending.scope == :cluster
-    assert Configuration.diagnostics(machine).state == :needs_cluster
-
-    assert {:error, :configuration_change_outside_scope} =
-             Configuration.stage_tailnet(pending.id, tailnet_params(), machine)
-
-    assert {:error, :configuration_change_outside_scope} =
-             Configuration.update_internet(pending.id, internet_params(), machine)
-
     params = %{"cluster" => %{"group" => "New_group"}}
-    assert {:ok, pending} = Configuration.stage_cluster(pending.id, params, machine)
+
+    assert {:ok, pending} =
+             Configuration.update_settings(:cluster, params, "change-a", 60_000, machine)
+
     assert pending.phase == :confirmation
+    assert pending.scope == :cluster
     assert_receive {:cluster, "New_group"}
     refute_receive {:stage_tailnet, _token, _previous}
 
@@ -170,18 +163,17 @@ defmodule NervesGate.Gateway.ConfigurationTest do
     assert Configuration.current(machine)["tailnet"]["profile_id"] == accepted_profile
   end
 
-  test "a scoped revert restores only the selected subsystem", context do
+  test "a scoped revert restores only the submitted subsystem", context do
     machine = start_machine(context)
     accept_initial(machine)
     flush_messages()
 
     assert {:ok, pending} =
-             Configuration.begin_change(:cluster, "change-a", 60_000, machine)
-
-    assert {:ok, pending} =
-             Configuration.stage_cluster(
-               pending.id,
+             Configuration.update_settings(
+               :cluster,
                %{"cluster" => %{"group" => "New_group"}},
+               "change-a",
+               60_000,
                machine
              )
 
@@ -194,19 +186,164 @@ defmodule NervesGate.Gateway.ConfigurationTest do
     refute_receive {:ssh, _enabled}
   end
 
-  test "editing completed steps preserves later candidate work", context do
+  test "accepted settings remain unchanged until Keep settings succeeds", context do
+    machine = start_machine(context)
+    accept_initial(machine)
+    accepted = settings(context.root, "a")
+    flush_messages()
+
+    params = put_in(internet_params(), ["device", "name"], "Updated gateway")
+
+    assert {:ok, pending} =
+             Configuration.update_settings(:internet, params, "change-a", 60_000, machine)
+
+    assert settings(context.root, "a") == accepted
+    assert Configuration.current(machine) == accepted
+    assert_receive {:internet, _config}
+
+    assert :ok = Configuration.confirm(pending.id, connection("change-b"), machine)
+    assert settings(context.root, "a")["name"] == "Updated gateway"
+    assert Configuration.current(machine)["name"] == "Updated gateway"
+  end
+
+  test "a failed runtime update restores accepted settings and clears its candidate", context do
+    owner = self()
+
+    cluster = fn
+      "Broken_group" ->
+        send(owner, :cluster_update_failed)
+        {:error, :distribution_failed}
+
+      group ->
+        send(owner, {:cluster, group})
+        :ok
+    end
+
+    context = %{context | ops: Keyword.put(context.ops, :cluster, cluster)}
+    machine = start_machine(context)
+    accept_initial(machine)
+    accepted = settings(context.root, "a")
+    flush_messages()
+
+    assert {:error, :distribution_failed} =
+             Configuration.update_settings(
+               :cluster,
+               %{"cluster" => %{"group" => "Broken_group"}},
+               "change-a",
+               60_000,
+               machine
+             )
+
+    assert_receive :cluster_update_failed
+    assert_receive {:cluster, "Field_group"}
+    assert Configuration.current(machine) == accepted
+    assert settings(context.root, "a") == accepted
+    assert Configuration.configuration(machine).pending == nil
+    refute File.exists?(Persistence.candidate_path(context.root))
+  end
+
+  test "commissioning steps only move forward", context do
     machine = start_machine(context)
 
     {:ok, internet} =
       Configuration.stage_internet(internet_params(), "connection-a", nil, machine)
 
-    {:ok, tailnet} = Configuration.stage_tailnet(internet.id, tailnet_params(), machine)
+    {:ok, _tailnet} = Configuration.stage_tailnet(internet.id, tailnet_params(), machine)
 
-    updated = put_in(internet_params(), ["device", "name"], "Updated gateway")
-    assert {:ok, pending} = Configuration.update_internet(tailnet.id, updated, machine)
-    assert pending.phase == :cluster
-    assert pending.candidate.name == "Updated gateway"
-    assert pending.candidate.tailnet_configured
+    assert {:error, {:invalid_transition, :needs_cluster, :stage_internet}} =
+             Configuration.stage_internet(internet_params(), "connection-a", nil, machine)
+
+    assert {:error, {:invalid_transition, :needs_cluster, :stage_tailnet}} =
+             Configuration.stage_tailnet(internet.id, tailnet_params(), machine)
+  end
+
+  test "a failed rollback retains the candidate and retries until accepted settings are restored",
+       context do
+    {:ok, failures} = Agent.start_link(fn -> 0 end)
+    owner = self()
+
+    cluster = fn group ->
+      send(owner, {:cluster, group})
+
+      if group == "Field_group" and Agent.get_and_update(failures, &{&1, &1 + 1}) == 1,
+        do: {:error, :distribution_unavailable},
+        else: :ok
+    end
+
+    context = %{context | ops: Keyword.put(context.ops, :cluster, cluster)}
+    machine = start_machine(context)
+    accept_initial(machine)
+    flush_messages()
+
+    assert {:ok, pending} =
+             Configuration.update_settings(
+               :cluster,
+               %{"cluster" => %{"group" => "Temporary_group"}},
+               "change-a",
+               60_000,
+               machine
+             )
+
+    assert {:error, {:rollback_failed, :distribution_unavailable}} =
+             Configuration.revert(pending.id, machine)
+
+    assert Configuration.diagnostics(machine).state == :rolling_back
+    assert Configuration.configuration(machine).pending.id == pending.id
+    assert File.exists?(Persistence.candidate_path(context.root))
+
+    assert_eventually(fn -> Configuration.diagnostics(machine).state == :idle end)
+    assert Configuration.configuration(machine).pending == nil
+    refute File.exists?(Persistence.candidate_path(context.root))
+    assert Configuration.current(machine)["cluster"]["group"] == "Field_group"
+  end
+
+  test "an unkept scoped update times out and restores accepted settings", context do
+    machine = start_machine(context)
+    accept_initial(machine)
+    accepted = settings(context.root, "a")
+    flush_messages()
+
+    assert {:ok, _pending} =
+             Configuration.update_settings(
+               :cluster,
+               %{"cluster" => %{"group" => "Temporary_group"}},
+               "change-a",
+               50,
+               machine
+             )
+
+    assert_receive {:cluster, "Temporary_group"}
+    assert_eventually(fn -> Configuration.configuration(machine).pending == nil end)
+    assert_receive {:cluster, "Field_group"}
+    assert Configuration.current(machine) == accepted
+    assert settings(context.root, "a") == accepted
+    refute File.exists?(Persistence.candidate_path(context.root))
+  end
+
+  test "restart rejects an unkept scoped update and restores accepted settings", context do
+    machine = start_machine(context)
+    accept_initial(machine)
+    accepted = settings(context.root, "a")
+    flush_messages()
+
+    assert {:ok, _pending} =
+             Configuration.update_settings(
+               :cluster,
+               %{"cluster" => %{"group" => "Temporary_group"}},
+               "change-a",
+               60_000,
+               machine
+             )
+
+    GenServer.stop(machine)
+    assert File.exists?(Persistence.candidate_path(context.root))
+
+    restarted = start_machine(context)
+    assert Configuration.configuration(restarted).pending == nil
+    assert Configuration.current(restarted) == accepted
+    assert settings(context.root, "a") == accepted
+    refute File.exists?(Persistence.candidate_path(context.root))
+    assert_receive {:cluster, "Field_group"}
   end
 
   test "configured candidates time out through the ordinary revert transition", context do

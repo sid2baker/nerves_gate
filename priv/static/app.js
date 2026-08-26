@@ -4,7 +4,10 @@ import {LiveSocket} from "/vendor/live_view/phoenix_live_view.esm.js";
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
 const syncInternetFields = select => {
-  const fields = document.getElementById(select.getAttribute("aria-controls"));
+  const controlledId = select.getAttribute("aria-controls");
+  const fields = controlledId
+    ? document.getElementById(controlledId)
+    : select.closest("form")?.querySelector("[data-static-internet-fields]");
   if (!fields) return;
 
   const staticAddressing = select.value === "static";

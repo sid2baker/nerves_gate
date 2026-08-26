@@ -60,7 +60,8 @@ defmodule NervesGateWeb.Router do
     post("/internet", ConfigurationController, :internet)
     post("/tailnet", ConfigurationController, :tailnet)
     post("/cluster", ConfigurationController, :cluster)
-    post("/confirm", ConfigurationController, :confirm)
+    post("/update/:scope", ConfigurationController, :update)
+    post("/keep", ConfigurationController, :keep)
   end
 
   defp put_remote_access(connection, _options) do

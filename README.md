@@ -33,20 +33,29 @@ rollback target.
 ```
 
 The candidate is applied temporarily, but the running slot file remains
-unchanged. A configured gateway's change must be accepted from a fresh
-management connection before the selected timeout, which defaults to one minute.
-First-time setup has no automatic timer. Acceptance atomically promotes the
-candidate over `settings-a.json` or `settings-b.json`. Application restart,
-device reboot, or explicit rejection always deletes the candidate and reapplies
-the running slot file; configured changes do the same when their timer expires.
-Tailscale auth keys are used once and never written to any settings file.
+unchanged. A configured gateway's update must be kept from a fresh Tailnet
+connection before the selected timeout, which defaults to one minute.
+First-time setup has no automatic timer. **Keep settings** atomically promotes
+the candidate over `settings-a.json` or `settings-b.json`. Application restart,
+device reboot, **Revert now**, or timer expiry reapplies the accepted slot file
+and removes the candidate. Failed rollback effects retain the candidate and are
+retried. Tailscale auth keys are used once and never written to any settings
+file.
 
-An unconfigured gateway starts the three-step editor immediately. A configured
-gateway chooses **Tailnet only**, **Cluster only**, or **All settings** together
-with the auto-revert time. Scoped changes leave every other accepted setting
-unchanged and skip unrelated commissioning steps. There is no `/settings`
-route or separate setup workflow. The local JSON commissioning transport maps
-one-to-one onto the same guarded `NervesGate` commands used by LiveView.
+An unconfigured gateway starts the ordered Internet → Tailnet → Cluster editor.
+A configured gateway opens `/commissioning` directly on separate Internet,
+Tailnet, and Cluster forms. One page-wide **Revert unless kept after** selector
+applies to all three forms. Merely opening or editing a form has no effect; only
+its explicit **Update** button creates and applies a scoped candidate. While an
+update is temporary, a compact notification shows the countdown and **Keep
+changes**, **Reopen through Tailnet**, and **Revert changes** actions while the
+forms remain visible but locked. Internet and Tailnet forms warn that the browser
+may disconnect, retain a client-side applying/reconnecting indicator during the
+request, and identify the notification as proof that the gateway is reachable
+again. Scoped updates leave all other accepted settings unchanged. There is no
+`/settings` route or separate setup workflow. The local JSON commissioning
+transport maps one-to-one onto the same guarded `NervesGate` commands used by
+LiveView.
 
 ## Backend model
 
@@ -76,8 +85,9 @@ implementation machinery, not another domain abstraction. Finitomata is reserved
 for protocols with meaningful legal phases; ordinary observers and reconcilers
 are supervised GenServers.
 
-Private accepted settings, candidates, credentials, effect references, and
-rollback timing never enter DeviceState. Each remote gateway replica owns its
+Credentials, private candidate data, and effect references never enter
+DeviceState. Its configuration slice exposes only secret-free accepted and
+candidate projections plus the user-visible countdown. Each remote gateway replica owns its
 boot ID, revision, retry, liveness lease, and connection metadata. It installs
 one atomic snapshot and then reduces ordered events pushed by the source. The
 source sends a lightweight heartbeat every second; missing the 2.5-second lease
@@ -143,15 +153,22 @@ Commissioning follows the runtime dependencies:
 2. enroll in Tailscale with a one-use auth key;
 3. select singular cluster mode or a public Tailnet-visible cluster group.
 
+The gateway display name is a friendly replicated label used in NervesGate
+status pages and gateway lists. It does not change the stable device ID, setup
+Wi-Fi SSID, Tailscale hostname, IP address, or Erlang node name.
+
 During first-time setup, each dependency is applied before the next step is
-available and all three remain one reversible candidate. Completed Internet and
-Tailnet steps stay accessible for further editing without undoing downstream
-runtime changes. A configured gateway may instead change only Tailnet or only
-the cluster and proceed directly to acceptance. **Accept settings** opens the
-candidate Tailnet address, promotes the candidate on that fresh request, and
-redirects directly to status. Configured changes must be accepted before their
-countdown expires. Production then restricts the dashboard to Tailscale.
-Development firmware keeps QEMU's isolated local dashboard forwards available.
+available and all three remain one reversible candidate. Applied steps do not
+reopen: revert and start again if an earlier value is wrong. After Cluster is
+applied, reopen `/commissioning` through the candidate Tailnet address and press
+**Keep settings**. A plain GET never mutates settings.
+
+On a configured gateway, `/commissioning` opens all three scoped forms directly.
+Press **Update Internet**, **Update Tailnet**, or **Update Cluster** to apply only
+that submitted subsystem. Then keep the temporary update from a fresh Tailnet
+connection before its countdown expires, or let it restore accepted settings
+automatically. Production restricts the dashboard to Tailscale. Development
+firmware keeps QEMU's isolated local dashboard forwards available.
 
 ## Subnet routing
 
@@ -335,11 +352,12 @@ mix nerves_gate.qemu integration --count 3 --rebuild
 ```
 
 It builds current firmware, recreates the requested disks, commissions every
-VM, waits for a fully replicated mesh, and runs disconnect/reconnect, hard
-restart, and stop/start scenarios. Tests use only the backend command transport
-and `nerves_gate.status.v3`; browser rendering has separate focused LiveView
-tests. Assertions verify accepted settings survive, offline replicas retain
-last-known state, and new DeviceState boot IDs replace stale snapshots.
+VM, waits for a fully replicated mesh, and runs unkept-update rollback,
+disconnect/reconnect, hard restart, and stop/start scenarios. Tests use only the
+backend command transport and `nerves_gate.status.v3`; browser rendering has
+separate focused LiveView tests. Assertions verify accepted settings survive,
+offline replicas retain last-known state, and new DeviceState boot IDs replace
+stale snapshots.
 Host-side faults are always healed during cleanup.
 
 To rerun the integration tests against an already commissioned topology:

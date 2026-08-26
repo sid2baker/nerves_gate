@@ -15,34 +15,35 @@ defmodule NervesGate.Gateway.Configuration do
   @fsm """
   [*] --> activating : boot
   activating --> idle : activation_completed
+  activating --> rolling_back : activation_completed
   activating --> activating : tick
   activating --> activating : public_state_requested
   idle --> executing_change : stage_internet
-  idle --> executing_change : begin_tailnet_change
-  idle --> executing_change : begin_cluster_change
-  needs_tailnet --> executing_change : update_internet
-  needs_cluster --> executing_change : update_internet
-  needs_confirmation --> executing_change : update_internet
+  idle --> executing_change : update_settings
   needs_tailnet --> executing_change : stage_tailnet
-  needs_cluster --> executing_change : stage_tailnet
-  needs_confirmation --> executing_change : stage_tailnet
   needs_cluster --> executing_change : stage_cluster
-  needs_confirmation --> executing_change : stage_cluster
   needs_confirmation --> executing_change : confirm
-  needs_tailnet --> executing_change : revert
-  needs_cluster --> executing_change : revert
-  needs_confirmation --> executing_change : revert
+  needs_tailnet --> needs_tailnet : revert
+  needs_tailnet --> rolling_back : revert
+  needs_cluster --> needs_cluster : revert
+  needs_cluster --> rolling_back : revert
+  needs_confirmation --> needs_confirmation : revert
+  needs_confirmation --> rolling_back : revert
   needs_tailnet --> needs_tailnet : tick
-  needs_tailnet --> executing_change : tick
+  needs_tailnet --> rolling_back : tick
   needs_cluster --> needs_cluster : tick
-  needs_cluster --> executing_change : tick
+  needs_cluster --> rolling_back : tick
   needs_confirmation --> needs_confirmation : tick
-  needs_confirmation --> executing_change : tick
+  needs_confirmation --> rolling_back : tick
   executing_change --> idle : configuration_step_completed
   executing_change --> needs_tailnet : configuration_step_completed
   executing_change --> needs_cluster : configuration_step_completed
   executing_change --> needs_confirmation : configuration_step_completed
+  executing_change --> rolling_back : configuration_step_completed
   executing_change --> executing_change : tick
+  rolling_back --> idle : rollback_completed
+  rolling_back --> rolling_back : rollback_completed
+  rolling_back --> rolling_back : tick
   executing_change --> executing_change : public_state_requested
   idle --> persisting_runtime_change : configure_subnet_router
   idle --> persisting_runtime_change : configure_ssh
@@ -60,8 +61,10 @@ defmodule NervesGate.Gateway.Configuration do
   needs_cluster --> needs_cluster : public_state_requested
   needs_confirmation --> needs_confirmation : public_state_requested
   persisting_runtime_change --> persisting_runtime_change : public_state_requested
+  rolling_back --> rolling_back : public_state_requested
   activating --> [*] : terminate
   executing_change --> [*] : terminate
+  rolling_back --> [*] : terminate
   idle --> [*] : terminate
   persisting_runtime_change --> [*] : terminate
   """
@@ -91,6 +94,8 @@ defmodule NervesGate.Gateway.Configuration do
       runtime_change: nil,
       startup_effect: %{ref: make_ref()},
       step_effect: nil,
+      rollback_effect: nil,
+      rollback_context: nil,
       ops: Map.merge(Runtime.default(), Map.new(Keyword.get(options, :ops, []))),
       keep_local_access:
         Keyword.get(
@@ -117,22 +122,30 @@ defmodule NervesGate.Gateway.Configuration do
     server |> Diagnostics.state() |> Map.fetch!(:payload) |> Context.public()
   end
 
-  @type change_scope :: :tailnet | :cluster
+  @type settings_scope :: :internet | :tailnet | :cluster
 
-  @spec begin_change(change_scope(), String.t(), pos_integer(), GenServer.server()) ::
+  @spec update_settings(settings_scope(), map(), String.t(), pos_integer(), GenServer.server()) ::
           {:ok, map()} | {:error, term()}
-  def begin_change(scope, source_connection, timeout \\ @default_timeout, server \\ __MODULE__)
+  def update_settings(
+        scope,
+        params,
+        source_connection,
+        timeout \\ @default_timeout,
+        server \\ __MODULE__
+      )
 
-  def begin_change(scope, source_connection, timeout, server)
-      when scope in [:tailnet, :cluster] do
-    event = if scope == :tailnet, do: :begin_tailnet_change, else: :begin_cluster_change
-
-    command(server, event, %{
+  def update_settings(scope, params, source_connection, timeout, server)
+      when scope in [:internet, :tailnet, :cluster] and is_integer(timeout) and timeout > 0 do
+    command(server, :update_settings, %{
       scope: scope,
+      params: params,
       source_connection: source_connection,
       timeout: timeout
     })
   end
+
+  def update_settings(_scope, _params, _source_connection, _timeout, _server),
+    do: {:error, :invalid_settings_update}
 
   @spec stage_internet(map(), String.t(), pos_integer() | nil, GenServer.server()) ::
           {:ok, map()} | {:error, term()}
@@ -148,10 +161,6 @@ defmodule NervesGate.Gateway.Configuration do
       timeout: timeout
     })
   end
-
-  @spec update_internet(String.t(), map(), GenServer.server()) :: {:ok, map()} | {:error, term()}
-  def update_internet(id, params, server \\ __MODULE__),
-    do: command(server, :update_internet, %{change_id: id, params: params})
 
   @spec stage_tailnet(String.t(), map(), GenServer.server()) :: {:ok, map()} | {:error, term()}
   def stage_tailnet(id, params, server \\ __MODULE__),
@@ -193,15 +202,8 @@ defmodule NervesGate.Gateway.Configuration do
     end
   end
 
-  defp execute_step(:idle, event, command, payload)
-       when event in [:begin_tailnet_change, :begin_cluster_change] do
-    phase = command.scope
-    state = phase_state(phase)
-
-    case start_change(payload, command, phase) do
-      {:ok, payload} -> finish(:idle, event, state, payload)
-      {:error, payload} -> finish(:idle, event, :idle, payload)
-    end
+  defp execute_step(:idle, :update_settings, command, payload) do
+    update_configured_settings(command, payload)
   end
 
   defp execute_step(:idle, :stage_internet, command, payload) do
@@ -232,25 +234,18 @@ defmodule NervesGate.Gateway.Configuration do
           finish(:idle, :stage_internet, :needs_tailnet, payload)
 
         {:error, reason} ->
-          payload = rollback_candidate(payload, candidate, reason)
-          finish(:idle, :stage_internet, :idle, put_result(payload, command.id, {:error, reason}))
+          fail_candidate_application(
+            :stage_internet,
+            command,
+            payload,
+            candidate,
+            reason,
+            :complete
+          )
       end
     else
       {:error, reason} ->
         finish(:idle, :stage_internet, :idle, put_result(payload, command.id, {:error, reason}))
-    end
-  end
-
-  defp execute_step(state, :update_internet, command, payload) do
-    case payload.pending do
-      %{id: id, scope: :complete} = pending when id == command.change_id ->
-        update_internet_candidate(state, command, payload, pending)
-
-      %{id: id} when id == command.change_id ->
-        finish(state, :update_internet, state, outside_scope(payload, command.id))
-
-      _missing ->
-        finish(state, :update_internet, state, not_found(payload, command.id))
     end
   end
 
@@ -344,39 +339,6 @@ defmodule NervesGate.Gateway.Configuration do
     end
   end
 
-  defp execute_step(state, :revert, command, payload) do
-    if payload.pending.id == command.change_id do
-      payload =
-        rollback_candidate(
-          payload,
-          payload.pending.candidate,
-          :reverted,
-          payload.pending.scope
-        )
-
-      result =
-        if match?({:rollback_failed, _}, payload.last_error),
-          do: {:error, payload.last_error},
-          else: :ok
-
-      finish(state, :revert, :idle, put_result(payload, command.id, result))
-    else
-      finish(state, :revert, state, not_found(payload, command.id))
-    end
-  end
-
-  defp execute_step(state, :tick, _command, payload) do
-    payload =
-      rollback_candidate(
-        payload,
-        payload.pending.candidate,
-        :revert_timeout,
-        payload.pending.scope
-      )
-
-    finish(state, :tick, :idle, payload)
-  end
-
   @impl Finitomata
   def on_transition(:*, :boot, _event_payload, payload) do
     finish(:*, :boot, :activating, refresh_diagnostics(payload))
@@ -389,7 +351,29 @@ defmodule NervesGate.Gateway.Configuration do
         %{startup_effect: %{ref: ref}} = payload
       ) do
     payload = complete_activation(outcome, payload)
-    finish(:activating, :activation_completed, :idle, payload)
+
+    case payload.recovered_candidate do
+      nil ->
+        finish(:activating, :activation_completed, :idle, payload)
+
+      candidate ->
+        context = %{
+          candidate: candidate,
+          scope: :complete,
+          reason: :recovered_unkept_configuration,
+          reply_id: nil,
+          attempt: 0,
+          retry_at: nil
+        }
+
+        payload = %{
+          payload
+          | rollback_context: context,
+            rollback_effect: %{ref: make_ref()}
+        }
+
+        finish(:activating, :activation_completed, :rolling_back, payload)
+    end
   end
 
   def on_transition(:activating, :activation_completed, _stale, _payload),
@@ -397,14 +381,11 @@ defmodule NervesGate.Gateway.Configuration do
 
   def on_transition(state, event, command, payload)
       when event in [
-             :begin_tailnet_change,
-             :begin_cluster_change,
+             :update_settings,
              :stage_internet,
-             :update_internet,
              :stage_tailnet,
              :stage_cluster,
-             :confirm,
-             :revert
+             :confirm
            ] do
     step_effect = %{ref: make_ref(), from: state, event: event, command: command}
     finish(state, event, :executing_change, %{payload | step_effect: step_effect})
@@ -421,6 +402,27 @@ defmodule NervesGate.Gateway.Configuration do
 
   def on_transition(:executing_change, :configuration_step_completed, _stale, _payload),
     do: {:error, :stale_effect_completion}
+
+  def on_transition(state, :revert, command, payload)
+      when state in [:needs_tailnet, :needs_cluster, :needs_confirmation] do
+    if payload.pending.id == command.change_id do
+      begin_rollback(state, :revert, command.id, :reverted, payload)
+    else
+      finish(state, :revert, state, not_found(payload, command.id))
+    end
+  end
+
+  def on_transition(
+        :rolling_back,
+        :rollback_completed,
+        {ref, outcome},
+        %{rollback_effect: %{ref: ref}} = payload
+      ) do
+    complete_rollback(outcome, payload)
+  end
+
+  def on_transition(:rolling_back, :rollback_completed, _stale, _payload),
+    do: {:error, :stale_rollback_completion}
 
   def on_transition(:idle, :configure_subnet_router, command, payload),
     do: begin_runtime_change(:subnet_router, command, payload)
@@ -455,13 +457,19 @@ defmodule NervesGate.Gateway.Configuration do
       when state in [:persisting_runtime_change, :executing_change],
       do: finish(state, :tick, state, payload)
 
-  def on_transition(state, :tick, _event_payload, payload) do
-    if expired?(payload.pending) do
-      step_effect = %{ref: make_ref(), from: state, event: :tick, command: nil}
-      finish(state, :tick, :executing_change, %{payload | step_effect: step_effect})
+  def on_transition(:rolling_back, :tick, _event_payload, payload) do
+    if is_nil(payload.rollback_effect) and retry_due?(payload.rollback_context) do
+      effect = %{ref: make_ref()}
+      finish(:rolling_back, :tick, :rolling_back, %{payload | rollback_effect: effect})
     else
-      finish(state, :tick, state, refresh_diagnostics(payload))
+      finish(:rolling_back, :tick, :rolling_back, payload)
     end
+  end
+
+  def on_transition(state, :tick, _event_payload, payload) do
+    if expired?(payload.pending),
+      do: begin_rollback(state, :tick, nil, :revert_timeout, payload),
+      else: finish(state, :tick, state, refresh_diagnostics(payload))
   end
 
   @impl Finitomata
@@ -501,6 +509,24 @@ defmodule NervesGate.Gateway.Configuration do
          ) do
       {:ok, _coordinator} -> :ok
       {:error, reason} -> raise "Configuration step launch failed: #{inspect(reason)}"
+    end
+  end
+
+  defp after_committed(
+         :rolling_back,
+         %{rollback_effect: %{ref: ref}} = payload
+       ) do
+    rollback_payload = %{payload | rollback_effect: nil}
+
+    case Effect.start(
+           self(),
+           ref,
+           fn -> run_rollback(rollback_payload) end,
+           fn ref, outcome -> {:rollback_completed, {ref, outcome}} end,
+           timeout: payload.step_timeout
+         ) do
+      {:ok, _coordinator} -> :ok
+      {:error, reason} -> raise "Configuration rollback launch failed: #{inspect(reason)}"
     end
   end
 
@@ -559,6 +585,8 @@ defmodule NervesGate.Gateway.Configuration do
     end
   end
 
+  defp confirm_effects(%{pending: %{scope: :internet}}, _candidate), do: {:ok, :ok}
+
   defp confirm_effects(%{pending: %{scope: :tailnet}} = payload, candidate) do
     cleanup = payload.ops.commit_tailnet.(Context.tailnet_metadata(payload.current, candidate))
     {cleanup, :ok}
@@ -571,66 +599,170 @@ defmodule NervesGate.Gateway.Configuration do
     {cleanup, restore_subnet_router(candidate, payload.ops)}
   end
 
-  defp update_internet_candidate(state, command, payload, pending) do
-    with {:ok, candidate} <- Settings.update_internet(pending.candidate, command.params),
-         {:ok, _checks} <- payload.ops.internet.(Settings.internet(candidate)) do
-      persist_internet_candidate(state, command, payload, pending, candidate)
+  defp update_configured_settings(command, %{current: %{"configured" => false}} = payload) do
+    finish(
+      :idle,
+      :update_settings,
+      :idle,
+      put_result(payload, command.id, {:error, :gateway_not_configured})
+    )
+  end
+
+  defp update_configured_settings(%{scope: :internet} = command, payload) do
+    id = change_id()
+
+    with {:ok, candidate} <- Settings.build_internet(payload.current, command.params),
+         :ok <- Persistence.write_candidate(candidate, payload.root) do
+      case payload.ops.internet.(Settings.internet(candidate)) do
+        {:ok, _checks} -> complete_settings_update(command, payload, id, candidate)
+        {:error, reason} -> fail_settings_update(command, payload, candidate, reason)
+      end
     else
       {:error, reason} ->
-        finish(state, :update_internet, state, put_result(payload, command.id, {:error, reason}))
+        Persistence.clear_candidate(payload.root)
+
+        finish(
+          :idle,
+          :update_settings,
+          :idle,
+          put_result(payload, command.id, {:error, reason})
+        )
     end
   end
 
-  defp persist_internet_candidate(state, command, payload, pending, candidate) do
-    case Persistence.write_candidate(candidate, payload.root) do
-      :ok ->
-        pending = advance(pending, pending.phase, candidate)
+  defp update_configured_settings(%{scope: :cluster} = command, payload) do
+    group = command.params |> get_in(["cluster", "group"]) |> blank_nil()
 
+    case Cluster.validate_group(group) do
+      {:ok, group} -> apply_cluster_settings_update(command, payload, group)
+      {:error, reason} -> reject_settings_update(command, payload, reason)
+    end
+  end
+
+  defp update_configured_settings(%{scope: :tailnet} = command, payload) do
+    id = change_id()
+    auth_token = command.params |> Map.get("auth_token") |> blank_nil()
+
+    with :ok <- Settings.validate_auth_token(auth_token, payload.current),
+         :ok <- Persistence.write_candidate(payload.current, payload.root) do
+      apply_tailnet_settings_update(command, payload, auth_token, id)
+    else
+      {:error, reason} ->
+        Persistence.clear_candidate(payload.root)
+        reject_settings_update(command, payload, reason)
+    end
+  end
+
+  defp apply_cluster_settings_update(command, payload, group) do
+    candidate = Settings.bump(payload.current, %{"cluster" => %{"group" => group}})
+
+    with :ok <- Persistence.write_candidate(candidate, payload.root),
+         :ok <- payload.ops.cluster.(group) do
+      complete_settings_update(command, payload, change_id(), candidate)
+    else
+      {:error, reason} -> fail_settings_update(command, payload, candidate, reason)
+    end
+  end
+
+  defp apply_tailnet_settings_update(command, payload, auth_token, id) do
+    case apply_tailnet(payload, payload.current, auth_token, id) do
+      {:ok, staged_candidate} ->
+        persist_tailnet_settings_update(command, payload, id, staged_candidate)
+
+      {:error, reason} ->
+        fail_settings_update(command, payload, payload.current, reason)
+    end
+  end
+
+  defp persist_tailnet_settings_update(command, payload, id, staged_candidate) do
+    candidate = Settings.bump(staged_candidate, %{})
+
+    case Persistence.write_candidate(candidate, payload.root) do
+      :ok -> complete_settings_update(command, payload, id, candidate)
+      {:error, reason} -> fail_settings_update(command, payload, candidate, reason)
+    end
+  end
+
+  defp reject_settings_update(command, payload, reason) do
+    finish(
+      :idle,
+      :update_settings,
+      :idle,
+      put_result(payload, command.id, {:error, reason})
+    )
+  end
+
+  defp complete_settings_update(command, payload, id, candidate) do
+    pending = %{
+      id: id,
+      phase: :confirmation,
+      scope: command.scope,
+      source_connection: command.source_connection,
+      timeout: command.timeout,
+      deadline: deadline(command.timeout),
+      candidate: candidate
+    }
+
+    payload =
+      payload
+      |> Map.merge(%{pending: pending, last_error: nil})
+      |> put_result(command.id, {:ok, Context.public_pending(pending)})
+      |> refresh_diagnostics()
+      |> notify()
+
+    finish(:idle, :update_settings, :needs_confirmation, payload)
+  end
+
+  defp fail_settings_update(command, payload, candidate, reason) do
+    fail_candidate_application(
+      :update_settings,
+      command,
+      payload,
+      candidate,
+      reason,
+      command.scope
+    )
+  end
+
+  defp fail_candidate_application(event, command, payload, candidate, reason, scope) do
+    case restore_and_clear(payload, candidate, scope) do
+      :ok ->
         payload =
           payload
-          |> Map.merge(%{pending: pending, last_error: nil})
-          |> put_result(command.id, {:ok, Context.public_pending(pending)})
+          |> Map.merge(%{pending: nil, last_error: reason})
+          |> put_result(command.id, {:error, reason})
+          |> configure_access()
           |> refresh_diagnostics()
           |> notify()
 
-        finish(state, :update_internet, state, payload)
+        finish(:idle, event, :idle, payload)
 
-      {:error, reason} ->
-        payload.ops.internet_restore.(Settings.internet(pending.candidate))
-        error = {:candidate_write_failed, reason}
-        finish(state, :update_internet, state, put_result(payload, command.id, {:error, error}))
-    end
-  end
-
-  defp start_change(%{current: %{"configured" => false}} = payload, command, _phase),
-    do: {:error, put_result(payload, command.id, {:error, :gateway_not_configured})}
-
-  defp start_change(payload, command, phase) do
-    candidate = payload.current
-
-    case Persistence.write_candidate(candidate, payload.root) do
-      :ok ->
-        pending = %{
-          id: change_id(),
-          phase: phase,
-          scope: command.scope,
-          source_connection: command.source_connection,
-          timeout: command.timeout,
-          deadline: deadline(command.timeout),
-          candidate: candidate
+      {:error, rollback_reason} ->
+        context = %{
+          candidate: candidate,
+          scope: scope,
+          reason: reason,
+          reply_id: nil,
+          attempt: 1,
+          retry_at: nil
         }
 
+        error = {:rollback_failed, rollback_reason}
+
         payload =
           payload
-          |> Map.merge(%{pending: pending, last_error: nil})
-          |> put_result(command.id, {:ok, Context.public_pending(pending)})
+          |> Map.merge(%{
+            pending: nil,
+            rollback_context: context,
+            rollback_effect: %{ref: make_ref()},
+            last_error: error,
+            attempt: 1,
+            retry_at: nil
+          })
+          |> put_result(command.id, {:error, reason})
           |> refresh_diagnostics()
-          |> notify()
 
-        {:ok, payload}
-
-      {:error, reason} ->
-        {:error, put_result(payload, command.id, {:error, reason})}
+        finish(:idle, event, :rolling_back, payload, error: error, attempt: 1)
     end
   end
 
@@ -904,17 +1036,23 @@ defmodule NervesGate.Gateway.Configuration do
   defp recover_candidate(%{recovered_candidate: nil} = payload), do: payload
 
   defp recover_candidate(payload) do
-    result = restore_runtime(payload.current, payload.recovered_candidate, payload.ops, :complete)
-    clear_result = Persistence.clear_candidate(payload.root)
+    case restore_runtime(payload.current, payload.recovered_candidate, payload.ops, :complete) do
+      :ok ->
+        case Persistence.clear_candidate(payload.root) do
+          :ok ->
+            %{
+              payload
+              | recovered_candidate: nil,
+                last_error: :recovered_unkept_configuration
+            }
 
-    last_error =
-      case {result, clear_result} do
-        {:ok, :ok} -> :recovered_unconfirmed_configuration
-        {{:error, failures}, _clear} -> {:rollback_failed, failures}
-        {:ok, {:error, reason}} -> {:candidate_cleanup_failed, reason}
-      end
+          {:error, reason} ->
+            %{payload | last_error: {:candidate_cleanup_failed, reason}}
+        end
 
-    %{payload | recovered_candidate: nil, last_error: last_error}
+      {:error, failures} ->
+        %{payload | last_error: {:rollback_failed, failures}}
+    end
   end
 
   defp activate_current(payload) do
@@ -932,22 +1070,120 @@ defmodule NervesGate.Gateway.Configuration do
     if failures == [], do: payload, else: %{payload | last_error: {:activation_failed, failures}}
   end
 
-  defp rollback_candidate(payload, candidate, reason, scope \\ :complete) do
-    rollback_result = restore_runtime(payload.current, candidate, payload.ops, scope)
-    clear_result = Persistence.clear_candidate(payload.root)
+  defp begin_rollback(state, event, reply_id, reason, payload) do
+    context = %{
+      candidate: payload.pending.candidate,
+      scope: payload.pending.scope,
+      reason: reason,
+      reply_id: reply_id,
+      attempt: 0,
+      retry_at: nil
+    }
 
-    last_error =
-      case {rollback_result, clear_result} do
-        {:ok, :ok} -> reason
-        {{:error, failures}, _clear} -> {:rollback_failed, failures}
-        {:ok, {:error, clear_reason}} -> {:candidate_cleanup_failed, clear_reason}
-      end
+    payload = %{
+      payload
+      | rollback_context: context,
+        rollback_effect: %{ref: make_ref()},
+        last_error: nil
+    }
 
-    payload
-    |> Map.merge(%{pending: nil, last_error: last_error})
-    |> configure_access()
-    |> refresh_diagnostics()
-    |> notify()
+    finish(state, event, :rolling_back, refresh_diagnostics(payload))
+  end
+
+  defp run_rollback(%{rollback_context: context} = payload),
+    do: restore_and_clear(payload, context.candidate, context.scope)
+
+  defp restore_and_clear(payload, candidate, scope) do
+    case restore_runtime(payload.current, candidate, payload.ops, scope) do
+      :ok -> Persistence.clear_candidate(payload.root)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp complete_rollback({:returned, :ok}, payload) do
+    context = payload.rollback_context
+
+    payload =
+      payload
+      |> Map.merge(%{
+        pending: nil,
+        recovered_candidate: nil,
+        rollback_effect: nil,
+        rollback_context: nil,
+        last_error: context.reason,
+        attempt: 0,
+        retry_at: nil
+      })
+      |> maybe_put_rollback_result(context.reply_id, :ok)
+      |> configure_access()
+      |> refresh_diagnostics()
+      |> notify()
+
+    finish(:rolling_back, :rollback_completed, :idle, payload)
+  end
+
+  defp complete_rollback({:returned, {:error, reason}}, payload),
+    do: rollback_failed(payload, reason)
+
+  defp complete_rollback(:timed_out, payload),
+    do: rollback_failed(payload, :rollback_timed_out)
+
+  defp complete_rollback(:cancelled, payload),
+    do: rollback_failed(payload, :rollback_cancelled)
+
+  defp complete_rollback({:crashed, _kind, _reason, _stack}, payload),
+    do: rollback_failed(payload, :rollback_crashed)
+
+  defp complete_rollback(_invalid, payload),
+    do: rollback_failed(payload, :invalid_rollback_result)
+
+  defp rollback_failed(payload, reason) do
+    context = payload.rollback_context
+    attempt = context.attempt + 1
+    delay = min(:timer.seconds(5), :timer.seconds(attempt))
+    retry_at = System.monotonic_time(:millisecond) + delay
+    error = {:rollback_failed, reason}
+
+    context = %{
+      context
+      | attempt: attempt,
+        retry_at: retry_at,
+        reply_id: nil
+    }
+
+    payload =
+      payload
+      |> Map.merge(%{
+        rollback_effect: nil,
+        rollback_context: context,
+        last_error: error,
+        attempt: attempt,
+        retry_at: retry_at
+      })
+      |> maybe_put_rollback_result(payload.rollback_context.reply_id, {:error, error})
+      |> refresh_diagnostics()
+
+    finish(
+      :rolling_back,
+      :rollback_completed,
+      :rolling_back,
+      payload,
+      error: error,
+      attempt: attempt,
+      retry_at: retry_at
+    )
+  end
+
+  defp retry_due?(%{retry_at: retry_at}),
+    do: is_nil(retry_at) or System.monotonic_time(:millisecond) >= retry_at
+
+  defp maybe_put_rollback_result(payload, nil, _result), do: payload
+
+  defp maybe_put_rollback_result(payload, reply_id, result),
+    do: put_result(payload, reply_id, result)
+
+  defp restore_runtime(current, _candidate, ops, :internet) do
+    ops.internet_restore.(Settings.internet(current))
   end
 
   defp restore_runtime(current, candidate, ops, :tailnet) do
