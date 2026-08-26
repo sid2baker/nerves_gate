@@ -129,8 +129,8 @@ defmodule NervesGateWebTest do
 
       assert redirected_to(connection) == "/"
       assert_redirect(editor, "/")
-      assert NervesGate.configured?()
-      assert NervesGate.snapshot().state.configuration.pending == nil
+      assert configured?()
+      assert local_snapshot().state.configuration.pending == nil
     end)
   end
 
@@ -147,6 +147,15 @@ defmodule NervesGateWebTest do
     assert build_conn() |> get("/settings") |> response(404)
     assert build_conn() |> post("/api/setup/internet", %{}) |> response(404)
     assert build_conn() |> get("/api/setup/status") |> response(404)
+  end
+
+  test "local automation reaches commands through the backend API rather than the UI" do
+    body =
+      build_conn()
+      |> post("/api/configuration/tailnet", %{})
+      |> json_response(422)
+
+    assert body == %{"error" => ":candidate_required", "ok" => false}
   end
 
   test "the status page redirects unconfigured gateways to commissioning" do
@@ -222,7 +231,7 @@ defmodule NervesGateWebTest do
   test "stale replicas expose last-known alarms with an explicit warning" do
     alarm = %{id: "Remote.Alarm", description: "Remote gateway needs attention", level: :warning}
 
-    local_state = NervesGate.snapshot().state
+    local_state = local_snapshot().state
 
     remote_state = %{
       local_state
@@ -269,6 +278,9 @@ defmodule NervesGateWebTest do
   test "ordinary uplink addresses cannot visit management routes" do
     connection = %{build_conn() | remote_ip: {192, 168, 1, 50}}
     assert connection |> get("/api/status") |> response(403)
+
+    connection = %{build_conn() | remote_ip: {192, 168, 1, 50}}
+    assert connection |> post("/api/configuration/tailnet", %{}) |> response(403)
   end
 
   test "development setup network can observe status but not peer discovery" do
@@ -308,7 +320,7 @@ defmodule NervesGateWebTest do
   end
 
   test "status API explicitly serializes the canonical SSH address" do
-    fleet = NervesGate.fleet()
+    fleet = current_fleet()
 
     public_state = %{
       fleet.local.state
@@ -321,7 +333,7 @@ defmodule NervesGateWebTest do
     }
 
     fleet = put_in(fleet, [:local, :state], public_state)
-    body = fleet |> NervesGate.status() |> Jason.encode!() |> Jason.decode!()
+    body = fleet |> NervesGate.Session.status() |> Jason.encode!() |> Jason.decode!()
 
     assert get_in(body, ["local", "state", "ssh", "address"]) == "100.64.0.10"
   end
@@ -582,7 +594,7 @@ defmodule NervesGateWebTest do
   end
 
   defp dashboard_view(replicas \\ %{}, selected_device_id \\ nil) do
-    fleet = %{NervesGate.fleet() | replicas: replicas}
+    fleet = %{current_fleet() | replicas: replicas}
     local_device_id = fleet.local.state.device.device_id
 
     NervesGateWeb.StatusLive.View.build(
@@ -590,5 +602,22 @@ defmodule NervesGateWebTest do
       NervesGateWeb.Presence.count(),
       selected_device_id || local_device_id
     )
+  end
+
+  defp configured? do
+    with_session(fn session, _fleet -> NervesGate.configured?(session) end)
+  end
+
+  defp local_snapshot, do: current_fleet().local
+  defp current_fleet, do: with_session(fn _session, fleet -> fleet end)
+
+  defp with_session(function) do
+    {:ok, session, fleet} = NervesGate.connect()
+
+    try do
+      function.(session, fleet)
+    after
+      NervesGate.disconnect(session)
+    end
   end
 end

@@ -42,6 +42,15 @@ defmodule NervesGate.ClusterTest do
     %{machine: machine, tailnet: tailnet, runtime: runtime}
   end
 
+  test "cluster supervision preserves owner intent across peer-supervisor failures" do
+    assert {:ok, {_flags, children}} = NervesGate.Cluster.Supervisor.init([])
+
+    assert Enum.map(children, & &1.id) == [
+             NervesGate.Cluster,
+             NervesGate.Cluster.Peer.Supervisor
+           ]
+  end
+
   test "configured cluster blocks on Tailnet then reconciles online", context do
     assert :ok = Cluster.configure("field", context.machine)
     assert Cluster.diagnostics(context.machine).state == :blocked

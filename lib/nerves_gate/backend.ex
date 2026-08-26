@@ -29,22 +29,28 @@ defmodule NervesGate.Backend do
         tailnet_children() ++
         [
           NervesGate.DeviceState.Server,
-          {NervesGate.Commissioning,
-           payload: NervesGate.Commissioning.new(), name: NervesGate.Commissioning},
-          {NervesGate.Internet, payload: NervesGate.Internet.new(), name: NervesGate.Internet},
-          {NervesGate.Tailnet, payload: NervesGate.Tailnet.new(), name: NervesGate.Tailnet},
+          fresh_owner(NervesGate.Commissioning),
+          fresh_owner(NervesGate.Internet),
+          fresh_owner(NervesGate.Tailnet),
           NervesGate.SSH.Supervisor,
-          {NervesGate.SubnetRouter,
-           payload: NervesGate.SubnetRouter.new(), name: NervesGate.SubnetRouter},
+          fresh_owner(NervesGate.SubnetRouter),
           NervesGate.Cluster.Supervisor,
-          {NervesGate.Gateway.Configuration,
-           payload: NervesGate.Gateway.Configuration.new(), name: NervesGate.Gateway.Configuration},
+          fresh_owner(NervesGate.Gateway.Configuration),
           NervesGate.Dependencies,
           NervesGate.Alarms.Runtime,
-          NervesGate.DeviceState.Replica.Supervisor
+          NervesGate.DeviceState.Replica.Supervisor,
+          NervesGate.Session.Supervisor
         ]
 
     Supervisor.init(children, strategy: :rest_for_one)
+  end
+
+  @doc false
+  @spec start_owner(module()) :: GenServer.on_start()
+  def start_owner(owner), do: owner.start_link(payload: owner.new(), name: owner)
+
+  defp fresh_owner(owner) do
+    %{id: owner, start: {__MODULE__, :start_owner, [owner]}}
   end
 
   defp tailnet_children do

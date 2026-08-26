@@ -1,64 +1,120 @@
-defmodule NervesGateQEMU.FaultIntegrationTest do
-  use ExUnit.Case
-
-  alias NervesGateQEMU.Fault
-  alias NervesGateQEMU.Status
+defmodule NervesGateQEMU.ResilienceIntegrationTest do
+  use NervesGateQEMU.IntegrationCase, async: false
 
   @moduletag :integration
-  @moduletag timeout: 120_000
+  @moduletag timeout: 300_000
 
-  setup do
-    on_exit(fn -> Fault.heal_all() end)
-    :ok
+  test "three commissioned gateways form one fully replicated mesh", %{cluster: cluster} do
+    Enum.each(cluster.devices, fn device ->
+      status = Harness.fetch!(device)
+      assert Gateway.ready?(status)
+
+      expected = Map.values(cluster.ids) -- [Map.fetch!(cluster.ids, device.id)]
+
+      assert Enum.all?(expected, fn id ->
+               match?(%{"connected" => true}, Gateway.replica(status, id))
+             end)
+    end)
   end
 
-  test "a deterministic uplink disconnect is observable and heals through local HTTP" do
-    initial = Status.all().devices
+  test "uplink loss preserves accepted settings, marks replicas stale, and heals", %{
+    cluster: cluster
+  } do
+    victim = hd(cluster.devices)
+    before = Harness.fetch!(victim)
+    accepted_revision = Gateway.accepted_revision(before)
 
-    assert Enum.count_until(initial, 3) == 3,
-           "start at least three QEMU gateways before running fault integration tests"
-
-    assert Enum.all?(initial, &ready?/1),
-           "commission every QEMU gateway and wait for Internet, Tailnet, and cluster convergence"
-
-    victim = hd(initial)
+    disconnected_at = System.monotonic_time(:millisecond)
     assert :ok = Fault.link_down(victim.id)
 
-    assert_eventually(
-      fn ->
-        observed = device_status(victim.id)
-        observed.fault == :link_down and observed.link == :down and observed.internet == :offline
-      end,
-      "#{victim.id} did not report its disconnected uplink"
-    )
+    Enum.each(Harness.peers(cluster, victim.id), fn peer ->
+      replica = Harness.await_replica!(cluster, peer.id, victim.id, false, 10_000)
+      assert replica["state"]["configuration"]["configured"] == true
+    end)
+
+    assert System.monotonic_time(:millisecond) - disconnected_at < 10_000
+
+    disconnected =
+      Harness.await!("#{victim.id} offline Internet evidence", fn ->
+        case Gateway.fetch(victim) do
+          {:ok, status} ->
+            state = Gateway.state(status)
+
+            if Gateway.configured?(status) and get_in(state, ["internet", "state"]) == "offline",
+              do: {:ok, status},
+              else: {:retry, Gateway.summary(status)}
+
+          {:error, reason} ->
+            {:retry, reason}
+        end
+      end)
+
+    assert Gateway.configured?(disconnected)
+    assert Gateway.accepted_revision(disconnected) == accepted_revision
 
     assert :ok = Fault.heal(victim.id)
-
-    assert_eventually(
-      fn -> device_status(victim.id) |> ready?() end,
-      "#{victim.id} did not recover Internet, Tailnet, and cluster connectivity"
-    )
+    recovered = Harness.await_ready!(cluster, victim.id)
+    assert Gateway.configured?(recovered)
+    assert Gateway.accepted_revision(recovered) == accepted_revision
+    Harness.await_mesh!(cluster)
   end
 
-  defp device_status(id) do
-    Enum.find(Status.all().devices, &(&1.id == id)) || flunk("QEMU device disappeared: #{id}")
+  test "hard restart retains accepted intent and replicas resynchronize to the new boot", %{
+    cluster: cluster
+  } do
+    victim = Enum.at(cluster.devices, 1)
+    before = Harness.fetch!(victim)
+    old_boot_id = Gateway.boot_id(before)
+    accepted_revision = Gateway.accepted_revision(before)
+
+    assert :ok = Runner.restart(victim.id)
+
+    recovered =
+      Harness.await!("#{victim.id} restart with a new DeviceState boot ID", fn ->
+        case Gateway.fetch(victim) do
+          {:ok, status} ->
+            if Gateway.ready?(status) and Gateway.boot_id(status) != old_boot_id,
+              do: {:ok, status},
+              else: {:retry, Gateway.summary(status)}
+
+          {:error, reason} ->
+            {:retry, reason}
+        end
+      end)
+
+    assert Gateway.configured?(recovered)
+    assert Gateway.accepted_revision(recovered) == accepted_revision
+
+    Enum.each(Harness.peers(cluster, victim.id), fn observer ->
+      replica =
+        Harness.await_replica_boot!(
+          cluster,
+          observer.id,
+          victim.id,
+          Gateway.boot_id(recovered)
+        )
+
+      assert replica["boot_id"] == Gateway.boot_id(recovered)
+    end)
   end
 
-  defp ready?(device) do
-    device.vm == :running and device.link == :up and device.configured and
-      device.internet == :online and device.tailnet == :online and device.cluster == :online
+  test "a stopped VM remains as a stale replica and rejoins without commissioning", %{
+    cluster: cluster
+  } do
+    victim = List.last(cluster.devices)
+    accepted_revision = victim |> Harness.fetch!() |> Gateway.accepted_revision()
+
+    assert :ok = Runner.stop(victim.id)
+
+    Enum.each(Harness.peers(cluster, victim.id), fn observer ->
+      stale = Harness.await_replica!(cluster, observer.id, victim.id, false, 120_000)
+      assert stale["state"]["configuration"]["configured"] == true
+    end)
+
+    assert :ok = Runner.start(victim.id)
+    recovered = Harness.await_ready!(cluster, victim.id)
+    assert Gateway.configured?(recovered)
+    assert Gateway.accepted_revision(recovered) == accepted_revision
+    Harness.await_mesh!(cluster)
   end
-
-  defp assert_eventually(predicate, message, attempts \\ 60)
-
-  defp assert_eventually(predicate, message, attempts) when attempts > 0 do
-    if predicate.() do
-      :ok
-    else
-      Process.sleep(1_000)
-      assert_eventually(predicate, message, attempts - 1)
-    end
-  end
-
-  defp assert_eventually(_predicate, message, 0), do: flunk(message)
 end

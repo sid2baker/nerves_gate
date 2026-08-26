@@ -330,14 +330,15 @@ defmodule NervesGate.Internet do
 
   def summarize(interface, checks) do
     online = Connectivity.internet_ready?(checks)
+    reason = if online, do: nil, else: first_failure(checks)
 
     %Status{
       state: if(online, do: :online, else: :offline),
       interface: interface,
       online: online,
       ready: online,
-      reason: if(online, do: nil, else: first_failure(checks)),
-      checks: checks
+      reason: reason,
+      checks: public_checks(checks)
     }
   end
 
@@ -531,7 +532,7 @@ defmodule NervesGate.Internet do
   end
 
   defp observation_failure(from, payload, command_id, error) do
-    observed = with_state(payload.observed, :offline) |> Map.put(:reason, error)
+    observed = with_state(payload.observed, :offline) |> Map.put(:reason, public_error(error))
     payload = payload |> put_observation(observed) |> result(command_id, {:error, error})
     finish(from, :observation_completed, :offline, payload, error: error)
   end
@@ -665,9 +666,10 @@ defmodule NervesGate.Internet do
     do: Map.new(checks, fn {key, value} -> {key, public_check(value)} end)
 
   defp public_check(:ok), do: :ok
-  defp public_check({:error, reason}) when is_atom(reason), do: {:error, reason}
-  defp public_check(_value), do: {:error, :failed}
+  defp public_check({:error, reason}) when is_atom(reason), do: reason
+  defp public_check(_value), do: :failed
   defp public_error(reason) when is_atom(reason), do: reason
+  defp public_error({reason, _private}) when is_atom(reason), do: reason
   defp public_error(_reason), do: :operation_failed
   defp now, do: System.monotonic_time(:millisecond)
 

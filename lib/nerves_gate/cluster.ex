@@ -11,6 +11,7 @@ defmodule NervesGate.Cluster do
 
   alias NervesGate.Cluster.{Discovery, Distribution, Status}
   alias NervesGate.Cluster.Peer.Supervisor, as: PeerSupervisor
+  alias NervesGate.Gateway.{Configuration, Settings}
   alias NervesGate.Retry
 
   @group_pattern ~r/\A[A-Za-z0-9][A-Za-z0-9_-]*\z/
@@ -88,6 +89,7 @@ defmodule NervesGate.Cluster do
 
   @impl true
   def init(state) do
+    state = restore_desired_group(state)
     schedule_tick()
     publish_state(state)
     send(self(), :reconcile)
@@ -281,7 +283,26 @@ defmodule NervesGate.Cluster do
   end
 
   defp peers(%{peers: peers}) when is_map(peers), do: peers.statuses.()
-  defp peers(state), do: state.peers.statuses()
+
+  defp peers(state) do
+    state.peers.statuses()
+  catch
+    _kind, _reason -> []
+  end
+
+  defp restore_desired_group(%{desired: %{group: nil}} = state) do
+    case GenServer.whereis(Configuration) do
+      pid when is_pid(pid) ->
+        put_in(state, [:desired, :group], Configuration.current() |> Settings.cluster_group())
+
+      nil ->
+        state
+    end
+  catch
+    _kind, _reason -> state
+  end
+
+  defp restore_desired_group(state), do: state
 
   defp sync_peer_machines(peers, candidates, group, ops) when is_map(peers),
     do: peers.sync.(candidates, group, ops)

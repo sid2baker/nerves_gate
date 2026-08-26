@@ -93,11 +93,13 @@ defmodule NervesGate.InternetTest do
     assert length(TestInternetAdapter.state().calls) == calls
   end
 
-  test "summarization retains normalized diagnostic causes" do
+  test "summarization retains public normalized diagnostic causes" do
     checks = TestScenario.checks(%{physical_link: {:error, :no_carrier}})
+    status = Internet.summarize("eth0", checks)
 
-    assert %{online: false, ready: false, reason: :no_carrier, checks: ^checks} =
-             Internet.summarize("eth0", checks)
+    assert %{online: false, ready: false, reason: :no_carrier} = status
+    assert status.checks.physical_link == :no_carrier
+    assert NervesGate.DeviceState.public?(status)
   end
 
   defp start_machine(verifier, publisher \\ fn _status -> :ok end) do

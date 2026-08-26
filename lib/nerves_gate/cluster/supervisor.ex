@@ -14,10 +14,12 @@ defmodule NervesGate.Cluster.Supervisor do
   @impl true
   def init(options) do
     children = [
-      PeerSupervisor,
-      {Cluster, payload: Cluster.new(options), name: Cluster}
+      {Cluster, payload: Cluster.new(options), name: Cluster},
+      PeerSupervisor
     ]
 
+    # Peer infrastructure may restart without discarding the coordinator's
+    # desired group. An owner restart also rebuilds the peer infrastructure.
     Supervisor.init(children, strategy: :rest_for_one)
   end
 end

@@ -3,7 +3,7 @@ defmodule NervesGate.Tailnet.Enrollment do
 
   alias NervesGate.Identity
 
-  @ready_timeout 30_000
+  @ready_timeout 90_000
 
   @spec stage(String.t(), String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, atom()} | {:error, atom(), map()}
@@ -16,25 +16,16 @@ defmodule NervesGate.Tailnet.Enrollment do
 
     with :ok <- client.await_ready(timeout: 10_000),
          :ok <- cleanup_untracked_profile(client, previous_profile_id),
-         :ok <-
-           client.login(
-             auth_key: auth_key,
-             hostname: Identity.get().hostname,
-             nickname: nickname,
-             accept_dns: false
-           ),
-         {:ok, profile} <- client.current_profile() do
+         {:ok, profile} <- login_candidate(client, auth_key, nickname) do
       metadata = %{
         "previous_profile_id" => previous_profile_id,
         "candidate_profile_id" => profile.id
       }
 
-      with :ok <-
-             client.await_online(
-               timeout: @ready_timeout,
-               require: [:authenticated, :tailscale_ipv4]
-             ),
-           :ok <- client.set(ssh: false) do
+      deadline = System.monotonic_time(:millisecond) + @ready_timeout
+
+      with :ok <- await_candidate_online(client, deadline),
+           :ok <- set_candidate_preferences(client, deadline) do
         {:ok, metadata}
       else
         {:error, :online_timeout} -> {:error, :tailnet_online_timeout, metadata}
@@ -101,14 +92,97 @@ defmodule NervesGate.Tailnet.Enrollment do
     end
   end
 
-  defp cleanup_untracked_profile(_client, previous) when is_binary(previous), do: :ok
+  defp await_candidate_online(client, deadline) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 1)
 
-  defp cleanup_untracked_profile(client, nil) do
-    case client.profiles() do
-      {:ok, profiles} -> remove_profiles(client, profiles)
+    case client.await_online(
+           timeout: timeout,
+           require: [:authenticated, :tailscale_ipv4]
+         ) do
+      :ok -> :ok
+      {:error, reason} = error -> retry_transient(client, deadline, reason, error, :online)
+    end
+  end
+
+  defp set_candidate_preferences(client, deadline) do
+    case client.set(ssh: false) do
+      :ok -> :ok
+      {:error, reason} = error -> retry_transient(client, deadline, reason, error, :preferences)
+    end
+  end
+
+  defp retry_transient(client, deadline, reason, error, operation) do
+    if transient?(reason) and System.monotonic_time(:millisecond) < deadline do
+      Process.sleep(500)
+
+      case operation do
+        :online -> await_candidate_online(client, deadline)
+        :preferences -> set_candidate_preferences(client, deadline)
+      end
+    else
+      error
+    end
+  end
+
+  defp transient?(reason),
+    do: reason in [:server_unavailable, :daemon_restarting, :socket_unavailable]
+
+  defp login_candidate(client, auth_key, nickname) do
+    result =
+      client.login(
+        auth_key: auth_key,
+        hostname: Identity.get().hostname,
+        nickname: nickname,
+        accept_dns: false
+      )
+
+    case select_candidate_profile(client, nickname) do
+      {:ok, profile} -> {:ok, profile}
+      {:error, _reason} when result == :ok -> {:error, :candidate_profile_not_found}
+      {:error, _reason} -> result
+    end
+  end
+
+  defp select_candidate_profile(client, nickname) do
+    with {:ok, profiles} <- client.profiles(),
+         %Tailscale.Profile{} = profile <- Enum.find(profiles, &(&1.nickname == nickname)),
+         :ok <- maybe_switch_profile(client, profile) do
+      {:ok, %{profile | selected?: true}}
+    else
+      nil -> {:error, :candidate_profile_not_found}
       {:error, _reason} = error -> error
     end
   end
+
+  defp maybe_switch_profile(_client, %{selected?: true}), do: :ok
+  defp maybe_switch_profile(client, profile), do: client.switch_profile(profile.id)
+
+  defp cleanup_untracked_profile(_client, previous) when is_binary(previous), do: :ok
+
+  defp cleanup_untracked_profile(client, nil) do
+    with {:ok, profiles} <- client.profiles(),
+         :ok <- logout_selected_profile(client, profiles),
+         {:ok, remaining_profiles} <- client.profiles() do
+      remove_profiles(client, remaining_profiles)
+    end
+  end
+
+  defp logout_selected_profile(client, profiles) do
+    if Enum.any?(profiles, & &1.selected?) do
+      result =
+        if function_exported?(client, :logout, 0),
+          do: client.logout(),
+          else: client.cli("logout", [], mode: :mutation)
+
+      normalize_mutation_result(result)
+    else
+      :ok
+    end
+  end
+
+  defp normalize_mutation_result(:ok), do: :ok
+  defp normalize_mutation_result({:ok, _result}), do: :ok
+  defp normalize_mutation_result({:error, _reason} = error), do: error
 
   defp remove_profiles(client, profiles) do
     Enum.reduce_while(profiles, :ok, fn profile, :ok ->

@@ -27,11 +27,8 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   defp mount_editor(socket, connection_id, loopback_access, flash) do
-    {:ok, snapshot} =
-      if connected?(socket),
-        do: NervesGate.subscribe(),
-        else: {:ok, NervesGate.snapshot()}
-
+    {:ok, session, fleet} = NervesGate.connect()
+    snapshot = fleet.local
     status = snapshot.state.configuration
     mode = if status.configured and is_nil(status.pending), do: :entry, else: :editor
 
@@ -48,6 +45,10 @@ defmodule NervesGateWeb.CommissioningLive do
         revert_minutes: @default_revert_minutes,
         revert_timeout:
           if(status.configured, do: :timer.minutes(@default_revert_minutes), else: nil)
+      )
+      |> assign_private(
+        session: session,
+        session_monitor: Process.monitor(session)
       )
       |> maybe_put_accept_error(flash)
       |> refresh(snapshot)
@@ -450,39 +451,34 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   def handle_info(
-        {:device_state_event, _node, _boot_id, _revision,
-         {:state_reported, :configuration, %{configured: true, pending: nil}}},
-        %{assigns: %{mode: :editor}} = socket
+        {:nerves_gate_state_changed, session, fleet},
+        %{private: %{session: session}} = socket
       ) do
-    {:noreply, redirect(socket, to: ~p"/")}
-  end
+    previous_pending = socket.assigns.configuration.pending
+    socket = refresh(socket, fleet.local)
+    configuration = socket.assigns.configuration
 
-  def handle_info(
-        {:device_state_event, _node, _boot_id, _revision,
-         {:state_reported, :configuration, %{pending: nil}}},
-        socket
-      ) do
-    socket = socket |> refresh() |> assign(:editor_step, :internet)
-    {:noreply, socket}
-  end
+    cond do
+      socket.assigns.mode == :editor and configuration.configured and
+          is_nil(configuration.pending) ->
+        {:noreply, redirect(socket, to: ~p"/")}
 
-  def handle_info(
-        {:device_state_event, _node, boot_id, revision, event},
-        %{assigns: %{public_snapshot: %{boot_id: boot_id, revision: previous} = snapshot}} =
-          socket
-      )
-      when revision == previous + 1 do
-    case NervesGate.apply_event(snapshot.state, event) do
-      {:ok, state} ->
-        snapshot = %{snapshot | state: state, revision: revision}
-        {:noreply, refresh(socket, snapshot)}
+      not is_nil(previous_pending) and is_nil(configuration.pending) ->
+        {:noreply, assign(socket, :editor_step, :internet)}
 
-      :error ->
-        {:noreply, refresh(socket)}
+      true ->
+        {:noreply, socket}
     end
   end
 
-  def handle_info(_event, socket), do: {:noreply, refresh(socket)}
+  def handle_info(
+        {:DOWN, reference, :process, session, _reason},
+        %{private: %{session: session, session_monitor: reference}} = socket
+      ) do
+    {:stop, :nerves_gate_session_stopped, socket}
+  end
+
+  def handle_info(_event, socket), do: {:noreply, socket}
 
   defp start_change(socket, :complete, minutes) do
     {:noreply,
@@ -518,7 +514,9 @@ defmodule NervesGateWeb.CommissioningLive do
     end
   end
 
-  defp refresh(socket, snapshot \\ NervesGate.snapshot()) do
+  defp refresh(socket), do: refresh(socket, NervesGate.state(socket.private.session).local)
+
+  defp refresh(socket, snapshot) do
     configuration =
       snapshot.state.configuration ||
         %{configured: false, current: %{}, pending: nil, last_error: nil}
@@ -637,6 +635,12 @@ defmodule NervesGateWeb.CommissioningLive do
   end
 
   defp maybe_accept(_params, _connection_id, _tailnet_access), do: {:continue, nil}
+
+  defp assign_private(socket, assigns) do
+    Enum.reduce(assigns, socket, fn {key, value}, socket ->
+      put_in(socket.private[key], value)
+    end)
+  end
 
   defp maybe_put_accept_error(socket, nil), do: socket
   defp maybe_put_accept_error(socket, message), do: put_flash(socket, :error, message)

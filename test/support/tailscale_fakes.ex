@@ -20,31 +20,7 @@ defmodule NervesGate.TestTailscaleClient do
   def await_ready(_options), do: result(:await_ready)
   def await_online(_options), do: result(:await_online)
 
-  def login(options) do
-    Agent.get_and_update(__MODULE__, fn state ->
-      case state.login do
-        :ok ->
-          profiles =
-            state.profiles
-            |> Enum.map(&%{&1 | selected?: false})
-            |> then(
-              &[
-                %Profile{
-                  id: "candidate-profile",
-                  nickname: Keyword.get(options, :nickname),
-                  selected?: true
-                }
-                | &1
-              ]
-            )
-
-          {:ok, %{state | profiles: profiles}}
-
-        error ->
-          {error, state}
-      end
-    end)
-  end
+  def login(options), do: Agent.get_and_update(__MODULE__, &login_result(&1, options))
 
   def profiles, do: Agent.get(__MODULE__, &{:ok, &1.profiles})
 
@@ -55,6 +31,12 @@ defmodule NervesGate.TestTailscaleClient do
         [] -> {:error, :no_current_profile}
         _profiles -> {:error, :multiple_current_profiles}
       end
+    end)
+  end
+
+  def logout do
+    Agent.update(__MODULE__, fn state ->
+      %{state | profiles: Enum.reject(state.profiles, & &1.selected?)}
     end)
   end
 
@@ -94,13 +76,44 @@ defmodule NervesGate.TestTailscaleClient do
     end)
   end
 
-  defp result(key), do: Agent.get(__MODULE__, &Map.fetch!(&1, key))
+  defp login_result(%{login: :ok} = state, options),
+    do: apply_login(state, options, :ok)
+
+  defp login_result(%{login: {:applied, reply}} = state, options),
+    do: apply_login(state, options, reply)
+
+  defp login_result(state, _options), do: {state.login, state}
+
+  defp apply_login(state, options, reply) do
+    candidate = %Profile{
+      id: "candidate-profile",
+      nickname: Keyword.get(options, :nickname),
+      selected?: state.select_after_login
+    }
+
+    profiles = [candidate | Enum.map(state.profiles, &%{&1 | selected?: false})]
+    {reply, %{state | profiles: profiles}}
+  end
+
+  defp result(key), do: Agent.get_and_update(__MODULE__, &take_result(&1, key))
+
+  defp take_result(state, key) do
+    case Map.fetch!(state, key) do
+      {:sequence, [result | remaining]} ->
+        next = if remaining == [], do: result, else: {:sequence, remaining}
+        {result, Map.put(state, key, next)}
+
+      result ->
+        {result, state}
+    end
+  end
 
   defp defaults do
     %{
       await_ready: :ok,
       await_online: :ok,
       login: :ok,
+      select_after_login: true,
       profiles: [],
       preferences: %Preferences{},
       status: %Status{}

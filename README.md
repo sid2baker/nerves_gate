@@ -45,7 +45,8 @@ An unconfigured gateway starts the three-step editor immediately. A configured
 gateway chooses **Tailnet only**, **Cluster only**, or **All settings** together
 with the auto-revert time. Scoped changes leave every other accepted setting
 unchanged and skip unrelated commissioning steps. There is no `/settings`
-route, separate setup workflow, or commissioning API.
+route or separate setup workflow. The local JSON commissioning transport maps
+one-to-one onto the same guarded `NervesGate` commands used by LiveView.
 
 ## Backend model
 
@@ -62,6 +63,8 @@ resource owners → Gateway.Configuration FSM
 Dependencies         Alarms.Runtime
       ↓
 DeviceState.Replica FSM × remote gateway
+      ↓
+NervesGate.Session × connected client
 ```
 
 The architecture uses only Command, Event, and State. Imperative commands go to
@@ -75,21 +78,27 @@ are supervised GenServers.
 
 Private accepted settings, candidates, credentials, effect references, and
 rollback timing never enter DeviceState. Each remote gateway replica owns its
-boot ID, revision, retry, and connection metadata. It installs one atomic
-snapshot, applies ordered public events, and requests a new snapshot immediately
-on a boot-ID change or revision gap; events are never buffered for replay.
+boot ID, revision, retry, liveness lease, and connection metadata. It installs
+one atomic snapshot and then reduces ordered events pushed by the source. The
+source sends a lightweight heartbeat every second; missing the 2.5-second lease
+marks the retained snapshot stale without polling full state or waiting for
+Erlang's node-down timeout. A boot-ID change or revision gap requests a fresh
+snapshot immediately; events are never buffered for replay.
 
 ## Code organization
 
-`NervesGate` is the strict boundary between the web application and the backend.
-LiveViews and controllers request complete models and submit commands through
-that one module; they do not know about supervisors, settings files, Tailscale,
-or subsystem processes.
+`NervesGate` is the strict boundary between clients and the backend. A client
+connects once, receives a session PID plus complete initial fleet state, and is
+then pushed complete updates. The session owns snapshot installation, reducer
+application, revisions, and resynchronization. LiveViews and controllers submit
+commands through the thin facade and do not know about supervisors, settings
+files, Tailscale, or subsystem processes.
 
 Backend code is organized by bounded context rather than by module count:
 
 ```text
-nerves_gate.ex                   public backend API
+nerves_gate.ex                   thin session and command facade
+nerves_gate/session.ex           per-client live state projection
 nerves_gate/{internet,tailnet,cluster,ssh,subnet_router,commissioning}.ex
                                  one resource owner per subsystem
 nerves_gate/*/{status,runtime}.ex
@@ -218,14 +227,23 @@ The main page at `http://<tailscale-ip>/` provides:
 
 Each gateway is the sole sequencer for its canonical
 `NervesGate.DeviceState.State`. Connected gateways join every peer's independent
-snapshot/event stream and retain stale snapshots after disconnection. No fleet leader
-is required because each stream mutates only its owning device. Credentials,
-candidate internals, task metadata, and logger history are never replicated.
+snapshot/event stream and retain stale snapshots after disconnection. Changes
+are pushed and reduced locally; one-second source heartbeats detect silent
+partitions in about two to three seconds. Heartbeats carry only identity and
+revision metadata, do not mutate canonical state, and do not consume revisions.
+No fleet leader is required because each stream mutates only its owning device.
+Credentials, candidate internals, task metadata, and logger history are never
+replicated.
 
 ```elixir
-snapshot = NervesGate.snapshot()
-fleet = NervesGate.fleet()
-{:ok, initial_fleet} = NervesGate.subscribe_fleet()
+{:ok, session, initial_fleet} = NervesGate.connect()
+
+receive do
+  {:nerves_gate_state_changed, ^session, fleet} ->
+    fleet
+end
+
+:ok = NervesGate.disconnect(session)
 ```
 
 ## Firmware
@@ -272,6 +290,8 @@ asynchronously.
 mix nerves_gate.qemu help
 mix nerves_gate.qemu setup --count 3 --rebuild  # build current source, recreate disks, start
 mix nerves_gate.qemu setup --count 3            # reuse the existing firmware artifact
+mix nerves_gate.qemu commission                  # commission and converge every existing VM
+mix nerves_gate.qemu integration --count 3 --rebuild  # fresh cluster plus resilience suite
 mix nerves_gate.qemu add
 mix nerves_gate.qemu remove M04
 mix nerves_gate.qemu status
@@ -298,16 +318,36 @@ an isolated TAP/netem
 uplink layer; deterministic QMP link-down faults work with the current SLIRP
 networking.
 
-Once at least three gateways are commissioned and Internet, Tailnet, and cluster
-status have converged, run the deterministic fault test with:
+Put a reusable, pre-authorized Tailnet key in the process environment or the
+repository's ignored `.env` file:
+
+```sh
+NERVES_GATE_TAILSCALE_AUTH_KEY=tskey-auth-...
+```
+
+`commission` invokes the guarded backend commands through the local JSON
+transport; it does not run a browser or depend on rendered forms. The key is
+sent only to the Tailnet command and is never written to settings or test
+output. The easiest complete run is:
+
+```sh
+mix nerves_gate.qemu integration --count 3 --rebuild
+```
+
+It builds current firmware, recreates the requested disks, commissions every
+VM, waits for a fully replicated mesh, and runs disconnect/reconnect, hard
+restart, and stop/start scenarios. Tests use only the backend command transport
+and `nerves_gate.status.v3`; browser rendering has separate focused LiveView
+tests. Assertions verify accepted settings survive, offline replicas retain
+last-known state, and new DeviceState boot IDs replace stale snapshots.
+Host-side faults are always healed during cleanup.
+
+To rerun the integration tests against an already commissioned topology:
 
 ```sh
 cd tools/nerves_gate_qemu
 mix test --include integration test/integration/qemu_fault_test.exs
 ```
-
-The test observes failures through `/api/status` and always heals host-side
-fault state during cleanup.
 
 Tailscale grants must allow gateway tags to reach other gateways on TCP port `80`
 for group discovery and ports `4369` and `43769` for Erlang distribution.

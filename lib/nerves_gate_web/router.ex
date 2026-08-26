@@ -55,6 +55,14 @@ defmodule NervesGateWeb.Router do
     get("/discovery", DiscoveryController, :show)
   end
 
+  scope "/api/configuration", NervesGateWeb do
+    pipe_through([:api, :setup_access])
+    post("/internet", ConfigurationController, :internet)
+    post("/tailnet", ConfigurationController, :tailnet)
+    post("/cluster", ConfigurationController, :cluster)
+    post("/confirm", ConfigurationController, :confirm)
+  end
+
   defp put_remote_access(connection, _options) do
     connection
     |> Plug.Conn.put_session(

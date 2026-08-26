@@ -8,31 +8,34 @@ defmodule NervesGateWeb.StatusLive do
   alias NervesGateWeb.StatusLive.View
 
   @impl true
-  def mount(_params, session, socket) do
-    if NervesGate.configured?() do
-      mount_dashboard(session, socket)
+  def mount(_params, web_session, socket) do
+    {:ok, session, fleet} = NervesGate.connect()
+
+    if NervesGate.configured?(session) do
+      mount_dashboard(session, fleet, web_session, socket)
     else
+      :ok = NervesGate.disconnect(session)
       {:ok, redirect(socket, to: ~p"/commissioning")}
     end
   end
 
-  defp mount_dashboard(session, socket) do
-    {:ok, fleet} =
-      if connected?(socket),
-        do: NervesGate.subscribe_fleet(),
-        else: {:ok, NervesGate.fleet()}
-
+  defp mount_dashboard(session, fleet, web_session, socket) do
     model = dashboard_model(fleet)
-    remote_ip = Map.get(session, "remote_ip", "unknown")
+    remote_ip = Map.get(web_session, "remote_ip", "unknown")
 
     socket =
       socket
       |> assign(
-        dashboard_access: Map.get(session, "dashboard_access", false),
+        dashboard_access: Map.get(web_session, "dashboard_access", false),
         selected_device_id: model.local.id,
         presence_tracked: false
       )
-      |> assign_private(fleet: fleet, actor: NervesGate.actor_for_ip(remote_ip))
+      |> assign_private(
+        fleet: fleet,
+        actor: NervesGate.actor_for_ip(session, remote_ip),
+        session: session,
+        session_monitor: Process.monitor(session)
+      )
       |> assign_view()
       |> maybe_track_presence()
 
@@ -58,13 +61,13 @@ defmodule NervesGateWeb.StatusLive do
         {:noreply,
          socket
          |> put_flash(:info, "Subnet router enabled.")
-         |> refresh_dashboard()}
+         |> refresh_from_session()}
 
       {:error, reason} ->
         {:noreply,
          socket
          |> put_flash(:error, subnet_router_error(reason))
-         |> refresh_dashboard()}
+         |> refresh_from_session()}
     end
   end
 
@@ -74,13 +77,13 @@ defmodule NervesGateWeb.StatusLive do
         {:noreply,
          socket
          |> put_flash(:info, "Subnet router disabled. Remote gateway access is unchanged.")
-         |> refresh_dashboard()}
+         |> refresh_from_session()}
 
       {:error, reason} ->
         {:noreply,
          socket
          |> put_flash(:error, subnet_router_error(reason))
-         |> refresh_dashboard()}
+         |> refresh_from_session()}
     end
   end
 
@@ -90,7 +93,7 @@ defmodule NervesGateWeb.StatusLive do
         {:noreply,
          socket
          |> put_flash(:info, "Remote IEx enabled for Tailnet clients.")
-         |> refresh_dashboard()}
+         |> refresh_from_session()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, ssh_error(reason))}
@@ -103,7 +106,7 @@ defmodule NervesGateWeb.StatusLive do
         {:noreply,
          socket
          |> put_flash(:info, "Remote IEx disabled.")
-         |> refresh_dashboard()}
+         |> refresh_from_session()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, ssh_error(reason))}
@@ -112,26 +115,30 @@ defmodule NervesGateWeb.StatusLive do
 
   @impl true
   def handle_info(
-        {:device_state_event, _node, boot_id, revision, event},
-        %{private: %{fleet: %{local: %{boot_id: boot_id, revision: previous} = local} = fleet}} =
-          socket
-      )
-      when revision == previous + 1 do
-    case NervesGate.apply_event(local.state, event) do
-      {:ok, state} ->
-        local = %{local | state: state, revision: revision}
-        {:noreply, refresh_dashboard(socket, %{fleet | local: local})}
-
-      :error ->
-        {:noreply, refresh_dashboard(socket)}
-    end
+        {:nerves_gate_state_changed, session, fleet},
+        %{private: %{session: session}} = socket
+      ) do
+    {:noreply, refresh_dashboard(socket, fleet)}
   end
 
-  def handle_info(_backend_or_presence_event, socket) do
+  def handle_info(
+        {:DOWN, reference, :process, session, _reason},
+        %{private: %{session: session, session_monitor: reference}} = socket
+      ) do
+    {:stop, :nerves_gate_session_stopped, socket}
+  end
+
+  def handle_info(_presence_event, socket) do
     {:noreply, refresh_dashboard(socket)}
   end
 
-  defp refresh_dashboard(socket, fleet \\ NervesGate.fleet()) do
+  defp refresh_from_session(socket) do
+    refresh_dashboard(socket, NervesGate.state(socket.private.session))
+  end
+
+  defp refresh_dashboard(socket), do: refresh_dashboard(socket, socket.private.fleet)
+
+  defp refresh_dashboard(socket, fleet) do
     socket
     |> assign_private(fleet: fleet)
     |> assign_view()

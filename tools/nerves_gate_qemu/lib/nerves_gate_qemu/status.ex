@@ -2,6 +2,7 @@ defmodule NervesGateQEMU.Status do
   @moduledoc "Combines host/QMP state with each gateway's local diagnostics API."
 
   alias NervesGateQEMU.Fault
+  alias NervesGateQEMU.Gateway
   alias NervesGateQEMU.Runner
 
   @timeout 2_000
@@ -53,10 +54,7 @@ defmodule NervesGateQEMU.Status do
     link = if vm == :running, do: Fault.link_state(device), else: :unknown
     fault = if vm == :running, do: Fault.status(device), else: :unknown
 
-    gateway =
-      if vm == :running,
-        do: fetch_gateway(device.status_url),
-        else: {:error, :vm_unavailable}
+    gateway = if vm == :running, do: Gateway.fetch(device), else: {:error, :vm_unavailable}
 
     gateway_status(device, vm, link, fault, gateway)
   end
@@ -129,17 +127,6 @@ defmodule NervesGateQEMU.Status do
       link: link,
       fault: fault
     }
-  end
-
-  defp fetch_gateway(url) do
-    request = {String.to_charlist(url), []}
-    options = [timeout: @timeout, connect_timeout: @timeout]
-
-    case :httpc.request(:get, request, options, body_format: :binary) do
-      {:ok, {{_version, 200, _reason}, _headers, body}} -> Jason.decode(body)
-      {:ok, {{_version, status, _reason}, _headers, _body}} -> {:error, {:http, status}}
-      {:error, reason} -> {:error, reason}
-    end
   end
 
   defp layer_state(status) when is_binary(status) do

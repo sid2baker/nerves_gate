@@ -101,7 +101,7 @@ defmodule NervesGate.Gateway.Configuration do
       reply: nil,
       effect_timeout: Keyword.get(options, :effect_timeout, 30_000),
       startup_timeout: Keyword.get(options, :startup_timeout, 120_000),
-      step_timeout: Keyword.get(options, :step_timeout, 120_000),
+      step_timeout: Keyword.get(options, :step_timeout, 180_000),
       publisher: Keyword.get(options, :publisher, &publish_configuration/1)
     })
   end
@@ -155,7 +155,7 @@ defmodule NervesGate.Gateway.Configuration do
 
   @spec stage_tailnet(String.t(), map(), GenServer.server()) :: {:ok, map()} | {:error, term()}
   def stage_tailnet(id, params, server \\ __MODULE__),
-    do: command(server, :stage_tailnet, %{change_id: id, params: params}, 45_000)
+    do: command(server, :stage_tailnet, %{change_id: id, params: params}, 165_000)
 
   @spec stage_cluster(String.t(), map(), GenServer.server()) :: {:ok, map()} | {:error, term()}
   def stage_cluster(id, params, server \\ __MODULE__),

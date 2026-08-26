@@ -6,6 +6,8 @@ defmodule Mix.Tasks.Qemu do
     mix qemu setup [--count N] [--rebuild]
     mix qemu add
     mix qemu remove DEVICE
+    mix qemu commission [--group GROUP]
+    mix qemu integration [--count N] [--rebuild] [--group GROUP]
     mix qemu start|stop|restart|reset [DEVICE|all]
     mix qemu status [DEVICE|all]
     mix qemu observe [DEVICE|all] [--json]
@@ -28,7 +30,7 @@ defmodule Mix.Tasks.Qemu do
   @lifecycle ~w(start stop restart reset status prepare)
   @help_arguments ~w(help --help -h)
 
-  alias NervesGateQEMU.Runner
+  alias NervesGateQEMU.{Environment, Harness, Runner}
 
   @impl Mix.Task
   def run(arguments), do: dispatch(List.first(arguments) || "setup", arguments)
@@ -41,6 +43,8 @@ defmodule Mix.Tasks.Qemu do
   defp dispatch("remove", arguments), do: run!(fn -> Runner.remove(Enum.at(arguments, 1, "")) end)
   defp dispatch("observe", arguments), do: observe(Enum.drop(arguments, 1))
   defp dispatch("logs", arguments), do: logs(Enum.at(arguments, 1, "all"))
+  defp dispatch("commission", arguments), do: commission(Enum.drop(arguments, 1))
+  defp dispatch("integration", arguments), do: integration(Enum.drop(arguments, 1))
 
   defp dispatch(action, arguments) when action in @lifecycle,
     do: lifecycle(action, Enum.at(arguments, 1, "all"))
@@ -54,6 +58,28 @@ defmodule Mix.Tasks.Qemu do
     run!(fn -> Runner.setup(count: count) end)
     ports = Enum.map_join(Runner.devices(), ", ", & &1.port)
     Mix.shell().info("Fresh commissioning pages ready on ports #{ports} at /commissioning")
+  end
+
+  defp commission(arguments) do
+    group = group_option!(arguments, "usage: mix qemu commission [--group GROUP]")
+    {:ok, _applications} = Application.ensure_all_started(:inets)
+    Harness.ensure_cluster!(count: length(Runner.devices()), group: group)
+    Mix.shell().info("QEMU gateways are commissioned and fully connected in #{group}")
+  end
+
+  defp integration(arguments) do
+    {count, rebuild?, group} = integration_options!(arguments)
+
+    if rebuild? do
+      build_firmware!()
+      run!(fn -> Runner.setup(count: count) end)
+    else
+      ensure_firmware!()
+    end
+
+    {:ok, _applications} = Application.ensure_all_started(:inets)
+    Harness.ensure_cluster!(count: count, group: group)
+    run_integration_tests!()
   end
 
   defp lifecycle("status", target) do
@@ -275,6 +301,49 @@ defmodule Mix.Tasks.Qemu do
       :ok -> :ok
       {:ok, value} -> Mix.shell().info(inspect(value))
       {:error, reason} -> Mix.raise("QEMU operation failed: #{inspect(reason)}")
+    end
+  end
+
+  defp group_option!(arguments, usage) do
+    case OptionParser.parse(arguments, strict: [group: :string]) do
+      {options, [], []} -> Keyword.get(options, :group, Environment.cluster_group())
+      _invalid -> Mix.raise(usage)
+    end
+  end
+
+  defp integration_options!(arguments) do
+    case OptionParser.parse(arguments,
+           strict: [count: :integer, rebuild: :boolean, group: :string]
+         ) do
+      {options, [], []} ->
+        count = Keyword.get(options, :count, 3)
+
+        if count in 3..12 do
+          {
+            count,
+            Keyword.get(options, :rebuild, false),
+            Keyword.get(options, :group, Environment.cluster_group())
+          }
+        else
+          Mix.raise("QEMU integration machine count must be between 3 and 12")
+        end
+
+      _invalid ->
+        Mix.raise("usage: mix qemu integration [--count N] [--rebuild] [--group GROUP]")
+    end
+  end
+
+  defp run_integration_tests! do
+    case System.cmd(
+           "mix",
+           ["test", "--include", "integration", "test/integration"],
+           cd: File.cwd!(),
+           env: [{"MIX_ENV", "test"}],
+           into: IO.stream(),
+           stderr_to_stdout: true
+         ) do
+      {_output, 0} -> :ok
+      {_output, status} -> Mix.raise("QEMU integration tests failed with status #{status}")
     end
   end
 

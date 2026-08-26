@@ -8,7 +8,8 @@ defmodule NervesGateQEMU.MixProject do
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      aliases: aliases()
+      aliases: aliases(),
+      test_ignore_filters: [&String.starts_with?(&1, "test/support/")]
     ]
   end
 

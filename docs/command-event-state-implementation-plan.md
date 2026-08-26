@@ -21,6 +21,8 @@ migration ledger.
 6. DeviceState is typed, secret-free, atomically snapshotable, and revisioned.
 7. Erlang references remain private; durable workflows use serializable IDs.
 8. A revision gap or boot-ID change installs a fresh snapshot without buffering.
+9. Remote liveness uses a bounded heartbeat lease, not full-state polling or
+   Erlang's distribution timeout.
 
 ## Process selection
 
@@ -44,8 +46,8 @@ Ordinary GenServers:
 - Cluster distribution coordination.
 - Subnet-route reconciliation.
 - Commissioning interface reconciliation.
-- DeviceState serving, dependency projection, alarms, startup gating, and
-  replica scanning.
+- DeviceState serving, dependency projection, alarms, startup gating, replica
+  scanning, and disposable client-session projection.
 
 A timer, retry counter, or stateful process is not by itself a reason to create
 an FSM. A graph dominated by self-transitions or worker phases is a signal to
@@ -68,6 +70,7 @@ flowchart TD
   Cluster --> DeviceState
   SubnetRouter --> DeviceState
   DeviceState --> Replicas[Replica FSMs]
+  Replicas --> Sessions[NervesGate.Session clients]
 ```
 
 ## Idiomatic Finitomata subset
@@ -120,13 +123,44 @@ Owners publish complete slices such as:
 {:state_reported, :ssh, %NervesGate.SSH.Status{}}
 ```
 
-`DeviceState.Server` authenticates the current supervised owner, recursively
-rejects secrets, deduplicates unchanged slices, increments the revision, stores
-the new projection, and broadcasts one event. It performs no lifecycle work.
+`DeviceState.State.apply_event/2` is the pure reducer. Every operation is a
+past-tense `:state_reported` tuple containing one owner's complete public slice.
+The reducer validates the source and slice shape and replaces only that source's
+field. It never reads runtime state, performs effects, emits commands, or merges
+partially observed structures. Reducing the same ordered event stream from the
+same snapshot therefore produces the same projection.
 
-Consumers install one atomic snapshot and then apply exactly ordered events.
-They request another snapshot on malformed input, a revision gap, or a boot-ID
-change.
+`DeviceState.Server` is the serializer for one gateway. For every submitted
+operation it:
+
+1. authenticates the caller as the current local supervised owner of the slice;
+2. recursively rejects secrets and BEAM-local runtime values;
+3. invokes the reducer;
+4. drops an operation whose resulting state is unchanged;
+5. increments its boot-scoped revision; and
+6. broadcasts the accepted operation after the subscriber's atomic join.
+
+The server performs no lifecycle work. Desired commands never enter this stream;
+only complete committed or observed public reality does.
+
+Consumers atomically join to obtain `{boot_id, revision, state}` and then apply
+only the exact next revision. Duplicate revisions are ignored. Malformed input,
+a revision gap, or a boot-ID change discards incremental synchronization and
+installs another atomic snapshot without buffering or replay.
+
+Remote reducer clients additionally receive a one-second heartbeat containing
+only the source node, boot ID, and current revision. Heartbeats are transport
+evidence rather than state operations: they never enter the reducer or consume
+a revision. If no event or heartbeat arrives within the 2.5-second lease, the
+client immediately publishes its retained snapshot as disconnected. Successful
+rejoining installs a snapshot before connectivity is reported again.
+
+`NervesGate.Session` is the client boundary over these streams. `connect/0`
+returns a disposable session PID and complete initial fleet state. That process
+owns reducer application, duplicate handling, gap recovery, and remote-replica
+updates, then pushes complete `{:nerves_gate_state_changed, session, fleet}`
+messages to its monitored client. LiveViews, controllers, and integration tools
+never apply DeviceState events themselves.
 
 ## Dependency direction
 
@@ -135,9 +169,9 @@ NervesGate facade → owners → runtime/platform boundaries
 owners → DeviceState → web/API/alarms/dependencies/replicas
 ```
 
-The web layer uses only the `NervesGate` facade and public state types. Runtime
-modules do not know DeviceState exists. Dependencies only forward public
-Tailnet evidence to SSH, Cluster, and SubnetRouter; they own no lifecycle.
+The web layer uses only the thin `NervesGate` session and command facade.
+Runtime modules do not know DeviceState exists. Dependencies only forward
+public Tailnet evidence to SSH, Cluster, and SubnetRouter; they own no lifecycle.
 
 ## Validation
 

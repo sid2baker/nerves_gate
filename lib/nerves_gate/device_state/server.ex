@@ -4,8 +4,10 @@ defmodule NervesGate.DeviceState.Server do
 
   The server validates authenticated state-owner reports, replaces exactly one
   public slice, advances a revision only when public state changes, and sends
-  the accepted event to monitored subscribers. It never issues lifecycle
-  commands or performs subsystem work.
+  the accepted event to monitored subscribers. It also emits lightweight
+  heartbeats to remote reducer clients so they can detect a silent partition
+  without polling snapshots. It never issues lifecycle commands or performs
+  subsystem work.
   """
 
   use GenServer
@@ -14,7 +16,9 @@ defmodule NervesGate.DeviceState.Server do
   alias NervesGate.DeviceState.State
   alias NervesGate.Identity
 
-  defstruct [:state, :boot_id, :owners, revision: 0, subscribers: %{}]
+  @heartbeat_interval 1_000
+
+  defstruct [:state, :boot_id, :owners, :heartbeat_interval, revision: 0, subscribers: %{}]
 
   @type snapshot :: %{
           boot_id: String.t(),
@@ -47,14 +51,14 @@ defmodule NervesGate.DeviceState.Server do
 
   @type subscriber :: pid() | {:finitomata, pid()}
 
-  @spec subscribe(subscriber(), GenServer.server()) :: {:ok, snapshot()}
-  def subscribe(subscriber \\ self(), server \\ __MODULE__)
+  @spec subscribe(subscriber(), GenServer.server(), timeout()) :: {:ok, snapshot()}
+  def subscribe(subscriber \\ self(), server \\ __MODULE__, timeout \\ 5_000)
 
-  def subscribe(subscriber, server) when is_pid(subscriber),
-    do: GenServer.call(server, {:subscribe, subscriber, :message})
+  def subscribe(subscriber, server, timeout) when is_pid(subscriber),
+    do: GenServer.call(server, {:subscribe, subscriber, :message}, timeout)
 
-  def subscribe({:finitomata, subscriber}, server) when is_pid(subscriber),
-    do: GenServer.call(server, {:subscribe, subscriber, :finitomata})
+  def subscribe({:finitomata, subscriber}, server, timeout) when is_pid(subscriber),
+    do: GenServer.call(server, {:subscribe, subscriber, :finitomata}, timeout)
 
   @spec hydrated?(GenServer.server()) :: boolean()
   def hydrated?(server \\ __MODULE__), do: GenServer.call(server, :hydrated?)
@@ -64,12 +68,15 @@ defmodule NervesGate.DeviceState.Server do
     public_state = Keyword.get(options, :initial_state, State.new())
     public_state = maybe_bootstrap_device(public_state, options)
 
-    {:ok,
-     %__MODULE__{
-       state: public_state,
-       boot_id: Keyword.get_lazy(options, :boot_id, &new_boot_id/0),
-       owners: Map.merge(@default_owners, Map.new(Keyword.get(options, :owners, %{})))
-     }}
+    server = %__MODULE__{
+      state: public_state,
+      boot_id: Keyword.get_lazy(options, :boot_id, &new_boot_id/0),
+      owners: Map.merge(@default_owners, Map.new(Keyword.get(options, :owners, %{}))),
+      heartbeat_interval: Keyword.get(options, :heartbeat_interval, @heartbeat_interval)
+    }
+
+    schedule_heartbeat(server)
+    {:ok, server}
   end
 
   @impl true
@@ -93,6 +100,12 @@ defmodule NervesGate.DeviceState.Server do
     do: {:reply, {:error, :invalid_event}, server}
 
   @impl true
+  def handle_info(:heartbeat, server) do
+    broadcast_heartbeat(server)
+    schedule_heartbeat(server)
+    {:noreply, server}
+  end
+
   def handle_info({:DOWN, reference, :process, subscriber, _reason}, server) do
     case Map.get(server.subscribers, subscriber) do
       %{reference: ^reference} ->
@@ -162,6 +175,22 @@ defmodule NervesGate.DeviceState.Server do
     end)
   end
 
+  defp broadcast_heartbeat(server) do
+    heartbeat = %{
+      node: node(),
+      boot_id: server.boot_id,
+      revision: server.revision
+    }
+
+    Enum.each(server.subscribers, fn
+      {subscriber, %{delivery: :finitomata}} ->
+        GenServer.cast(subscriber, {:device_state_heartbeat_received, heartbeat})
+
+      {_subscriber, %{delivery: :message}} ->
+        :ok
+    end)
+  end
+
   defp monitor_subscriber(server, subscriber, delivery) do
     case Map.fetch(server.subscribers, subscriber) do
       {:ok, metadata} ->
@@ -201,6 +230,10 @@ defmodule NervesGate.DeviceState.Server do
       name: identity.hostname,
       firmware_version: Application.spec(:nerves_gate, :vsn) |> to_string()
     }
+  end
+
+  defp schedule_heartbeat(%{heartbeat_interval: interval}) do
+    Process.send_after(self(), :heartbeat, interval)
   end
 
   defp new_boot_id do

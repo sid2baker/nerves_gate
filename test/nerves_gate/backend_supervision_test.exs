@@ -3,6 +3,16 @@ defmodule NervesGate.BackendSupervisionTest do
 
   alias NervesGate.DeviceState.Server
 
+  test "stateful owners rebuild their payload on every supervised start" do
+    assert {:ok, {_flags, children}} = NervesGate.Backend.init([])
+
+    configuration =
+      Enum.find(children, &(&1.id == NervesGate.Gateway.Configuration))
+
+    assert configuration.start ==
+             {NervesGate.Backend, :start_owner, [NervesGate.Gateway.Configuration]}
+  end
+
   test "DeviceState failure restarts every publisher and rehydrates the public state" do
     old = %{
       server: Process.whereis(Server),

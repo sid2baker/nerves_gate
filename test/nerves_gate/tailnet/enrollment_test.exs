@@ -39,6 +39,26 @@ defmodule NervesGate.Tailnet.EnrollmentTest do
     assert {:ok, nil} = Enrollment.current_profile_id()
   end
 
+  test "continues when login times out after creating the candidate profile" do
+    TestTailscaleClient.put(:login, {:applied, {:error, :server_unavailable}})
+
+    assert {:ok, metadata} =
+             Enrollment.stage("tskey-auth-candidate", "change-123", nil)
+
+    assert metadata["candidate_profile_id"] == "candidate-profile"
+    assert {:ok, "candidate-profile"} = Enrollment.current_profile_id()
+  end
+
+  test "selects the profile created by login when the CLI leaves it unselected" do
+    TestTailscaleClient.put(:select_after_login, false)
+
+    assert {:ok, metadata} =
+             Enrollment.stage("tskey-auth-candidate", "change-123", nil)
+
+    assert metadata["candidate_profile_id"] == "candidate-profile"
+    assert {:ok, "candidate-profile"} = Enrollment.current_profile_id()
+  end
+
   test "initial enrollment removes an untracked local profile" do
     TestTailscaleClient.put(:profiles, [
       %Profile{id: "orphan-profile", selected?: true}
@@ -107,6 +127,18 @@ defmodule NervesGate.Tailnet.EnrollmentTest do
              })
 
     refute Enum.any?(TestTailscaleClient.state().profiles, &(&1.id == "slot-b"))
+  end
+
+  test "online readiness survives a transient Tailscale server restart" do
+    TestTailscaleClient.put(
+      :await_online,
+      {:sequence, [{:error, :server_unavailable}, :ok]}
+    )
+
+    assert {:ok, metadata} =
+             Enrollment.stage("tskey-auth-candidate", "change-123", nil)
+
+    assert metadata["candidate_profile_id"] == "candidate-profile"
   end
 
   test "failed online readiness returns rollback metadata" do

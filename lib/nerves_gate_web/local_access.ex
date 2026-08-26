@@ -43,7 +43,17 @@ defmodule NervesGateWeb.LocalAccess do
   defp allowed?(:setup, ip), do: setup?(ip)
 
   defp allowed?(:home, ip) do
-    if NervesGate.configured?(), do: dashboard?(ip), else: setup?(ip)
+    case NervesGate.connect() do
+      {:ok, session, _state} ->
+        try do
+          if NervesGate.configured?(session), do: dashboard?(ip), else: setup?(ip)
+        after
+          NervesGate.disconnect(session)
+        end
+
+      {:error, _reason} ->
+        setup?(ip)
+    end
   catch
     :exit, _reason -> setup?(ip)
   end

@@ -87,6 +87,17 @@ defmodule NervesGate.DeviceState.ServerTest do
     refute inspect(Server.state(server)) =~ "secret"
   end
 
+  test "remote reducer clients receive lightweight boot and revision heartbeats", %{
+    server: server
+  } do
+    assert {:ok, _snapshot} = Server.subscribe({:finitomata, self()}, server)
+    send(server, :heartbeat)
+
+    assert_receive {:"$gen_cast",
+                    {:device_state_heartbeat_received,
+                     %{node: _node, boot_id: "boot-a", revision: 0}}}
+  end
+
   test "subscriber monitors remain outside canonical state", %{server: server} do
     client = spawn(fn -> Process.sleep(:infinity) end)
     assert {:ok, _snapshot} = Server.subscribe(client, server)

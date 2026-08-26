@@ -3,14 +3,20 @@ defmodule NervesGateTest do
 
   alias NervesGate.DeviceState.State
 
-  test "is the typed public Command/Event/State boundary" do
-    assert %{state: %State{}} = NervesGate.snapshot()
-    assert %{local: %{state: %State{}}, replicas: replicas} = NervesGate.fleet()
-    assert is_map(replicas)
-    assert is_boolean(NervesGate.configured?())
+  test "connects clients to complete live state behind a thin command boundary" do
+    assert {:ok, session, %{local: %{state: %State{}}, replicas: replicas}} =
+             NervesGate.connect()
 
-    assert %{schema: "nerves_gate.status.v3", local: %{state: state}} = NervesGate.status()
+    assert is_pid(session)
+    assert is_map(replicas)
+    assert is_boolean(NervesGate.configured?(session))
+    assert NervesGate.state(session).local.state.__struct__ == State
+
+    assert %{schema: "nerves_gate.status.v3", local: %{state: state}} =
+             NervesGate.status(session)
+
     assert is_map(state)
+    assert :ok = NervesGate.disconnect(session)
   end
 
   test "web code does not reach through the backend boundary" do
