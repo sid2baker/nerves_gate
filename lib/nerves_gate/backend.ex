@@ -29,6 +29,7 @@ defmodule NervesGate.Backend do
         tailnet_children() ++
         [
           NervesGate.DeviceState.Server,
+          fresh_owner(NervesGate.Firmware),
           fresh_owner(NervesGate.Commissioning),
           fresh_owner(NervesGate.Internet),
           fresh_owner(NervesGate.Tailnet),

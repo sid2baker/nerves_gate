@@ -7,7 +7,8 @@ config :nerves_gate,
   internet_adapter: NervesGate.Internet.HostAdapter,
   tailscale_enabled: false,
   internet_poll_interval: 60_000,
-  cluster_poll_interval: 60_000
+  cluster_poll_interval: 60_000,
+  firmware: [platform: NervesGate.Firmware.Platform.Host]
 
 if config_env() == :test do
   config :nerves_gate,

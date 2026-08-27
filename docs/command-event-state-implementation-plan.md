@@ -23,6 +23,11 @@ migration ledger.
 8. A revision gap or boot-ID change installs a fresh snapshot without buffering.
 9. Remote liveness uses a bounded heartbeat lease, not full-state polling or
    Erlang's distribution timeout.
+10. Firmware installation can reach a platform only after detached manifest,
+    digest, fwup signature, metadata, compatibility, and health validation.
+11. A trial remains unvalidated until sustained health and explicit acceptance
+    from a fresh Tailnet connection; the previous known-good image remains the
+    fallback until then.
 
 ## Process selection
 
@@ -33,6 +38,8 @@ Current FSMs:
 
 - `NervesGate.Gateway.Configuration` — explicit scoped updates, candidate
   staging, Keep confirmation, timeout, promotion, and retrying rollback.
+- `NervesGate.Firmware` — discovery, persistent download, verification,
+  preflight, inactive-slot installation, trial health, acceptance, and rollback.
 - `NervesGate.Internet` — apply, verify, restore, and retry transaction.
 - `NervesGate.Cluster.Peer` — discovery, group classification, connection, and
   backoff for one peer.
@@ -55,6 +62,8 @@ use a GenServer.
 
 ```mermaid
 flowchart TD
+  Firmware[Firmware FSM] --> Platform[Firmware.Platform contract]
+  Firmware --> DeviceState
   Configuration[Gateway.Configuration FSM] --> Internet[Internet FSM]
   Configuration --> Tailnet[Tailnet observer]
   Configuration --> SSH[SSH reconciler]
@@ -107,6 +116,31 @@ changes remote access and must support explicit Keep confirmation and rollback.
 Opening `/commissioning` is inert: only a submitted scoped Update command creates
 a candidate. Unkept candidates revert on their deadline, and failed rollback
 effects retain the candidate and retry rather than declaring success.
+
+## Firmware transaction
+
+Firmware is a separate resource owner and DeviceState slice. GitHub Releases is
+an untrusted distribution source: exact manifest bytes must pass detached
+Ed25519 verification before their artifact URL or metadata is used. The artifact
+is downloaded to persistent storage, resumed safely, fsynced, and checked for
+size, SHA-256, fwup signature, and exact product/system/platform/architecture,
+version, UUID, and VCS metadata before preflight.
+
+The owner depends on a generic `NervesGate.Firmware.Platform` contract, never on
+partition names or bootloader flags. A platform that cannot report automatic
+trial fallback is read-only. Installation records a durable serializable journal
+before writing the inactive candidate. A new unvalidated boot runs public-state
+health checks until stable; explicit acceptance requires a fresh Tailnet session
+and commits through the platform. Timeout, sustained management loss, explicit
+rollback, or any unvalidated reboot returns to the previous known-good image.
+After fallback, the platform synchronizes its physically running slot and
+next-boot authority before another inactive-slot write is legal. The journal is
+cleared only after committed validation or after the restored firmware observes
+completed fallback.
+
+Shared `/data` migrations must remain backward-compatible while a firmware is a
+trial. Destructive migrations are deferred until validation or require their own
+rollback-safe strategy.
 
 ## Runtime effects
 

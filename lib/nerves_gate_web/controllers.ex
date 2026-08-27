@@ -114,6 +114,73 @@ defmodule NervesGateWeb.ConfigurationController do
   end
 end
 
+defmodule NervesGateWeb.FirmwareController do
+  @moduledoc "Tailnet-only transport for firmware lifecycle commands."
+
+  use NervesGateWeb, :controller
+
+  alias NervesGateWeb.LocalAccess
+
+  def check(connection, _params), do: command_result(connection, NervesGate.check_firmware())
+
+  def prepare(connection, %{"release_id" => id} = params) do
+    command_result(
+      connection,
+      NervesGate.prepare_firmware(id, Map.get(params, "connection_id", command_id()))
+    )
+  end
+
+  def prepare(connection, _params), do: command_result(connection, {:error, :release_required})
+
+  def install(connection, %{"release_id" => id} = params) do
+    command_result(
+      connection,
+      NervesGate.install_firmware(id, Map.get(params, "connection_id", command_id()))
+    )
+  end
+
+  def install(connection, _params), do: command_result(connection, {:error, :release_required})
+
+  def accept(connection, %{"trial_id" => id}) do
+    case NervesGate.connect() do
+      {:ok, session, fleet} ->
+        try do
+          actor = %{
+            id: command_id(),
+            tailnet?: LocalAccess.tailnet?(connection.remote_ip),
+            boot_id: fleet.local.boot_id
+          }
+
+          command_result(connection, NervesGate.accept_firmware(id, actor))
+        after
+          NervesGate.disconnect(session)
+        end
+
+      {:error, _reason} ->
+        command_result(connection, {:error, :state_unavailable})
+    end
+  end
+
+  def accept(connection, _params), do: command_result(connection, {:error, :trial_required})
+
+  def rollback(connection, %{"trial_id" => id}),
+    do: command_result(connection, NervesGate.rollback_firmware(id))
+
+  def rollback(connection, _params), do: command_result(connection, {:error, :trial_required})
+
+  defp command_result(connection, :ok), do: json(connection, %{ok: true})
+
+  defp command_result(connection, {:error, reason}) do
+    connection
+    |> put_status(:unprocessable_entity)
+    |> json(%{ok: false, error: inspect(reason)})
+  end
+
+  defp command_id do
+    18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+  end
+end
+
 defmodule NervesGateWeb.ErrorHTML do
   @moduledoc false
   use NervesGateWeb, :html

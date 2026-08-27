@@ -98,7 +98,8 @@ start_node() {
   "$QEMU" "${accel[@]}" -machine q35 -m 1024 -smp 2 -display none -monitor none \
     -qmp "unix:$qmp_socket,server=on,wait=off" \
     -chardev "socket,id=serial$index,path=$serial_socket,server=on,wait=off,logfile=$STATE/$node.serial.log,logappend=on" \
-    -serial "chardev:serial$index" -no-reboot -uuid "$uuid" \
+    -serial "chardev:serial$index" -uuid "$uuid" \
+    -device i6300esb \
     -drive "file=$disk,if=virtio,format=raw" \
     -netdev "user,id=uplink$index" \
     -device "virtio-net-pci,id=uplink_device_$index,netdev=uplink$index,mac=$uplink_mac" \
@@ -107,7 +108,54 @@ start_node() {
     >"$STATE/$node.qemu.log" 2>&1 &
 
   echo $! >"$pidfile"
-  print_location "$node" "started"
+
+  for _ in $(seq 1 50); do
+    if ! kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+      echo "$node failed to start" >&2
+      test ! -s "$STATE/$node.qemu.log" || cat "$STATE/$node.qemu.log" >&2
+      rm -f "$pidfile"
+      return 1
+    fi
+
+    if node_running "$node" && test -S "$serial_socket" && test -S "$qmp_socket"; then
+      print_location "$node" "started"
+      return
+    fi
+
+    sleep 0.1
+  done
+
+  echo "$node start timed out waiting for QEMU sockets" >&2
+  kill -KILL "$(cat "$pidfile")" 2>/dev/null || true
+  rm -f "$pidfile" "$serial_socket" "$qmp_socket"
+  return 1
+}
+
+power_cut_node() {
+  local node pidfile pid=""
+  node=$(normalize_node "$1")
+  pidfile="$STATE/$node.pid"
+
+  if node_running "$node"; then
+    pid=$(cat "$pidfile")
+    kill -KILL "$pid" 2>/dev/null || true
+
+    # A hard power cut is about guest semantics, not racing the replacement
+    # host process. Wait until QEMU releases the image and forwarded port before
+    # allowing a subsequent start.
+    for _ in $(seq 1 50); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+
+    if kill -0 "$pid" 2>/dev/null; then
+      echo "$node power cut timed out waiting for QEMU to exit" >&2
+      return 1
+    fi
+  fi
+
+  rm -f "$pidfile" "$STATE/$node.serial.sock" "$STATE/$node.qmp.sock"
+  echo "$node power cut"
 }
 
 stop_node() {
@@ -151,6 +199,7 @@ case "$command" in
   prepare) for node in "${selected[@]}"; do prepare_node "$node"; done ;;
   start) for node in "${selected[@]}"; do start_node "$node"; done ;;
   stop) for node in "${selected[@]}"; do stop_node "$node"; done ;;
+  power-cut) for node in "${selected[@]}"; do power_cut_node "$node"; done ;;
   restart) for node in "${selected[@]}"; do stop_node "$node"; start_node "$node"; done ;;
   reset)
     for node in "${selected[@]}"; do
@@ -172,7 +221,7 @@ case "$command" in
     done
     ;;
   *)
-    echo "usage: $0 {prepare|start|stop|restart|reset|remove|status} [M01|M02|...|all]" >&2
+    echo "usage: $0 {prepare|start|stop|power-cut|restart|reset|remove|status} [M01|M02|...|all]" >&2
     exit 2
     ;;
 esac

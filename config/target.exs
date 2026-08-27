@@ -1,5 +1,19 @@
 import Config
 
+qemu_firmware_public_key = "QQ7mTLG7ip0Wu5PYksxiwID9sXip67R374bCbmLilWY="
+release_api_url = System.get_env("NERVES_GATE_RELEASE_API_URL", "https://api.github.com")
+
+firmware_public_keys =
+  System.get_env(
+    "NERVES_GATE_FWUP_PUBLIC_KEYS",
+    if(config_env() == :dev, do: qemu_firmware_public_key, else: "")
+  )
+  |> String.split(",", trim: true)
+
+if firmware_public_keys == [] do
+  raise "NERVES_GATE_FWUP_PUBLIC_KEYS is required for production firmware"
+end
+
 # Use Ringlogger as the logger backend and remove :console.
 # See https://ring-logger.hexdocs.pm/readme.html for more information on
 # configuring ring_logger.
@@ -10,14 +24,43 @@ config :logger, backends: [RingLogger]
 # library documentation for more control in ordering how OTP
 # applications are started and handling failures.
 
-config :shoehorn, init: [:nerves_runtime, :vintage_net]
+config :shoehorn,
+  init: [:nerves_runtime, :vintage_net],
+  handler: NervesGate.ShoehornHandler,
+  retry_applications: [:nerves_runtime],
+  retry_attempts: 1,
+  resume_application: :nerves_gate
 
-# This custom GRUB system does not yet implement trial-boot validation or
-# automatic fallback. Enabling StartupGuard makes a normal QEMU boot exhaust
-# validation retries and reboot, so leave it disabled until GRUB supports it.
+# NervesGate owns trial validation so firmware is never committed merely because
+# OTP started. The system boot contract performs fallback on any unvalidated reboot.
 config :nerves_runtime, startup_guard_enabled: false
 
-config :nerves_gate, startup_gate_enabled: true
+config :nerves_gate,
+  startup_gate_enabled: true,
+  firmware: [
+    platform: NervesGate.Firmware.Platform.Nerves,
+    enabled: true,
+    automatic_fallback: true,
+    system: "nerves_system_nerves_gate",
+    repository: "sid2baker/nerves_gate",
+    api_url: release_api_url,
+    allow_insecure_http: URI.parse(release_api_url).scheme == "http",
+    manifest_public_keys: firmware_public_keys,
+    fwup_public_keys: firmware_public_keys,
+    reboot_method:
+      if(config_env() == :dev and Mix.target() == :x86_64,
+        do: :kernel_sysrq,
+        else: :nerves_runtime
+      ),
+    free_space_bytes:
+      if(config_env() == :dev and Mix.target() == :x86_64,
+        do: 2 * 1024 * 1024 * 1024,
+        else: nil
+      ),
+    trial_timeout: String.to_integer(System.get_env("NERVES_GATE_TRIAL_TIMEOUT_MS", "900000")),
+    stable_window: String.to_integer(System.get_env("NERVES_GATE_STABLE_WINDOW_MS", "60000")),
+    health_grace: String.to_integer(System.get_env("NERVES_GATE_HEALTH_GRACE_MS", "120000"))
+  ]
 
 config :nerves_gate,
   frame_ancestors:

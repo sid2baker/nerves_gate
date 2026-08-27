@@ -47,6 +47,7 @@ defmodule NervesGate.DeviceState.StateTest do
     events = [
       {:state_reported, :device,
        %{device_id: "gate-a", name: "Gate A", firmware_version: "1.0.0"}},
+      {:state_reported, :firmware, firmware()},
       {:state_reported, :configuration, %{configured: false}},
       {:state_reported, :commissioning,
        %NervesGate.Commissioning.Status{state: :disabled, active: [], mode: :disabled}},
@@ -78,6 +79,15 @@ defmodule NervesGate.DeviceState.StateTest do
   defp apply!(state, event) do
     assert {:ok, state} = State.apply_event(state, event)
     state
+  end
+
+  defp firmware do
+    %NervesGate.Firmware.Status{
+      supported: false,
+      phase: :unsupported,
+      current: %{version: "1.0.0"},
+      validation: :unsupported
+    }
   end
 
   defp internet(online) do

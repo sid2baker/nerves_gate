@@ -50,7 +50,7 @@ defmodule NervesGateQEMU.Commissioner do
         drive(device, auth_key, group, connection_id, tailnet_attempts)
 
       configuration["pending"]["phase"] == "confirmation" ->
-        tailnet_ipv4 = get_in(status, ["local", "state", "tailnet", "ipv4"])
+        tailnet_ipv4 = await_tailnet_ipv4(device, 60_000)
         keep!(device, tailnet_ipv4, configuration["pending"]["id"])
         await_configured(device, 60_000)
 
@@ -118,6 +118,27 @@ defmodule NervesGateQEMU.Commissioner do
     case Gateway.fetch(device) do
       {:ok, status} -> status
       {:error, reason} -> raise "#{device.id} status unavailable: #{inspect(reason)}"
+    end
+  end
+
+  defp await_tailnet_ipv4(device, timeout) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_await_tailnet_ipv4(device, deadline)
+  end
+
+  defp do_await_tailnet_ipv4(device, deadline) do
+    ipv4 = device |> fetch!() |> get_in(["local", "state", "tailnet", "ipv4"])
+
+    cond do
+      is_binary(ipv4) ->
+        ipv4
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        raise "#{device.id} candidate has no Tailnet address for guarded acceptance"
+
+      true ->
+        Process.sleep(500)
+        do_await_tailnet_ipv4(device, deadline)
     end
   end
 

@@ -1,0 +1,66 @@
+name: Firmware release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  x86_64:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: prod
+      MIX_TARGET: x86_64
+      NERVES_GATE_VERSION: ${{ github.event.release.tag_name }}
+      NERVES_FW_VCS_IDENTIFIER: ${{ github.sha }}
+      NERVES_GATE_FWUP_PRIVATE_KEY: ${{ secrets.NERVES_GATE_FWUP_PRIVATE_KEY }}
+      NERVES_GATE_FWUP_PUBLIC_KEYS: ${{ vars.NERVES_GATE_FWUP_PUBLIC_KEYS }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28.1'
+          elixir-version: '1.20.3'
+
+      - name: Install firmware tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes fwup squashfs-tools xz-utils
+
+      - name: Install dependencies
+        run: |
+          mix local.hex --force
+          mix local.rebar --force
+          mix archive.install hex nerves_bootstrap --force
+          mix deps.get
+
+      - name: Build firmware
+        env:
+          NERVES_GATE_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          export NERVES_GATE_VERSION="${NERVES_GATE_VERSION#v}"
+          mix firmware --output nerves_gate.fw
+
+      - name: Sign firmware and manifest
+        env:
+          NERVES_GATE_VERSION: ${{ github.event.release.tag_name }}
+        run: |
+          test -n "$NERVES_GATE_FWUP_PRIVATE_KEY"
+          printf '%s' "$NERVES_GATE_FWUP_PRIVATE_KEY" > "$RUNNER_TEMP/fwup-key.priv"
+          chmod 600 "$RUNNER_TEMP/fwup-key.priv"
+          export NERVES_GATE_VERSION="${NERVES_GATE_VERSION#v}"
+          mix nerves_gate.firmware.release \
+            --firmware nerves_gate.fw \
+            --output dist \
+            --private-key-file "$RUNNER_TEMP/fwup-key.priv"
+          rm -f "$RUNNER_TEMP/fwup-key.priv"
+
+      - name: Upload signed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber

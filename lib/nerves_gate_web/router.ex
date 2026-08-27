@@ -45,6 +45,11 @@ defmodule NervesGateWeb.Router do
     live("/commissioning", CommissioningLive, :index)
   end
 
+  scope "/", NervesGateWeb do
+    pipe_through([:browser, :tailnet])
+    live("/update", UpdateLive, :index)
+  end
+
   scope "/api", NervesGateWeb do
     pipe_through([:api, :home_access])
     get("/status", StatusController, :show)
@@ -53,6 +58,15 @@ defmodule NervesGateWeb.Router do
   scope "/api", NervesGateWeb do
     pipe_through([:api, :tailnet])
     get("/discovery", DiscoveryController, :show)
+  end
+
+  scope "/api/firmware", NervesGateWeb do
+    pipe_through([:api, :tailnet])
+    post("/check", FirmwareController, :check)
+    post("/prepare", FirmwareController, :prepare)
+    post("/install", FirmwareController, :install)
+    post("/accept", FirmwareController, :accept)
+    post("/rollback", FirmwareController, :rollback)
   end
 
   scope "/api/configuration", NervesGateWeb do

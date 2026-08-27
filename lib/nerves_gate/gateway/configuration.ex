@@ -194,11 +194,34 @@ defmodule NervesGate.Gateway.Configuration do
   def diagnostics(server \\ __MODULE__), do: server |> Diagnostics.state() |> Diagnostics.view()
 
   @doc false
+  @spec busy?(GenServer.server()) :: boolean()
+  def busy?(server \\ __MODULE__) do
+    case Diagnostics.state(server) do
+      %Finitomata.State{current: :idle} -> false
+      %Finitomata.State{} -> true
+      nil -> true
+    end
+  end
+
+  @doc false
   @spec report_public_state(GenServer.server()) :: :ok | {:error, term()}
   def report_public_state(server \\ __MODULE__) do
     case Diagnostics.transition(server, :public_state_requested) do
       {:ok, _state} -> :ok
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp guarded_step(step, payload) do
+    if payload.ops.firmware_busy.() do
+      finish(
+        step.from,
+        step.event,
+        step.from,
+        put_result(payload, step.command.id, {:error, :firmware_update_in_progress})
+      )
+    else
+      execute_step(step.from, step.event, step.command, payload)
     end
   end
 
@@ -424,11 +447,29 @@ defmodule NervesGate.Gateway.Configuration do
   def on_transition(:rolling_back, :rollback_completed, _stale, _payload),
     do: {:error, :stale_rollback_completion}
 
-  def on_transition(:idle, :configure_subnet_router, command, payload),
-    do: begin_runtime_change(:subnet_router, command, payload)
+  def on_transition(:idle, :configure_subnet_router, command, payload) do
+    if payload.ops.firmware_busy.(),
+      do:
+        finish(
+          :idle,
+          :configure_subnet_router,
+          :idle,
+          put_result(payload, command.id, {:error, :firmware_update_in_progress})
+        ),
+      else: begin_runtime_change(:subnet_router, command, payload)
+  end
 
-  def on_transition(:idle, :configure_ssh, command, payload),
-    do: begin_runtime_change(:ssh, command, payload)
+  def on_transition(:idle, :configure_ssh, command, payload) do
+    if payload.ops.firmware_busy.(),
+      do:
+        finish(
+          :idle,
+          :configure_ssh,
+          :idle,
+          put_result(payload, command.id, {:error, :firmware_update_in_progress})
+        ),
+      else: begin_runtime_change(:ssh, command, payload)
+  end
 
   def on_transition(
         :persisting_runtime_change,
@@ -503,7 +544,7 @@ defmodule NervesGate.Gateway.Configuration do
     case Effect.start(
            self(),
            step.ref,
-           fn -> execute_step(step.from, step.event, step.command, execution_payload) end,
+           fn -> guarded_step(step, execution_payload) end,
            fn ref, outcome -> {:configuration_step_completed, {ref, outcome}} end,
            timeout: payload.step_timeout
          ) do

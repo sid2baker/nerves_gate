@@ -2,7 +2,7 @@ defmodule NervesGate.MixProject do
   use Mix.Project
 
   @app :nerves_gate
-  @version "0.1.0"
+  @version System.get_env("NERVES_GATE_VERSION", "0.1.0")
   @all_targets [:x86_64]
 
   def project do

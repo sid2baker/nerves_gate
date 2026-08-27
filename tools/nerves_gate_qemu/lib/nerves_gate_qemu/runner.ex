@@ -80,6 +80,9 @@ defmodule NervesGateQEMU.Runner do
   @spec restart(:all | String.t()) :: :ok | {:error, term()}
   def restart(target \\ :all), do: lifecycle("restart", target)
 
+  @spec power_cut(:all | String.t()) :: :ok | {:error, term()}
+  def power_cut(target \\ :all), do: lifecycle("power-cut", target)
+
   @spec reset(:all | String.t()) :: :ok | {:error, term()}
   def reset(target \\ :all), do: lifecycle("reset", target)
 
@@ -101,6 +104,9 @@ defmodule NervesGateQEMU.Runner do
 
   @spec manifest_path() :: Path.t()
   def manifest_path, do: Path.join(state_root(), "topology.json")
+
+  @spec release_root() :: Path.t()
+  def release_root, do: Path.join(state_root(), "releases")
 
   defp lifecycle(action, target) do
     transaction(fn ->

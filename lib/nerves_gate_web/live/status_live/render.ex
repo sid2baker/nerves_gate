@@ -33,7 +33,10 @@ defmodule NervesGateWeb.StatusLive.Render do
           </div>
 
           <div class="flex flex-wrap items-center gap-2 sm:gap-3">
-            <.link_button href={~p"/commissioning"}>Settings</.link_button>
+            <.link_button href={~p"/update"}>Firmware</.link_button>
+            <.link_button href={~p"/commissioning"} class="bg-zinc-800 text-zinc-100 hover:bg-zinc-700">
+              Settings
+            </.link_button>
             <div class="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2 text-right">
               <strong class="block text-sm text-zinc-200">{@view.local.hostname}</strong>
               <span class="block font-mono text-xs text-zinc-500">{@view.local.ipv4 || "No Tailnet IP"}</span>
@@ -294,7 +297,9 @@ defmodule NervesGateWeb.StatusLive.Render do
       {"Remote IEx", ssh_label(node.ssh)},
       {"SSH address", ssh_address(node.ssh)},
       {"BEAM node", format_node(node.cluster.node)},
-      {"Firmware", node.firmware_version},
+      {"Firmware", firmware_version(node)},
+      {"Firmware validation", humanize(node.firmware.validation)},
+      {"Update available", available_firmware(node.firmware)},
       {"Revision", node.revision},
       {"Connection", if(node.connected, do: "Connected", else: "Stale")}
     ]
@@ -372,6 +377,12 @@ defmodule NervesGateWeb.StatusLive.Render do
       other -> humanize(other)
     end
   end
+
+  defp firmware_version(%{firmware: %{current: %{version: version}}}), do: version
+  defp firmware_version(node), do: node.firmware_version
+
+  defp available_firmware(%{available: %{version: version}}), do: version
+  defp available_firmware(_firmware), do: "No newer release"
 
   defp format_node(nil), do: "Disabled"
   defp format_node(node), do: to_string(node)

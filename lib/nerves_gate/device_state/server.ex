@@ -28,6 +28,7 @@ defmodule NervesGate.DeviceState.Server do
         }
 
   @default_owners %{
+    firmware: NervesGate.Firmware,
     configuration: NervesGate.Gateway.Configuration,
     commissioning: NervesGate.Commissioning,
     internet: NervesGate.Internet,

@@ -43,6 +43,15 @@ defmodule NervesGate.StartupGateTest do
   defp device,
     do: %{device_id: "gate-a", name: "Gate A", firmware_version: "1.0.0"}
 
+  defp disabled(:firmware) do
+    %NervesGate.Firmware.Status{
+      supported: false,
+      phase: :unsupported,
+      current: %{version: "1.0.0"},
+      validation: :unsupported
+    }
+  end
+
   defp disabled(:configuration), do: %{configured: false}
 
   defp disabled(:commissioning),

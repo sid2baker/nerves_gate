@@ -28,8 +28,23 @@ defmodule NervesGateQEMU.Gateway do
 
   @spec command_at(String.t(), String.t(), map(), timeout()) :: :ok | {:error, term()}
   def command_at(base_url, command, params, timeout \\ 180_000) do
-    url = command_url(base_url, command)
+    request_command(command_url(base_url, "/api/configuration", command), params, timeout)
+  end
 
+  @spec firmware_command(Runner.device(), String.t(), map(), timeout()) ::
+          :ok | {:error, term()}
+  def firmware_command(device, command, params, timeout \\ 180_000) do
+    with {:ok, status} <- fetch(device),
+         address when is_binary(address) <- get_in(status, ["local", "state", "tailnet", "ipv4"]) do
+      base_url = "http://#{address}/api/status"
+      request_command(command_url(base_url, "/api/firmware", command), params, timeout)
+    else
+      nil -> {:error, :tailnet_address_unavailable}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp request_command(url, params, timeout) do
     request = {
       String.to_charlist(url),
       [{~c"content-type", ~c"application/json"}],
@@ -63,6 +78,9 @@ defmodule NervesGateQEMU.Gateway do
     configured?(status) and layer(status, "internet") == "online" and
       layer(status, "tailnet") == "online" and layer(status, "cluster") == "online"
   end
+
+  @spec firmware(map()) :: map()
+  def firmware(status), do: get_in(status, ["local", "state", "firmware"]) || %{}
 
   @spec device_id(map()) :: String.t() | nil
   def device_id(status), do: get_in(status, ["local", "state", "device", "device_id"])
@@ -109,7 +127,7 @@ defmodule NervesGateQEMU.Gateway do
     end
   end
 
-  defp command_url(status_url, command) do
+  defp command_url(status_url, prefix, command) do
     encoded_command =
       command
       |> String.split("/", trim: true)
@@ -117,7 +135,7 @@ defmodule NervesGateQEMU.Gateway do
 
     status_url
     |> URI.parse()
-    |> Map.put(:path, "/api/configuration/#{encoded_command}")
+    |> Map.put(:path, "#{prefix}/#{encoded_command}")
     |> Map.put(:query, nil)
     |> URI.to_string()
   end

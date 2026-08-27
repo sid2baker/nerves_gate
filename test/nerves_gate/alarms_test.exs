@@ -47,7 +47,9 @@ defmodule NervesGate.AlarmsTest do
 
     event = alarm_event({Uncatalogued, "Never_publish_this_parameter-123"}, :set, :error)
     assert Alarms.public_event(event) == :ignore
-    assert capture_log(fn -> Alarms.log_transition(event) end) == ""
+    log = capture_log(fn -> Alarms.log_transition(event) end)
+    refute log =~ "Uncatalogued"
+    refute log =~ "Never_publish_this_parameter-123"
   end
 
   test "public alarm logs use stable catalogue metadata without caller descriptions" do

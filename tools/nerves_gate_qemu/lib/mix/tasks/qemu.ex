@@ -71,11 +71,17 @@ defmodule Mix.Tasks.Qemu do
     {count, rebuild?, group} = integration_options!(arguments)
 
     if rebuild? do
+      build_release_fixture!()
       build_firmware!()
-      run!(fn -> Runner.setup(count: count) end)
     else
       ensure_firmware!()
+      ensure_release_fixture!()
     end
+
+    # Every integration run starts from newly provisioned known-good disks.
+    # Firmware transactions intentionally survive VM restarts, so reusing disks
+    # here would leak the previous run's staged artifact or trial journal.
+    run!(fn -> Runner.setup(count: count) end)
 
     {:ok, _applications} = Application.ensure_all_started(:inets)
     Harness.ensure_cluster!(count: count, group: group)
@@ -367,19 +373,143 @@ defmodule Mix.Tasks.Qemu do
     unless File.exists?(Runner.firmware_path()), do: build_firmware!()
   end
 
+  defp ensure_release_fixture! do
+    required = ["index-0.2.0.json", "index-0.3.0.json", "index-wrong.json"]
+
+    unless Enum.all?(required, &File.regular?(Path.join(Runner.release_root(), &1))) do
+      Mix.raise("signed firmware fixtures are missing; rerun integration with --rebuild")
+    end
+  end
+
   defp build_firmware! do
     firmware = Runner.firmware_path()
     File.mkdir_p!(Path.dirname(firmware))
     Mix.shell().info("Building current x86_64 firmware at #{firmware}…")
+    build_project_firmware!(firmware, "0.1.0")
+  end
 
-    case System.cmd("mix", ["firmware", "--output", firmware],
+  defp build_release_fixture! do
+    root = Runner.release_root()
+
+    private_key =
+      Path.join(
+        Runner.project_root(),
+        "tools/nerves_gate_qemu/fixtures/firmware/qemu-fwup-key.priv"
+      )
+
+    File.rm_rf!(root)
+    File.mkdir_p!(root)
+
+    Enum.each(["0.2.0", "0.3.0"], fn version ->
+      unsigned = Path.join(root, "candidate-#{version}-unsigned.fw")
+      Mix.shell().info("Building signed QEMU update fixture #{version}…")
+      build_project_firmware!(unsigned, version)
+
+      run_project_mix!(
+        [
+          "nerves_gate.firmware.release",
+          "--firmware",
+          unsigned,
+          "--output",
+          root,
+          "--private-key-file",
+          private_key
+        ],
+        firmware_environment(version)
+      )
+
+      File.rm!(unsigned)
+      write_release_index!(root, version)
+    end)
+
+    write_wrong_metadata_index!(root, private_key)
+    File.cp!(Path.join(root, "index-0.2.0.json"), Path.join(root, "index.json"))
+  end
+
+  defp build_project_firmware!(output, version) do
+    run_project_mix!(["clean"], firmware_environment(version))
+    run_project_mix!(["firmware", "--output", output], firmware_environment(version))
+  end
+
+  defp run_project_mix!(arguments, environment) do
+    case System.cmd("mix", arguments,
            cd: Runner.project_root(),
-           env: [{"MIX_TARGET", "x86_64"}],
+           env: environment,
            into: IO.stream(),
            stderr_to_stdout: true
          ) do
       {_output, 0} -> :ok
-      {_output, status} -> Mix.raise("firmware build failed with status #{status}")
+      {_output, status} -> Mix.raise("project mix command failed with status #{status}")
     end
+  end
+
+  defp firmware_environment(version) do
+    public_key =
+      Runner.project_root()
+      |> Path.join("tools/nerves_gate_qemu/fixtures/firmware/qemu-fwup-key.pub")
+      |> File.read!()
+      |> String.trim()
+
+    [
+      {"MIX_TARGET", "x86_64"},
+      {"NERVES_GATE_VERSION", version},
+      {"NERVES_FW_VCS_IDENTIFIER", source_revision()},
+      {"NERVES_GATE_RELEASE_API_URL", "http://10.0.2.2:4010"},
+      {"NERVES_GATE_FWUP_PUBLIC_KEYS", public_key},
+      {"NERVES_GATE_TRIAL_TIMEOUT_MS", "300000"},
+      {"NERVES_GATE_STABLE_WINDOW_MS", "2000"},
+      {"NERVES_GATE_HEALTH_GRACE_MS", "180000"}
+    ]
+  end
+
+  defp source_revision do
+    case System.cmd("git", ["rev-parse", "HEAD"], cd: Runner.project_root()) do
+      {revision, 0} -> String.trim(revision)
+      _failure -> "qemu-fixture"
+    end
+  end
+
+  defp write_wrong_metadata_index!(root, private_key_path) do
+    [source] = Path.wildcard(Path.join(root, "*-0.2.0-*.firmware.json"))
+    manifest = source |> File.read!() |> Jason.decode!() |> Map.put("system", "wrong_system")
+    path = Path.join(root, "wrong-system.firmware.json")
+    contents = Jason.encode!(manifest, pretty: true) <> "\n"
+
+    private_key = private_key_path |> File.read!() |> String.trim() |> Base.decode64!()
+
+    signature =
+      :crypto.sign(:eddsa, :none, contents, [binary_part(private_key, 0, 32), :ed25519])
+
+    File.write!(path, contents)
+    File.write!(path <> ".sig", Base.encode64(signature))
+    write_release_index_for_manifest!(root, path, "index-wrong.json")
+  end
+
+  defp write_release_index!(root, version) do
+    [manifest_path] = Path.wildcard(Path.join(root, "*-#{version}-*.firmware.json"))
+    write_release_index_for_manifest!(root, manifest_path, "index-#{version}.json")
+  end
+
+  defp write_release_index_for_manifest!(root, manifest_path, index_name) do
+    manifest = manifest_path |> File.read!() |> Jason.decode!()
+    manifest_name = Path.basename(manifest_path)
+    artifact_name = Map.fetch!(manifest, "artifact")
+    base = "http://10.0.2.2:4010/assets"
+
+    release = %{
+      "draft" => false,
+      "prerelease" => false,
+      "published_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+      "assets" => [
+        %{"name" => manifest_name, "browser_download_url" => "#{base}/#{manifest_name}"},
+        %{
+          "name" => manifest_name <> ".sig",
+          "browser_download_url" => "#{base}/#{manifest_name}.sig"
+        },
+        %{"name" => artifact_name, "browser_download_url" => "#{base}/#{artifact_name}"}
+      ]
+    }
+
+    File.write!(Path.join(root, index_name), Jason.encode!([release], pretty: true))
   end
 end

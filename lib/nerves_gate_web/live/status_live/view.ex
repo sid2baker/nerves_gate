@@ -15,6 +15,7 @@ defmodule NervesGateWeb.StatusLive.View do
 
     %{
       configuration: state.configuration || empty_configuration(),
+      firmware: state.firmware || empty_firmware(),
       internet: state.internet || empty_internet(),
       subnet_router: state.subnet_router || empty_subnet_router(),
       ssh: state.ssh || empty_ssh(),
@@ -55,19 +56,25 @@ defmodule NervesGateWeb.StatusLive.View do
 
   defp node_view(state, metadata) do
     connected = Keyword.fetch!(metadata, :connected)
-    device = state.device || empty_device()
+
+    %{
+      device: device,
+      firmware: firmware,
+      tailnet: tailnet,
+      cluster: cluster,
+      internet: internet,
+      subnet_router: subnet_router,
+      ssh: ssh,
+      alarms: alarms
+    } = node_slices(state)
+
     display_name = configuration_name(state.configuration, device.name)
-    tailnet = state.tailnet || empty_tailnet()
-    cluster = state.cluster || empty_cluster()
-    internet = state.internet || empty_internet()
-    subnet_router = state.subnet_router || empty_subnet_router()
-    ssh = state.ssh || empty_ssh()
-    alarms = state.alarms || []
     status = node_status(internet, tailnet, cluster, connected)
 
     %{
       id: device.device_id,
       device: device,
+      firmware: firmware,
       internet: internet,
       tailnet: tailnet,
       subnet_router: subnet_router,
@@ -93,6 +100,21 @@ defmodule NervesGateWeb.StatusLive.View do
         layer(:tailnet, tailnet.state, tailnet.error),
         layer(:cluster, cluster.state, cluster.state)
       ]
+    }
+  end
+
+  defp node_slices(state) do
+    device = state.device || empty_device()
+
+    %{
+      device: device,
+      firmware: state.firmware || empty_firmware(device.firmware_version),
+      tailnet: state.tailnet || empty_tailnet(),
+      cluster: state.cluster || empty_cluster(),
+      internet: state.internet || empty_internet(),
+      subnet_router: state.subnet_router || empty_subnet_router(),
+      ssh: state.ssh || empty_ssh(),
+      alarms: state.alarms || []
     }
   end
 
@@ -133,6 +155,16 @@ defmodule NervesGateWeb.StatusLive.View do
 
   defp empty_device,
     do: %{device_id: "starting", name: "Starting", firmware_version: "unknown"}
+
+  defp empty_firmware(version \\ "unknown") do
+    %{
+      supported: false,
+      phase: :unsupported,
+      current: %{version: version},
+      validation: :unknown,
+      available: nil
+    }
+  end
 
   defp empty_configuration,
     do: %{configured: false, current: %{}, pending: nil, last_error: nil}

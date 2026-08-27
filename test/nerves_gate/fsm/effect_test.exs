@@ -25,6 +25,27 @@ defmodule NervesGate.FSM.EffectTest do
     refute_receive {:"$gen_cast", {:effect_finished, _duplicate}}
   end
 
+  test "fast workers cannot exit before terminal-result monitoring is established", context do
+    refs = Enum.map(1..200, fn _index -> make_ref() end)
+
+    Enum.each(refs, fn ref ->
+      assert {:ok, _coordinator} =
+               Effect.start(self(), ref, fn -> :immediate end, &event/2,
+                 supervisor: context.supervisor,
+                 registry: context.registry
+               )
+    end)
+
+    outcomes =
+      Enum.map(refs, fn _ref ->
+        assert_receive {:"$gen_cast", {:effect_finished, {ref, outcome}}}, 2_000
+        {ref, outcome}
+      end)
+
+    assert MapSet.new(Enum.map(outcomes, &elem(&1, 0))) == MapSet.new(refs)
+    assert Enum.all?(outcomes, fn {_ref, outcome} -> outcome == {:returned, :immediate} end)
+  end
+
   test "worker crashes become correlated terminal events", context do
     ref = make_ref()
 
@@ -60,7 +81,7 @@ defmodule NervesGate.FSM.EffectTest do
              )
 
     assert_receive {:worker, worker}
-    assert_receive {:"$gen_cast", {:effect_finished, {^ref, :timed_out}}}
+    assert_receive {:"$gen_cast", {:effect_finished, {^ref, :timed_out}}}, 1_000
     refute Process.alive?(worker)
   end
 

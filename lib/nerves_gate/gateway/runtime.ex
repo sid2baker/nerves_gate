@@ -26,7 +26,8 @@ defmodule NervesGate.Gateway.Runtime do
       end,
       cluster: &Cluster.configure/1,
       access: &Commissioning.enable/2,
-      disable_access: &Commissioning.disable/0
+      disable_access: &Commissioning.disable/0,
+      firmware_busy: &NervesGate.Firmware.busy?/0
     }
   end
 end

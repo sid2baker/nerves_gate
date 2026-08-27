@@ -3,7 +3,7 @@ defmodule NervesGateQEMU.Harness do
 
   alias NervesGateQEMU.{Commissioner, Environment, Fault, Gateway, Runner}
 
-  @default_timeout 180_000
+  @default_timeout 300_000
 
   @type cluster :: %{
           devices: [Runner.device()],

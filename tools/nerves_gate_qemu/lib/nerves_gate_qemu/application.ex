@@ -6,6 +6,12 @@ defmodule NervesGateQEMU.Application do
   def start(_type, _args) do
     children = [
       {Phoenix.PubSub, name: NervesGateQEMU.PubSub},
+      NervesGateQEMU.ReleaseServer,
+      {Bandit,
+       plug: NervesGateQEMU.ReleaseServer,
+       scheme: :http,
+       port: Application.fetch_env!(:nerves_gate_qemu, :release_port),
+       ip: {0, 0, 0, 0}},
       NervesGateQEMUWeb.Endpoint
     ]
 

@@ -3,7 +3,8 @@ import Config
 project_root = Path.expand("../../..", __DIR__)
 
 config :nerves_gate_qemu,
-  project_root: project_root
+  project_root: project_root,
+  release_port: 4010
 
 config :nerves_gate_qemu, NervesGateQEMUWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,

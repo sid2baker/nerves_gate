@@ -46,16 +46,37 @@ defmodule NervesGate.FSM.Effect do
 
     {:ok, worker} =
       Task.Supervisor.start_child(supervisor, fn ->
-        outcome = execute(work)
-        send(coordinator, {:effect_terminal, self(), outcome})
+        receive do
+          {:run_effect, ^coordinator} ->
+            outcome = execute(work)
+            send(coordinator, {:effect_terminal, self(), outcome})
+        end
       end)
 
+    # The worker must not finish before its monitor exists. Without this
+    # handshake, a fast or scheduler-starved effect can send its terminal
+    # result and exit before Process.monitor/1 runs. The resulting :noproc DOWN
+    # can then overtake the result and misclassify successful work as crashed.
     worker_monitor = Process.monitor(worker)
+    send(worker, {:run_effect, coordinator})
 
     receive do
       {:effect_terminal, ^worker, outcome} ->
         Process.demonitor(worker_monitor, [:flush])
         deliver(owner, effect_ref, outcome, event_builder)
+
+      {:DOWN, ^worker_monitor, :process, ^worker, :normal} ->
+        # A worker always catches its work outcome and sends a terminal message
+        # before a normal exit. Exit and ordinary signals can still be observed
+        # in either order, so give the terminal message a bounded chance to
+        # arrive instead of reporting a false crash.
+        receive do
+          {:effect_terminal, ^worker, outcome} ->
+            deliver(owner, effect_ref, outcome, event_builder)
+        after
+          100 ->
+            deliver(owner, effect_ref, {:crashed, :exit, :missing_terminal, []}, event_builder)
+        end
 
       {:DOWN, ^worker_monitor, :process, ^worker, reason} ->
         deliver(owner, effect_ref, {:crashed, :exit, reason, []}, event_builder)

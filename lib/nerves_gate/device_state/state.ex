@@ -13,6 +13,7 @@ defmodule NervesGate.DeviceState.State do
 
   @sources [
     :device,
+    :firmware,
     :configuration,
     :commissioning,
     :internet,
@@ -25,6 +26,7 @@ defmodule NervesGate.DeviceState.State do
 
   @essential_sources [
     :device,
+    :firmware,
     :configuration,
     :commissioning,
     :internet,
@@ -36,6 +38,7 @@ defmodule NervesGate.DeviceState.State do
   ]
 
   defstruct device: nil,
+            firmware: nil,
             configuration: nil,
             commissioning: nil,
             internet: nil,
@@ -47,6 +50,7 @@ defmodule NervesGate.DeviceState.State do
 
   @type source ::
           :device
+          | :firmware
           | :configuration
           | :commissioning
           | :internet
@@ -58,6 +62,7 @@ defmodule NervesGate.DeviceState.State do
 
   @type event ::
           {:state_reported, :device, map()}
+          | {:state_reported, :firmware, NervesGate.Firmware.Status.t()}
           | {:state_reported, :configuration, map()}
           | {:state_reported, :commissioning, NervesGate.Commissioning.Status.t()}
           | {:state_reported, :internet, NervesGate.Internet.Status.t()}
@@ -69,6 +74,7 @@ defmodule NervesGate.DeviceState.State do
 
   @type t :: %__MODULE__{
           device: map() | nil,
+          firmware: NervesGate.Firmware.Status.t() | nil,
           configuration: map() | nil,
           commissioning: NervesGate.Commissioning.Status.t() | nil,
           internet: NervesGate.Internet.Status.t() | nil,
@@ -124,6 +130,7 @@ defmodule NervesGate.DeviceState.State do
        when is_binary(id) and is_binary(name) and is_binary(version),
        do: true
 
+  defp valid_slice?(:firmware, %NervesGate.Firmware.Status{}), do: true
   defp valid_slice?(:configuration, value) when is_map(value), do: true
   defp valid_slice?(:commissioning, %NervesGate.Commissioning.Status{}), do: true
   defp valid_slice?(:internet, %NervesGate.Internet.Status{}), do: true

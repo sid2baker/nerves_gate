@@ -1,6 +1,7 @@
 # NervesGate
 
-NervesGate is an x86_64 Nerves gateway with one firmware-tagged configuration:
+NervesGate is a Nerves gateway application. Its current x86_64 system is the
+development and QEMU contract implementation. Runtime configuration follows:
 
 ```text
 Internet → Tailnet → Cluster
@@ -67,7 +68,7 @@ Task/Tailscale runtime
       ↓
 DeviceState.Server
       ↓
-resource owners → Gateway.Configuration FSM
+resource owners → Gateway.Configuration FSM + Firmware FSM
       ↓                 ↓
 Dependencies         Alarms.Runtime
       ↓
@@ -111,6 +112,8 @@ nerves_gate.ex                   thin session and command facade
 nerves_gate/session.ex           per-client live state projection
 nerves_gate/{internet,tailnet,cluster,ssh,subnet_router,commissioning}.ex
                                  one resource owner per subsystem
+nerves_gate/firmware.ex           signed, recoverable firmware transaction owner
+nerves_gate/firmware/             release, artifact, health, persistence, platform contract
 nerves_gate/*/{status,runtime}.ex
                                  public projections and imperative boundaries
 nerves_gate/*/alarms.ex          subsystem-owned alarm policy and remedies
@@ -199,12 +202,12 @@ change the listener address policy or any Tailnet setting.
 
 ## Lifecycle machines, alarms, and healing
 
-Only staged configuration, Internet application, cluster-peer protocols, and
-remote replica synchronization use Finitomata. Finitomata embeds each executable
-state diagram in its module documentation, and ExDoc renders those declarations
-as Mermaid diagrams during `mix docs`. Tailnet, SSH, Cluster coordination,
-subnet routing, commissioning, and replica scanning are ordinary GenServers
-because their state is observed or reconciled reality rather than a transition
+Only staged configuration, firmware updates, Internet application, cluster-peer
+protocols, and remote replica synchronization use Finitomata. Finitomata embeds
+each executable state diagram in its module documentation, and ExDoc renders
+those declarations as Mermaid diagrams during `mix docs`. Tailnet, SSH, Cluster
+coordination, subnet routing, commissioning, and replica scanning are ordinary
+GenServers because their state is observed or reconciled reality rather than a transition
 protocol. `DeviceState.State.apply_event/2` remains a pure projection and
 storage remains synchronous rather than being modeled as a controller.
 
@@ -263,11 +266,58 @@ end
 :ok = NervesGate.disconnect(session)
 ```
 
-## Firmware
+## Recoverable firmware updates
 
-The local Nerves system enables kernel TUN, IPv6 policy routing, netfilter, and
-A/B root filesystems. Tailscale `1.102.3` is pinned and verified during firmware
-construction:
+The status page shows only the running version, validation state, update
+availability, and a link to the Tailnet-only `/update` page. `/update` owns
+release discovery, persistent download progress, preflight results, trial
+health, acceptance, and immediate rollback. GET requests are inert; every
+mutation is an explicit command through `NervesGate`.
+
+GitHub Releases is transport rather than trust. A release contains a fwup-signed
+`.fw`, a signed `nerves_gate.firmware.v1` manifest, and its detached `.sig`.
+Firmware embeds only Ed25519 public keys. Discovery verifies the exact manifest
+bytes before using URLs or metadata. The downloaded archive is kept under
+`/data/firmware`, resumed with HTTP ranges, fsynced, SHA-256 checked, verified by
+fwup, and matched exactly against product, Nerves system, platform,
+architecture, semantic version, UUID, source revision, size, and digest before
+the platform installer can run. Downgrades, duplicate UUIDs, unsigned files,
+and incompatible systems are rejected.
+
+The application depends only on `NervesGate.Firmware.Platform`:
+
+```text
+status → synchronize → install_verified → reboot → validate | revert → reboot
+```
+
+A platform advertises whether it guarantees automatic fallback. Unsupported
+systems remain observable but cannot install. This keeps partition names,
+bootloader flags, and storage mechanics out of the application. A future device
+system can implement the same contract with its own bootloader and layout. The
+`synchronize` operation aligns a platform's physical running slot and next-boot
+authority after automatic fallback before any later installation.
+
+Installation is transactional: preflight requires writable storage, enough
+space, hydrated public state, accepted configuration with no candidate, healthy
+Internet and Tailnet, no critical alarm, and a validated current firmware. The
+platform writes only its inactive candidate. After reboot, the new firmware is
+an unvalidated trial. It must remain healthy and remotely manageable for a
+stability window, then an operator must press **Accept firmware** from a fresh
+Tailnet session. Missing acceptance, sustained management loss, failed health,
+an application/watchdog reboot, or **Roll back now** returns to the previous
+known-good firmware. The transaction journal remains until validation or until
+the old firmware has observed completed fallback.
+
+The x86_64 system is a development reference implementation only. It supplies
+fwup A/B slots and a GRUB one-trial contract so QEMU can exercise generic
+behavior; it is not prescribed for production hardware. GRUB records the trial
+before loading its kernel and selects the previous validated slot on any second
+unvalidated boot. Validation and explicit revert update both Nerves slot
+metadata and the GRUB environment. Upgrade task selection uses the physically
+running rootfs rather than possibly stale next-boot metadata, and restart
+recovery synchronizes those two authorities before another write.
+
+Tailscale `1.102.3` is pinned and verified during firmware construction:
 
 ```sh
 mix deps.get
@@ -275,14 +325,23 @@ mix nerves_gate.bundle_tailscale
 MIX_TARGET=x86_64 mix firmware
 ```
 
-Firmware output:
+To publish a release, configure `NERVES_GATE_FWUP_PUBLIC_KEYS` in the firmware
+build and keep the matching private key outside the repository:
 
-```text
-_build/x86_64_dev/nerves/images/nerves_gate.fw
+```sh
+MIX_TARGET=x86_64 NERVES_GATE_VERSION=1.2.3 \
+  NERVES_FW_VCS_IDENTIFIER=$(git rev-parse HEAD) \
+  mix firmware --output nerves_gate.fw
+mix nerves_gate.firmware.release \
+  --firmware nerves_gate.fw \
+  --output dist \
+  --private-key-file /run/secrets/fwup-key.priv
 ```
 
-The system supports explicit `Nerves.Runtime.revert/0`. Automatic GRUB trial
-boot fallback remains separate system-level work.
+`.github/workflows/firmware-release.yml` performs this for `v*` GitHub Releases
+using `NERVES_GATE_FWUP_PRIVATE_KEY` as a repository secret and
+`NERVES_GATE_FWUP_PUBLIC_KEYS` as a repository variable. Never use the committed
+QEMU development key for production firmware.
 
 ## Local QEMU environment
 
@@ -351,14 +410,17 @@ output. The easiest complete run is:
 mix nerves_gate.qemu integration --count 3 --rebuild
 ```
 
-It builds current firmware, recreates the requested disks, commissions every
-VM, waits for a fully replicated mesh, and runs unkept-update rollback,
-disconnect/reconnect, hard restart, and stop/start scenarios. Tests use only the
-backend command transport and `nerves_gate.status.v3`; browser rendering has
-separate focused LiveView tests. Assertions verify accepted settings survive,
-offline replicas retain last-known state, and new DeviceState boot IDs replace
-stale snapshots.
-Host-side faults are always healed during cleanup.
+It builds the baseline firmware plus signed `0.2.0` and `0.3.0` release
+fixtures, recreates the requested disks, commissions every VM, waits for a fully
+replicated mesh, and runs resilience scenarios. The host fixture server models
+GitHub Releases and supports truncated and corrupt downloads without adding a
+fault API to production firmware. Backend-only tests cover wrong signed
+metadata, interrupted and corrupt artifacts, power loss during installation,
+unvalidated boot fallback, Internet/Tailnet loss, missing confirmation, explicit
+rollback, successful validation, and a subsequent upgrade. Existing scenarios
+also cover guarded settings rollback, disconnect/reconnect, hard restart, and
+stop/start behavior. Browser rendering remains covered by focused LiveView
+tests. Host-side faults are always healed during cleanup.
 
 To rerun the integration tests against an already commissioned topology:
 

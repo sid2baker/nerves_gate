@@ -6,6 +6,34 @@ defmodule NervesGateWebTest do
 
   @endpoint NervesGateWeb.Endpoint
 
+  test "firmware lifecycle has a dedicated Tailnet-only update page" do
+    with_configured(true, fn ->
+      {:ok, _view, html} = live(build_conn(), "/update")
+
+      assert html =~ "Firmware update"
+      assert html =~ "Running version"
+      assert html =~ "Validation"
+      assert html =~ "Updates unavailable"
+      assert html =~ "safe automatic-fallback contract"
+
+      setup_connection = %{build_conn() | remote_ip: {192, 168, 77, 20}}
+
+      assert setup_connection |> get("/update") |> response(403) =~
+               "only available from the tailnet"
+    end)
+  end
+
+  test "the status page links to firmware maintenance and limits itself to firmware summary" do
+    view = dashboard_view()
+    html = render_component(&NervesGateWeb.StatusLive.dashboard/1, view: view, flash: %{})
+
+    assert html =~ ~s(href="/update")
+    assert html =~ "Firmware validation"
+    assert html =~ "Update available"
+    refute html =~ "Install trial firmware"
+    refute html =~ "Accept firmware"
+  end
+
   test "unconfigured gateways start the three-step commissioning flow with Internet" do
     with_configured(false, fn ->
       {:ok, view, html} = live(build_conn(), "/commissioning")
