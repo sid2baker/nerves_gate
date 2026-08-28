@@ -2,12 +2,17 @@ defmodule NervesGate.Gateway.Configuration do
   @moduledoc "Owns durable accepted settings and the complete staged configuration transaction."
 
   alias NervesGate.Cluster, as: Cluster
+  alias NervesGate.Cluster.Group
+  alias NervesGate.Commissioning
   alias NervesGate.FSM.{Diagnostics, Effect}
   alias NervesGate.Gateway.Configuration.Context
   alias NervesGate.Gateway.Persistence
-  alias NervesGate.Gateway.Runtime
   alias NervesGate.Gateway.Settings
+  alias NervesGate.Internet
+  alias NervesGate.SSH
   alias NervesGate.Storage
+  alias NervesGate.SubnetRouter
+  alias NervesGate.Tailnet.Enrollment
 
   @slots ["a", "b"]
   @default_timeout :timer.minutes(1)
@@ -96,7 +101,10 @@ defmodule NervesGate.Gateway.Configuration do
       step_effect: nil,
       rollback_effect: nil,
       rollback_context: nil,
-      ops: Map.merge(Runtime.default(), Map.new(Keyword.get(options, :ops, []))),
+      ops:
+        default_ops()
+        |> Map.put(:firmware_busy, Keyword.get(options, :firmware_busy, fn -> false end))
+        |> Map.merge(Map.new(Keyword.get(options, :ops, []))),
       keep_local_access:
         Keyword.get(
           options,
@@ -291,7 +299,7 @@ defmodule NervesGate.Gateway.Configuration do
 
     with %{id: id, scope: scope} = pending
          when id == command.change_id and scope in [:complete, :cluster] <- payload.pending,
-         {:ok, group} <- Cluster.validate_group(group) do
+         {:ok, group} <- Group.validate(group) do
       candidate =
         pending.candidate
         |> Map.put("configured", true)
@@ -674,7 +682,7 @@ defmodule NervesGate.Gateway.Configuration do
   defp update_configured_settings(%{scope: :cluster} = command, payload) do
     group = command.params |> get_in(["cluster", "group"]) |> blank_nil()
 
-    case Cluster.validate_group(group) do
+    case Group.validate(group) do
       {:ok, group} -> apply_cluster_settings_update(command, payload, group)
       {:error, reason} -> reject_settings_update(command, payload, reason)
     end
@@ -1368,6 +1376,25 @@ defmodule NervesGate.Gateway.Configuration do
 
   defp change_id do
     18 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+  end
+
+  defp default_ops do
+    %{
+      internet: &Internet.configure/1,
+      internet_restore: &Internet.restore/1,
+      internet_observe: &Internet.poll_now/0,
+      stage_tailnet: &Enrollment.stage/3,
+      tailnet_restore: &Enrollment.select/1,
+      commit_tailnet: &Enrollment.commit/1,
+      rollback_tailnet: &Enrollment.rollback/1,
+      subnet_router: fn enabled, routes, change_id ->
+        SubnetRouter.configure(enabled, routes, SubnetRouter, change_id: change_id)
+      end,
+      ssh: fn enabled, _change_id -> SSH.set_enabled(enabled) end,
+      cluster: &Cluster.configure/1,
+      access: &Commissioning.enable/2,
+      disable_access: &Commissioning.disable/0
+    }
   end
 
   defp firmware_metadata do

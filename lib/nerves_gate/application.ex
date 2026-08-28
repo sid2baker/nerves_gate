@@ -7,16 +7,14 @@ defmodule NervesGate.Application do
     children = [
       {Phoenix.PubSub, name: NervesGate.PubSub},
       NervesGate.Backend,
-      NervesGate.StartupGate,
+      NervesGate.Boot.Gate,
       NervesGateWeb.Presence,
       NervesGateWeb.Endpoint
     ]
 
     Supervisor.start_link(children,
       strategy: :one_for_one,
-      name: NervesGate.Supervisor,
-      max_restarts: 20,
-      max_seconds: 60
+      name: NervesGate.Supervisor
     )
   end
 

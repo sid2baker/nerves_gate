@@ -6,8 +6,7 @@ defmodule NervesGate.DeviceState do
   subscribe to one snapshot followed by future ordered events.
   """
 
-  alias NervesGate.DeviceState.{Server, State}
-  alias NervesGate.Secret
+  alias NervesGate.DeviceState.{Public, Server, State}
 
   @type event :: State.event()
   @type snapshot :: Server.snapshot()
@@ -33,31 +32,5 @@ defmodule NervesGate.DeviceState do
 
   @doc "Returns whether a value can cross the shared public-state boundary."
   @spec public?(term()) :: boolean()
-  def public?(%Secret{}), do: false
-  def public?(value) when is_pid(value) or is_port(value) or is_reference(value), do: false
-  def public?(value) when is_function(value), do: false
-  def public?(value) when is_binary(value) or is_number(value) or is_atom(value), do: true
-
-  def public?(value) when is_list(value), do: Enum.all?(value, &public?/1)
-
-  def public?(%_module{} = value) do
-    value
-    |> Map.from_struct()
-    |> public?()
-  end
-
-  def public?(value) when is_map(value) do
-    Enum.all?(value, fn {key, item} -> public_key?(key) and public?(item) end)
-  end
-
-  # IPv4 addresses are accepted temporarily as Erlang-native public values and
-  # are encoded as strings at HTTP boundaries. No other tuple is public.
-  def public?({a, b, c, d})
-      when a in 0..255 and b in 0..255 and c in 0..255 and d in 0..255,
-      do: true
-
-  def public?(_value), do: false
-
-  defp public_key?(key) when is_atom(key) or is_binary(key), do: true
-  defp public_key?(_key), do: false
+  defdelegate public?(value), to: Public
 end

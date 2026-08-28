@@ -11,7 +11,7 @@ defmodule NervesGate.Commissioning do
 
   alias NervesGate.Commissioning.{Access, Status}
   alias NervesGate.Internet.Hardware
-  alias NervesGate.Retry
+  alias NervesGate.Reconciliation
 
   @retry_delay 2_000
   @tick_interval 2_000
@@ -51,13 +51,6 @@ defmodule NervesGate.Commissioning do
   @spec disable(GenServer.server()) :: :ok | {:error, term()}
   def disable(server \\ __MODULE__) do
     GenServer.call(server, :disable, 20_000)
-  catch
-    :exit, _reason -> {:error, :owner_unavailable}
-  end
-
-  @spec release(String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def release(interface, server \\ __MODULE__) do
-    GenServer.call(server, {:release, interface})
   catch
     :exit, _reason -> {:error, :owner_unavailable}
   end
@@ -113,14 +106,6 @@ defmodule NervesGate.Commissioning do
     {:reply, reply, state}
   end
 
-  def handle_call({:release, interface}, _from, state) do
-    active = Enum.reject(state.active, &(&1.interface == interface))
-    phase = if active == [], do: :waiting, else: state.phase
-    state = %{state | active: active, phase: phase}
-    publish_state(state)
-    {:reply, :ok, state}
-  end
-
   def handle_call(:status, _from, state), do: {:reply, public_status(state), state}
   def handle_call(:diagnostics, _from, state), do: {:reply, diagnostic_view(state), state}
 
@@ -138,7 +123,7 @@ defmodule NervesGate.Commissioning do
   defp periodic_reconcile(%{phase: :disabled} = state), do: state
 
   defp periodic_reconcile(%{phase: :backoff} = state) do
-    if Retry.due?(state.retry_at) do
+    if Reconciliation.due?(state.retry_at) do
       {_reply, state} = reconcile(state, :tick)
       publish_state(state)
       state
@@ -185,7 +170,7 @@ defmodule NervesGate.Commissioning do
     end
   catch
     _kind, reason ->
-      error = {:commissioning_reconciliation_crashed, Retry.public_error(reason)}
+      error = {:commissioning_reconciliation_crashed, Reconciliation.public_error(reason)}
       state = enter_backoff(state, error)
       {{:error, error}, state}
   end
@@ -207,14 +192,9 @@ defmodule NervesGate.Commissioning do
   defp command_result(_command, _active), do: :ok
 
   defp enter_backoff(state, error) do
-    %{
-      state
-      | phase: :backoff,
-        last_error: error,
-        blocked_by: nil,
-        attempt: state.attempt + 1,
-        retry_at: Retry.now() + state.retry_delay
-    }
+    state
+    |> Map.merge(Reconciliation.failed(state.attempt, state.retry_delay, error))
+    |> Map.merge(%{phase: :backoff, blocked_by: nil})
   end
 
   defp public_status(state) do

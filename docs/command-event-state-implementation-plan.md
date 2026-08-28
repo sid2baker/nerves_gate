@@ -53,8 +53,8 @@ Ordinary GenServers:
 - Cluster distribution coordination.
 - Subnet-route reconciliation.
 - Commissioning interface reconciliation.
-- DeviceState serving, dependency projection, alarms, startup gating, replica
-  scanning, and disposable client-session projection.
+- DeviceState serving, alarms, startup gating, replica scanning, and disposable
+  client-session projection.
 
 A timer, retry counter, or stateful process is not by itself a reason to create
 an FSM. A graph dominated by self-transitions or worker phases is a signal to
@@ -203,12 +203,13 @@ never apply DeviceState events themselves.
 
 ```text
 NervesGate facade → owners → runtime/platform boundaries
-owners → DeviceState → web/API/alarms/dependencies/replicas
+owners → DeviceState → web/API/alarms/replicas/sessions
 ```
 
 The web layer uses only the thin `NervesGate` session and command facade.
-Runtime modules do not know DeviceState exists. Dependencies only forward
-public Tailnet evidence to SSH, Cluster, and SubnetRouter; they own no lifecycle.
+Runtime adapters do not know DeviceState exists. SSH, Cluster, and SubnetRouter
+read Tailnet's current typed observation during their own supervised
+reconciliation instead of maintaining a second public-state projection.
 
 ## Validation
 

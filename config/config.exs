@@ -56,7 +56,6 @@ config :nerves_gate,
   frame_ancestors: "'none'",
   internet_adapter: NervesGate.Internet.VintageNetAdapter,
   internet_poll_interval: 10_000,
-  tailscale_enabled: true,
   tailscale_version: "1.102.3",
   tailscale_binary_sha256: %{
     cli: "d6ffcba02fa07728f0c4847fc06d61f239f763478bd59156abf3591bdb1a3ad1",
@@ -79,7 +78,11 @@ config :nerves_gate, NervesGateWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   server: true,
   url: [host: "nervesgate.local", port: 80, scheme: "http"],
-  http: [ip: {0, 0, 0, 0}, port: 80],
+  http: [
+    ip: {0, 0, 0, 0},
+    port: 80,
+    thousand_island_options: [num_acceptors: 4]
+  ],
   secret_key_base: "kVe8TVi10nIRiiuHjUdxi5zudS5O8H3CHf19UvOK1fmQY3PGuF8NrmhT2om8bgkM",
   render_errors: [
     formats: [html: NervesGateWeb.ErrorHTML, json: NervesGateWeb.ErrorJSON],

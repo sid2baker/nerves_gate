@@ -9,12 +9,10 @@ defmodule NervesGate.Cluster do
 
   use GenServer
 
-  alias NervesGate.Cluster.{Discovery, Distribution, Status}
+  alias NervesGate.Cluster.{Distribution, Group, Status}
   alias NervesGate.Cluster.Peer.Supervisor, as: PeerSupervisor
-  alias NervesGate.Gateway.{Configuration, Settings}
-  alias NervesGate.Retry
+  alias NervesGate.Reconciliation
 
-  @group_pattern ~r/\A[A-Za-z0-9][A-Za-z0-9_-]*\z/
   @retry_delay 30_000
   @tick_interval 1_000
 
@@ -22,7 +20,7 @@ defmodule NervesGate.Cluster do
   def start_link(options) do
     GenServer.start_link(
       __MODULE__,
-      Keyword.get_lazy(options, :payload, &new/0),
+      Keyword.get_lazy(options, :payload, fn -> new(options) end),
       name: Keyword.get(options, :name, __MODULE__)
     )
   end
@@ -37,6 +35,7 @@ defmodule NervesGate.Cluster do
       ops: Keyword.get(options, :ops, default_ops()),
       peers: Keyword.get(options, :peers, PeerSupervisor),
       publisher: Keyword.get(options, :publisher, &publish/1),
+      load_group: Keyword.get(options, :load_group, fn -> nil end),
       retry_delay: Keyword.get(options, :retry_delay, @retry_delay),
       last_error: nil,
       blocked_by: nil,
@@ -47,7 +46,7 @@ defmodule NervesGate.Cluster do
 
   @spec configure(String.t() | nil, GenServer.server()) :: :ok | {:error, term()}
   def configure(group, server \\ __MODULE__) do
-    with {:ok, group} <- validate_group(group) do
+    with {:ok, group} <- Group.validate(group) do
       GenServer.call(server, {:configure, group}, 35_000)
     end
   catch
@@ -73,19 +72,6 @@ defmodule NervesGate.Cluster do
 
   @spec diagnostics(GenServer.server()) :: map() | nil
   def diagnostics(server \\ __MODULE__), do: call_or(server, :diagnostics, nil)
-
-  @spec validate_group(term()) :: {:ok, String.t() | nil} | {:error, :invalid_cluster_group}
-  def validate_group(value) when value in [nil, ""], do: {:ok, nil}
-
-  def validate_group(value) when is_binary(value) and byte_size(value) in 1..128 do
-    value = String.trim(value)
-
-    if byte_size(value) in 1..128 and String.match?(value, @group_pattern),
-      do: {:ok, value},
-      else: {:error, :invalid_cluster_group}
-  end
-
-  def validate_group(_value), do: {:error, :invalid_cluster_group}
 
   @impl true
   def init(state) do
@@ -160,7 +146,7 @@ defmodule NervesGate.Cluster do
         |> sync_peers()
         |> Map.merge(%{phase: :blocked, blocked_by: :tailnet})
 
-      state.phase == :backoff and not force and not Retry.due?(state.retry_at) ->
+      state.phase == :backoff and not force and not Reconciliation.due?(state.retry_at) ->
         sync_peers(state)
 
       state.phase == :online and runtime_matches?(state, tailnet.ipv4) ->
@@ -171,7 +157,7 @@ defmodule NervesGate.Cluster do
     end
   catch
     _kind, reason ->
-      enter_backoff(state, {:cluster_reconciliation_crashed, Retry.public_error(reason)})
+      enter_backoff(state, {:cluster_reconciliation_crashed, Reconciliation.public_error(reason)})
   end
 
   defp start_runtime(state, ipv4) do
@@ -186,10 +172,13 @@ defmodule NervesGate.Cluster do
         |> stable(:online)
 
       {:error, reason} ->
-        enter_backoff(state, {:distribution_start_failed, Retry.public_error(reason)})
+        enter_backoff(state, {:distribution_start_failed, Reconciliation.public_error(reason)})
 
       invalid ->
-        enter_backoff(state, {:invalid_distribution_start_result, Retry.public_error(invalid)})
+        enter_backoff(
+          state,
+          {:invalid_distribution_start_result, Reconciliation.public_error(invalid)}
+        )
     end
   end
 
@@ -230,25 +219,15 @@ defmodule NervesGate.Cluster do
   defp gateway_hostname?(_hostname), do: false
 
   defp stable(state, phase) do
-    %{
-      state
-      | phase: phase,
-        last_error: nil,
-        blocked_by: nil,
-        attempt: 0,
-        retry_at: nil
-    }
+    state
+    |> Map.merge(Reconciliation.converged())
+    |> Map.merge(%{phase: phase, blocked_by: nil})
   end
 
   defp enter_backoff(state, error) do
-    %{
-      state
-      | phase: :backoff,
-        last_error: error,
-        blocked_by: nil,
-        attempt: state.attempt + 1,
-        retry_at: Retry.now() + state.retry_delay
-    }
+    state
+    |> Map.merge(Reconciliation.failed(state.attempt, state.retry_delay, error))
+    |> Map.merge(%{phase: :backoff, blocked_by: nil})
   end
 
   defp public_status(state) do
@@ -291,12 +270,11 @@ defmodule NervesGate.Cluster do
   end
 
   defp restore_desired_group(%{desired: %{group: nil}} = state) do
-    case GenServer.whereis(Configuration) do
-      pid when is_pid(pid) ->
-        put_in(state, [:desired, :group], Configuration.current() |> Settings.cluster_group())
-
-      nil ->
-        state
+    with group <- state.load_group.(),
+         {:ok, group} <- Group.validate(group) do
+      put_in(state, [:desired, :group], group)
+    else
+      _unavailable -> state
     end
   catch
     _kind, _reason -> state
@@ -363,8 +341,29 @@ defmodule NervesGate.Cluster do
       alive?: &Distribution.alive?/0,
       connect: &Distribution.connect/1,
       connected: &Distribution.connected/0,
-      discover: &Discovery.fetch/1
+      discover: &discover_group/1
     }
+  end
+
+  defp discover_group(ipv4) do
+    url = ~c"http://#{ipv4}/api/discovery"
+    http_options = [timeout: 2_000, connect_timeout: 2_000]
+
+    with {:ok, {{_version, 200, _reason}, _headers, body}} <-
+           :httpc.request(:get, {url, []}, http_options, body_format: :binary),
+         {:ok, %{"cluster_group" => group}} <- Jason.decode(body),
+         {:ok, group} <- Group.validate(group) do
+      {:ok, group}
+    else
+      {:ok, {{_version, status, _reason}, _headers, _body}} ->
+        {:error, {:http_status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _invalid ->
+        {:error, :invalid_discovery_response}
+    end
   end
 
   defp publish(status) do

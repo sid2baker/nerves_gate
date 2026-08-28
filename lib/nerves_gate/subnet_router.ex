@@ -9,8 +9,8 @@ defmodule NervesGate.SubnetRouter do
   use GenServer
 
   alias NervesGate.FSM.Effect
-  alias NervesGate.Retry
-  alias NervesGate.SubnetRouter.{Routes, Status}
+  alias NervesGate.Reconciliation
+  alias NervesGate.SubnetRouter.Status
 
   @retry_delay 30_000
   @tick_interval 1_000
@@ -29,7 +29,7 @@ defmodule NervesGate.SubnetRouter do
       observed: unavailable_observation(),
       tailnet_state: Keyword.get(options, :initial_tailnet),
       tailnet: Keyword.get(options, :tailnet, &NervesGate.Tailnet.status/0),
-      apply: Keyword.get(options, :apply, &Routes.apply/2),
+      apply: Keyword.get(options, :apply, &apply_routes/2),
       publisher: Keyword.get(options, :publisher, &publish/1),
       retry_delay: Keyword.get(options, :retry_delay, @retry_delay),
       effect_timeout: Keyword.get(options, :effect_timeout, 45_000),
@@ -57,12 +57,6 @@ defmodule NervesGate.SubnetRouter do
   @spec heal(GenServer.server()) :: :ok
   def heal(server \\ __MODULE__) do
     GenServer.cast(server, :heal)
-    :ok
-  end
-
-  @spec tailnet_state_changed(map(), GenServer.server()) :: :ok
-  def tailnet_state_changed(status, server \\ __MODULE__) do
-    GenServer.cast(server, {:tailnet_state_changed, status})
     :ok
   end
 
@@ -103,12 +97,6 @@ defmodule NervesGate.SubnetRouter do
   @impl true
   def handle_cast(:heal, state) do
     state = apply_or_block(state)
-    publish_state(state)
-    {:noreply, state}
-  end
-
-  def handle_cast({:tailnet_state_changed, status}, state) do
-    state = put_tailnet(state, status) |> reconcile_dependency()
     publish_state(state)
     {:noreply, state}
   end
@@ -157,7 +145,7 @@ defmodule NervesGate.SubnetRouter do
         %{state | phase: :applying, effect: %{ref: ref, revision: revision}, blocked_by: nil}
 
       {:error, reason} ->
-        enter_backoff(state, {:route_effect_launch_failed, Retry.public_error(reason)})
+        enter_backoff(state, {:route_effect_launch_failed, Reconciliation.public_error(reason)})
     end
   end
 
@@ -176,7 +164,7 @@ defmodule NervesGate.SubnetRouter do
     do: enter_backoff(state, :route_application_cancelled)
 
   defp complete_application({:crashed, _kind, reason, _stack}, _revision, state),
-    do: enter_backoff(state, {:route_application_crashed, Retry.public_error(reason)})
+    do: enter_backoff(state, {:route_application_crashed, Reconciliation.public_error(reason)})
 
   defp complete_application(_invalid, _revision, state),
     do: enter_backoff(state, :invalid_route_application_result)
@@ -189,10 +177,10 @@ defmodule NervesGate.SubnetRouter do
   end
 
   defp resolve_application_result({:error, reason}, state),
-    do: enter_backoff(state, {:route_apply_failed, Retry.public_error(reason)})
+    do: enter_backoff(state, {:route_apply_failed, Reconciliation.public_error(reason)})
 
   defp resolve_application_result(invalid, state),
-    do: enter_backoff(state, {:invalid_route_apply_result, Retry.public_error(invalid)})
+    do: enter_backoff(state, {:invalid_route_apply_result, Reconciliation.public_error(invalid)})
 
   defp reconcile_dependency(%{effect: effect} = state) when not is_nil(effect), do: state
 
@@ -204,7 +192,7 @@ defmodule NervesGate.SubnetRouter do
       state.phase == :blocked and state.desired.enabled ->
         start_application(state)
 
-      state.phase == :backoff and Retry.due?(state.retry_at) ->
+      state.phase == :backoff and Reconciliation.due?(state.retry_at) ->
         apply_or_block(state)
 
       true ->
@@ -222,7 +210,7 @@ defmodule NervesGate.SubnetRouter do
       not tailnet_online?(state) ->
         %{state | phase: :blocked, blocked_by: :tailnet}
 
-      state.phase == :backoff and not Retry.due?(state.retry_at) ->
+      state.phase == :backoff and not Reconciliation.due?(state.retry_at) ->
         state
 
       routes_approved?(state) ->
@@ -254,14 +242,9 @@ defmodule NervesGate.SubnetRouter do
   end
 
   defp enter_backoff(state, error) do
-    %{
-      state
-      | phase: :backoff,
-        last_error: error,
-        attempt: state.attempt + 1,
-        retry_at: Retry.now() + state.retry_delay,
-        blocked_by: nil
-    }
+    state
+    |> Map.merge(Reconciliation.failed(state.attempt, state.retry_delay, error))
+    |> Map.merge(%{phase: :backoff, blocked_by: nil})
   end
 
   defp diagnostic_view(state) do
@@ -300,6 +283,23 @@ defmodule NervesGate.SubnetRouter do
 
   defp schedule_tick, do: Process.send_after(self(), :tick, @tick_interval)
   defp publish_state(state), do: state.publisher.(public_status(state))
+
+  defp apply_routes(enabled, routes) do
+    advertised = if enabled, do: routes, else: []
+
+    with :ok <-
+           Tailscale.await_online(timeout: 30_000, require: [:authenticated, :tailscale_ipv4]),
+         :ok <- Tailscale.set(ssh: false, advertise_routes: advertised),
+         {:ok, applied} <- Tailscale.advertised_routes(),
+         true <- applied == advertised or enabled do
+      NervesGate.Tailnet.refresh()
+      {:ok, if(enabled, do: applied, else: routes)}
+    else
+      false -> {:error, :route_withdrawal_failed}
+      {:error, _reason} = error -> error
+      _failure -> {:error, :route_update_failed}
+    end
+  end
 
   defp publish(status) do
     case NervesGate.DeviceState.publish({:state_reported, :subnet_router, status}) do

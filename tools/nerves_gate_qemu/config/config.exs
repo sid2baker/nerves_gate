@@ -10,7 +10,11 @@ config :nerves_gate_qemu, NervesGateQEMUWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   server: true,
   url: [host: "qemu.localhost", port: 4000, scheme: "http"],
-  http: [ip: {127, 0, 0, 1}, port: if(config_env() == :test, do: 0, else: 4000)],
+  http: [
+    ip: {127, 0, 0, 1},
+    port: if(config_env() == :test, do: 0, else: 4000),
+    thousand_island_options: [num_acceptors: 4]
+  ],
   secret_key_base: "tBP1d7zSaDT7l0xW8Qm5D8dHnYQhdTFUM0TBVfoQpgL0oM9MtX6JuFjRpGsJEghf",
   render_errors: [
     formats: [html: NervesGateQEMUWeb.ErrorHTML, json: NervesGateQEMUWeb.ErrorJSON],

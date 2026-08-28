@@ -41,7 +41,7 @@ defmodule NervesGate.Tailnet.Observation do
   @spec offline(atom(), Tailscale.Health.t()) :: t()
   def offline(reason, health \\ Tailscale.Health.initial()) do
     %Status{
-      state: :disabled,
+      state: :connecting,
       online: false,
       authenticated: :unknown,
       hostname: nil,

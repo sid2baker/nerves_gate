@@ -33,7 +33,7 @@ defmodule NervesGate.SubnetRouterTest do
 
     status = online([], [])
     Agent.update(context.tailnet, fn _ -> status end)
-    SubnetRouter.tailnet_state_changed(status, context.machine)
+    refresh_tailnet(context.machine)
     assert_receive {:apply, true, ^routes}
 
     assert_eventually(fn ->
@@ -42,7 +42,7 @@ defmodule NervesGate.SubnetRouterTest do
 
     status = online(routes, routes)
     Agent.update(context.tailnet, fn _ -> status end)
-    SubnetRouter.tailnet_state_changed(status, context.machine)
+    refresh_tailnet(context.machine)
     assert_eventually(fn -> SubnetRouter.diagnostics(context.machine).state == :active end)
   end
 
@@ -50,13 +50,13 @@ defmodule NervesGate.SubnetRouterTest do
     routes = ["10.20.0.0/16"]
     status = online(routes, routes)
     Agent.update(context.tailnet, fn _ -> status end)
-    SubnetRouter.tailnet_state_changed(status, context.machine)
+    refresh_tailnet(context.machine)
 
     assert {:ok, ^routes} = SubnetRouter.configure(true, routes, context.machine)
     assert_eventually(fn -> SubnetRouter.diagnostics(context.machine).state == :active end)
 
     Agent.update(context.tailnet, fn _ -> offline() end)
-    SubnetRouter.tailnet_state_changed(offline(), context.machine)
+    refresh_tailnet(context.machine)
     assert_eventually(fn -> SubnetRouter.diagnostics(context.machine).state == :blocked end)
     assert SubnetRouter.status(context.machine).routes == routes
   end
@@ -66,7 +66,7 @@ defmodule NervesGate.SubnetRouterTest do
     :sys.replace_state(context.machine, &%{&1 | apply: failing})
     status = online([], [])
     Agent.update(context.tailnet, fn _ -> status end)
-    SubnetRouter.tailnet_state_changed(status, context.machine)
+    refresh_tailnet(context.machine)
 
     assert {:ok, ["192.0.2.0/24"]} =
              SubnetRouter.configure(true, ["192.0.2.0/24"], context.machine)
@@ -93,7 +93,7 @@ defmodule NervesGate.SubnetRouterTest do
     :sys.replace_state(context.machine, &%{&1 | apply: apply})
     status = online([], [])
     Agent.update(context.tailnet, fn _ -> status end)
-    SubnetRouter.tailnet_state_changed(status, context.machine)
+    refresh_tailnet(context.machine)
 
     assert {:ok, ["10.0.0.0/8"]} =
              SubnetRouter.configure(true, ["10.0.0.0/8"], context.machine)
@@ -109,6 +109,12 @@ defmodule NervesGate.SubnetRouterTest do
     send(second, :complete)
 
     assert_eventually(fn -> SubnetRouter.status(context.machine).routes == ["192.168.0.0/16"] end)
+  end
+
+  defp refresh_tailnet(machine) do
+    send(machine, :tick)
+    _state = :sys.get_state(machine)
+    :ok
   end
 
   defp assert_eventually(predicate, attempts \\ 100) do

@@ -8,6 +8,7 @@ defmodule NervesGate.AlarmsTest do
 
   import ExUnit.CaptureLog
 
+  alias NervesGate.AlarmistAdapter
   alias NervesGate.Alarms
   alias NervesGate.Internet.Alarm.Unavailable
   alias NervesGate.Storage.Signal.Failure, as: StorageFailure
@@ -28,20 +29,20 @@ defmodule NervesGate.AlarmsTest do
   end
 
   test "subsystem-declared public alarm transitions flow into authoritative device state" do
-    Alarms.clear(StorageFailure)
-    on_exit(fn -> Alarms.clear(StorageFailure) end)
+    AlarmistAdapter.clear(StorageFailure)
+    on_exit(fn -> AlarmistAdapter.clear(StorageFailure) end)
     assert_eventually(fn -> public_alarm_absent?("storage_failure") end)
 
-    Alarms.set(StorageFailure, StorageFailure.description())
+    AlarmistAdapter.set(StorageFailure, StorageFailure.description())
     assert_eventually(fn -> public_alarm_present?("storage_failure") end)
 
-    Alarms.clear(StorageFailure)
+    AlarmistAdapter.clear(StorageFailure)
     assert_eventually(fn -> public_alarm_absent?("storage_failure") end)
   end
 
   test "uncatalogued alarms never become public" do
-    Alarms.set(Uncatalogued, Uncatalogued.description())
-    on_exit(fn -> Alarms.clear(Uncatalogued) end)
+    AlarmistAdapter.set(Uncatalogued, Uncatalogued.description())
+    on_exit(fn -> AlarmistAdapter.clear(Uncatalogued) end)
 
     refute Enum.any?(Alarms.active(), &(&1.id == inspect(Uncatalogued)))
 

@@ -1,9 +1,9 @@
-defmodule NervesGate.StartupGateTest do
+defmodule NervesGate.Boot.GateTest do
   use ExUnit.Case, async: true
 
+  alias NervesGate.Boot.Gate
   alias NervesGate.DeviceState
   alias NervesGate.DeviceState.{Server, State}
-  alias NervesGate.StartupGate
 
   test "boot handshake completes once after every essential owner hydrates" do
     owner = self()
@@ -18,21 +18,21 @@ defmodule NervesGate.StartupGateTest do
       )
 
     {:ok, gate} =
-      StartupGate.start_link(
+      Gate.start_link(
         name: nil,
         enabled: true,
         device_state: server,
         callback: fn -> Agent.update(calls, &(&1 + 1)) end
       )
 
-    refute :sys.get_state(gate).completed
+    assert Process.alive?(gate)
 
     Enum.each(State.essential_sources() -- [:device, :alarms], fn source ->
       assert :ok = DeviceState.publish({:state_reported, source, disabled(source)}, server)
     end)
 
     assert :ok = DeviceState.publish({:state_reported, :alarms, []}, server)
-    assert_eventually(fn -> :sys.get_state(gate).completed end)
+    assert_eventually(fn -> not Process.alive?(gate) end)
     assert Agent.get(calls, & &1) == 1
 
     assert :ok = DeviceState.publish({:state_reported, :internet, internet(true)}, server)
@@ -61,7 +61,7 @@ defmodule NervesGate.StartupGateTest do
 
   defp disabled(:tailnet) do
     %NervesGate.Tailnet.Status{
-      state: :disabled,
+      state: :connecting,
       online: false,
       authenticated: false,
       hostname: nil,
@@ -70,7 +70,7 @@ defmodule NervesGate.StartupGateTest do
       nodes: [],
       subnet_router: %{},
       health: %{},
-      error: :disabled
+      error: :unavailable
     }
   end
 
@@ -128,5 +128,39 @@ defmodule NervesGate.StartupGateTest do
         Process.sleep(10)
         assert_eventually(predicate, attempts - 1)
     end
+  end
+end
+
+defmodule NervesGate.Boot.ShoehornTest do
+  use ExUnit.Case, async: true
+
+  alias NervesGate.Boot.Shoehorn
+
+  test "retries nerves_runtime only once and resumes nerves_gate" do
+    owner = self()
+
+    restart = fn application ->
+      send(owner, {:restart, application})
+      {:ok, [application]}
+    end
+
+    assert {:ok, state} = Shoehorn.init(restart_application: restart)
+    assert {:continue, state} = Shoehorn.application_exited(:nerves_runtime, :boot_failed, state)
+    assert_receive {:restart, :nerves_runtime}
+    assert_receive {:restart, :nerves_gate}
+
+    assert {:continue, _state} =
+             Shoehorn.application_exited(:nerves_runtime, :boot_failed_again, state)
+
+    refute_receive {:restart, :nerves_runtime}
+  end
+
+  test "ignores nonessential application exits" do
+    owner = self()
+    restart = fn application -> send(owner, {:restart, application}) end
+
+    assert {:ok, state} = Shoehorn.init(restart_application: restart)
+    assert {:continue, ^state} = Shoehorn.application_exited(:nerves_gate, :boot_failed, state)
+    refute_receive {:restart, :nerves_gate}
   end
 end

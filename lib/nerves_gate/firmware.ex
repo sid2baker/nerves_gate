@@ -1,9 +1,8 @@
 defmodule NervesGate.Firmware do
   @moduledoc "Owns the signed, recoverable firmware-update transaction across reboots."
 
-  alias NervesGate.Firmware.{Artifact, Clock, Health, Persistence, Release, Status}
+  alias NervesGate.Firmware.{Artifact, Health, Persistence, Release, Status}
   alias NervesGate.FSM.{Diagnostics, Effect}
-  alias NervesGate.Gateway.Configuration
   alias NervesGate.Storage
 
   @fsm """
@@ -96,10 +95,11 @@ defmodule NervesGate.Firmware do
     platform_options = Keyword.get(options, :platform_options, options)
     {report, platform_error} = platform_report(platform, platform_options)
     {journal, journal_error} = journal(root)
-    boot_id = Keyword.get_lazy(options, :system_boot_id, &Clock.system_boot_id/0)
+    boot_id = Keyword.get_lazy(options, :system_boot_id, &system_boot_id/0)
     journal = normalize_journal(journal, report, root)
 
     now = monotonic(options)
+    configuration_busy = Keyword.get(options, :configuration_busy, fn -> false end)
 
     {initial_state, effect, journal, selected, artifact_path} =
       initial_state(report, journal, root, boot_id, now, options)
@@ -126,7 +126,7 @@ defmodule NervesGate.Firmware do
         end),
       preflight_provider:
         Keyword.get(options, :preflight_provider, fn release, platform_report ->
-          if Configuration.busy?() do
+          if configuration_busy.() do
             {:error, %{operations: :configuration_change_in_progress}}
           else
             Health.preflight(
@@ -139,8 +139,8 @@ defmodule NervesGate.Firmware do
           end
         end),
       publisher: Keyword.get(options, :publisher, &publish/1),
-      monotonic: Keyword.get(options, :monotonic, &Clock.monotonic_ms/0),
-      uptime: Keyword.get(options, :uptime, &Clock.uptime_ms/0),
+      monotonic: Keyword.get(options, :monotonic, &monotonic_ms/0),
+      uptime: Keyword.get(options, :uptime, &uptime_ms/0),
       device_boot_id: Keyword.get_lazy(options, :device_boot_id, &device_boot_id/0),
       system_boot_id: boot_id,
       initial_state: initial_state,
@@ -1050,7 +1050,7 @@ defmodule NervesGate.Firmware do
 
   defp trial_deadline(:trial, now, options) do
     timeout = Keyword.get(options, :trial_timeout, @default_trial_timeout)
-    uptime = Keyword.get(options, :uptime, &Clock.uptime_ms/0).()
+    uptime = Keyword.get(options, :uptime, &uptime_ms/0).()
     now + max(timeout - uptime, 0)
   end
 
@@ -1180,7 +1180,28 @@ defmodule NervesGate.Firmware do
   end
 
   defp monotonic(%{monotonic: function}), do: function.()
-  defp monotonic(options), do: Keyword.get(options, :monotonic, &Clock.monotonic_ms/0).()
+  defp monotonic(options), do: Keyword.get(options, :monotonic, &monotonic_ms/0).()
+
+  defp monotonic_ms, do: System.monotonic_time(:millisecond)
+
+  defp system_boot_id do
+    case File.read("/proc/sys/kernel/random/boot_id") do
+      {:ok, id} -> String.trim(id)
+      {:error, _reason} -> "unknown-boot"
+    end
+  end
+
+  defp uptime_ms do
+    with {:ok, contents} <- File.read("/proc/uptime"),
+         [seconds | _rest] <- String.split(contents),
+         {value, _remainder} <- Float.parse(seconds) do
+      trunc(value * 1_000)
+    else
+      _unavailable ->
+        {milliseconds, _since_last_call} = :erlang.statistics(:wall_clock)
+        milliseconds
+    end
+  end
 
   defp device_boot_id do
     NervesGate.DeviceState.snapshot().boot_id

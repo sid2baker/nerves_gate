@@ -40,7 +40,7 @@ end
 defmodule NervesGate.Commissioning.Alarms do
   @moduledoc "Owns commissioning signals, mutually exclusive public alarms, and access healing."
 
-  alias NervesGate.Alarms
+  alias NervesGate.AlarmistAdapter
   alias NervesGate.Commissioning
   alias NervesGate.Commissioning.Alarm
   alias NervesGate.Commissioning.Signal
@@ -61,12 +61,12 @@ defmodule NervesGate.Commissioning.Alarms do
 
   @spec required(boolean()) :: :ok
   def required(active) do
-    Alarms.report_sync(Signal.Required, active, Signal.Required.description())
+    AlarmistAdapter.report_sync(Signal.Required, active, Signal.Required.description())
   end
 
   @spec unavailable(boolean()) :: :ok
   def unavailable(active) do
-    Alarms.report_sync(
+    AlarmistAdapter.report_sync(
       Signal.AccessUnavailable,
       active,
       Signal.AccessUnavailable.description()
@@ -75,6 +75,6 @@ defmodule NervesGate.Commissioning.Alarms do
 
   @spec heal() :: :ok | {:error, term()}
   def heal do
-    Alarms.heal(Alarm.Unavailable, &Commissioning.heal/0)
+    AlarmistAdapter.heal(Alarm.Unavailable, &Commissioning.heal/0)
   end
 end

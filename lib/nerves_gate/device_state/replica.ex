@@ -40,7 +40,7 @@ defmodule NervesGate.DeviceState.Replica do
   disconnected --> [*] : terminate
   """
 
-  use NervesGate.FSM, fsm: @fsm, timer: 1_000
+  use NervesGate.FSM, fsm: @fsm, timer: 1_000, supervised: false
 
   @spec new(node(), keyword()) :: map()
   def new(remote_node, options \\ []) do

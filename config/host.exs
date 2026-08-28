@@ -5,7 +5,6 @@ import Config
 config :nerves_gate,
   data_dir: Path.join(System.tmp_dir!(), "nerves_gate/#{config_env()}"),
   internet_adapter: NervesGate.Internet.HostAdapter,
-  tailscale_enabled: false,
   internet_poll_interval: 60_000,
   cluster_poll_interval: 60_000,
   firmware: [platform: NervesGate.Firmware.Platform.Host]
@@ -21,7 +20,12 @@ if config_env() == :test do
     }
 end
 
-config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {127, 0, 0, 1}, port: 0]
+config :nerves_gate, NervesGateWeb.Endpoint,
+  http: [
+    ip: {127, 0, 0, 1},
+    port: 0,
+    thousand_island_options: [num_acceptors: 4]
+  ]
 
 config :nerves_runtime,
   kv_backend:

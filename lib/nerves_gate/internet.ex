@@ -9,7 +9,7 @@ defmodule NervesGate.Internet do
 
   alias NervesGate.FSM.{Diagnostics, Effect}
   alias NervesGate.Internet.{Config, Connectivity, Status}
-  alias NervesGate.Retry
+  alias NervesGate.Reconciliation
 
   @fsm """
   [*] --> unconfigured : boot
@@ -121,9 +121,6 @@ defmodule NervesGate.Internet do
   @spec restore(Config.t() | nil, GenServer.server()) :: :ok | {:error, term()}
   def restore(config, server \\ __MODULE__),
     do: Diagnostics.request(server, :restore, %{config: config, timeout: 0}, 35_000)
-
-  @spec reapply(GenServer.server()) :: :ok | {:error, term()}
-  def reapply(server \\ __MODULE__), do: heal(server)
 
   @spec heal(GenServer.server()) :: :ok | {:error, term()}
   def heal(server \\ __MODULE__), do: Diagnostics.request(server, :heal, %{}, 35_000)
@@ -246,7 +243,7 @@ defmodule NervesGate.Internet do
       payload.effect ->
         finish(state, :tick, state, payload)
 
-      (state == :backoff and payload.current) && Retry.due?(payload.retry_at) ->
+      (state == :backoff and payload.current) && Reconciliation.due?(payload.retry_at) ->
         pending = %{
           id: nil,
           mode: :heal,
@@ -259,7 +256,7 @@ defmodule NervesGate.Internet do
         payload = set_pending(payload, pending)
         begin_configuration(state, :tick, payload)
 
-      state == :backoff and not Retry.due?(payload.retry_at) ->
+      state == :backoff and not Reconciliation.due?(payload.retry_at) ->
         finish(state, :tick, :backoff, payload)
 
       true ->
@@ -583,7 +580,7 @@ defmodule NervesGate.Internet do
         {:error, checks}
 
       true ->
-        {wait, next_delay} = Retry.next(pending.delay, 4_000)
+        {wait, next_delay} = Reconciliation.next_delay(pending.delay, 4_000)
         Process.sleep(min(wait, max(pending.deadline - now(), 0)))
         verify_until(verifier, %{pending | delay: next_delay})
     end

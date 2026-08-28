@@ -26,10 +26,7 @@ config :logger, backends: [RingLogger]
 
 config :shoehorn,
   init: [:nerves_runtime, :vintage_net],
-  handler: NervesGate.ShoehornHandler,
-  retry_applications: [:nerves_runtime],
-  retry_attempts: 1,
-  resume_application: :nerves_gate
+  handler: NervesGate.Boot.Shoehorn
 
 # NervesGate owns trial validation so firmware is never committed merely because
 # OTP started. The system boot contract performs fallback on any unvalidated reboot.

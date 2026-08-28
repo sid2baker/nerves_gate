@@ -6,7 +6,7 @@ end
 defmodule NervesGate.DeviceState.Alarms do
   @moduledoc "Owns DeviceState signals used to inhibit expected operational alarms."
 
-  alias NervesGate.Alarms
+  alias NervesGate.AlarmistAdapter
   alias NervesGate.DeviceState.Signal
 
   def managed_alarms, do: []
@@ -16,6 +16,6 @@ defmodule NervesGate.DeviceState.Alarms do
 
   @spec changing(boolean()) :: :ok
   def changing(active) do
-    Alarms.report_sync(Signal.Changing, active, Signal.Changing.description())
+    AlarmistAdapter.report_sync(Signal.Changing, active, Signal.Changing.description())
   end
 end

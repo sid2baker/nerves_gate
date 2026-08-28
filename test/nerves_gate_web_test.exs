@@ -463,7 +463,6 @@ defmodule NervesGateWebTest do
       %{
         state
         | phase: :online,
-          desired: %{enabled: true},
           source: source,
           observed: observed,
           read_status: fn -> {:ok, source} end
@@ -476,7 +475,7 @@ defmodule NervesGateWebTest do
       function.()
     after
       :sys.replace_state(machine, fn _state -> original end)
-      :ok = NervesGate.Tailnet.refresh()
+      _ = NervesGate.Tailnet.refresh()
     end
   end
 
@@ -604,9 +603,7 @@ defmodule NervesGateWebTest do
       )
     end
 
-    ssh = fn enabled, change_id ->
-      NervesGate.SSH.set_enabled(enabled, NervesGate.SSH, change_id: change_id)
-    end
+    ssh = fn enabled, _change_id -> NervesGate.SSH.set_enabled(enabled) end
 
     ops =
       original.payload.ops

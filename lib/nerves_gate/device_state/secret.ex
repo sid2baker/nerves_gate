@@ -1,9 +1,9 @@
-defmodule NervesGate.Secret do
+defmodule NervesGate.DeviceState.Secret do
   @moduledoc """
-  Redacted wrapper for credentials that may exist only in private control-plane state.
+  Redacted marker for private values that must never cross DeviceState.
 
-  Public DeviceState publication rejects this struct recursively. Its `Inspect`
-  implementation never renders the wrapped value, including in crash reports.
+  Public validation rejects this marker recursively, and inspection never
+  renders its wrapped value.
   """
 
   @enforce_keys [:value]
@@ -34,7 +34,7 @@ defmodule NervesGate.Secret do
   def contains?(_value), do: false
 end
 
-defimpl Inspect, for: NervesGate.Secret do
+defimpl Inspect, for: NervesGate.DeviceState.Secret do
   import Inspect.Algebra
 
   @impl true

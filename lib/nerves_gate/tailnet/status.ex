@@ -27,7 +27,7 @@ defmodule NervesGate.Tailnet.Status do
   ]
 
   @type t :: %__MODULE__{
-          state: :disabled | :needs_auth | :connecting | :online,
+          state: :needs_auth | :connecting | :online,
           online: boolean(),
           authenticated: boolean() | :unknown,
           hostname: String.t() | nil,

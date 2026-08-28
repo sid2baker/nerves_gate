@@ -21,7 +21,7 @@ defmodule NervesGateTest do
 
   test "web code does not reach through the backend boundary" do
     forbidden =
-      ~r/NervesGate\.(Alarms|Backend|Cluster|Commissioning|DeviceState|FSM|Gateway|Identity|Internet|SSH|Storage|SubnetRouter|Tailnet)/
+      ~r/NervesGate\.(Alarms|Backend|Cluster|Commissioning|DeviceState|Firmware|FSM|Gateway|Identity|Internet|Reconciliation|Session|SSH|Storage|SubnetRouter|Tailnet)/
 
     violations =
       "lib/nerves_gate_web/**/*.ex"

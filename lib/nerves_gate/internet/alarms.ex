@@ -68,7 +68,7 @@ end
 defmodule NervesGate.Internet.Alarms do
   @moduledoc "Owns truthful Internet signals, public alarms, flapping history, and healing."
 
-  alias NervesGate.Alarms
+  alias NervesGate.AlarmistAdapter
   alias NervesGate.Internet
   alias NervesGate.Internet.Alarm
   alias NervesGate.Internet.Signal
@@ -96,10 +96,10 @@ defmodule NervesGate.Internet.Alarms do
 
   @spec report(map(), map() | nil) :: :ok
   def report(%{online: online}, previous \\ nil) when is_boolean(online) do
-    Alarms.report(Signal.Unavailable, not online, Signal.Unavailable.description())
+    AlarmistAdapter.report(Signal.Unavailable, not online, Signal.Unavailable.description())
 
-    if availability_changed?(previous, online) and Alarms.operational_monitoring?() do
-      Alarms.report(
+    if availability_changed?(previous, online) and operational_monitoring?() do
+      AlarmistAdapter.report(
         Signal.UnavailableSample,
         not online,
         Signal.UnavailableSample.description()
@@ -111,7 +111,7 @@ defmodule NervesGate.Internet.Alarms do
 
   @spec heal() :: :ok | {:error, term()}
   def heal do
-    Alarms.heal(Alarm.Unavailable, fn ->
+    AlarmistAdapter.heal(Alarm.Unavailable, fn ->
       case Internet.status() do
         %{reason: :no_carrier} ->
           Internet.poll_now()
@@ -124,6 +124,12 @@ defmodule NervesGate.Internet.Alarms do
           Internet.heal()
       end
     end)
+  end
+
+  defp operational_monitoring? do
+    Alarmist.alarm_state(NervesGate.DeviceState.Signal.Changing) != :set and
+      Alarmist.alarm_state(NervesGate.Commissioning.Signal.Required) == :clear and
+      Alarmist.alarm_state(NervesGate.Storage.Signal.Failure) != :set
   end
 
   defp availability_changed?(%{online: previous}, online) when is_boolean(previous),

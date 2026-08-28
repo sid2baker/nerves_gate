@@ -2,8 +2,7 @@ defmodule NervesGate.DeviceState.ServerTest do
   use ExUnit.Case, async: true
 
   alias NervesGate.DeviceState
-  alias NervesGate.DeviceState.{Server, State}
-  alias NervesGate.Secret
+  alias NervesGate.DeviceState.{Secret, Server, State}
 
   setup do
     owner = self()

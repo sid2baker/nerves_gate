@@ -14,7 +14,7 @@ defmodule NervesGate.Cluster.Supervisor do
   @impl true
   def init(options) do
     children = [
-      {Cluster, payload: Cluster.new(options), name: Cluster},
+      {Cluster, options},
       PeerSupervisor
     ]
 

@@ -64,18 +64,30 @@ LiveView.
 restartable public-state subtree:
 
 ```text
-Task/Tailscale runtime
-      ↓
-DeviceState.Server
-      ↓
-resource owners → Gateway.Configuration FSM + Firmware FSM
-      ↓                 ↓
-Dependencies         Alarms.Runtime
-      ↓
-DeviceState.Replica FSM × remote gateway
-      ↓
-NervesGate.Session × connected client
+EffectRegistry → TaskSupervisor → Tailscale
+                         ↓
+                  DeviceState.Server
+                         ↓
+        Publishers (:one_for_one failure domains)
+        ├── Firmware FSM
+        ├── Connection runtime → Gateway.Configuration FSM
+        └── Alarms.Runtime
+                         ↓
+          DeviceState.Replica FSM × remote gateway
+                         ↓
+             NervesGate.Session × connected client
 ```
+
+These are resource owners, not a generic service layer: Internet owns the
+uplink, Commissioning owns local setup interfaces, Tailnet observes the device's
+integrated Tailscale runtime, SSH owns its listener, SubnetRouter owns route
+advertisement, Cluster owns distribution and peers, Firmware owns update
+transactions, and Gateway.Configuration owns accepted settings. They remain
+separate because merging them would create overlapping mutation authority.
+Supervisors either own genuinely dynamic children or encode an explicit failure
+boundary. A firmware or alarm crash cannot restart connection owners or discard
+client sessions; losing DeviceState deliberately rebuilds every downstream
+publisher, replica, and session.
 
 The architecture uses only Command, Event, and State. Imperative commands go to
 the subsystem that owns the affected private state. Runtime completions and
@@ -110,6 +122,7 @@ Backend code is organized by bounded context rather than by module count:
 ```text
 nerves_gate.ex                   thin session and command facade
 nerves_gate/session.ex           per-client live state projection
+nerves_gate/backend.ex           explicit infrastructure, state, publisher, and connection failure domains
 nerves_gate/{internet,tailnet,cluster,ssh,subnet_router,commissioning}.ex
                                  one resource owner per subsystem
 nerves_gate/firmware.ex           signed, recoverable firmware transaction owner
@@ -134,8 +147,9 @@ code discoverable without mixing frontend concerns into the backend.
 `tailscale_ex` owns `tailscaled`, command scheduling, typed status, health,
 profiles, preferences, readiness, and subscriptions. `Tailnet` projects
 that typed state and owns Tailnet usability, but never repairs or restarts the
-daemon. `Gateway.Settings`, `Gateway.Persistence`, and `Gateway.Runtime` remain
-small configuration boundaries. A single change signal inhibits expected
+daemon. `Gateway.Configuration` keeps its owner-command wiring private while
+`Gateway.Settings` and `Gateway.Persistence` remain pure boundaries. A single
+change signal inhibits expected
 connectivity alarms while a remote-access candidate is active.
 
 Kernel forwarding is immutable platform policy in `/etc/sysctl.conf`, loaded by

@@ -3,7 +3,7 @@ defmodule NervesGate.Gateway.Settings do
 
   import Bitwise
 
-  alias NervesGate.Cluster, as: Cluster
+  alias NervesGate.Cluster.Group
   alias NervesGate.Identity
   alias NervesGate.Internet.Config
 
@@ -34,7 +34,7 @@ defmodule NervesGate.Gateway.Settings do
          {:ok, internet} <- validate_internet(persisted_internet, configured),
          {:ok, subnet_router} <- validate_subnet_router(Map.get(settings, "subnet_router")),
          {:ok, ssh_enabled} <- validate_ssh_enabled(Map.get(settings, "ssh_enabled", false)),
-         {:ok, group} <- Cluster.validate_group(group),
+         {:ok, group} <- Group.validate(group),
          {:ok, name} <- valid_name(name) do
       {:ok,
        settings

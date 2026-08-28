@@ -126,7 +126,6 @@ defmodule NervesGate.TailnetTest do
       Tailnet.new(
         Keyword.merge(
           [
-            enabled: true,
             read_status: read_status,
             read_health: fn -> {:ok, Tailscale.Health.initial()} end,
             route_status: fn -> {:ok, %{advertised: [], approved: [], primary: []}} end,

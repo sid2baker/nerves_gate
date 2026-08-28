@@ -34,23 +34,42 @@ defmodule NervesGate.SSHTest do
     %{machine: machine, tailnet: tailnet}
   end
 
+  test "owner startup restores accepted desired state before reconciliation" do
+    name = String.to_atom("ssh_restore_#{System.unique_integer([:positive])}")
+
+    {:ok, machine} =
+      SSH.start_link(
+        name: name,
+        load_enabled: fn -> true end,
+        initial_tailnet: offline(),
+        tailnet: fn -> offline() end,
+        observer: fn _address -> nil end,
+        publisher: fn _status -> :ok end
+      )
+
+    assert SSH.status(machine).enabled
+    assert SSH.status(machine).state == :blocked
+  end
+
   test "commands, dependency events, and completion events drive lifecycle state", context do
     assert SSH.status(context.machine).state == :disabled
     assert :ok = SSH.set_enabled(true, context.machine)
     assert SSH.status(context.machine).state == :blocked
 
-    SSH.tailnet_state_changed(online("100.84.12.7"), context.machine)
+    Agent.update(context.tailnet, fn _ -> online("100.84.12.7") end)
+    refresh_tailnet(context.machine)
     assert_receive {:started, listener, {100, 84, 12, 7}}
     assert_eventually(fn -> SSH.status(context.machine).state == :listening end)
 
-    SSH.tailnet_state_changed(offline(), context.machine)
+    Agent.update(context.tailnet, fn _ -> offline() end)
+    refresh_tailnet(context.machine)
     assert_receive {:stopped, ^listener}
     assert_eventually(fn -> SSH.status(context.machine).state == :blocked end)
   end
 
   test "listener death is observed and reconciled", context do
     Agent.update(context.tailnet, fn _ -> online("100.84.12.7") end)
-    SSH.tailnet_state_changed(online("100.84.12.7"), context.machine)
+    refresh_tailnet(context.machine)
     assert :ok = SSH.set_enabled(true, context.machine)
     assert_receive {:started, first, {100, 84, 12, 7}}
     assert_eventually(fn -> SSH.status(context.machine).state == :listening end)
@@ -68,7 +87,8 @@ defmodule NervesGate.SSHTest do
     state = :sys.get_state(context.machine)
     runtime = %{state.runtime | start: fn _ -> {:error, :busy} end}
     :sys.replace_state(context.machine, &%{&1 | runtime: runtime})
-    SSH.tailnet_state_changed(online("100.84.12.7"), context.machine)
+    Agent.update(context.tailnet, fn _ -> online("100.84.12.7") end)
+    refresh_tailnet(context.machine)
 
     assert :ok = SSH.set_enabled(true, context.machine)
     assert_eventually(fn -> SSH.status(context.machine).state == :backoff end)
@@ -94,6 +114,7 @@ defmodule NervesGate.SSHTest do
   test "desired changes are coalesced while one mutation is in flight" do
     owner = self()
     {:ok, actual} = Agent.start_link(fn -> nil end)
+    {:ok, tailnet} = Agent.start_link(fn -> online("100.84.12.7") end)
 
     starter = fn address ->
       send(owner, {:start_requested, self(), address})
@@ -117,7 +138,7 @@ defmodule NervesGate.SSHTest do
       start_machine(
         SSH.new(
           initial_tailnet: online("100.84.12.7"),
-          tailnet: fn -> online("100.84.12.7") end,
+          tailnet: fn -> Agent.get(tailnet, & &1) end,
           starter: starter,
           stopper: stopper,
           observer: fn _ -> Agent.get(actual, & &1) end,
@@ -128,7 +149,8 @@ defmodule NervesGate.SSHTest do
     assert :ok = SSH.set_enabled(true, machine)
     assert_receive {:start_requested, first_worker, {100, 84, 12, 7}}
 
-    SSH.tailnet_state_changed(online("100.84.12.8"), machine)
+    Agent.update(tailnet, fn _ -> online("100.84.12.8") end)
+    refresh_tailnet(machine)
     refute_receive {:start_requested, _overlapping_worker, _address}, 50
 
     send(first_worker, :complete)
@@ -250,7 +272,9 @@ defmodule NervesGate.SSHTest do
     machine
   end
 
-  defp transition(machine, :retry_timer_fired) do
+  defp transition(machine, :retry_timer_fired), do: refresh_tailnet(machine)
+
+  defp refresh_tailnet(machine) do
     send(machine, :tick)
     _state = :sys.get_state(machine)
     :ok

@@ -2,7 +2,7 @@ defmodule NervesGate.Cluster.Peer do
   @moduledoc "Independent discovery, connection, retry, and diagnosis for one gateway peer."
 
   alias NervesGate.FSM.Diagnostics
-  alias NervesGate.Retry
+  alias NervesGate.Reconciliation
 
   @fsm """
   [*] --> discovering : boot
@@ -31,7 +31,7 @@ defmodule NervesGate.Cluster.Peer do
   foreign --> [*] : terminate
   """
 
-  use NervesGate.FSM, fsm: @fsm, timer: 1_000
+  use NervesGate.FSM, fsm: @fsm, timer: 1_000, supervised: false
 
   @retry_delay 30_000
 
@@ -105,25 +105,30 @@ defmodule NervesGate.Cluster.Peer do
         else
           finish(:discovering, :tick, :foreign, payload,
             attempt: 0,
-            retry_at: Retry.now() + payload.retry_delay
+            retry_at: Reconciliation.after_ms(payload.retry_delay)
           )
         end
 
       {:error, reason} ->
-        backoff(:discovering, :tick, payload, {:discovery_failed, Retry.public_error(reason)})
+        backoff(
+          :discovering,
+          :tick,
+          payload,
+          {:discovery_failed, Reconciliation.public_error(reason)}
+        )
 
       invalid ->
         backoff(
           :discovering,
           :tick,
           payload,
-          {:invalid_discovery_result, Retry.public_error(invalid)}
+          {:invalid_discovery_result, Reconciliation.public_error(invalid)}
         )
     end
   end
 
   def on_transition(:foreign, :tick, _event_payload, payload) do
-    if Retry.due?(payload.retry_at),
+    if Reconciliation.due?(payload.retry_at),
       do: finish(:foreign, :tick, :discovering, payload),
       else: finish(:foreign, :tick, :foreign, payload)
   end
@@ -143,7 +148,7 @@ defmodule NervesGate.Cluster.Peer do
   end
 
   def on_transition(:backoff, :tick, _event_payload, payload) do
-    if Retry.due?(payload.retry_at),
+    if Reconciliation.due?(payload.retry_at),
       do: finish(:backoff, :tick, :discovering, payload),
       else: finish(:backoff, :tick, :backoff, payload)
   end
@@ -158,14 +163,19 @@ defmodule NervesGate.Cluster.Peer do
         connected_after_attempt(payload, node_name)
 
       {:error, reason} ->
-        backoff(:connecting, :tick, payload, {:connect_failed, Retry.public_error(reason)})
+        backoff(
+          :connecting,
+          :tick,
+          payload,
+          {:connect_failed, Reconciliation.public_error(reason)}
+        )
 
       invalid ->
         backoff(
           :connecting,
           :tick,
           payload,
-          {:invalid_connect_result, Retry.public_error(invalid)}
+          {:invalid_connect_result, Reconciliation.public_error(invalid)}
         )
     end
   end
@@ -191,7 +201,7 @@ defmodule NervesGate.Cluster.Peer do
       reason: error,
       error: error,
       attempt: attempt,
-      retry_at: Retry.now() + payload.retry_delay
+      retry_at: Reconciliation.after_ms(payload.retry_delay)
     )
   end
 

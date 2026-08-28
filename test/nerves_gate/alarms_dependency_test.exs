@@ -1,6 +1,7 @@
 defmodule NervesGate.AlarmsDependencyTest do
   use ExUnit.Case
 
+  alias NervesGate.AlarmistAdapter
   alias NervesGate.Alarms
   alias NervesGate.Cluster
   alias NervesGate.Commissioning
@@ -38,13 +39,13 @@ defmodule NervesGate.AlarmsDependencyTest do
       SubnetRouter.Signal.Unavailable
     ]
 
-    Enum.each(signals, &Alarms.clear/1)
+    Enum.each(signals, &AlarmistAdapter.clear/1)
 
     signals
     |> List.delete(Internet.Signal.UnavailableSample)
     |> Enum.each(&initialize_clear/1)
 
-    Enum.each(signals, fn id -> on_exit(fn -> Alarms.clear(id) end) end)
+    Enum.each(signals, fn id -> on_exit(fn -> AlarmistAdapter.clear(id) end) end)
 
     wait_for(fn ->
       Enum.all?(signals ++ Alarms.public_ids(), &(Alarmist.alarm_state(&1) != :set))
@@ -117,7 +118,7 @@ defmodule NervesGate.AlarmsDependencyTest do
     wait_set(Commissioning.Alarm.Unavailable)
     refute_set(Commissioning.Alarm.Required)
 
-    Alarms.clear(Commissioning.Signal.AccessUnavailable)
+    AlarmistAdapter.clear(Commissioning.Signal.AccessUnavailable)
     wait_set(Commissioning.Alarm.Required)
     refute_set(Commissioning.Alarm.Unavailable)
   end
@@ -169,7 +170,7 @@ defmodule NervesGate.AlarmsDependencyTest do
     set(Internet.Signal.Unavailable)
     wait_for(fn -> Alarmist.alarm_state(Tailnet.Condition.ActionableUnavailable) != :set end)
 
-    Alarms.clear(Internet.Signal.Unavailable)
+    AlarmistAdapter.clear(Internet.Signal.Unavailable)
     Process.sleep(10)
     refute_set(Tailnet.Alarm.Unavailable)
     wait_set(Tailnet.Alarm.Unavailable)
@@ -190,11 +191,11 @@ defmodule NervesGate.AlarmsDependencyTest do
   end
 
   defp initialize_clear(id) do
-    :ok = Alarms.report_sync(id, true, id.description())
-    :ok = Alarms.report_sync(id, false, id.description())
+    :ok = AlarmistAdapter.report_sync(id, true, id.description())
+    :ok = AlarmistAdapter.report_sync(id, false, id.description())
   end
 
-  defp set(id), do: Alarms.set(id, id.description())
+  defp set(id), do: AlarmistAdapter.set(id, id.description())
   defp assert_set(id), do: assert(Alarmist.alarm_state(id) == :set)
   defp refute_set(id), do: refute(Alarmist.alarm_state(id) == :set)
   defp wait_set(id), do: wait_for(fn -> Alarmist.alarm_state(id) == :set end)

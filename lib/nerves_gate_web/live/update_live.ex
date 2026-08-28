@@ -247,7 +247,7 @@ defmodule NervesGateWeb.UpdateLive do
   defp firmware(fleet), do: fleet.local.state.firmware || unsupported()
 
   defp unsupported do
-    %NervesGate.Firmware.Status{
+    %{
       supported: false,
       phase: :unsupported,
       current: %{},

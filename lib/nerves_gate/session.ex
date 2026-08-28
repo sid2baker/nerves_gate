@@ -18,10 +18,25 @@ defmodule NervesGate.Session do
 
   @type fleet :: %{local: DeviceState.snapshot(), replicas: %{String.t() => map()}}
 
-  @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(options) do
-    GenServer.start_link(__MODULE__, options)
+  @doc false
+  def child_spec(options) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [options]},
+      restart: :temporary
+    }
   end
+
+  @spec start(pid(), keyword()) :: DynamicSupervisor.on_start_child()
+  def start(client, options \\ []) when is_pid(client) do
+    DynamicSupervisor.start_child(
+      NervesGate.Session.DynamicSupervisor,
+      {__MODULE__, [{:client, client} | options]}
+    )
+  end
+
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(options), do: GenServer.start_link(__MODULE__, options)
 
   @spec state(GenServer.server()) :: fleet()
   def state(session), do: GenServer.call(session, :state)

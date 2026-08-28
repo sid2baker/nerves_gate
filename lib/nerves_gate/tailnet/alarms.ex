@@ -37,7 +37,7 @@ end
 defmodule NervesGate.Tailnet.Alarms do
   @moduledoc "Owns truthful Tailnet state, upstream inhibition, and non-mutating healing."
 
-  alias NervesGate.Alarms
+  alias NervesGate.AlarmistAdapter
   alias NervesGate.Tailnet
   alias NervesGate.Tailnet.Alarm
   alias NervesGate.Tailnet.Signal
@@ -58,11 +58,11 @@ defmodule NervesGate.Tailnet.Alarms do
 
   @spec report(map()) :: :ok
   def report(%{online: online}) when is_boolean(online) do
-    Alarms.report(Signal.Unavailable, not online, Signal.Unavailable.description())
+    AlarmistAdapter.report(Signal.Unavailable, not online, Signal.Unavailable.description())
   end
 
   @spec heal() :: :ok | {:error, term()}
   def heal do
-    Alarms.heal(Alarm.Unavailable, &Tailnet.heal/0)
+    AlarmistAdapter.heal(Alarm.Unavailable, &Tailnet.heal/0)
   end
 end

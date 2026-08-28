@@ -12,8 +12,7 @@ defmodule NervesGate.DeviceState.Server do
 
   use GenServer
 
-  alias NervesGate.DeviceState
-  alias NervesGate.DeviceState.State
+  alias NervesGate.DeviceState.{Public, Secret, State}
   alias NervesGate.Identity
 
   @heartbeat_interval 1_000
@@ -26,18 +25,6 @@ defmodule NervesGate.DeviceState.Server do
           state: State.t(),
           hydrated: boolean()
         }
-
-  @default_owners %{
-    firmware: NervesGate.Firmware,
-    configuration: NervesGate.Gateway.Configuration,
-    commissioning: NervesGate.Commissioning,
-    internet: NervesGate.Internet,
-    tailnet: NervesGate.Tailnet,
-    subnet_router: NervesGate.SubnetRouter,
-    ssh: NervesGate.SSH,
-    cluster: NervesGate.Cluster,
-    alarms: NervesGate.Alarms.Runtime
-  }
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
@@ -72,7 +59,7 @@ defmodule NervesGate.DeviceState.Server do
     server = %__MODULE__{
       state: public_state,
       boot_id: Keyword.get_lazy(options, :boot_id, &new_boot_id/0),
-      owners: Map.merge(@default_owners, Map.new(Keyword.get(options, :owners, %{}))),
+      owners: options |> Keyword.fetch!(:owners) |> Map.new(),
       heartbeat_interval: Keyword.get(options, :heartbeat_interval, @heartbeat_interval)
     }
 
@@ -136,8 +123,8 @@ defmodule NervesGate.DeviceState.Server do
 
   defp validate_public({:state_reported, _source, value}) do
     cond do
-      NervesGate.Secret.contains?(value) -> {:error, :secret_detected}
-      DeviceState.public?(value) -> :ok
+      Secret.contains?(value) -> {:error, :secret_detected}
+      Public.public?(value) -> :ok
       true -> {:error, :invalid_state}
     end
   end

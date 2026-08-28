@@ -113,9 +113,9 @@ defmodule NervesGate.ClusterTest do
     assert Cluster.status(context.machine).online
   end
 
-  test "clearing a group disables distribution" do
-    assert {:ok, nil} = Cluster.validate_group(nil)
-    assert {:error, :invalid_cluster_group} = Cluster.validate_group("bad group")
+  test "cluster group validation accepts clearing and rejects malformed names" do
+    assert {:ok, nil} = NervesGate.Cluster.Group.validate(nil)
+    assert {:error, :invalid_cluster_group} = NervesGate.Cluster.Group.validate("bad group")
   end
 
   defp drain_published(statuses \\ []) do

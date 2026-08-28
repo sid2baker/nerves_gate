@@ -81,8 +81,7 @@ defmodule NervesGate.FSM.FailureScenariosTest do
     assert_eventually(fn -> Cluster.diagnostics(cluster).state == :online end)
 
     Agent.update(tail, fn _ -> tail_status(false) end)
-    SSH.tailnet_state_changed(tail_status(false), ssh)
-    SubnetRouter.tailnet_state_changed(tail_status(false), subnet)
+    refresh_tailnet(ssh, subnet)
     assert :ok = Cluster.reconcile(cluster)
 
     assert_eventually(fn -> SSH.diagnostics(ssh).state == :blocked end)
@@ -90,8 +89,7 @@ defmodule NervesGate.FSM.FailureScenariosTest do
     assert_eventually(fn -> Cluster.diagnostics(cluster).state == :blocked end)
 
     Agent.update(tail, fn _ -> tail_status(true) end)
-    SSH.tailnet_state_changed(tail_status(true), ssh)
-    SubnetRouter.tailnet_state_changed(tail_status(true), subnet)
+    refresh_tailnet(ssh, subnet)
     assert :ok = Cluster.reconcile(cluster)
 
     assert_eventually(fn -> SSH.diagnostics(ssh).state == :listening end)
@@ -122,6 +120,14 @@ defmodule NervesGate.FSM.FailureScenariosTest do
     assert Tailnet.diagnostics(machine).state == :online
   after
     NervesGate.Internet.Alarms.report(%{online: true}, %{online: false})
+  end
+
+  defp refresh_tailnet(ssh, subnet) do
+    send(ssh, :tick)
+    send(subnet, :tick)
+    _ssh_state = :sys.get_state(ssh)
+    _subnet_state = :sys.get_state(subnet)
+    :ok
   end
 
   defp start_machine(module, payload) do

@@ -14,9 +14,9 @@ defmodule NervesGate.SSH.Supervisor do
   def init(options) do
     children = [
       {DynamicSupervisor, name: NervesGate.SSH.DynamicSupervisor, strategy: :one_for_one},
-      {SSH, payload: SSH.new(options), name: SSH}
+      {SSH, options}
     ]
 
-    Supervisor.init(children, strategy: :rest_for_one, max_restarts: 0, max_seconds: 1)
+    Supervisor.init(children, strategy: :rest_for_one)
   end
 end

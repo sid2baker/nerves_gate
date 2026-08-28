@@ -23,46 +23,6 @@ defmodule NervesGate.Alarms do
   @type remedy_declaration ::
           {Alarmist.alarm_id(), Alarmist.remedy_fn(), Alarmist.remedy_options()}
 
-  @spec set(Alarmist.alarm_id(), String.t()) :: :ok
-  def set(id, description) when is_binary(description) do
-    :alarm_handler.set_alarm({id, description})
-  end
-
-  @spec clear(Alarmist.alarm_id()) :: :ok
-  def clear(id), do: :alarm_handler.clear_alarm(id)
-
-  @doc "Synchronizes a truthful boolean signal into Alarmist."
-  @spec report(Alarmist.alarm_id(), boolean(), String.t()) :: :ok
-  def report(id, true, description), do: set(id, description)
-  def report(id, false, _description), do: clear(id)
-
-  @doc false
-  @spec report_sync(Alarmist.alarm_id(), boolean(), String.t()) :: :ok
-  def report_sync(id, active, description) do
-    expected = if active, do: :set, else: :clear
-    :ok = report(id, active, description)
-
-    # A newer ordered projection may supersede this signal while Alarmist is
-    # still processing it. That is convergence, not an invariant failure.
-    case await_state(id, expected) do
-      :ok -> :ok
-      {:error, :alarm_state_timeout} -> :ok
-    end
-  end
-
-  @doc false
-  @spec await_state(Alarmist.alarm_id(), :set | :clear, non_neg_integer()) ::
-          :ok | {:error, :alarm_state_timeout}
-  def await_state(id, expected, attempts \\ 100)
-
-  def await_state(id, expected, attempts) do
-    if Alarmist.alarm_state(id) == expected do
-      :ok
-    else
-      await_state_retry(id, expected, attempts)
-    end
-  end
-
   @doc "Installs subsystem-owned signal levels, managed alarms, and runtime remedies."
   @spec install(keyword()) :: :ok
   def install(options \\ []) do
@@ -127,33 +87,6 @@ defmodule NervesGate.Alarms do
 
   def log_transition(%Alarmist.Event{}), do: :ok
 
-  @doc "Whether genuine operational transition history should currently be recorded."
-  @spec operational_monitoring?() :: boolean()
-  def operational_monitoring? do
-    Alarmist.alarm_state(NervesGate.DeviceState.Signal.Changing) != :set and
-      Alarmist.alarm_state(NervesGate.Commissioning.Signal.Required) == :clear and
-      Alarmist.alarm_state(NervesGate.Storage.Signal.Failure) != :set
-  end
-
-  @doc "Runs and records one bounded Alarmist remedy without logging private error terms."
-  @spec heal(module(), (-> term())) :: term()
-  def heal(alarm, function) when is_atom(alarm) and is_function(function, 0) do
-    started = System.monotonic_time(:millisecond)
-    result = function.()
-    duration = System.monotonic_time(:millisecond) - started
-    public_id = alarm.public_id()
-    outcome = heal_outcome(result)
-
-    Logger.info("alarm heal: #{public_id} #{outcome}",
-      heal: true,
-      alarm_id: public_id,
-      heal_result: outcome,
-      heal_duration_ms: duration
-    )
-
-    result
-  end
-
   defp validate_declarations! do
     Enum.each(@subsystems, &validate_subsystem!/1)
 
@@ -202,13 +135,6 @@ defmodule NervesGate.Alarms do
     end)
 
     :ok
-  end
-
-  defp await_state_retry(_id, _expected, 0), do: {:error, :alarm_state_timeout}
-
-  defp await_state_retry(id, expected, attempts) do
-    Process.sleep(1)
-    await_state(id, expected, attempts - 1)
   end
 
   defp public_transition(:set, id), do: {:set, public_alarm(id)}
@@ -275,12 +201,6 @@ defmodule NervesGate.Alarms do
   end
 
   def sync_public_state(_state, _source, _previous), do: :ok
-
-  defp heal_outcome(:ok), do: :ok
-  defp heal_outcome({:ok, _value}), do: :ok
-  defp heal_outcome({:error, reason}) when is_atom(reason), do: reason
-  defp heal_outcome({:error, _reason}), do: :failed
-  defp heal_outcome(_result), do: :invalid_result
 end
 
 defmodule NervesGate.Alarms.Runtime do

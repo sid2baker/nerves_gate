@@ -11,7 +11,8 @@ defmodule NervesGateQEMU.Application do
        plug: NervesGateQEMU.ReleaseServer,
        scheme: :http,
        port: Application.fetch_env!(:nerves_gate_qemu, :release_port),
-       ip: {0, 0, 0, 0}},
+       ip: {0, 0, 0, 0},
+       thousand_island_options: [num_acceptors: 2]},
       NervesGateQEMUWeb.Endpoint
     ]
 

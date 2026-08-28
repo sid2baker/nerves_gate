@@ -18,7 +18,7 @@ end
 defmodule NervesGate.Storage.Alarms do
   @moduledoc "Owns the sticky storage signal and non-healable public alarm."
 
-  alias NervesGate.Alarms
+  alias NervesGate.AlarmistAdapter
   alias NervesGate.Storage.Alarm
   alias NervesGate.Storage.Signal
 
@@ -29,6 +29,6 @@ defmodule NervesGate.Storage.Alarms do
 
   @spec failure(boolean()) :: :ok
   def failure(active) do
-    Alarms.report_sync(Signal.Failure, active, Signal.Failure.description())
+    AlarmistAdapter.report_sync(Signal.Failure, active, Signal.Failure.description())
   end
 end

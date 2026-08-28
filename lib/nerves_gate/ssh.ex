@@ -10,8 +10,7 @@ defmodule NervesGate.SSH do
   use GenServer
 
   alias NervesGate.FSM.Effect
-  alias NervesGate.Gateway.Configuration
-  alias NervesGate.Retry
+  alias NervesGate.Reconciliation
   alias NervesGate.SSH.{Runtime, Status}
 
   @retry_delay 1_000
@@ -19,7 +18,7 @@ defmodule NervesGate.SSH do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) do
-    state = Keyword.get_lazy(options, :payload, &new/0)
+    state = Keyword.get_lazy(options, :payload, fn -> new(options) end)
     GenServer.start_link(__MODULE__, state, name: Keyword.get(options, :name, __MODULE__))
   end
 
@@ -41,6 +40,7 @@ defmodule NervesGate.SSH do
       tailnet: Keyword.get(options, :tailnet, &NervesGate.Tailnet.status/0),
       runtime: runtime,
       publisher: Keyword.get(options, :publisher, &publish/1),
+      load_enabled: Keyword.get(options, :load_enabled, fn -> false end),
       retry_delay: Keyword.get(options, :retry_delay, @retry_delay),
       effect_timeout: Keyword.get(options, :effect_timeout, 30_000),
       revision: 0,
@@ -52,14 +52,8 @@ defmodule NervesGate.SSH do
     }
   end
 
-  @spec enable() :: :ok | {:error, term()}
-  def enable, do: Configuration.configure_ssh(true)
-
-  @spec disable() :: :ok | {:error, term()}
-  def disable, do: Configuration.configure_ssh(false)
-
-  @spec set_enabled(boolean(), GenServer.server(), keyword()) :: :ok | {:error, term()}
-  def set_enabled(enabled, server \\ __MODULE__, _options \\ []) when is_boolean(enabled) do
+  @spec set_enabled(boolean(), GenServer.server()) :: :ok | {:error, term()}
+  def set_enabled(enabled, server \\ __MODULE__) when is_boolean(enabled) do
     GenServer.call(server, {:set_enabled, enabled})
   catch
     :exit, _reason -> {:error, :owner_unavailable}
@@ -70,11 +64,6 @@ defmodule NervesGate.SSH do
     GenServer.call(server, :heal)
   catch
     :exit, _reason -> {:error, :owner_unavailable}
-  end
-
-  @spec tailnet_state_changed(map(), GenServer.server()) :: :ok
-  def tailnet_state_changed(status, server \\ __MODULE__) when is_map(status) do
-    GenServer.cast(server, {:tailnet_state_changed, status})
   end
 
   @spec status(GenServer.server()) :: Status.t()
@@ -96,7 +85,7 @@ defmodule NervesGate.SSH do
   @impl true
   def init(state) do
     schedule_tick()
-    state = refresh_tailnet(state)
+    state = state |> restore_desired() |> refresh_tailnet()
     publish_state(state)
     send(self(), :reconcile)
     {:ok, state}
@@ -120,12 +109,6 @@ defmodule NervesGate.SSH do
   def handle_call(:state, _from, state), do: {:reply, state, state}
 
   @impl true
-  def handle_cast({:tailnet_state_changed, tailnet}, state) do
-    state = state |> put_tailnet(tailnet) |> reconcile()
-    publish_state(state)
-    {:noreply, state}
-  end
-
   def handle_cast(
         {:reconciliation_completed, {ref, outcome}},
         %{effect: %{ref: ref, revision: revision}} = state
@@ -188,7 +171,7 @@ defmodule NervesGate.SSH do
   defp reconciliation_decision(_state, _listener, _address, true), do: :reconcile
 
   defp retry_decision(%{phase: :backoff, retry_at: retry_at}) do
-    if Retry.due?(retry_at), do: :reconcile, else: :wait
+    if Reconciliation.due?(retry_at), do: :reconcile, else: :wait
   end
 
   defp retry_decision(_state), do: :reconcile
@@ -209,7 +192,10 @@ defmodule NervesGate.SSH do
         %{state | phase: :reconciling, effect: %{ref: ref, revision: revision}}
 
       {:error, reason} ->
-        enter_backoff(state, {:listener_effect_launch_failed, Retry.public_error(reason)})
+        enter_backoff(
+          state,
+          {:listener_effect_launch_failed, Reconciliation.public_error(reason)}
+        )
     end
   end
 
@@ -255,7 +241,11 @@ defmodule NervesGate.SSH do
     do: enter_backoff(state, :listener_reconciliation_cancelled)
 
   defp complete_reconciliation({:crashed, _kind, reason, _stack}, _revision, state),
-    do: enter_backoff(state, {:listener_reconciliation_crashed, Retry.public_error(reason)})
+    do:
+      enter_backoff(
+        state,
+        {:listener_reconciliation_crashed, Reconciliation.public_error(reason)}
+      )
 
   defp complete_reconciliation(_invalid, _revision, state),
     do: enter_backoff(state, :invalid_listener_reconciliation_result)
@@ -265,7 +255,7 @@ defmodule NervesGate.SSH do
   defp resolve_result(state, {:blocked, :tailnet}), do: stable(state, :blocked)
 
   defp resolve_result(state, {:error, reason}),
-    do: enter_backoff(state, {:listener_start_failed, Retry.public_error(reason)})
+    do: enter_backoff(state, {:listener_start_failed, Reconciliation.public_error(reason)})
 
   defp apply_runtime_result(state, {:ok, listener}),
     do: put_in(state, [:observed, :listener], listener)
@@ -288,6 +278,15 @@ defmodule NervesGate.SSH do
     end
   end
 
+  defp restore_desired(state) do
+    case state.load_enabled.() do
+      enabled when is_boolean(enabled) -> put_in(state, [:desired, :enabled], enabled)
+      _invalid -> state
+    end
+  catch
+    _kind, _reason -> state
+  end
+
   defp refresh_tailnet(state) do
     put_tailnet(state, state.tailnet.())
   catch
@@ -296,17 +295,16 @@ defmodule NervesGate.SSH do
 
   defp stable(state, phase) do
     blocked_by = if phase == :blocked, do: :tailnet
-    %{state | phase: phase, last_error: nil, attempt: 0, retry_at: nil, blocked_by: blocked_by}
+
+    state
+    |> Map.merge(Reconciliation.converged())
+    |> Map.merge(%{phase: phase, blocked_by: blocked_by})
   end
 
   defp enter_backoff(state, error) do
-    %{
-      state
-      | phase: :backoff,
-        last_error: error,
-        attempt: state.attempt + 1,
-        retry_at: Retry.now() + state.retry_delay
-    }
+    state
+    |> Map.merge(Reconciliation.failed(state.attempt, state.retry_delay, error))
+    |> Map.merge(%{phase: :backoff, blocked_by: nil})
   end
 
   defp stop_actual(_state, nil), do: :ok

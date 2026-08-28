@@ -21,15 +21,11 @@ defmodule NervesGate.Tailnet do
 
   @spec new(keyword()) :: map()
   def new(options \\ []) do
-    enabled =
-      Keyword.get(options, :enabled, Application.get_env(:nerves_gate, :tailscale_enabled, true))
-
     health = Tailscale.Health.initial()
 
     %{
-      phase: :disabled,
-      desired: %{enabled: enabled},
-      observed: Observation.offline(if(enabled, do: :starting, else: :disabled), health),
+      phase: :connecting,
+      observed: Observation.offline(:starting, health),
       source: Tailscale.Status.unknown(),
       health: health,
       read_status: Keyword.get(options, :read_status, &Tailscale.status/0),
@@ -39,12 +35,6 @@ defmodule NervesGate.Tailnet do
       last_error: nil
     }
   end
-
-  @spec enable(GenServer.server()) :: :ok | {:error, term()}
-  def enable(server \\ __MODULE__), do: call(server, :enable)
-
-  @spec disable(GenServer.server()) :: :ok | {:error, term()}
-  def disable(server \\ __MODULE__), do: call(server, :disable)
 
   @spec refresh(GenServer.server()) :: :ok | {:error, term()}
   def refresh(server \\ __MODULE__), do: call(server, :refresh)
@@ -59,14 +49,6 @@ defmodule NervesGate.Tailnet do
     :exit, _reason -> Observation.offline(:unavailable)
   end
 
-  @spec actor_for_ip(String.t(), GenServer.server()) :: map()
-  def actor_for_ip(ip, server \\ __MODULE__) do
-    peer = Enum.find(status(server).peers, &(&1.ipv4 == ip))
-    %{ip: ip, name: (peer && peer.hostname) || "tailnet user"}
-  catch
-    :exit, _reason -> %{ip: ip, name: "tailnet user"}
-  end
-
   @spec diagnostics(GenServer.server()) :: map() | nil
   def diagnostics(server \\ __MODULE__) do
     GenServer.call(server, :diagnostics)
@@ -77,26 +59,13 @@ defmodule NervesGate.Tailnet do
   @impl true
   def init(state) do
     schedule_poll()
-    state = if state.desired.enabled, do: state, else: disabled(state)
     publish_state(state)
     {:ok, state}
   end
 
   @impl true
-  def handle_call(:enable, _from, state) do
-    state = state |> put_in([:desired, :enabled], true) |> observe()
-    publish_state(state)
-    {:reply, observation_reply(state), state}
-  end
-
-  def handle_call(:disable, _from, state) do
-    state = state |> put_in([:desired, :enabled], false) |> disabled()
-    publish_state(state)
-    {:reply, :ok, state}
-  end
-
   def handle_call(:refresh, _from, state) do
-    state = if state.desired.enabled, do: observe(state), else: disabled(state)
+    state = observe(state)
     publish_state(state)
     {:reply, observation_reply(state), state}
   end
@@ -106,7 +75,7 @@ defmodule NervesGate.Tailnet do
   def handle_call(:diagnostics, _from, state) do
     diagnostics = %{
       state: state.phase,
-      desired: state.desired,
+      desired: %{integrated: true},
       observed: state.observed,
       blocked_by: nil,
       last_error: state.last_error,
@@ -120,7 +89,7 @@ defmodule NervesGate.Tailnet do
   @impl true
   def handle_info(:poll, state) do
     schedule_poll()
-    state = if state.desired.enabled, do: observe(state), else: state
+    state = observe(state)
     publish_state(state)
     {:noreply, state}
   end
@@ -144,15 +113,6 @@ defmodule NervesGate.Tailnet do
         phase: phase,
         observed: %{observed | state: phase},
         last_error: read_error
-    }
-  end
-
-  defp disabled(state) do
-    %{
-      state
-      | phase: :disabled,
-        observed: Observation.offline(:disabled, state.health),
-        last_error: nil
     }
   end
 
