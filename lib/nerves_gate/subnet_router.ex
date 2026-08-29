@@ -17,7 +17,7 @@ defmodule NervesGate.SubnetRouter do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) do
-    state = Keyword.get_lazy(options, :payload, &new/0)
+    state = Keyword.get_lazy(options, :payload, fn -> new(options) end)
     GenServer.start_link(__MODULE__, state, name: Keyword.get(options, :name, __MODULE__))
   end
 
@@ -25,12 +25,16 @@ defmodule NervesGate.SubnetRouter do
   def new(options \\ []) do
     %{
       phase: :disabled,
-      desired: %{enabled: false, routes: []},
+      desired: %{
+        enabled: Keyword.get(options, :enabled, false),
+        routes: Keyword.get(options, :routes, [])
+      },
       observed: unavailable_observation(),
       tailnet_state: Keyword.get(options, :initial_tailnet),
       tailnet: Keyword.get(options, :tailnet, &NervesGate.Tailnet.status/0),
       apply: Keyword.get(options, :apply, &apply_routes/2),
       publisher: Keyword.get(options, :publisher, &publish/1),
+      load_desired: Keyword.get(options, :load_desired, fn -> nil end),
       retry_delay: Keyword.get(options, :retry_delay, @retry_delay),
       effect_timeout: Keyword.get(options, :effect_timeout, 45_000),
       revision: 0,
@@ -77,7 +81,7 @@ defmodule NervesGate.SubnetRouter do
   @impl true
   def init(state) do
     schedule_tick()
-    state = refresh_tailnet(state) |> resolve_observation()
+    state = state |> restore_desired() |> refresh_tailnet() |> resolve_observation()
     publish_state(state)
     {:ok, state}
   end
@@ -118,6 +122,18 @@ defmodule NervesGate.SubnetRouter do
     state = state |> refresh_tailnet() |> reconcile_dependency()
     publish_state(state)
     {:noreply, state}
+  end
+
+  defp restore_desired(state) do
+    case state.load_desired.() do
+      %{enabled: enabled, routes: routes} when is_boolean(enabled) and is_list(routes) ->
+        %{state | desired: %{enabled: enabled, routes: routes}}
+
+      _unavailable ->
+        state
+    end
+  catch
+    _kind, _reason -> state
   end
 
   defp apply_or_block(%{effect: effect} = state) when not is_nil(effect), do: state

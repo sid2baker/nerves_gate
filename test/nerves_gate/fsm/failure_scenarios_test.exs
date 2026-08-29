@@ -116,10 +116,7 @@ defmodule NervesGate.FSM.FailureScenariosTest do
     assert :ok = Tailnet.refresh(machine)
     assert Tailnet.diagnostics(machine).state == :online
 
-    NervesGate.Internet.Alarms.report(%{online: false}, %{online: true})
     assert Tailnet.diagnostics(machine).state == :online
-  after
-    NervesGate.Internet.Alarms.report(%{online: true}, %{online: false})
   end
 
   defp refresh_tailnet(ssh, subnet) do

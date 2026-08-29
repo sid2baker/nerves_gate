@@ -11,7 +11,6 @@ config :nerves_gate,
 
 if config_env() == :test do
   config :nerves_gate,
-    alarm_healing_enabled: false,
     alarm_timings: %{
       failure_debounce: 20,
       flapping_count: 4,

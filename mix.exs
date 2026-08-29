@@ -53,7 +53,6 @@ defmodule NervesGate.MixProject do
       {:vibe_kit, "~> 0.1"},
 
       # Runtime dependencies
-      {:alarmist, "~> 0.4.2"},
       {:bandit, "~> 1.12"},
       {:finitomata, "~> 0.43.0"},
       {:jason, "~> 1.4"},

@@ -1,6 +1,7 @@
 defmodule NervesGate.BackendSupervisionTest do
   use ExUnit.Case, async: false
 
+  alias NervesGate.Alarms
   alias NervesGate.DeviceState.Server
 
   @owners [
@@ -20,8 +21,8 @@ defmodule NervesGate.BackendSupervisionTest do
              NervesGate.Gateway.Configuration.child_spec([])
   end
 
-  test "DeviceState failure restarts every publisher and downstream cache" do
-    old = snapshot([:server, :publishers, :connection, :replicas, :sessions | @owners])
+  test "DeviceState failure rebuilds owners and fleet under a new stream" do
+    old = snapshot([:server, :owners, :fleet | @owners])
     assert Enum.all?(old, fn {_name, pid} -> is_pid(pid) end)
 
     Process.exit(old.server, :kill)
@@ -34,36 +35,47 @@ defmodule NervesGate.BackendSupervisionTest do
     assert Server.snapshot().revision > 0
   end
 
-  test "firmware failure stays inside the firmware publisher" do
-    old = snapshot([:firmware, :connection, :alarms, :replicas, :sessions])
+  test "firmware failure is isolated from every other owner and Fleet" do
+    old = snapshot([:firmware, :configuration, :internet, :alarms, :fleet])
     Process.exit(old.firmware, :kill)
 
     assert_eventually(fn -> replaced?(:firmware, old.firmware) end)
 
-    assert current_pid(:connection) == old.connection
+    assert current_pid(:configuration) == old.configuration
+    assert current_pid(:internet) == old.internet
     assert current_pid(:alarms) == old.alarms
-    assert current_pid(:replicas) == old.replicas
-    assert current_pid(:sessions) == old.sessions
+    assert current_pid(:fleet) == old.fleet
   end
 
-  test "SSH owner failure restores in place without restarting configuration" do
-    old = snapshot([:ssh, :configuration, :connection, :replicas, :sessions])
+  test "SSH failure restores accepted intent without restarting Configuration" do
+    old = snapshot([:ssh, :configuration, :owners, :fleet])
     Process.exit(old.ssh, :kill)
 
     assert_eventually(fn -> replaced?(:ssh, old.ssh) end)
     assert current_pid(:configuration) == old.configuration
-    assert current_pid(:connection) == old.connection
-    assert current_pid(:replicas) == old.replicas
-    assert current_pid(:sessions) == old.sessions
+    assert current_pid(:owners) == old.owners
+    assert current_pid(:fleet) == old.fleet
   end
 
-  test "alarm projection failure does not disconnect replicas or sessions" do
-    old = snapshot([:alarms, :replicas, :sessions])
+  test "alarm projection failure does not restart owners or Fleet" do
+    old = snapshot([:alarms, :owners, :fleet])
     Process.exit(old.alarms, :kill)
 
     assert_eventually(fn -> replaced?(:alarms, old.alarms) end)
-    assert current_pid(:replicas) == old.replicas
-    assert current_pid(:sessions) == old.sessions
+    assert current_pid(:owners) == old.owners
+    assert current_pid(:fleet) == old.fleet
+  end
+
+  test "storage failure evidence survives an alarm owner restart" do
+    on_exit(fn -> Alarms.storage_failure(false) end)
+    assert :ok = Alarms.storage_failure(true)
+    assert_eventually(fn -> Enum.any?(Alarms.active(), &(&1.id == "storage_failure")) end)
+
+    previous = current_pid(:alarms)
+    Process.exit(previous, :kill)
+
+    assert_eventually(fn -> replaced?(:alarms, previous) end)
+    assert_eventually(fn -> Enum.any?(Alarms.active(), &(&1.id == "storage_failure")) end)
   end
 
   defp snapshot(names), do: Map.new(names, &{&1, current_pid(&1)})
@@ -74,8 +86,7 @@ defmodule NervesGate.BackendSupervisionTest do
   end
 
   defp current_pid(:server), do: Process.whereis(Server)
-  defp current_pid(:publishers), do: Process.whereis(NervesGate.Backend.Publishers)
-  defp current_pid(:connection), do: Process.whereis(NervesGate.Backend.Connection)
+  defp current_pid(:owners), do: Process.whereis(NervesGate.Backend.Owners)
   defp current_pid(:firmware), do: Process.whereis(NervesGate.Firmware)
   defp current_pid(:commissioning), do: Process.whereis(NervesGate.Commissioning)
   defp current_pid(:internet), do: Process.whereis(NervesGate.Internet)
@@ -84,12 +95,8 @@ defmodule NervesGate.BackendSupervisionTest do
   defp current_pid(:subnet_router), do: Process.whereis(NervesGate.SubnetRouter)
   defp current_pid(:cluster), do: Process.whereis(NervesGate.Cluster)
   defp current_pid(:configuration), do: Process.whereis(NervesGate.Gateway.Configuration)
-  defp current_pid(:alarms), do: Process.whereis(NervesGate.Alarms.Runtime)
-
-  defp current_pid(:replicas),
-    do: Process.whereis(NervesGate.DeviceState.Replica.Supervisor)
-
-  defp current_pid(:sessions), do: Process.whereis(NervesGate.Session.DynamicSupervisor)
+  defp current_pid(:alarms), do: Process.whereis(NervesGate.Alarms)
+  defp current_pid(:fleet), do: Process.whereis(NervesGate.Fleet)
 
   defp assert_eventually(predicate, attempts \\ 100) do
     cond do

@@ -68,14 +68,12 @@ EffectRegistry → TaskSupervisor → Tailscale
                          ↓
                   DeviceState.Server
                          ↓
-        Publishers (:one_for_one failure domains)
-        ├── Firmware FSM
-        ├── Connection runtime → Gateway.Configuration FSM
-        └── Alarms.Runtime
+                Owners (:one_for_one)
+     Firmware · Configuration · network resources · Alarms
                          ↓
-          DeviceState.Replica FSM × remote gateway
+                  Fleet (one process)
                          ↓
-             NervesGate.Session × connected client
+             Client (immutable reducer value)
 ```
 
 These are resource owners, not a generic service layer: Internet owns the
@@ -84,73 +82,70 @@ integrated Tailscale runtime, SSH owns its listener, SubnetRouter owns route
 advertisement, Cluster owns distribution and peers, Firmware owns update
 transactions, and Gateway.Configuration owns accepted settings. They remain
 separate because merging them would create overlapping mutation authority.
-Supervisors either own genuinely dynamic children or encode an explicit failure
-boundary. A firmware or alarm crash cannot restart connection owners or discard
-client sessions; losing DeviceState deliberately rebuilds every downstream
-publisher, replica, and session.
+Supervisors encode actual failure boundaries. A resource-owner crash restarts
+only that owner, which reloads accepted intent and reconciles external reality.
+Losing DeviceState deliberately rebuilds all owners and Fleet under a fresh boot
+ID so every public slice is republished.
 
 The architecture uses only Command, Event, and State. Imperative commands go to
 the subsystem that owns the affected private state. Runtime completions and
 observations return as past-tense events. Owners report complete secret-free
 public slices to `DeviceState.Server`, which validates ownership, deduplicates,
-assigns a revision, and broadcasts the event. Runtime effects are supervised
+assigns a revision, reduces a `{:put, source, value}` operation, and broadcasts
+that operation. Runtime effects are supervised
 implementation machinery, not another domain abstraction. Finitomata is reserved
 for protocols with meaningful legal phases; ordinary observers and reconcilers
 are supervised GenServers.
 
 Credentials, private candidate data, and effect references never enter
 DeviceState. Its configuration slice exposes only secret-free accepted and
-candidate projections plus the user-visible countdown. Each remote gateway replica owns its
-boot ID, revision, retry, liveness lease, and connection metadata. It installs
-one atomic snapshot and then reduces ordered events pushed by the source. The
-source sends a lightweight heartbeat every second; missing the 2.5-second lease
-marks the retained snapshot stale without polling full state or waiting for
-Erlang's node-down timeout. A boot-ID change or revision gap requests a fresh
-snapshot immediately; events are never buffered for replay.
+candidate projections plus the user-visible countdown. One `Fleet` process stores a pure `DeviceState.Client` reducer per remote node.
+Each reducer atomically installs a snapshot and then accepts only operations from
+the same boot in strict revision order. The source sends a lightweight heartbeat
+every second; missing the 2.5-second lease marks retained state stale without
+polling snapshots or waiting for Erlang's node-down timeout. A boot-ID change or
+revision gap requests a fresh snapshot immediately; operations are never
+buffered for replay.
 
 ## Code organization
 
-`NervesGate` is the strict boundary between clients and the backend. A client
-connects once, receives a session PID plus complete initial fleet state, and is
-then pushed complete updates. The session owns snapshot installation, reducer
-application, revisions, and resynchronization. LiveViews and controllers submit
-commands through the thin facade and do not know about supervisors, settings
-files, Tailscale, or subsystem processes.
+`NervesGate` is the strict boundary between clients and the backend. `connect/0`
+subscribes the caller and returns an immutable `NervesGate.Client` reducer plus
+the initial fleet. The caller applies pushed operations with `reduce/2` and
+atomically calls `resync/1` after any boot change or revision gap. There is no
+process or supervisor per client. LiveViews naturally own the reducer in socket
+state; controllers use it for one request and unsubscribe.
 
 Backend code is organized by bounded context rather than by module count:
 
 ```text
-nerves_gate.ex                   thin session and command facade
-nerves_gate/session.ex           per-client live state projection
-nerves_gate/backend.ex           explicit infrastructure, state, publisher, and connection failure domains
+nerves_gate.ex                   shallow public command/subscription facade
+nerves_gate/client.ex            process-free local and fleet reducer
+nerves_gate/backend.ex           state-first supervision and independent owners
+nerves_gate/fleet.ex             all remote reducers, leases, and resubscription
 nerves_gate/{internet,tailnet,cluster,ssh,subnet_router,commissioning}.ex
-                                 one resource owner per subsystem
-nerves_gate/firmware.ex           signed, recoverable firmware transaction owner
-nerves_gate/firmware/             release, artifact, health, persistence, platform contract
-nerves_gate/*/{status,runtime}.ex
-                                 public projections and imperative boundaries
-nerves_gate/*/alarms.ex          subsystem-owned alarm policy and remedies
+                                 one external-resource owner per subsystem
+nerves_gate/alarms.ex            one derived public-alarm projection
+nerves_gate/firmware.ex          signed, recoverable firmware transaction owner
+nerves_gate/firmware/            release, artifact, health, persistence, platform contract
 nerves_gate/gateway/             guarded settings FSM, validation, persistence
-nerves_gate/device_state/        pure State projection, event server, replicas
-nerves_gate/fsm.ex               small Finitomata defaults
+nerves_gate/device_state/        pure State/Client reducers and authoritative server
 nerves_gate/fsm/{listener,effect,diagnostics}.ex
-                                 commit hooks, bounded effects, and FSM queries
+                                 support for the few durable protocol FSMs
 nerves_gate_web/                 rendering, forms, routing, and access policy
 ```
 
 A support module stays in its subsystem file unless it is a substantial pure,
-platform, or policy boundary worth testing independently. Alarm graphs remain
-separate from state machines because they have a different concern and
-lifecycle, while still living under their owning subsystem. This keeps related
-code discoverable without mixing frontend concerns into the backend.
+platform, or policy boundary worth testing independently. Processes exist only
+for external-resource ownership, shared sequencing, or durable workflows; pure
+projection and replication stay as data and functions.
 
 `tailscale_ex` owns `tailscaled`, command scheduling, typed status, health,
 profiles, preferences, readiness, and subscriptions. `Tailnet` projects
 that typed state and owns Tailnet usability, but never repairs or restarts the
 daemon. `Gateway.Configuration` keeps its owner-command wiring private while
-`Gateway.Settings` and `Gateway.Persistence` remain pure boundaries. A single
-change signal inhibits expected
-connectivity alarms while a remote-access candidate is active.
+`Gateway.Settings` and `Gateway.Persistence` remain pure boundaries. The alarm
+projection derives inhibition directly from canonical configuration state.
 
 Kernel forwarding is immutable platform policy in `/etc/sysctl.conf`, loaded by
 `nerves_runtime` before this application starts.
@@ -199,8 +194,8 @@ The desired enabled state and canonical routes live in the active firmware-slot
 snapshot. Persistence is the acceptance boundary; `SubnetRouter` then converges
 asynchronously and publishes advertised, approved, and primary state through the
 public event stream. There is no resource-change saga, candidate, confirmation,
-or revert timer. Application failures raise a noncritical alarm and a bounded
-remedy asks the owner to reconcile again; remote gateway access is unchanged.
+or revert timer. Application failures raise a noncritical alarm while the owner continues its
+bounded reconciliation loop; remote gateway access is unchanged.
 
 ## Remote IEx
 
@@ -211,35 +206,25 @@ range, and it binds port 22 to that exact address. Tailnet loss blocks and stops
 the listener; reconnection or an address change reconciles it automatically.
 
 Persistent listener failures raise an SSH alarm only while Internet and Tailnet
-are healthy. Its remedy reapplies the accepted `ssh_enabled` intent; it cannot
+are healthy. The owner keeps reconciling accepted `ssh_enabled` intent; it cannot
 change the listener address policy or any Tailnet setting.
 
 ## Lifecycle machines, alarms, and healing
 
-Only staged configuration, firmware updates, Internet application, cluster-peer
-protocols, and remote replica synchronization use Finitomata. Finitomata embeds
-each executable state diagram in its module documentation, and ExDoc renders
-those declarations as Mermaid diagrams during `mix docs`. Tailnet, SSH, Cluster
-coordination, subnet routing, commissioning, and replica scanning are ordinary
-GenServers because their state is observed or reconciled reality rather than a transition
-protocol. `DeviceState.State.apply_event/2` remains a pure projection and
-storage remains synchronous rather than being modeled as a controller.
+Only staged configuration, firmware updates, and cluster-peer negotiation use
+Finitomata. ExDoc renders those executable state diagrams as Mermaid diagrams.
+Internet, Tailnet, SSH, Cluster coordination, subnet routing, commissioning,
+Fleet, and alarms are ordinary GenServers because they serialize a resource or
+reduce observed reality rather than enforce a phase-dependent protocol.
+`DeviceState.State.reduce/2` and `DeviceState.Client.reduce/2` are pure.
 
-`Alarms.Runtime` atomically subscribes to the same public snapshot/event stream
-as every other consumer. Each subsystem owns its raw signals, managed conditions,
-public alarms, and bounded heal callbacks. The dependency graph reports the highest actionable
-root cause: Internet suppresses Tailnet and every downstream alarm; Tailnet
-suppresses cluster, SSH, and subnet-router alarms; storage, commissioning, and
-active configuration changes suppress expected operational alarms. Raw signals
-remain truthful while public alarms are inhibited. Remedy declarations are
-registered by the alarm runtime rather than compiled into alarm definitions.
-
-Alarm remedies never clear alarms directly. They reapply accepted state and
-request a fresh observation; only that observation can clear the alarm. Internet,
-cluster, SSH, subnet routing, and commissioning access have idempotent remedies.
-Storage failure, Internet instability, and required commissioning remain human
-actions. Tailnet healing is limited to a fresh typed observation—login, profile
-switching, `down`, and daemon manipulation remain prohibited.
+`Alarms` atomically subscribes to canonical state and derives one complete public
+alarm list. Internet suppresses Tailnet and downstream alarms; Tailnet suppresses
+cluster, SSH, and subnet-router alarms; storage failure, incomplete
+commissioning, and active configuration candidates suppress expected operational
+alarms. Resource owners heal through their normal reconciliation loops rather
+than through a second remedy graph. Storage failure and Internet flapping are
+the only private evidence retained by the alarm owner.
 
 Client authentication is delegated to Tailnet policy with OTP SSH's
 `no_auth_needed` option. No developer public key is embedded in firmware,
@@ -270,14 +255,19 @@ Credentials, candidate internals, task metadata, and logger history are never
 replicated.
 
 ```elixir
-{:ok, session, initial_fleet} = NervesGate.connect()
+{:ok, client, initial_fleet} = NervesGate.connect()
 
-receive do
-  {:nerves_gate_state_changed, ^session, fleet} ->
-    fleet
-end
+client =
+  receive do
+    operation ->
+      case NervesGate.reduce(client, operation) do
+        {:ok, client, _change} -> client
+        :resync -> NervesGate.resync(client) |> elem(1)
+      end
+  end
 
-:ok = NervesGate.disconnect(session)
+fleet = NervesGate.state(client)
+:ok = NervesGate.disconnect(client)
 ```
 
 ## Recoverable firmware updates
@@ -317,7 +307,7 @@ Internet and Tailnet, no critical alarm, and a validated current firmware. The
 platform writes only its inactive candidate. After reboot, the new firmware is
 an unvalidated trial. It must remain healthy and remotely manageable for a
 stability window, then an operator must press **Accept firmware** from a fresh
-Tailnet session. Missing acceptance, sustained management loss, failed health,
+Tailnet connection. Missing acceptance, sustained management loss, failed health,
 an application/watchdog reboot, or **Roll back now** returns to the previous
 known-good firmware. The transaction journal remains until validation or until
 the old firmware has observed completed fallback.

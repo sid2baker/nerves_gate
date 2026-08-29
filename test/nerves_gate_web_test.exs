@@ -108,7 +108,7 @@ defmodule NervesGateWebTest do
     assert view.local.hostname == "nervesgate-tailnet-id"
   end
 
-  test "Update applies one scope and Keep settings promotes it from a fresh session" do
+  test "Update applies one scope and Keep settings promotes it from a fresh connection" do
     with_configured(true, fn ->
       {:ok, view, _html} = live(build_conn(), "/commissioning")
 
@@ -440,7 +440,7 @@ defmodule NervesGateWebTest do
     }
 
     fleet = put_in(fleet, [:local, :state], public_state)
-    body = fleet |> NervesGate.Session.status() |> Jason.encode!() |> Jason.decode!()
+    body = fleet |> NervesGate.Client.status() |> Jason.encode!() |> Jason.decode!()
 
     assert get_in(body, ["local", "state", "ssh", "address"]) == "100.64.0.10"
   end
@@ -534,7 +534,6 @@ defmodule NervesGateWebTest do
     after
       :sys.replace_state(machine, fn _state -> original end)
       :ok = NervesGate.Gateway.Configuration.report_public_state()
-      NervesGate.Commissioning.Alarms.required(not payload.current["configured"])
       File.rm_rf!(root)
     end
   end
@@ -685,7 +684,6 @@ defmodule NervesGateWebTest do
     after
       :sys.replace_state(machine, fn _state -> original end)
       :ok = NervesGate.Gateway.Configuration.report_public_state()
-      NervesGate.DeviceState.Alarms.changing(false)
       File.rm_rf!(root)
     end
   end
@@ -710,19 +708,19 @@ defmodule NervesGateWebTest do
   end
 
   defp configured? do
-    with_session(fn session, _fleet -> NervesGate.configured?(session) end)
+    with_client(fn client, _fleet -> NervesGate.configured?(client) end)
   end
 
   defp local_snapshot, do: current_fleet().local
-  defp current_fleet, do: with_session(fn _session, fleet -> fleet end)
+  defp current_fleet, do: with_client(fn _client, fleet -> fleet end)
 
-  defp with_session(function) do
-    {:ok, session, fleet} = NervesGate.connect()
+  defp with_client(function) do
+    {:ok, client, fleet} = NervesGate.connect()
 
     try do
-      function.(session, fleet)
+      function.(client, fleet)
     after
-      NervesGate.disconnect(session)
+      NervesGate.disconnect(client)
     end
   end
 end

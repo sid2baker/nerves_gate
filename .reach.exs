@@ -3,7 +3,12 @@
     web: "NervesGateWeb.*",
     public_api: "NervesGate",
     firmware_platform: ["NervesGate.Firmware.Platform", "NervesGate.Firmware.Platform.*"],
-    projection: ["NervesGate.DeviceState", "NervesGate.DeviceState.*", "NervesGate.Session"]
+    projection: [
+      "NervesGate.Client",
+      "NervesGate.Fleet",
+      "NervesGate.DeviceState",
+      "NervesGate.DeviceState.*"
+    ]
   ],
   deps: [
     forbidden: [
@@ -29,7 +34,13 @@
       "NervesGate.Retry",
       "NervesGate.Backoff",
       "NervesGate.Secret",
+      "NervesGate.Session",
       "NervesGate.Session.Supervisor",
+      "NervesGate.DeviceState.Replica",
+      "NervesGate.DeviceState.Replica.*",
+      "NervesGate.AlarmistAdapter",
+      "NervesGate.Alarms.Runtime",
+      "NervesGate.*.Alarms",
       "NervesGate.StartupGate",
       "NervesGate.ShoehornHandler"
     ],
@@ -38,7 +49,12 @@
       "lib/nerves_gate/retry.ex",
       "lib/nerves_gate/backoff.ex",
       "lib/nerves_gate/secret.ex",
-      "lib/nerves_gate/session/supervisor.ex",
+      "lib/nerves_gate/session.ex",
+      "lib/nerves_gate/session/**",
+      "lib/nerves_gate/device_state/replica.ex",
+      "lib/nerves_gate/device_state/replica/**",
+      "lib/nerves_gate/alarmist_adapter.ex",
+      "lib/nerves_gate/*/alarms.ex",
       "lib/nerves_gate/startup_gate.ex",
       "lib/nerves_gate/shoehorn_handler.ex"
     ]

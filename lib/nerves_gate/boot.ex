@@ -9,7 +9,7 @@ defmodule NervesGate.Boot.Gate do
   use GenServer
 
   alias NervesGate.DeviceState
-  alias NervesGate.DeviceState.State
+  alias NervesGate.DeviceState.Client
 
   @doc false
   def child_spec(options) do
@@ -31,14 +31,15 @@ defmodule NervesGate.Boot.Gate do
       server = Keyword.get(options, :device_state, NervesGate.DeviceState.Server)
       {:ok, snapshot} = DeviceState.subscribe(self(), server)
 
+      {:ok, client} = Client.install(snapshot)
+
       state = %{
-        state: snapshot.state,
-        boot_id: snapshot.boot_id,
-        revision: snapshot.revision,
+        client: client,
+        device_state_server: server,
         callback: Keyword.get(options, :callback, &Nerves.Runtime.Heart.init_complete/0)
       }
 
-      if State.hydrated?(state.state) do
+      if client.hydrated do
         :ok = state.callback.()
         :ignore
       else
@@ -50,23 +51,28 @@ defmodule NervesGate.Boot.Gate do
   end
 
   @impl true
-  def handle_info(
-        {:device_state_event, _node, boot_id, revision, event},
-        %{boot_id: boot_id, revision: previous} = state
-      )
-      when revision == previous + 1 do
-    case State.apply_event(state.state, event) do
-      {:ok, public_state} ->
-        state = %{state | state: public_state, revision: revision}
-        if State.hydrated?(public_state), do: complete(state), else: {:noreply, state}
-
-      :error ->
-        {:stop, :invalid_device_state_event, state}
-    end
+  def handle_info({:device_state_operation, _, _, _, _} = operation, state) do
+    state.client
+    |> Client.reduce(operation)
+    |> reduce_result(state)
   end
 
-  def handle_info({:device_state_event, _node, _boot, _revision, _event}, state),
-    do: {:stop, :device_state_revision_gap, state}
+  def handle_info({:device_state_heartbeat, _, _, _}, state), do: {:noreply, state}
+
+  defp reduce_result({:ok, client, :changed}, state),
+    do: continue_or_complete(%{state | client: client})
+
+  defp reduce_result({:ok, _client, :duplicate}, state), do: {:noreply, state}
+  defp reduce_result(:resync, state), do: resynchronize(state)
+
+  defp resynchronize(state) do
+    {:ok, snapshot} = DeviceState.subscribe(self(), state.device_state_server)
+    {:ok, client} = Client.install(snapshot)
+    continue_or_complete(%{state | client: client})
+  end
+
+  defp continue_or_complete(%{client: %{hydrated: true}} = state), do: complete(state)
+  defp continue_or_complete(state), do: {:noreply, state}
 
   defp complete(state) do
     :ok = state.callback.()

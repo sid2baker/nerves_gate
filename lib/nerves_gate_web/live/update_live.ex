@@ -7,9 +7,9 @@ defmodule NervesGateWeb.UpdateLive do
 
   @impl true
   def mount(_params, web_session, socket) do
-    {:ok, session, fleet} = NervesGate.connect()
+    {:ok, client, fleet} = NervesGate.connect()
 
-    if NervesGate.configured?(session) do
+    if NervesGate.configured?(client) do
       socket =
         socket
         |> assign(
@@ -18,11 +18,11 @@ defmodule NervesGateWeb.UpdateLive do
           fleet: fleet,
           firmware: firmware(fleet)
         )
-        |> assign_private(session: session, session_monitor: Process.monitor(session))
+        |> assign_private(client: client)
 
       {:ok, socket}
     else
-      NervesGate.disconnect(session)
+      NervesGate.disconnect(client)
       {:ok, redirect(socket, to: ~p"/commissioning")}
     end
   end
@@ -225,18 +225,42 @@ defmodule NervesGateWeb.UpdateLive do
   end
 
   @impl true
-  def handle_info(
-        {:nerves_gate_state_changed, session, fleet},
-        %{private: %{session: session}} = socket
-      ) do
-    {:noreply, assign(socket, fleet: fleet, firmware: firmware(fleet))}
-  end
+  def handle_info({:device_state_operation, _, _, _, _} = message, socket),
+    do: reduce_state(socket, message)
 
-  def handle_info(
-        {:DOWN, reference, :process, session, _reason},
-        %{private: %{session: session, session_monitor: reference}} = socket
-      ) do
-    {:stop, :nerves_gate_session_stopped, socket}
+  def handle_info({:fleet_operation, _, _, _} = message, socket),
+    do: reduce_state(socket, message)
+
+  def handle_info({:device_state_heartbeat, _, _, _}, socket), do: {:noreply, socket}
+  def handle_info(_message, socket), do: {:noreply, socket}
+
+  defp reduce_state(socket, message) do
+    case NervesGate.reduce(socket.private.client, message) do
+      {:ok, client, :changed} ->
+        fleet = NervesGate.state(client)
+
+        {:noreply,
+         socket
+         |> assign_private(client: client)
+         |> assign(fleet: fleet, firmware: firmware(fleet))}
+
+      {:ok, _client, _unchanged} ->
+        {:noreply, socket}
+
+      :resync ->
+        case NervesGate.resync(socket.private.client) do
+          {:ok, client} ->
+            fleet = NervesGate.state(client)
+
+            {:noreply,
+             socket
+             |> assign_private(client: client)
+             |> assign(fleet: fleet, firmware: firmware(fleet))}
+
+          {:error, _reason} ->
+            {:noreply, socket}
+        end
+    end
   end
 
   defp command(socket, :ok, message), do: {:noreply, put_flash(socket, :info, message)}

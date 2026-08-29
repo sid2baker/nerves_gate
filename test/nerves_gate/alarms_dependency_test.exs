@@ -1,216 +1,168 @@
 defmodule NervesGate.AlarmsDependencyTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
-  alias NervesGate.AlarmistAdapter
   alias NervesGate.Alarms
-  alias NervesGate.Cluster
-  alias NervesGate.Commissioning
   alias NervesGate.DeviceState
-  alias NervesGate.Internet
-  alias NervesGate.SSH
-  alias NervesGate.Storage
-  alias NervesGate.SubnetRouter
-  alias NervesGate.Tailnet
-
-  setup_all do
-    runtime = Process.whereis(NervesGate.Alarms.Runtime)
-    if runtime, do: :sys.suspend(runtime)
-
-    on_exit(fn ->
-      if runtime && Process.alive?(runtime), do: :sys.resume(runtime)
-    end)
-
-    :ok
-  end
+  alias NervesGate.DeviceState.{Server, State}
 
   setup do
-    signals = [
-      Storage.Signal.Failure,
-      Commissioning.Signal.Required,
-      Commissioning.Signal.AccessUnavailable,
-      DeviceState.Signal.Changing,
-      Internet.Signal.Unavailable,
-      Internet.Signal.UnavailableSample,
-      Tailnet.Signal.Unavailable,
-      Cluster.Signal.Enabled,
-      Cluster.Signal.Unavailable,
-      SSH.Signal.Enabled,
-      SSH.Signal.Unavailable,
-      SubnetRouter.Signal.Unavailable
-    ]
+    owner = self()
+    alarm_name = String.to_atom("alarm_policy_#{System.unique_integer([:positive])}")
 
-    Enum.each(signals, &AlarmistAdapter.clear/1)
+    owners =
+      Map.new(State.sources() -- [:device], fn source ->
+        {source, if(source == :alarms, do: alarm_name, else: owner)}
+      end)
 
-    signals
-    |> List.delete(Internet.Signal.UnavailableSample)
-    |> Enum.each(&initialize_clear/1)
+    {:ok, server} =
+      Server.start_link(
+        name: nil,
+        boot_id: "boot-a",
+        device: %{device_id: "gate-a", name: "Gate A", firmware_version: "1.0.0"},
+        owners: owners,
+        heartbeat_interval: 60_000
+      )
 
-    Enum.each(signals, fn id -> on_exit(fn -> AlarmistAdapter.clear(id) end) end)
+    {:ok, alarms} =
+      Alarms.start_link(
+        name: alarm_name,
+        device_state: server,
+        timings: %{
+          failure_debounce: 10,
+          flapping_count: 4,
+          flapping_period: 500,
+          flapping_hold: 100
+        }
+      )
 
-    wait_for(fn ->
-      Enum.all?(signals ++ Alarms.public_ids(), &(Alarmist.alarm_state(&1) != :set))
+    context = %{server: server, alarms: alarms}
+    report(context, :configuration, %{configured: true, pending: nil})
+    report(context, :commissioning, commissioning())
+    context
+  end
+
+  test "the first unhealthy dependency owns the actionable alarm", context do
+    report(context, :internet, internet(false))
+    report(context, :tailnet, tailnet(false))
+
+    assert_eventually(fn -> alarm_ids(context) == ["internet_unavailable"] end)
+
+    report(context, :internet, internet(true))
+    assert_eventually(fn -> alarm_ids(context) == ["tailnet_unavailable"] end)
+
+    report(context, :tailnet, tailnet(true))
+    assert_eventually(fn -> alarm_ids(context) == [] end)
+  end
+
+  test "downstream failures appear only while Internet and Tailnet are healthy", context do
+    report(context, :internet, internet(true))
+    report(context, :tailnet, tailnet(true))
+    report(context, :cluster, cluster(true, false))
+    report(context, :ssh, ssh(true, :backoff))
+    report(context, :subnet_router, subnet_router(true, :backoff))
+
+    assert_eventually(fn ->
+      alarm_ids(context) == [
+        "cluster_unavailable",
+        "ssh_unavailable",
+        "subnet_router_unavailable"
+      ]
     end)
 
-    :ok
+    report(context, :tailnet, tailnet(false))
+    assert_eventually(fn -> alarm_ids(context) == ["tailnet_unavailable"] end)
   end
 
-  test "Internet is the sole root-cause alarm when every downstream layer fails" do
-    set(Cluster.Signal.Enabled)
-    set(Cluster.Signal.Unavailable)
-    set(SSH.Signal.Enabled)
-    set(SSH.Signal.Unavailable)
-    set(SubnetRouter.Signal.Unavailable)
-    set(Tailnet.Signal.Unavailable)
-    set(Internet.Signal.Unavailable)
+  test "repeated operational Internet transitions produce one bounded unstable alarm", context do
+    report(context, :tailnet, tailnet(true))
 
-    wait_set(Internet.Alarm.Unavailable)
-    refute_set(Tailnet.Alarm.Unavailable)
-    refute_set(Cluster.Alarm.Unavailable)
-    refute_set(SSH.Alarm.Unavailable)
-    refute_set(SubnetRouter.Alarm.Unavailable)
+    Enum.each([true, false, true, false, true], fn online ->
+      report(context, :internet, internet(online))
+
+      assert_eventually(fn ->
+        :sys.get_state(context.alarms).client.state.internet.online == online
+      end)
+    end)
+
+    assert_eventually(fn -> "internet_unstable" in alarm_ids(context) end)
+    Process.sleep(120)
+    send(context.alarms, :tick)
+    assert_eventually(fn -> "internet_unstable" not in alarm_ids(context) end)
   end
 
-  test "Tailnet is the sole root-cause alarm while Internet is healthy" do
-    set(Cluster.Signal.Enabled)
-    set(Cluster.Signal.Unavailable)
-    set(SSH.Signal.Enabled)
-    set(SSH.Signal.Unavailable)
-    set(SubnetRouter.Signal.Unavailable)
-    set(Tailnet.Signal.Unavailable)
-
-    wait_set(Tailnet.Alarm.Unavailable)
-    refute_set(Internet.Alarm.Unavailable)
-    refute_set(Cluster.Alarm.Unavailable)
-    refute_set(SSH.Alarm.Unavailable)
-    refute_set(SubnetRouter.Alarm.Unavailable)
+  defp report(context, source, value) do
+    assert :ok = DeviceState.publish({:state_reported, source, value}, context.server)
   end
 
-  test "an enabled broken cluster alarms only after every upstream layer" do
-    set(Cluster.Signal.Enabled)
-    set(Cluster.Signal.Unavailable)
+  defp alarm_ids(context), do: Enum.map(Alarms.active(context.alarms), & &1.id)
 
-    wait_set(Cluster.Alarm.Unavailable)
-    refute_set(Internet.Alarm.Unavailable)
-    refute_set(Tailnet.Alarm.Unavailable)
+  defp commissioning do
+    %NervesGate.Commissioning.Status{state: :disabled, active: [], mode: :disabled}
   end
 
-  test "a persistent SSH listener error alarms only while Tailnet is healthy" do
-    set(SSH.Signal.Enabled)
-    set(SSH.Signal.Unavailable)
-
-    wait_set(SSH.Alarm.Unavailable)
-    refute_set(Internet.Alarm.Unavailable)
-    refute_set(Tailnet.Alarm.Unavailable)
+  defp internet(online) do
+    %NervesGate.Internet.Status{
+      state: if(online, do: :online, else: :offline),
+      interface: "eth0",
+      online: online,
+      ready: online,
+      reason: if(online, do: nil, else: :offline),
+      checks: %{}
+    }
   end
 
-  test "a route application failure alarms only while Tailnet is healthy" do
-    set(SubnetRouter.Signal.Unavailable)
-
-    wait_set(SubnetRouter.Alarm.Unavailable)
-    refute_set(Internet.Alarm.Unavailable)
-    refute_set(Tailnet.Alarm.Unavailable)
+  defp tailnet(online) do
+    %NervesGate.Tailnet.Status{
+      state: if(online, do: :online, else: :connecting),
+      online: online,
+      authenticated: online,
+      hostname: if(online, do: "gate-a"),
+      ipv4: if(online, do: "100.64.0.10"),
+      peers: [],
+      nodes: [],
+      subnet_router: %{},
+      health: %{},
+      error: if(online, do: nil, else: :offline)
+    }
   end
 
-  test "commissioning alarms are mutually exclusive" do
-    set(Commissioning.Signal.AccessUnavailable)
-    set(Commissioning.Signal.Required)
-
-    wait_set(Commissioning.Alarm.Unavailable)
-    refute_set(Commissioning.Alarm.Required)
-
-    AlarmistAdapter.clear(Commissioning.Signal.AccessUnavailable)
-    wait_set(Commissioning.Alarm.Required)
-    refute_set(Commissioning.Alarm.Unavailable)
+  defp cluster(enabled, online) do
+    %NervesGate.Cluster.Status{
+      state: if(online, do: :online, else: :backoff),
+      enabled: enabled,
+      group: if(enabled, do: "factory"),
+      online: online,
+      node: nil,
+      connected: [],
+      candidates: [],
+      groups: []
+    }
   end
 
-  test "storage failure is the sole root cause across commissioning and operations" do
-    set(Storage.Signal.Failure)
-    set(Commissioning.Signal.Required)
-    set(Commissioning.Signal.AccessUnavailable)
-    set(Internet.Signal.Unavailable)
-    set(Tailnet.Signal.Unavailable)
-    set(Cluster.Signal.Enabled)
-    set(Cluster.Signal.Unavailable)
-    set(SSH.Signal.Enabled)
-    set(SSH.Signal.Unavailable)
-    set(SubnetRouter.Signal.Unavailable)
-
-    wait_set(Storage.Alarm.Failure)
-    refute_set(Commissioning.Alarm.Required)
-    refute_set(Commissioning.Alarm.Unavailable)
-    refute_set(Internet.Alarm.Unavailable)
-    refute_set(Tailnet.Alarm.Unavailable)
-    refute_set(Cluster.Alarm.Unavailable)
-    refute_set(SSH.Alarm.Unavailable)
-    refute_set(SubnetRouter.Alarm.Unavailable)
+  defp ssh(enabled, state) do
+    %NervesGate.SSH.Status{enabled: enabled, state: state, address: nil, port: 22}
   end
 
-  test "candidate work preserves raw truth without feeding flapping history" do
-    DeviceState.Alarms.changing(true)
-
-    Internet.Alarms.report(%{online: false}, %{online: true})
-    Tailnet.Alarms.report(%{online: false})
-    Cluster.Alarms.report(true, true)
-    SSH.Alarms.report(%{enabled: true, state: :error})
-    SubnetRouter.Alarms.failure(true)
-    Process.sleep(40)
-
-    assert_set(Internet.Signal.Unavailable)
-    assert_set(Tailnet.Signal.Unavailable)
-    assert_set(Cluster.Signal.Unavailable)
-    assert_set(SSH.Signal.Unavailable)
-    assert_set(SubnetRouter.Signal.Unavailable)
-    refute_set(Internet.Signal.UnavailableSample)
-    refute Enum.any?(Alarms.public_ids(), &(Alarmist.alarm_state(&1) == :set))
+  defp subnet_router(enabled, state) do
+    %NervesGate.SubnetRouter.Status{
+      enabled: enabled,
+      routes: if(enabled, do: ["192.168.1.0/24"], else: []),
+      state: state,
+      observed: %{}
+    }
   end
 
-  test "Tailnet debounce restarts when Internet recovers" do
-    set(Tailnet.Signal.Unavailable)
-    Process.sleep(10)
-    set(Internet.Signal.Unavailable)
-    wait_for(fn -> Alarmist.alarm_state(Tailnet.Condition.ActionableUnavailable) != :set end)
-
-    AlarmistAdapter.clear(Internet.Signal.Unavailable)
-    Process.sleep(10)
-    refute_set(Tailnet.Alarm.Unavailable)
-    wait_set(Tailnet.Alarm.Unavailable)
-  end
-
-  test "operational Internet transitions feed flapping history" do
-    Internet.Alarms.report(%{online: false}, %{online: true})
-    wait_set(Internet.Signal.UnavailableSample)
-
-    Internet.Alarms.report(%{online: true}, %{online: false})
-    wait_for(fn -> Alarmist.alarm_state(Internet.Signal.UnavailableSample) != :set end)
-  end
-
-  test "singular mode suppresses cluster failure" do
-    set(Cluster.Signal.Unavailable)
-    Process.sleep(40)
-    refute_set(Cluster.Alarm.Unavailable)
-  end
-
-  defp initialize_clear(id) do
-    :ok = AlarmistAdapter.report_sync(id, true, id.description())
-    :ok = AlarmistAdapter.report_sync(id, false, id.description())
-  end
-
-  defp set(id), do: AlarmistAdapter.set(id, id.description())
-  defp assert_set(id), do: assert(Alarmist.alarm_state(id) == :set)
-  defp refute_set(id), do: refute(Alarmist.alarm_state(id) == :set)
-  defp wait_set(id), do: wait_for(fn -> Alarmist.alarm_state(id) == :set end)
-
-  defp wait_for(predicate, attempts \\ 400) do
+  defp assert_eventually(predicate, attempts \\ 100) do
     cond do
       predicate.() ->
         :ok
 
       attempts == 0 ->
-        flunk("alarm condition did not converge")
+        flunk("condition did not converge")
 
       true ->
         Process.sleep(5)
-        wait_for(predicate, attempts - 1)
+        assert_eventually(predicate, attempts - 1)
     end
   end
 end

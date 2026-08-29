@@ -1,313 +1,368 @@
 defmodule NervesGate.Alarms do
   @moduledoc """
-  Generic Alarmist runtime for subsystem-owned alarm graphs.
+  Derives the complete public alarm list from canonical DeviceState.
 
-  Each subsystem owns its signals, managed conditions, public alarms, and remedy
-  declarations. This module only installs them, publishes explicitly
-  public transitions, and supplies secret-safe logging helpers.
-  """
-
-  require Logger
-
-  @subsystems [
-    NervesGate.DeviceState.Alarms,
-    NervesGate.Commissioning.Alarms,
-    NervesGate.Storage.Alarms,
-    NervesGate.Internet.Alarms,
-    NervesGate.Tailnet.Alarms,
-    NervesGate.Cluster.Alarms,
-    NervesGate.SSH.Alarms,
-    NervesGate.SubnetRouter.Alarms
-  ]
-
-  @type remedy_declaration ::
-          {Alarmist.alarm_id(), Alarmist.remedy_fn(), Alarmist.remedy_options()}
-
-  @doc "Installs subsystem-owned signal levels, managed alarms, and runtime remedies."
-  @spec install(keyword()) :: :ok
-  def install(options \\ []) do
-    validate_declarations!()
-
-    Enum.each(@subsystems, fn subsystem ->
-      Enum.each(subsystem.alarm_levels(), fn {id, level} ->
-        :ok = Alarmist.set_alarm_level(id, level)
-      end)
-    end)
-
-    Enum.each(@subsystems, fn subsystem ->
-      Enum.each(subsystem.managed_alarms(), fn id ->
-        :ok = Alarmist.add_managed_alarm(id)
-      end)
-    end)
-
-    sync_remedies(Keyword.get(options, :healing_enabled, true))
-  end
-
-  @doc false
-  @spec remedy_declarations() :: [remedy_declaration()]
-  def remedy_declarations do
-    Enum.flat_map(@subsystems, & &1.remedies())
-  end
-
-  @doc "Subscribes the calling process to explicitly public alarm transitions."
-  @spec subscribe_public() :: :ok
-  def subscribe_public do
-    Enum.each(public_ids(), fn id -> :ok = Alarmist.subscribe(id) end)
-    :ok
-  end
-
-  @spec public_ids() :: [Alarmist.alarm_id()]
-  def public_ids do
-    @subsystems
-    |> Enum.flat_map(& &1.public_alarms())
-    |> Enum.uniq()
-  end
-
-  @doc "Returns the currently set public alarms in stable identifier order."
-  @spec active() :: [map()]
-  def active do
-    public_ids()
-    |> Enum.filter(&(Alarmist.alarm_state(&1) == :set))
-    |> Enum.map(&public_alarm/1)
-    |> Enum.sort_by(& &1.id)
-  end
-
-  @spec public_event(Alarmist.Event.t()) :: {:set, map()} | {:clear, String.t()} | :ignore
-  def public_event(%Alarmist.Event{id: id, state: state}) do
-    if id in public_ids(), do: public_transition(state, id), else: :ignore
-  end
-
-  @doc "Logs a public transition without using caller descriptions or alarm parameters."
-  @spec log_transition(Alarmist.Event.t()) :: :ok
-  def log_transition(%Alarmist.Event{state: :clear, previous_state: :unknown}), do: :ok
-
-  def log_transition(%Alarmist.Event{id: id, state: state}) when state in [:set, :clear] do
-    if id in public_ids(), do: log_public(state, public_alarm(id)), else: :ok
-  end
-
-  def log_transition(%Alarmist.Event{}), do: :ok
-
-  defp validate_declarations! do
-    Enum.each(@subsystems, &validate_subsystem!/1)
-
-    public_ids = Enum.map(public_ids(), & &1.public_id())
-    remedy_ids = Enum.map(remedy_declarations(), &elem(&1, 0))
-
-    if length(public_ids) != length(Enum.uniq(public_ids)) do
-      raise ArgumentError, "public alarm identifiers must be unique"
-    end
-
-    if length(remedy_ids) != length(Enum.uniq(remedy_ids)) do
-      raise ArgumentError, "managed alarms may declare only one remedy"
-    end
-
-    :ok
-  end
-
-  defp validate_subsystem!(subsystem) do
-    managed = subsystem.managed_alarms()
-
-    if Enum.any?(subsystem.public_alarms(), &(&1 not in managed)) do
-      raise ArgumentError, "every public alarm must be managed by its owning subsystem"
-    end
-
-    if Enum.any?(subsystem.remedies(), fn {alarm, _callback, _options} ->
-         alarm not in managed
-       end) do
-      raise ArgumentError, "every remedy must belong to a managed alarm in its subsystem"
-    end
-  end
-
-  defp sync_remedies(true) do
-    Enum.each(remedy_declarations(), fn {alarm, callback, options} ->
-      :ok = Alarmist.add_remedy(alarm, callback, options)
-    end)
-
-    :ok
-  end
-
-  defp sync_remedies(false) do
-    Enum.each(remedy_declarations(), fn {alarm, _callback, _options} ->
-      case Alarmist.remove_remedy(alarm) do
-        :ok -> :ok
-        {:error, :not_found} -> :ok
-      end
-    end)
-
-    :ok
-  end
-
-  defp public_transition(:set, id), do: {:set, public_alarm(id)}
-  defp public_transition(:clear, id), do: {:clear, id.public_id()}
-  defp public_transition(:unknown, _id), do: :ignore
-
-  defp public_alarm(id) do
-    %{id: id.public_id(), description: id.description(), level: id.__alarm_level__()}
-  end
-
-  defp log_public(state, alarm) do
-    log_level = if state == :set, do: alarm.level, else: :info
-
-    Logger.log(log_level, "alarm #{state}: #{alarm.id}",
-      alarm: true,
-      alarm_id: alarm.id,
-      alarm_state: state,
-      alarm_level: alarm.level,
-      alarm_description: alarm.description
-    )
-
-    :ok
-  end
-
-  @doc false
-  @spec sync_public_state(NervesGate.DeviceState.State.t(), atom(), term()) :: :ok
-  def sync_public_state(state, source, previous \\ nil)
-
-  def sync_public_state(state, :configuration, _previous) do
-    configuration = state.configuration || %{}
-    NervesGate.DeviceState.Alarms.changing(not is_nil(Map.get(configuration, :pending)))
-    NervesGate.Commissioning.Alarms.required(not Map.get(configuration, :configured, false))
-  end
-
-  def sync_public_state(state, :commissioning, _previous) do
-    commissioning = state.commissioning || %{}
-    NervesGate.Commissioning.Alarms.unavailable(Map.get(commissioning, :state) == :waiting)
-  end
-
-  def sync_public_state(state, :internet, previous) when is_map(state.internet),
-    do: NervesGate.Internet.Alarms.report(state.internet, previous)
-
-  def sync_public_state(state, :tailnet, _previous) when is_map(state.tailnet),
-    do: NervesGate.Tailnet.Alarms.report(state.tailnet)
-
-  def sync_public_state(state, :ssh, _previous) when is_map(state.ssh),
-    do: NervesGate.SSH.Alarms.report(state.ssh)
-
-  def sync_public_state(state, :cluster, _previous) when is_map(state.cluster) do
-    enabled = Map.get(state.cluster, :enabled, false)
-
-    NervesGate.Cluster.Alarms.report(
-      enabled,
-      enabled and not Map.get(state.cluster, :online, false)
-    )
-  end
-
-  def sync_public_state(state, :subnet_router, _previous) when is_map(state.subnet_router) do
-    enabled = Map.get(state.subnet_router, :enabled, false)
-
-    NervesGate.SubnetRouter.Alarms.failure(
-      enabled and Map.get(state.subnet_router, :state) != :active
-    )
-  end
-
-  def sync_public_state(_state, _source, _previous), do: :ok
-end
-
-defmodule NervesGate.Alarms.Runtime do
-  @moduledoc """
-  Projects canonical public state into subsystem-owned Alarmist policy.
-
-  Alarm evidence comes only from the atomic DeviceState snapshot/event stream.
-  The runtime ignores its own `:alarms` state events for signal derivation and
-  publishes the complete active alarm state after Alarmist transitions.
+  Alarm dependency policy lives in one owner instead of a graph of signal,
+  condition, alarm, and remedy modules. Resource owners already reconcile their
+  own failures, so alarms are observation rather than a second healing system.
+  The only private evidence not represented by public owner state is sticky
+  persistent-storage failure.
   """
 
   use GenServer
 
-  alias NervesGate.Alarms
+  require Logger
+
   alias NervesGate.DeviceState
-  alias NervesGate.DeviceState.State
+  alias NervesGate.DeviceState.Client
+
+  @catalog %{
+    "cluster_unavailable" => %{description: "Cluster unavailable", level: :warning},
+    "commissioning_required" => %{
+      description: "Device commissioning is required",
+      level: :warning
+    },
+    "commissioning_unavailable" => %{
+      description: "No local commissioning interface is available",
+      level: :error
+    },
+    "internet_unavailable" => %{description: "Internet unavailable", level: :warning},
+    "internet_unstable" => %{
+      description: "Internet connectivity is unstable",
+      level: :warning
+    },
+    "ssh_unavailable" => %{description: "Tailnet-only SSH unavailable", level: :warning},
+    "storage_failure" => %{
+      description: "Persistent storage is unavailable or corrupt",
+      level: :error
+    },
+    "subnet_router_unavailable" => %{
+      description: "Subnet router configuration could not be applied",
+      level: :warning
+    },
+    "tailnet_unavailable" => %{description: "Tailnet unavailable", level: :warning}
+  }
+
+  @debounced_ids ~w(internet_unavailable tailnet_unavailable cluster_unavailable ssh_unavailable subnet_router_unavailable)
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options \\ []) do
     GenServer.start_link(__MODULE__, options, name: Keyword.get(options, :name, __MODULE__))
   end
 
+  @doc "Records or clears sticky persistent-storage failure evidence."
+  @spec storage_failure(boolean(), GenServer.server()) :: :ok
+  def storage_failure(active, server \\ __MODULE__)
+
+  def storage_failure(active, __MODULE__) when is_boolean(active) do
+    :persistent_term.put({__MODULE__, :storage_failure}, active)
+    notify_storage_failure(__MODULE__, active)
+  end
+
+  def storage_failure(active, server) when is_boolean(active),
+    do: notify_storage_failure(server, active)
+
+  @doc "Returns the stable public alarm identifiers."
+  @spec public_ids() :: [String.t()]
+  def public_ids, do: @catalog |> Map.keys() |> Enum.sort()
+
+  @doc "Returns the currently active canonical public alarms."
+  @spec active(GenServer.server()) :: [map()]
+  def active(server \\ __MODULE__) do
+    GenServer.call(server, :active)
+  catch
+    :exit, _reason -> []
+  end
+
+  @spec diagnostics(GenServer.server()) :: map() | nil
+  def diagnostics(server \\ __MODULE__) do
+    GenServer.call(server, :diagnostics)
+  catch
+    :exit, _reason -> nil
+  end
+
   @impl true
   def init(options) do
-    healing_enabled =
-      Keyword.get(
-        options,
-        :healing_enabled,
-        Application.get_env(:nerves_gate, :alarm_healing_enabled, true)
-      )
+    timings =
+      Keyword.get(options, :timings, Application.fetch_env!(:nerves_gate, :alarm_timings))
 
     server = Keyword.get(options, :device_state, NervesGate.DeviceState.Server)
-    :ok = Alarms.subscribe_public()
-    :ok = Alarms.install(healing_enabled: healing_enabled)
     {:ok, snapshot} = DeviceState.subscribe(self(), server)
+    {:ok, client} = Client.install(snapshot)
 
     state = %{
-      device_state: snapshot.state,
-      boot_id: snapshot.boot_id,
-      revision: snapshot.revision,
+      client: client,
       device_state_server: server,
-      healing_enabled: healing_enabled
+      storage_failure: initial_storage_failure(options),
+      candidates: %{},
+      internet_samples: [],
+      unstable_until: nil,
+      alarms: [],
+      published_alarms: client.state.alarms || [],
+      clock: Keyword.get(options, :clock, fn -> System.monotonic_time(:millisecond) end),
+      debounce: timings.failure_debounce,
+      flapping_count: timings.flapping_count,
+      flapping_period: timings.flapping_period,
+      flapping_hold: timings.flapping_hold,
+      tick_interval: min(1_000, max(10, div(max(timings.failure_debounce, 1), 2)))
     }
 
-    sync_snapshot(snapshot.state)
-    :ok = publish_active()
-    {:ok, state}
+    schedule_tick(state)
+    {:ok, publish(recompute(state))}
   end
 
   @impl true
-  def handle_info(%Alarmist.Event{} = event, state) do
-    Alarms.log_transition(event)
-    :ok = publish_active()
-    {:noreply, state}
+  def handle_call({:storage_failure, active}, _from, state) do
+    state = state |> Map.put(:storage_failure, active) |> recompute() |> publish()
+    {:reply, :ok, state}
   end
 
+  def handle_call(:active, _from, state), do: {:reply, state.alarms, state}
+
+  def handle_call(:diagnostics, _from, state) do
+    {:reply,
+     %{
+       state: :observing,
+       desired: %{},
+       observed: %{alarms: state.alarms},
+       blocked_by: nil,
+       last_error: nil,
+       attempt: 0,
+       retry_at: nil
+     }, state}
+  end
+
+  @impl true
   def handle_info(
-        {:device_state_event, _node, boot_id, revision,
-         {:state_reported, source, _value} = event},
-        %{boot_id: boot_id, revision: previous} = state
-      )
-      when revision == previous + 1 do
-    previous_slice = Map.fetch!(state.device_state, source)
+        {:device_state_operation, _node, _boot, _revision, {:put, source, _value}} = operation,
+        state
+      ) do
+    previous_internet = internet_online(state.client.state)
 
-    case State.apply_event(state.device_state, event) do
-      {:ok, device_state} ->
-        if source != :alarms,
-          do: Alarms.sync_public_state(device_state, source, previous_slice)
+    case Client.reduce(state.client, operation) do
+      {:ok, client, :changed} ->
+        state = %{state | client: client}
 
-        {:noreply, %{state | device_state: device_state, revision: revision}}
+        state =
+          if source == :internet, do: track_internet_change(state, previous_internet), else: state
+
+        {:noreply, state |> recompute() |> publish()}
+
+      {:ok, _client, :duplicate} ->
+        {:noreply, state}
+
+      :resync ->
+        {:noreply, resync(state)}
+    end
+  end
+
+  def handle_info({:device_state_heartbeat, _, _, _}, state), do: {:noreply, state}
+
+  def handle_info(:tick, state) do
+    schedule_tick(state)
+    {:noreply, state |> recompute() |> publish()}
+  end
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  defp resync(state) do
+    {:ok, snapshot} = DeviceState.subscribe(self(), state.device_state_server)
+    {:ok, client} = Client.install(snapshot)
+
+    state
+    |> Map.merge(%{client: client, published_alarms: client.state.alarms || []})
+    |> recompute()
+    |> publish()
+  end
+
+  defp recompute(state) do
+    now = now(state)
+    conditions = debounced_conditions(state)
+
+    candidates =
+      Enum.reduce(@debounced_ids, state.candidates, fn id, candidates ->
+        if Map.get(conditions, id, false) do
+          Map.put_new(candidates, id, now)
+        else
+          Map.delete(candidates, id)
+        end
+      end)
+
+    debounced =
+      for id <- @debounced_ids,
+          started_at = Map.get(candidates, id),
+          is_integer(started_at),
+          now - started_at >= state.debounce,
+          do: id
+
+    immediate = immediate_alarms(state)
+
+    unstable =
+      if operational?(state) and is_integer(state.unstable_until) and now < state.unstable_until,
+        do: ["internet_unstable"],
+        else: []
+
+    alarms =
+      (immediate ++ debounced ++ unstable)
+      |> Enum.uniq()
+      |> Enum.sort()
+      |> Enum.map(&public_alarm/1)
+
+    %{state | candidates: candidates, alarms: alarms}
+  end
+
+  defp immediate_alarms(%{storage_failure: true}), do: ["storage_failure"]
+
+  defp immediate_alarms(state) do
+    public = state.client.state
+    configured = configured?(public)
+    waiting = match?(%{state: :waiting}, public.commissioning)
+
+    cond do
+      configured -> []
+      waiting -> ["commissioning_unavailable"]
+      true -> ["commissioning_required"]
+    end
+  end
+
+  defp debounced_conditions(state) do
+    %{
+      "internet_unavailable" => internet_unavailable?(state),
+      "tailnet_unavailable" => tailnet_unavailable?(state),
+      "cluster_unavailable" => cluster_unavailable?(state),
+      "ssh_unavailable" => ssh_unavailable?(state),
+      "subnet_router_unavailable" => subnet_router_unavailable?(state)
+    }
+  end
+
+  defp internet_unavailable?(state) do
+    operational?(state) and not match?(%{online: true}, state.client.state.internet)
+  end
+
+  defp tailnet_unavailable?(state) do
+    upstream_healthy?(state) and not match?(%{online: true}, state.client.state.tailnet)
+  end
+
+  defp cluster_unavailable?(state) do
+    tailnet_healthy?(state) and
+      match?(%{enabled: true, online: false}, state.client.state.cluster)
+  end
+
+  defp ssh_unavailable?(state) do
+    ssh = state.client.state.ssh
+
+    tailnet_healthy?(state) and match?(%{enabled: true}, ssh) and
+      not match?(%{state: :listening}, ssh)
+  end
+
+  defp subnet_router_unavailable?(state) do
+    subnet_router = state.client.state.subnet_router
+
+    tailnet_healthy?(state) and match?(%{enabled: true}, subnet_router) and
+      not match?(%{state: :active}, subnet_router)
+  end
+
+  defp upstream_healthy?(state) do
+    operational?(state) and match?(%{online: true}, state.client.state.internet)
+  end
+
+  defp tailnet_healthy?(state) do
+    upstream_healthy?(state) and match?(%{online: true}, state.client.state.tailnet)
+  end
+
+  defp track_internet_change(state, previous) do
+    current = internet_online(state.client.state)
+
+    if is_boolean(previous) and is_boolean(current) and previous != current and
+         operational?(state) do
+      now = now(state)
+
+      samples =
+        [now | state.internet_samples]
+        |> Enum.filter(&(now - &1 <= state.flapping_period))
+
+      unstable_until =
+        if length(samples) >= state.flapping_count,
+          do: now + state.flapping_hold,
+          else: state.unstable_until
+
+      %{state | internet_samples: samples, unstable_until: unstable_until}
+    else
+      state
+    end
+  end
+
+  defp operational?(state) do
+    not state.storage_failure and configured?(state.client.state) and
+      not changing?(state.client.state)
+  end
+
+  defp configured?(%{configuration: %{configured: true}}), do: true
+  defp configured?(_state), do: false
+
+  defp changing?(%{configuration: %{pending: pending}}), do: not is_nil(pending)
+  defp changing?(_state), do: false
+
+  defp internet_online(%{internet: %{online: online}}) when is_boolean(online), do: online
+  defp internet_online(_state), do: nil
+
+  defp publish(%{alarms: alarms, published_alarms: previous} = state) do
+    if previous == alarms do
+      state
+    else
+      log_changes(previous, alarms)
+
+      case DeviceState.publish(
+             {:state_reported, :alarms, alarms},
+             state.device_state_server
+           ) do
+        :ok -> %{state | published_alarms: alarms}
+        {:error, :shutting_down} -> state
+        {:error, reason} -> raise "alarm publication failed: #{inspect(reason)}"
+      end
+    end
+  end
+
+  defp log_changes(previous, current) do
+    previous_ids = MapSet.new(previous, & &1.id)
+    current_ids = MapSet.new(current, & &1.id)
+
+    Enum.each(MapSet.difference(current_ids, previous_ids), &log_transition(:set, &1))
+    Enum.each(MapSet.difference(previous_ids, current_ids), &log_transition(:clear, &1))
+  end
+
+  defp log_transition(state, id) do
+    alarm = public_alarm(id)
+    level = if state == :set, do: alarm.level, else: :info
+
+    Logger.log(level, "alarm #{state}: #{id}",
+      alarm: true,
+      alarm_id: id,
+      alarm_state: state,
+      alarm_level: alarm.level,
+      alarm_description: alarm.description
+    )
+  end
+
+  defp initial_storage_failure(options) do
+    case Keyword.fetch(options, :storage_failure) do
+      {:ok, active} ->
+        active
 
       :error ->
-        {:stop, :invalid_device_state_event, state}
+        if Keyword.get(options, :name, __MODULE__) == __MODULE__,
+          do: :persistent_term.get({__MODULE__, :storage_failure}, false),
+          else: false
     end
   end
 
-  def handle_info(
-        {:device_state_event, _node, boot_id, revision, _event},
-        %{boot_id: boot_id, revision: current} = state
-      )
-      when revision <= current,
-      do: {:noreply, state}
-
-  def handle_info({:device_state_event, _node, _boot, _revision, _event}, state) do
-    {:ok, snapshot} = DeviceState.subscribe(self(), state.device_state_server)
-    sync_snapshot(snapshot.state)
-
-    {:noreply,
-     %{
-       state
-       | device_state: snapshot.state,
-         boot_id: snapshot.boot_id,
-         revision: snapshot.revision
-     }}
+  defp notify_storage_failure(server, active) do
+    GenServer.call(server, {:storage_failure, active})
+  catch
+    :exit, _reason -> :ok
   end
 
-  defp sync_snapshot(%State{} = state) do
-    Enum.each(State.sources() -- [:device, :alarms], fn source ->
-      Alarms.sync_public_state(state, source)
-    end)
-  end
-
-  defp publish_active do
-    case DeviceState.publish({:state_reported, :alarms, Alarms.active()}) do
-      :ok -> :ok
-      {:error, :shutting_down} -> :ok
-      {:error, reason} -> raise "Alarm DeviceState publication failed: #{inspect(reason)}"
-    end
-  end
+  defp public_alarm(id), do: Map.put(Map.fetch!(@catalog, id), :id, id)
+  defp now(state), do: state.clock.()
+  defp schedule_tick(state), do: Process.send_after(self(), :tick, state.tick_interval)
 end

@@ -4,7 +4,7 @@ defmodule NervesGate.DeviceState.Server do
 
   The server validates authenticated state-owner reports, replaces exactly one
   public slice, advances a revision only when public state changes, and sends
-  the accepted event to monitored subscribers. It also emits lightweight
+  the accepted operation to monitored subscribers. It also emits lightweight
   heartbeats to remote reducer clients so they can detect a silent partition
   without polling snapshots. It never issues lifecycle commands or performs
   subsystem work.
@@ -14,12 +14,14 @@ defmodule NervesGate.DeviceState.Server do
 
   alias NervesGate.DeviceState.{Public, Secret, State}
   alias NervesGate.Identity
+  alias NervesGate.Subscribers
 
   @heartbeat_interval 1_000
 
   defstruct [:state, :boot_id, :owners, :heartbeat_interval, revision: 0, subscribers: %{}]
 
   @type snapshot :: %{
+          node: node(),
           boot_id: String.t(),
           revision: non_neg_integer(),
           state: State.t(),
@@ -37,16 +39,22 @@ defmodule NervesGate.DeviceState.Server do
   @spec snapshot(GenServer.server()) :: snapshot()
   def snapshot(server \\ __MODULE__), do: GenServer.call(server, :snapshot)
 
-  @type subscriber :: pid() | {:finitomata, pid()}
+  @type subscriber :: pid()
 
   @spec subscribe(subscriber(), GenServer.server(), timeout()) :: {:ok, snapshot()}
   def subscribe(subscriber \\ self(), server \\ __MODULE__, timeout \\ 5_000)
 
   def subscribe(subscriber, server, timeout) when is_pid(subscriber),
-    do: GenServer.call(server, {:subscribe, subscriber, :message}, timeout)
+    do: GenServer.call(server, {:subscribe, subscriber, false}, timeout)
 
-  def subscribe({:finitomata, subscriber}, server, timeout) when is_pid(subscriber),
-    do: GenServer.call(server, {:subscribe, subscriber, :finitomata}, timeout)
+  @doc false
+  @spec subscribe_remote(subscriber(), GenServer.server(), timeout()) :: {:ok, snapshot()}
+  def subscribe_remote(subscriber, server, timeout \\ 5_000) when is_pid(subscriber),
+    do: GenServer.call(server, {:subscribe, subscriber, true}, timeout)
+
+  @spec unsubscribe(subscriber(), GenServer.server()) :: :ok
+  def unsubscribe(subscriber \\ self(), server \\ __MODULE__) when is_pid(subscriber),
+    do: GenServer.call(server, {:unsubscribe, subscriber})
 
   @spec hydrated?(GenServer.server()) :: boolean()
   def hydrated?(server \\ __MODULE__), do: GenServer.call(server, :hydrated?)
@@ -72,13 +80,25 @@ defmodule NervesGate.DeviceState.Server do
   def handle_call(:snapshot, _from, server), do: {:reply, snapshot_from(server), server}
   def handle_call(:hydrated?, _from, server), do: {:reply, State.hydrated?(server.state), server}
 
-  def handle_call({:subscribe, subscriber, delivery}, _from, server) do
-    server = monitor_subscriber(server, subscriber, delivery)
+  def handle_call({:subscribe, subscriber, heartbeat?}, _from, server) do
+    subscribers = Subscribers.add(server.subscribers, subscriber, %{heartbeat: heartbeat?})
+
+    subscribers =
+      if heartbeat?,
+        do: update_in(subscribers[subscriber], &Map.put(&1, :heartbeat, true)),
+        else: subscribers
+
+    server = %{server | subscribers: subscribers}
     {:reply, {:ok, snapshot_from(server)}, server}
   end
 
-  def handle_call({:publish, {:state_reported, source, _value} = event}, {caller, _tag}, server) do
-    case publish_event(server, caller, source, event) do
+  def handle_call({:unsubscribe, subscriber}, _from, server) do
+    subscribers = Subscribers.remove(server.subscribers, subscriber)
+    {:reply, :ok, %{server | subscribers: subscribers}}
+  end
+
+  def handle_call({:publish, {:state_reported, source, _value} = report}, {caller, _tag}, server) do
+    case publish_report(server, caller, source, report) do
       {:ok, server} -> {:reply, :ok, server}
       {:error, reason} -> {:reply, {:error, reason}, server}
     end
@@ -95,24 +115,20 @@ defmodule NervesGate.DeviceState.Server do
   end
 
   def handle_info({:DOWN, reference, :process, subscriber, _reason}, server) do
-    case Map.get(server.subscribers, subscriber) do
-      %{reference: ^reference} ->
-        {:noreply, %{server | subscribers: Map.delete(server.subscribers, subscriber)}}
-
-      _other ->
-        {:noreply, server}
-    end
+    subscribers = Subscribers.down(server.subscribers, subscriber, reference)
+    {:noreply, %{server | subscribers: subscribers}}
   end
 
-  defp publish_event(server, caller, source, event) do
+  defp publish_report(server, caller, source, report) do
     with :ok <- authenticate(server, source, caller),
-         :ok <- validate_public(event),
-         {:ok, new_state} <- State.apply_event(server.state, event) do
+         :ok <- validate_public(report),
+         {:ok, operation} <- State.operation(report),
+         {:ok, new_state} <- State.reduce(server.state, operation) do
       if new_state == server.state do
         {:ok, server}
       else
         revision = server.revision + 1
-        broadcast(server, revision, event)
+        broadcast(server, revision, operation)
         {:ok, %{server | state: new_state, revision: revision}}
       end
     else
@@ -149,52 +165,23 @@ defmodule NervesGate.DeviceState.Server do
     :exit, _reason -> nil
   end
 
-  defp broadcast(server, revision, event) do
-    Enum.each(server.subscribers, fn
-      {subscriber, %{delivery: :message}} ->
-        send(subscriber, {:device_state_event, node(), server.boot_id, revision, event})
-
-      {subscriber, %{delivery: :finitomata}} ->
-        GenServer.cast(
-          subscriber,
-          {:device_state_event_received,
-           %{node: node(), boot_id: server.boot_id, revision: revision, event: event}}
-        )
-    end)
+  defp broadcast(server, revision, operation) do
+    message = {:device_state_operation, node(), server.boot_id, revision, operation}
+    Enum.each(server.subscribers, fn {subscriber, _metadata} -> send(subscriber, message) end)
   end
 
   defp broadcast_heartbeat(server) do
-    heartbeat = %{
-      node: node(),
-      boot_id: server.boot_id,
-      revision: server.revision
-    }
+    message = {:device_state_heartbeat, node(), server.boot_id, server.revision}
 
     Enum.each(server.subscribers, fn
-      {subscriber, %{delivery: :finitomata}} ->
-        GenServer.cast(subscriber, {:device_state_heartbeat_received, heartbeat})
-
-      {_subscriber, %{delivery: :message}} ->
-        :ok
+      {subscriber, %{heartbeat: true}} -> send(subscriber, message)
+      {_subscriber, _metadata} -> :ok
     end)
-  end
-
-  defp monitor_subscriber(server, subscriber, delivery) do
-    case Map.fetch(server.subscribers, subscriber) do
-      {:ok, metadata} ->
-        %{
-          server
-          | subscribers: Map.put(server.subscribers, subscriber, %{metadata | delivery: delivery})
-        }
-
-      :error ->
-        metadata = %{reference: Process.monitor(subscriber), delivery: delivery}
-        %{server | subscribers: Map.put(server.subscribers, subscriber, metadata)}
-    end
   end
 
   defp snapshot_from(server) do
     %{
+      node: node(),
       boot_id: server.boot_id,
       revision: server.revision,
       state: server.state,
@@ -204,7 +191,7 @@ defmodule NervesGate.DeviceState.Server do
 
   defp maybe_bootstrap_device(%State{device: nil} = state, options) do
     device = Keyword.get_lazy(options, :device, &device_identity/0)
-    {:ok, state} = State.apply_event(state, {:state_reported, :device, device})
+    {:ok, state} = State.reduce(state, {:put, :device, device})
     state
   end
 

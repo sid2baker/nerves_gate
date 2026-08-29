@@ -19,8 +19,11 @@ defmodule NervesGate.DeviceState.ServerTest do
     %{server: server}
   end
 
-  test "subscription atomically returns a snapshot followed by ordered events", %{server: server} do
+  test "subscription atomically returns a snapshot followed by ordered operations", %{
+    server: server
+  } do
     assert {:ok, snapshot} = Server.subscribe(self(), server)
+    assert snapshot.node == node()
     assert snapshot.boot_id == "boot-a"
     assert snapshot.revision == 0
     assert snapshot.state.device.name == "Gate A"
@@ -28,8 +31,9 @@ defmodule NervesGate.DeviceState.ServerTest do
     event = {:state_reported, :ssh, ssh("100.64.0.10")}
     assert :ok = DeviceState.publish(event, server)
 
-    assert_receive {:device_state_event, _node, "boot-a", 1, ^event}
-    assert {:ok, client_state} = State.apply_event(snapshot.state, event)
+    operation = {:put, :ssh, ssh("100.64.0.10")}
+    assert_receive {:device_state_operation, _node, "boot-a", 1, ^operation}
+    assert {:ok, client_state} = State.reduce(snapshot.state, operation)
     assert Server.snapshot(server).state == client_state
   end
 
@@ -48,10 +52,11 @@ defmodule NervesGate.DeviceState.ServerTest do
        }}
 
     assert :ok = DeviceState.publish(event, server)
-    assert_receive {:device_state_event, _node, "boot-a", 1, ^event}
+
+    assert_receive {:device_state_operation, _node, "boot-a", 1, {:put, :internet, _status}}
 
     assert :ok = DeviceState.publish(event, server)
-    refute_receive {:device_state_event, _node, _boot, _revision, _event}
+    refute_receive {:device_state_operation, _node, _boot, _revision, _operation}
     assert Server.snapshot(server).revision == 1
   end
 
@@ -86,15 +91,16 @@ defmodule NervesGate.DeviceState.ServerTest do
     refute inspect(Server.state(server)) =~ "secret"
   end
 
-  test "remote reducer clients receive lightweight boot and revision heartbeats", %{
+  test "only remote reducer clients receive lightweight boot and revision heartbeats", %{
     server: server
   } do
-    assert {:ok, _snapshot} = Server.subscribe({:finitomata, self()}, server)
+    assert {:ok, _snapshot} = Server.subscribe(self(), server)
     send(server, :heartbeat)
+    refute_receive {:device_state_heartbeat, _node, "boot-a", 0}
 
-    assert_receive {:"$gen_cast",
-                    {:device_state_heartbeat_received,
-                     %{node: _node, boot_id: "boot-a", revision: 0}}}
+    assert {:ok, _snapshot} = Server.subscribe_remote(self(), server)
+    send(server, :heartbeat)
+    assert_receive {:device_state_heartbeat, _node, "boot-a", 0}
   end
 
   test "subscriber monitors remain outside canonical state", %{server: server} do

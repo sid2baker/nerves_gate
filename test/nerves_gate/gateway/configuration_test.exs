@@ -57,8 +57,7 @@ defmodule NervesGate.Gateway.ConfigurationTest do
     ]
 
     on_exit(fn ->
-      NervesGate.DeviceState.Alarms.changing(false)
-      NervesGate.Storage.Alarms.failure(false)
+      NervesGate.Alarms.storage_failure(false)
       File.chmod(root, 0o700)
       File.rm_rf!(root)
     end)

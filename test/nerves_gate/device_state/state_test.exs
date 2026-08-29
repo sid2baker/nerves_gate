@@ -3,18 +3,18 @@ defmodule NervesGate.DeviceState.StateTest do
 
   alias NervesGate.DeviceState.State
 
-  test "the same public event stream produces identical state" do
-    events = [
-      {:state_reported, :internet, internet(true)},
-      {:state_reported, :tailnet, tailnet(true)},
-      {:state_reported, :ssh, ssh(:listening)},
-      {:state_reported, :cluster, cluster(true)},
-      {:state_reported, :alarms,
+  test "the same public operation stream produces identical state" do
+    operations = [
+      {:put, :internet, internet(true)},
+      {:put, :tailnet, tailnet(true)},
+      {:put, :ssh, ssh(:listening)},
+      {:put, :cluster, cluster(true)},
+      {:put, :alarms,
        [%{id: "Internet.Alarm", description: "Internet unavailable", level: :warning}]}
     ]
 
-    owner = Enum.reduce(events, State.new(), &apply!(&2, &1))
-    replica = Enum.reduce(events, State.new(), &apply!(&2, &1))
+    owner = Enum.reduce(operations, State.new(), &apply!(&2, &1))
+    replica = Enum.reduce(operations, State.new(), &apply!(&2, &1))
 
     assert owner == replica
     assert owner.internet.online
@@ -23,13 +23,13 @@ defmodule NervesGate.DeviceState.StateTest do
     assert owner.cluster.online
   end
 
-  test "one event replaces only its owned public slice" do
+  test "one operation replaces only its owned public slice" do
     original =
       State.new()
-      |> apply!({:state_reported, :internet, internet(false)})
-      |> apply!({:state_reported, :ssh, ssh(:disabled)})
+      |> apply!({:put, :internet, internet(false)})
+      |> apply!({:put, :ssh, ssh(:disabled)})
 
-    updated = apply!(original, {:state_reported, :internet, internet(true)})
+    updated = apply!(original, {:put, :internet, internet(true)})
 
     assert updated.internet == internet(true)
     assert updated.ssh == original.ssh
@@ -39,45 +39,44 @@ defmodule NervesGate.DeviceState.StateTest do
     state = State.new()
     assert state.internet == nil
 
-    state = apply!(state, {:state_reported, :internet, internet(false)})
+    state = apply!(state, {:put, :internet, internet(false)})
     assert state.internet == internet(false)
   end
 
   test "hydration requires every essential typed slice" do
-    events = [
-      {:state_reported, :device,
-       %{device_id: "gate-a", name: "Gate A", firmware_version: "1.0.0"}},
-      {:state_reported, :firmware, firmware()},
-      {:state_reported, :configuration, %{configured: false}},
-      {:state_reported, :commissioning,
+    operations = [
+      {:put, :device, %{device_id: "gate-a", name: "Gate A", firmware_version: "1.0.0"}},
+      {:put, :firmware, firmware()},
+      {:put, :configuration, %{configured: false}},
+      {:put, :commissioning,
        %NervesGate.Commissioning.Status{state: :disabled, active: [], mode: :disabled}},
-      {:state_reported, :internet, internet(false)},
-      {:state_reported, :tailnet, tailnet(false)},
-      {:state_reported, :subnet_router,
+      {:put, :internet, internet(false)},
+      {:put, :tailnet, tailnet(false)},
+      {:put, :subnet_router,
        %NervesGate.SubnetRouter.Status{
          enabled: false,
          routes: [],
          state: :disabled,
          observed: %{}
        }},
-      {:state_reported, :ssh, ssh(:disabled)},
-      {:state_reported, :cluster, cluster(false)},
-      {:state_reported, :alarms, []}
+      {:put, :ssh, ssh(:disabled)},
+      {:put, :cluster, cluster(false)},
+      {:put, :alarms, []}
     ]
 
-    state = Enum.reduce(events, State.new(), &apply!(&2, &1))
+    state = Enum.reduce(operations, State.new(), &apply!(&2, &1))
     assert State.hydrated?(state)
   end
 
-  test "malformed, untyped, and unknown events are rejected" do
-    assert :error = State.apply_event(State.new(), {:unknown, :ssh, %{}})
-    assert :error = State.apply_event(State.new(), {:state_reported, :unknown, %{}})
-    assert :error = State.apply_event(State.new(), {:state_reported, :ssh, %{state: :disabled}})
-    assert :error = State.apply_event(State.new(), {:state_reported, :alarms, [%{id: 1}]})
+  test "malformed, untyped, and unknown operations are rejected" do
+    assert :error = State.reduce(State.new(), {:unknown, :ssh, %{}})
+    assert :error = State.reduce(State.new(), {:put, :unknown, %{}})
+    assert :error = State.reduce(State.new(), {:put, :ssh, %{state: :disabled}})
+    assert :error = State.reduce(State.new(), {:put, :alarms, [%{id: 1}]})
   end
 
-  defp apply!(state, event) do
-    assert {:ok, state} = State.apply_event(state, event)
+  defp apply!(state, operation) do
+    assert {:ok, state} = State.reduce(state, operation)
     state
   end
 

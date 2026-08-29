@@ -9,17 +9,17 @@ defmodule NervesGateWeb.StatusLive do
 
   @impl true
   def mount(_params, web_session, socket) do
-    {:ok, session, fleet} = NervesGate.connect()
+    {:ok, client, fleet} = NervesGate.connect()
 
-    if NervesGate.configured?(session) do
-      mount_dashboard(session, fleet, web_session, socket)
+    if NervesGate.configured?(client) do
+      mount_dashboard(client, fleet, web_session, socket)
     else
-      :ok = NervesGate.disconnect(session)
+      :ok = NervesGate.disconnect(client)
       {:ok, redirect(socket, to: ~p"/commissioning")}
     end
   end
 
-  defp mount_dashboard(session, fleet, web_session, socket) do
+  defp mount_dashboard(client, fleet, web_session, socket) do
     model = dashboard_model(fleet)
     remote_ip = Map.get(web_session, "remote_ip", "unknown")
 
@@ -32,9 +32,8 @@ defmodule NervesGateWeb.StatusLive do
       )
       |> assign_private(
         fleet: fleet,
-        actor: NervesGate.actor_for_ip(session, remote_ip),
-        session: session,
-        session_monitor: Process.monitor(session)
+        actor: NervesGate.actor_for_ip(client, remote_ip),
+        client: client
       )
       |> assign_view()
       |> maybe_track_presence()
@@ -114,26 +113,42 @@ defmodule NervesGateWeb.StatusLive do
   end
 
   @impl true
-  def handle_info(
-        {:nerves_gate_state_changed, session, fleet},
-        %{private: %{session: session}} = socket
-      ) do
-    {:noreply, refresh_dashboard(socket, fleet)}
-  end
+  def handle_info({:device_state_operation, _, _, _, _} = message, socket),
+    do: reduce_state(socket, message)
 
-  def handle_info(
-        {:DOWN, reference, :process, session, _reason},
-        %{private: %{session: session, session_monitor: reference}} = socket
-      ) do
-    {:stop, :nerves_gate_session_stopped, socket}
-  end
+  def handle_info({:fleet_operation, _, _, _} = message, socket),
+    do: reduce_state(socket, message)
+
+  def handle_info({:device_state_heartbeat, _, _, _}, socket), do: {:noreply, socket}
 
   def handle_info(_presence_event, socket) do
     {:noreply, refresh_dashboard(socket)}
   end
 
   defp refresh_from_session(socket) do
-    refresh_dashboard(socket, NervesGate.state(socket.private.session))
+    case NervesGate.resync(socket.private.client) do
+      {:ok, client} ->
+        socket
+        |> assign_private(client: client)
+        |> refresh_dashboard(NervesGate.state(client))
+
+      {:error, _reason} ->
+        socket
+    end
+  end
+
+  defp reduce_state(socket, message) do
+    case NervesGate.reduce(socket.private.client, message) do
+      {:ok, client, :changed} ->
+        socket = assign_private(socket, client: client)
+        {:noreply, refresh_dashboard(socket, NervesGate.state(client))}
+
+      {:ok, _client, _unchanged} ->
+        {:noreply, socket}
+
+      :resync ->
+        {:noreply, refresh_from_session(socket)}
+    end
   end
 
   defp refresh_dashboard(socket), do: refresh_dashboard(socket, socket.private.fleet)

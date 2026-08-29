@@ -18,7 +18,7 @@ defmodule NervesGate.Commissioning do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) do
-    state = Keyword.get_lazy(options, :payload, &new/0)
+    state = Keyword.get_lazy(options, :payload, fn -> new(options) end)
     GenServer.start_link(__MODULE__, state, name: Keyword.get(options, :name, __MODULE__))
   end
 
@@ -32,6 +32,7 @@ defmodule NervesGate.Commissioning do
         Keyword.get(options, :adapter, Application.fetch_env!(:nerves_gate, :internet_adapter)),
       hardware: Keyword.get(options, :hardware, &Hardware.interfaces/0),
       publisher: Keyword.get(options, :publisher, &publish/1),
+      load_desired: Keyword.get(options, :load_desired, fn -> nil end),
       retry_delay: Keyword.get(options, :retry_delay, @retry_delay),
       last_error: nil,
       blocked_by: nil,
@@ -79,6 +80,8 @@ defmodule NervesGate.Commissioning do
   @impl true
   def init(state) do
     schedule_tick()
+    state = restore_desired(state)
+    {_reply, state} = reconcile(state, :boot)
     publish_state(state)
     {:ok, state}
   end
@@ -118,6 +121,18 @@ defmodule NervesGate.Commissioning do
   def handle_info(:tick, state) do
     schedule_tick()
     {:noreply, periodic_reconcile(state)}
+  end
+
+  defp restore_desired(state) do
+    case state.load_desired.() do
+      %{mode: mode, uplink: uplink} when mode in [:disabled, :commissioning] ->
+        %{state | desired: %{mode: mode, uplink: uplink}}
+
+      _unavailable ->
+        state
+    end
+  catch
+    _kind, _reason -> state
   end
 
   defp periodic_reconcile(%{phase: :disabled} = state), do: state

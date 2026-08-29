@@ -3,7 +3,6 @@ defmodule NervesGate.Gateway.Persistence do
 
   alias NervesGate.Gateway.Settings
   alias NervesGate.Storage
-  alias NervesGate.Storage.Alarms, as: StorageAlarms
 
   @slots ["a", "b"]
   @legacy_files ~w(setup.json network.json cluster.json device.json settings-change.json)
@@ -71,7 +70,7 @@ defmodule NervesGate.Gateway.Persistence do
         {:cont, :ok}
 
       {:error, _reason} ->
-        StorageAlarms.failure(true)
+        NervesGate.Alarms.storage_failure(true)
         continue_or_halt(write_slot(Settings.default(firmware.slots[slot]), slot, root))
     end
   end
@@ -114,7 +113,7 @@ defmodule NervesGate.Gateway.Persistence do
         {:ok, candidate}
 
       {:error, _reason} ->
-        StorageAlarms.failure(true)
+        NervesGate.Alarms.storage_failure(true)
         {:ok, nil}
     end
   end
@@ -122,7 +121,7 @@ defmodule NervesGate.Gateway.Persistence do
   defp read_settings(path) do
     case Storage.read_json(path, &Settings.validate/1, nil) do
       {:error, {:invalid, reason}} ->
-        StorageAlarms.failure(true)
+        NervesGate.Alarms.storage_failure(true)
 
         case Storage.quarantine(path) do
           :ok -> {:error, {:corrupt, Path.basename(path), reason}}
@@ -147,7 +146,7 @@ defmodule NervesGate.Gateway.Persistence do
   defp storage_result(:ok), do: :ok
 
   defp storage_result({:error, _reason} = error) do
-    StorageAlarms.failure(true)
+    NervesGate.Alarms.storage_failure(true)
     error
   end
 

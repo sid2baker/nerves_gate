@@ -44,11 +44,11 @@ defmodule NervesGateWeb.LocalAccess do
 
   defp allowed?(:home, ip) do
     case NervesGate.connect() do
-      {:ok, session, _state} ->
+      {:ok, client, _state} ->
         try do
-          if NervesGate.configured?(session), do: dashboard?(ip), else: setup?(ip)
+          if NervesGate.configured?(client), do: dashboard?(ip), else: setup?(ip)
         after
-          NervesGate.disconnect(session)
+          NervesGate.disconnect(client)
         end
 
       {:error, _reason} ->

@@ -3,12 +3,11 @@ defmodule NervesGate.FSM.DocumentationTest do
 
   @fsms [
     NervesGate.Gateway.Configuration,
-    NervesGate.Internet,
-    NervesGate.Cluster.Peer,
-    NervesGate.DeviceState.Replica
+    NervesGate.Cluster.Peer
   ]
 
   @reconcilers [
+    NervesGate.Internet,
     NervesGate.Tailnet,
     NervesGate.SSH,
     NervesGate.Cluster,

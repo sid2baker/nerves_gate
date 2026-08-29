@@ -15,7 +15,7 @@ defmodule NervesGate.Tailnet do
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(options) do
-    payload = Keyword.get_lazy(options, :payload, &new/0)
+    payload = Keyword.get_lazy(options, :payload, fn -> new(options) end)
     GenServer.start_link(__MODULE__, payload, name: Keyword.get(options, :name, __MODULE__))
   end
 

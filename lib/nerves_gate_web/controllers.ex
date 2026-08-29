@@ -8,11 +8,11 @@ defmodule NervesGateWeb.StatusController do
 
   defp with_session(connection, function) do
     case NervesGate.connect() do
-      {:ok, session, _state} ->
+      {:ok, client, _state} ->
         try do
-          json(connection, function.(session))
+          json(connection, function.(client))
         after
-          NervesGate.disconnect(session)
+          NervesGate.disconnect(client)
         end
 
       {:error, _reason} ->
@@ -28,11 +28,11 @@ defmodule NervesGateWeb.DiscoveryController do
 
   def show(connection, _params) do
     case NervesGate.connect() do
-      {:ok, session, _state} ->
+      {:ok, client, _state} ->
         try do
-          json(connection, NervesGate.discovery(session))
+          json(connection, NervesGate.discovery(client))
         after
-          NervesGate.disconnect(session)
+          NervesGate.disconnect(client)
         end
 
       {:error, _reason} ->
@@ -143,7 +143,7 @@ defmodule NervesGateWeb.FirmwareController do
 
   def accept(connection, %{"trial_id" => id}) do
     case NervesGate.connect() do
-      {:ok, session, fleet} ->
+      {:ok, client, fleet} ->
         try do
           actor = %{
             id: command_id(),
@@ -153,7 +153,7 @@ defmodule NervesGateWeb.FirmwareController do
 
           command_result(connection, NervesGate.accept_firmware(id, actor))
         after
-          NervesGate.disconnect(session)
+          NervesGate.disconnect(client)
         end
 
       {:error, _reason} ->

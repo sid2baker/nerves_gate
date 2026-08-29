@@ -1,19 +1,19 @@
 defmodule NervesGate.DeviceState do
   @moduledoc """
-  Public snapshot/event API for canonical gateway state.
+  Public snapshot/operation API for canonical gateway state.
 
-  State owners synchronously publish secret-free events. Consumers atomically
-  subscribe to one snapshot followed by future ordered events.
+  State owners synchronously publish secret-free reports. Consumers atomically
+  subscribe to one snapshot followed by future ordered operations.
   """
 
   alias NervesGate.DeviceState.{Public, Server, State}
 
-  @type event :: State.event()
+  @type report :: State.report()
   @type snapshot :: Server.snapshot()
 
-  @spec publish(event(), GenServer.server()) :: :ok | {:error, term()}
-  def publish(event, server \\ Server) do
-    GenServer.call(server, {:publish, event})
+  @spec publish(report(), GenServer.server()) :: :ok | {:error, term()}
+  def publish(report, server \\ Server) do
+    GenServer.call(server, {:publish, report})
   catch
     :exit, {:noproc, _details} -> {:error, :shutting_down}
     :exit, {:normal, _details} -> {:error, :shutting_down}
@@ -29,6 +29,10 @@ defmodule NervesGate.DeviceState do
   @spec subscribe(Server.subscriber(), GenServer.server()) :: {:ok, snapshot()}
   def subscribe(subscriber \\ self(), server \\ Server),
     do: Server.subscribe(subscriber, server)
+
+  @spec unsubscribe(Server.subscriber(), GenServer.server()) :: :ok
+  def unsubscribe(subscriber \\ self(), server \\ Server),
+    do: Server.unsubscribe(subscriber, server)
 
   @doc "Returns whether a value can cross the shared public-state boundary."
   @spec public?(term()) :: boolean()

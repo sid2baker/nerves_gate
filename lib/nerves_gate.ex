@@ -1,15 +1,16 @@
 defmodule NervesGate do
   @moduledoc """
-  Public client-session and command boundary.
+  Public state-reducer and command boundary.
 
-  Clients connect once and receive complete live state from a disposable
-  session. Commands express intent to the subsystem that owns the affected
-  resource; resulting public reality returns through the session stream.
+  Clients subscribe once, own an immutable reducer value, and apply ordered
+  operations in their existing process. Commands express intent to the owner of
+  the affected resource; completed public reality returns through the shared
+  state stream.
   """
 
+  alias NervesGate.Client
   alias NervesGate.Firmware
   alias NervesGate.Gateway.Configuration
-  alias NervesGate.Session
 
   @type resource_id :: String.t()
   @type settings_scope :: :internet | :tailnet | :cluster
@@ -17,41 +18,45 @@ defmodule NervesGate do
   @type command_result :: :ok | {:error, term()}
   @type result(value) :: {:ok, value} | {:error, term()}
 
-  @doc "Starts a live state session owned by the calling client."
-  @spec connect() :: {:ok, pid(), Session.fleet()} | {:error, term()}
+  @doc "Subscribes the caller and returns its immutable state reducer."
+  @spec connect() :: {:ok, Client.t(), Client.fleet()} | {:error, term()}
   def connect do
-    with {:ok, session} <- Session.start(self()) do
-      {:ok, session, Session.state(session)}
+    with {:ok, client} <- Client.connect() do
+      {:ok, client, Client.state(client)}
     end
   end
 
-  @doc "Returns the session's complete current local and fleet state."
-  @spec state(GenServer.server()) :: Session.fleet()
-  defdelegate state(session), to: Session
+  @doc "Purely applies one state message to a client reducer."
+  @spec reduce(Client.t(), term()) :: Client.reduction()
+  defdelegate reduce(client, message), to: Client
 
-  @doc "Stops a disposable client session."
-  @spec disconnect(GenServer.server()) :: :ok
-  def disconnect(session) do
-    GenServer.stop(session, :normal)
-  catch
-    :exit, _reason -> :ok
-  end
+  @doc "Atomically reinstalls local and fleet snapshots after a revision gap."
+  @spec resync(Client.t()) :: {:ok, Client.t()} | {:error, term()}
+  defdelegate resync(client), to: Client
 
-  @doc "Returns whether first-time commissioning is complete in this session."
-  @spec configured?(GenServer.server()) :: boolean()
-  defdelegate configured?(session), to: Session
+  @doc "Returns the reducer's complete current local and fleet state."
+  @spec state(Client.t()) :: Client.fleet()
+  defdelegate state(client), to: Client
+
+  @doc "Unsubscribes the calling process."
+  @spec disconnect(Client.t()) :: :ok
+  defdelegate disconnect(client), to: Client
+
+  @doc "Returns whether first-time commissioning is complete."
+  @spec configured?(Client.t()) :: boolean()
+  defdelegate configured?(client), to: Client
 
   @doc "Returns the dashboard actor represented by a remote Tailnet address."
-  @spec actor_for_ip(GenServer.server(), String.t()) :: map()
-  defdelegate actor_for_ip(session, remote_ip), to: Session
+  @spec actor_for_ip(Client.t(), String.t()) :: map()
+  defdelegate actor_for_ip(client, remote_ip), to: Client
 
-  @doc "Returns Tailnet-only gateway discovery metadata from the session."
-  @spec discovery(GenServer.server()) :: map()
-  defdelegate discovery(session), to: Session
+  @doc "Returns Tailnet-only gateway discovery metadata."
+  @spec discovery(Client.t()) :: map()
+  defdelegate discovery(client), to: Client
 
-  @doc "Returns the versioned, secret-free status document for the session."
-  @spec status(GenServer.server()) :: map()
-  defdelegate status(session), to: Session
+  @doc "Returns the versioned, secret-free status document."
+  @spec status(Client.t()) :: map()
+  defdelegate status(client), to: Client
 
   @doc "Refreshes the signed firmware release catalog."
   @spec check_firmware() :: command_result()

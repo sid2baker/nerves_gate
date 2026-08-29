@@ -3,7 +3,7 @@ defmodule NervesGate.DeviceState.State do
   Canonical secret-free public state for one gateway.
 
   The authoritative server and every consumer hold the same `%State{}`. Public
-  state changes only by applying ordered `t:event/0` values. Applying an event
+  state changes only by applying ordered `t:operation/0` values. Applying an operation
   is pure and never returns commands or performs runtime work.
 
   A `nil` subsystem slice means that its owner has not hydrated the current
@@ -60,7 +60,7 @@ defmodule NervesGate.DeviceState.State do
           | :cluster
           | :alarms
 
-  @type event ::
+  @type report ::
           {:state_reported, :device, map()}
           | {:state_reported, :firmware, NervesGate.Firmware.Status.t()}
           | {:state_reported, :configuration, map()}
@@ -71,6 +71,18 @@ defmodule NervesGate.DeviceState.State do
           | {:state_reported, :ssh, NervesGate.SSH.Status.t()}
           | {:state_reported, :cluster, NervesGate.Cluster.Status.t()}
           | {:state_reported, :alarms, [map()]}
+
+  @type operation ::
+          {:put, :device, map()}
+          | {:put, :firmware, NervesGate.Firmware.Status.t()}
+          | {:put, :configuration, map()}
+          | {:put, :commissioning, NervesGate.Commissioning.Status.t()}
+          | {:put, :internet, NervesGate.Internet.Status.t()}
+          | {:put, :tailnet, NervesGate.Tailnet.Status.t()}
+          | {:put, :subnet_router, NervesGate.SubnetRouter.Status.t()}
+          | {:put, :ssh, NervesGate.SSH.Status.t()}
+          | {:put, :cluster, NervesGate.Cluster.Status.t()}
+          | {:put, :alarms, [map()]}
 
   @type t :: %__MODULE__{
           device: map() | nil,
@@ -103,14 +115,20 @@ defmodule NervesGate.DeviceState.State do
     Enum.all?(@essential_sources, &(not is_nil(Map.fetch!(state, &1))))
   end
 
-  @doc "Purely applies one public event."
-  @spec apply_event(t(), event()) :: {:ok, t()} | :error
-  def apply_event(%__MODULE__{} = state, {:state_reported, source, value})
-      when source in @sources do
+  @doc "Purely applies one replicated public-state operation."
+  @spec reduce(t(), operation()) :: {:ok, t()} | :error
+  def reduce(%__MODULE__{} = state, {:put, source, value}) when source in @sources do
     if valid_slice?(source, value), do: {:ok, Map.replace!(state, source, value)}, else: :error
   end
 
-  def apply_event(%__MODULE__{}, _event), do: :error
+  def reduce(%__MODULE__{}, _operation), do: :error
+
+  @doc false
+  @spec operation(report()) :: {:ok, operation()} | :error
+  def operation({:state_reported, source, value}) when source in @sources,
+    do: {:ok, {:put, source, value}}
+
+  def operation(_report), do: :error
 
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = state), do: Map.from_struct(state)

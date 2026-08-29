@@ -7,7 +7,8 @@ migration ledger.
 
 - **Command** expresses desired intent and is sent to the owner of the affected
   resource.
-- **Event** reports completed or observed reality.
+- **Report** is an owner's complete secret-free account of observed reality.
+- **Operation** is the ordered `{:put, source, value}` form reduced by clients.
 - **Private state** is owned by one subsystem process.
 - **Public state** is the canonical secret-free `DeviceState.State` projection.
 
@@ -40,21 +41,22 @@ Current FSMs:
   staging, Keep confirmation, timeout, promotion, and retrying rollback.
 - `NervesGate.Firmware` — discovery, persistent download, verification,
   preflight, inactive-slot installation, trial health, acceptance, and rollback.
-- `NervesGate.Internet` — apply, verify, restore, and retry transaction.
 - `NervesGate.Cluster.Peer` — discovery, group classification, connection, and
-  backoff for one peer.
-- `NervesGate.DeviceState.Replica` — snapshot synchronization and revision-gap
-  recovery.
+  backoff for one distribution peer.
 
 Ordinary GenServers:
 
+- Internet apply/verify/restore reconciliation.
 - Tailnet observation and classification.
 - SSH desired-state reconciliation.
 - Cluster distribution coordination.
 - Subnet-route reconciliation.
 - Commissioning interface reconciliation.
-- DeviceState serving, alarms, startup gating, replica scanning, and disposable
-  client-session projection.
+- DeviceState serving, the single Fleet reducer owner, derived alarms, and the
+  temporary startup gate.
+
+`NervesGate.Client` and `DeviceState.Client` are immutable reducer values, not
+processes.
 
 A timer, retry counter, or stateful process is not by itself a reason to create
 an FSM. A graph dominated by self-transitions or worker phases is a signal to
@@ -63,23 +65,13 @@ use a GenServer.
 ```mermaid
 flowchart TD
   Firmware[Firmware FSM] --> Platform[Firmware.Platform contract]
+  Configuration[Gateway.Configuration FSM] --> Owners[Resource owners]
+  Owners --> DeviceState[DeviceState.Server]
   Firmware --> DeviceState
-  Configuration[Gateway.Configuration FSM] --> Internet[Internet FSM]
-  Configuration --> Tailnet[Tailnet observer]
-  Configuration --> SSH[SSH reconciler]
-  Configuration --> Cluster[Cluster coordinator]
-  Configuration --> SubnetRouter[Subnet-router reconciler]
-  Tailnet --> SSH
-  Tailnet --> Cluster
-  Tailnet --> SubnetRouter
-  Cluster --> Peers[Cluster.Peer FSMs]
-  Internet --> DeviceState[DeviceState.State]
-  Tailnet --> DeviceState
-  SSH --> DeviceState
-  Cluster --> DeviceState
-  SubnetRouter --> DeviceState
-  DeviceState --> Replicas[Replica FSMs]
-  Replicas --> Sessions[NervesGate.Session clients]
+  DeviceState --> Fleet[Fleet: reducer per remote node]
+  DeviceState --> Client[Client immutable reducer]
+  Fleet --> Client
+  Cluster[Cluster owner] --> Peers[Cluster.Peer FSMs]
 ```
 
 ## Idiomatic Finitomata subset
@@ -130,7 +122,7 @@ The owner depends on a generic `NervesGate.Firmware.Platform` contract, never on
 partition names or bootloader flags. A platform that cannot report automatic
 trial fallback is read-only. Installation records a durable serializable journal
 before writing the inactive candidate. A new unvalidated boot runs public-state
-health checks until stable; explicit acceptance requires a fresh Tailnet session
+health checks until stable; explicit acceptance requires a fresh Tailnet connection
 and commits through the platform. Timeout, sustained management loss, explicit
 rollback, or any unvalidated reboot returns to the previous known-good image.
 After fallback, the platform synchronizes its physically running slot and
@@ -160,15 +152,15 @@ Owners publish complete slices such as:
 {:state_reported, :ssh, %NervesGate.SSH.Status{}}
 ```
 
-`DeviceState.State.apply_event/2` is the pure reducer. Every operation is a
-past-tense `:state_reported` tuple containing one owner's complete public slice.
-The reducer validates the source and slice shape and replaces only that source's
+`DeviceState.State.operation/1` validates an owner's `:state_reported` report and
+converts it to `{:put, source, value}`. `DeviceState.State.reduce/2` is the pure
+operation reducer: it validates the slice shape and replaces only that source's
 field. It never reads runtime state, performs effects, emits commands, or merges
-partially observed structures. Reducing the same ordered event stream from the
-same snapshot therefore produces the same projection.
+partially observed structures. Reducing the same ordered operation stream from
+the same snapshot therefore produces the same projection.
 
 `DeviceState.Server` is the serializer for one gateway. For every submitted
-operation it:
+report it:
 
 1. authenticates the caller as the current local supervised owner of the slice;
 2. recursively rejects secrets and BEAM-local runtime values;
@@ -180,33 +172,40 @@ operation it:
 The server performs no lifecycle work. Desired commands never enter this stream;
 only complete committed or observed public reality does.
 
-Consumers atomically join to obtain `{boot_id, revision, state}` and then apply
-only the exact next revision. Duplicate revisions are ignored. Malformed input,
-a revision gap, or a boot-ID change discards incremental synchronization and
-installs another atomic snapshot without buffering or replay.
+`DeviceState.Client` is the shared pure reducer used locally and remotely.
+Consumers atomically join to obtain `{node, boot_id, revision, state}` and then
+apply only the exact next revision. Duplicate revisions are ignored. Malformed
+input, a revision gap, or a boot-ID change requests another atomic snapshot
+without buffering or replay.
 
 Remote reducer clients additionally receive a one-second heartbeat containing
 only the source node, boot ID, and current revision. Heartbeats are transport
 evidence rather than state operations: they never enter the reducer or consume
-a revision. If no event or heartbeat arrives within the 2.5-second lease, the
+a revision. If no operation or heartbeat arrives within the 2.5-second lease, the
 client immediately publishes its retained snapshot as disconnected. Successful
 rejoining installs a snapshot before connectivity is reported again.
 
-`NervesGate.Session` is the client boundary over these streams. `connect/0`
-returns a disposable session PID and complete initial fleet state. That process
-owns reducer application, duplicate handling, gap recovery, and remote-replica
-updates, then pushes complete `{:nerves_gate_state_changed, session, fleet}`
-messages to its monitored client. LiveViews, controllers, and integration tools
-never apply DeviceState events themselves.
+`NervesGate.Client` is the process-free boundary over local and Fleet streams.
+`connect/0` directly subscribes the caller and returns an immutable reducer plus
+complete initial state. The caller passes operations to `NervesGate.reduce/2`;
+`NervesGate.resync/1` installs both snapshots after any gap. Server-side process
+monitors remove subscriptions when the caller exits.
+
+`NervesGate.Fleet` is one GenServer for all remote nodes. It stores one
+`DeviceState.Client` value per node, runs remote joins in a bounded set of
+unlinked tasks, maintains heartbeat leases, and broadcasts revisioned
+`{:put, device_id, replica}` or `{:delete, device_id}` fleet operations. There is
+no scanner, registry, dynamic supervisor, or process per replicated gateway.
 
 ## Dependency direction
 
 ```text
 NervesGate facade → owners → runtime/platform boundaries
-owners → DeviceState → web/API/alarms/replicas/sessions
+owners → DeviceState → Client / Fleet / Alarms
+Fleet → Client
 ```
 
-The web layer uses only the thin `NervesGate` session and command facade.
+The web layer uses only the thin `NervesGate` reducer and command facade.
 Runtime adapters do not know DeviceState exists. SSH, Cluster, and SubnetRouter
 read Tailnet's current typed observation during their own supervised
 reconciliation instead of maintaining a second public-state projection.
