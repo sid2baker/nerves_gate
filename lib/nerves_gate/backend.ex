@@ -114,7 +114,7 @@ defmodule NervesGate.Backend.Owners do
       NervesGate.Tailnet,
       {NervesGate.SSH.Supervisor, load_enabled: &accepted_ssh/0},
       {NervesGate.SubnetRouter, load_desired: &accepted_subnet_router/0},
-      {NervesGate.Cluster.Supervisor, load_group: &accepted_cluster_group/0},
+      {NervesGate.Cluster, load_group: &accepted_cluster_group/0},
       {Configuration, firmware_busy: &NervesGate.Firmware.busy?/0}
     ]
 

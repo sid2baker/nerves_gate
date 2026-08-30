@@ -3,8 +3,8 @@ defmodule NervesGate.FSM.Diagnostics do
   Queries and the one-shot request boundary for the remaining workflow FSMs.
 
   Most owner commands acknowledge intent immediately. Guarded configuration
-  steps and verified Internet transactions additionally return their committed
-  outcome through a short-lived relay. There is no state polling.
+  steps and firmware commands additionally return their committed outcome
+  through a short-lived relay. There is no state polling.
   """
 
   alias Finitomata.State

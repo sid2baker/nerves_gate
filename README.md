@@ -193,7 +193,7 @@ gateway's remote-management connection.
 The desired enabled state and canonical routes live in the active firmware-slot
 snapshot. Persistence is the acceptance boundary; `SubnetRouter` then converges
 asynchronously and publishes advertised, approved, and primary state through the
-public event stream. There is no resource-change saga, candidate, confirmation,
+public operation stream. There is no resource-change saga, candidate, confirmation,
 or revert timer. Application failures raise a noncritical alarm while the owner continues its
 bounded reconciliation loop; remote gateway access is unchanged.
 
@@ -211,11 +211,13 @@ change the listener address policy or any Tailnet setting.
 
 ## Lifecycle machines, alarms, and healing
 
-Only staged configuration, firmware updates, and cluster-peer negotiation use
-Finitomata. ExDoc renders those executable state diagrams as Mermaid diagrams.
-Internet, Tailnet, SSH, Cluster coordination, subnet routing, commissioning,
-Fleet, and alarms are ordinary GenServers because they serialize a resource or
-reduce observed reality rather than enforce a phase-dependent protocol.
+Only staged configuration and firmware updates use Finitomata. ExDoc renders
+those executable state diagrams as Mermaid diagrams. Internet, Tailnet, SSH,
+Cluster, subnet routing, commissioning, Fleet, and alarms are ordinary
+GenServers because they serialize a resource or reduce observed reality rather
+than enforce a phase-dependent protocol. Cluster keeps immutable retry records
+for candidates and runs bounded peer discovery and connection effects; it does
+not allocate a process per peer.
 `DeviceState.State.reduce/2` and `DeviceState.Client.reduce/2` are pure.
 
 `Alarms` atomically subscribes to canonical state and derives one complete public
@@ -246,7 +248,7 @@ The main page at `http://<tailscale-ip>/` provides:
 
 Each gateway is the sole sequencer for its canonical
 `NervesGate.DeviceState.State`. Connected gateways join every peer's independent
-snapshot/event stream and retain stale snapshots after disconnection. Changes
+snapshot/operation stream and retain stale snapshots after disconnection. Changes
 are pushed and reduced locally; one-second source heartbeats detect silent
 partitions in about two to three seconds. Heartbeats carry only identity and
 revision metadata, do not mutate canonical state, and do not consume revisions.

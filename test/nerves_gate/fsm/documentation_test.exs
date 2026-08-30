@@ -3,7 +3,7 @@ defmodule NervesGate.FSM.DocumentationTest do
 
   @fsms [
     NervesGate.Gateway.Configuration,
-    NervesGate.Cluster.Peer
+    NervesGate.Firmware
   ]
 
   @reconcilers [

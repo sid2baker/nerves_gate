@@ -41,15 +41,13 @@ Current FSMs:
   staging, Keep confirmation, timeout, promotion, and retrying rollback.
 - `NervesGate.Firmware` — discovery, persistent download, verification,
   preflight, inactive-slot installation, trial health, acceptance, and rollback.
-- `NervesGate.Cluster.Peer` — discovery, group classification, connection, and
-  backoff for one distribution peer.
 
 Ordinary GenServers:
 
 - Internet apply/verify/restore reconciliation.
 - Tailnet observation and classification.
 - SSH desired-state reconciliation.
-- Cluster distribution coordination.
+- Cluster distribution, bounded peer discovery, and connection coordination.
 - Subnet-route reconciliation.
 - Commissioning interface reconciliation.
 - DeviceState serving, the single Fleet reducer owner, derived alarms, and the
@@ -71,7 +69,7 @@ flowchart TD
   DeviceState --> Fleet[Fleet: reducer per remote node]
   DeviceState --> Client[Client immutable reducer]
   Fleet --> Client
-  Cluster[Cluster owner] --> Peers[Cluster.Peer FSMs]
+  Cluster[Cluster owner] --> PeerEffects[Bounded peer effects]
 ```
 
 ## Idiomatic Finitomata subset

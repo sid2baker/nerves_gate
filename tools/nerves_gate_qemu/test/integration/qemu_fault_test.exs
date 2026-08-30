@@ -279,6 +279,11 @@ defmodule NervesGateQEMU.ResilienceIntegrationTest do
   end
 
   defp discover_update!(device, version) do
+    Harness.await!(
+      "#{device.id} readiness before firmware discovery",
+      fn -> readiness_observation(device) end
+    )
+
     assert :ok = Gateway.firmware_command(device, "check", %{})
 
     firmware =
@@ -290,6 +295,18 @@ defmodule NervesGateQEMU.ResilienceIntegrationTest do
       )
 
     firmware["available"]
+  end
+
+  defp readiness_observation(device) do
+    case Gateway.fetch(device) do
+      {:ok, status} ->
+        if Gateway.ready?(status),
+          do: {:ok, status},
+          else: {:retry, Gateway.summary(status)}
+
+      {:error, reason} ->
+        {:retry, reason}
+    end
   end
 
   defp prepare_firmware(device, release) do
