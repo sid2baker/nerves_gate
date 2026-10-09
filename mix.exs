@@ -16,7 +16,7 @@ defmodule NervesGate.MixProject do
       releases: [
         nerves_gate: [
           include_erts: &Nerves.erts/0,
-          steps: [&Nerves.init_release/1, :assemble]
+          steps: [&prepare_firmware/1, &Nerves.init_release/1, :assemble]
         ]
       ]
     ]
@@ -28,6 +28,27 @@ defmodule NervesGate.MixProject do
 
   def cli, do: [preferred_targets: [run: :host, test: :host]]
 
+  defp prepare_firmware(release) do
+    if Mix.target() in @targets do
+      # Nerves 2.0.0-pre.3 validates :source_date_epoch but forwards a misspelled key
+      # to fwup. Export the configured value until that upstream typo is fixed.
+      System.put_env("SOURCE_DATE_EPOCH", Application.fetch_env!(:nerves, :source_date_epoch))
+      overlay = Application.fetch_env!(:nerves, :firmware) |> Keyword.fetch!(:rootfs_overlay)
+      cache = Path.expand("_build/tailscale")
+      script = Path.join(__DIR__, "scripts/prepare_tailscale.sh")
+
+      case System.cmd("sh", [script, to_string(Mix.target()), overlay, cache],
+             into: IO.stream(),
+             stderr_to_stdout: true
+           ) do
+        {_, 0} -> :ok
+        {_, status} -> Mix.raise("Tailscale firmware packaging failed (exit #{status})")
+      end
+    end
+
+    release
+  end
+
   defp deps do
     [
       {:nerves, "~> 2.0.0-pre.3", runtime: false},
@@ -37,8 +58,9 @@ defmodule NervesGate.MixProject do
       {:phoenix_live_view, "~> 1.2"},
       {:phoenix_pubsub, "~> 2.2"},
       {:lazy_html, ">= 0.1.0", only: :test},
-      # The refactored application owns its daemon. Enable startup when VPN is wired.
-      {:tailscale, path: "/home/n0gg1n/Development/Work/opencode/tailscale_ex", runtime: false},
+      # tailscale_ex owns its daemon; host simulation must never start the workstation VPN.
+      {:tailscale,
+       path: "/home/n0gg1n/Development/Work/opencode/tailscale_ex", runtime: Mix.target() != :host},
       {:nerves_runtime, "~> 0.13", targets: @targets},
       {:ring_logger, "~> 0.11", targets: @targets},
       {:nerves_ssh, "~> 1.3", targets: @targets},

@@ -38,6 +38,21 @@ support to upstream commit `5d755dba94fff478eac2bfd90ba91d2e0025d4eb`.
 Target system enablement/build verification is still in progress. See
 [`systems/README.md`](systems/README.md) for the x86 source and changes.
 
+## Firmware builds
+
+`mix firmware` automatically prepares the official static `tailscaled` **1.102.3**
+for the selected architecture, verifies its pinned SHA-256, and includes it at
+`/usr/sbin/tailscaled`. The CLI is not needed by `tailscale_ex`. Packaging requires
+`curl`, `sha256sum`, `tar`, and `install` on the build host. Verified archives are
+cached under `_build/tailscale`; subsequent builds can use them without internet.
+No software is downloaded on the device. Kernel TUN support is required to start
+in kernel mode; starting the daemon does not enroll the device or enable LAN routing.
+
+Nerves 2 requires a source timestamp. Target builds use the latest Git commit's
+Unix timestamp, or `SOURCE_DATE_EPOCH` when supplied (required for source archives
+without Git history). EC100 firmware assembly has been verified with OTP 29;
+this is not an EC100 boot or Tailscale connectivity test.
+
 ## Networking and settings
 
 `NervesGate.Network` owns Ethernet settings through VintageNet. Both `eth0` and
@@ -80,10 +95,11 @@ not in the gateway. This is **not** a Nerves boot or EC100 hardware test.
 The offline LiveView setup and dashboard share the network manager and update
 from discovery automatically. Host mode is explicitly labeled simulation; use
 `NervesGate.Network.Host.simulate/1` in IEx to change observations. Tailscale will
-use the refactored `sid2baker/tailscale_ex` LocalAPI interface. Its automatic daemon
-startup is disabled (`runtime: false`) until VPN integration is implemented;
-host development must not start or attach to the workstation's Tailscale daemon.
-Cellular and firmware upload are not implemented yet.
+use the refactored `sid2baker/tailscale_ex` LocalAPI interface. Its OTP application
+starts automatically on firmware targets, supervising `/usr/sbin/tailscaled` in
+kernel mode. Identity stays in `/data/tailscale_ex`; the socket is under `/run`.
+Host simulation does not start or attach to the workstation's Tailscale daemon.
+Enrollment UI, subnet forwarding, cellular and firmware upload remain unfinished.
 The target web listener remains loopback-only until LAN access controls exist.
 SSH recovery is key-only; set `NERVES_GATE_SSH_KEYS` to public keys at build time.
 
