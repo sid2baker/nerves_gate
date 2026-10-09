@@ -2,7 +2,6 @@ defmodule NervesGate.FirmwareBuildTest do
   use ExUnit.Case, async: false
 
   @target_config Path.expand("../../config/target.exs", __DIR__)
-  @packager Path.expand("../../scripts/prepare_tailscale.sh", __DIR__)
 
   defp with_env(env, fun) do
     previous = for {key, _value} <- env, do: {key, System.get_env(key)}
@@ -51,30 +50,19 @@ defmodule NervesGate.FirmwareBuildTest do
     refute :tailscale in Enum.map(Application.started_applications(), &elem(&1, 0))
   end
 
-  @tag :tmp_dir
-  test "packaging rejects unknown architectures without downloading", %{tmp_dir: tmp} do
-    {output, status} = System.cmd("sh", [@packager, "unknown", tmp, tmp], stderr_to_stdout: true)
-    assert status != 0
-    assert output =~ "Unsupported Tailscale target"
-    refute File.exists?(Path.join(tmp, "usr/sbin/tailscaled"))
+  test "Tailscale installer recognizes both firmware toolchains without using host architecture" do
+    for {target, triple, expected} <- [
+          {:ec100, "armv7-nerves-linux-gnueabihf", "arm"},
+          {:x86_64, "x86_64-nerves-linux-musl", "amd64"}
+        ] do
+      assert Mix.Tasks.Tailscale.Install.architecture!(target, triple, "aarch64-apple-darwin") ==
+               expected
+    end
   end
 
-  @tag :tmp_dir
-  test "packaging rejects corrupt cached archives without installing", %{tmp_dir: tmp} do
-    overlay = Path.join(tmp, "overlay")
-    cache = Path.join(tmp, "cache")
-    File.mkdir_p!(cache)
-
-    for {target, arch} <- [{"ec100", "arm"}, {"x86_64", "amd64"}] do
-      File.write!(Path.join(cache, "tailscale_1.102.3_#{arch}.tgz"), "corrupt archive")
-
-      {output, status} =
-        System.cmd("sh", [@packager, target, overlay, cache], stderr_to_stdout: true)
-
-      assert status != 0
-      assert output =~ "checksum mismatch"
-      refute File.exists?(Path.join(overlay, "usr/sbin/tailscaled"))
-      assert Path.wildcard(Path.join(cache, ".tailscale.*")) == []
-    end
+  test "firmware preparation does nothing on the host" do
+    [prepare | _] = Mix.Project.config()[:releases][:nerves_gate][:steps]
+    release = %Mix.Release{name: :nerves_gate}
+    assert prepare.(release) == release
   end
 end

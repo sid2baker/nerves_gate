@@ -40,13 +40,17 @@ Target system enablement/build verification is still in progress. See
 
 ## Firmware builds
 
-`mix firmware` automatically prepares the official static `tailscaled` **1.102.3**
-for the selected architecture, verifies its pinned SHA-256, and includes it at
-`/usr/sbin/tailscaled`. The CLI is not needed by `tailscale_ex`. Packaging requires
-`curl`, `sha256sum`, `tar`, and `install` on the build host. Verified archives are
-cached under `_build/tailscale`; subsequent builds can use them without internet.
-No software is downloaded on the device. Kernel TUN support is required to start
-in kernel mode; starting the daemon does not enroll the device or enable LAN routing.
+`MIX_TARGET=ec100 mix firmware` (or `MIX_TARGET=x86_64 mix firmware`) automatically
+runs the `tailscale_ex` task `mix tailscale.install` with the selected target.
+The task selects the official static `tailscaled` for the target toolchain and
+verifies its published SHA-256. Each target has a separate generated overlay at
+`_build/<target>_<env>/tailscale_rootfs`; the device binary is `/usr/sbin/tailscaled`.
+The Tailscale version is managed by `tailscale_ex` (currently **1.102.3**).
+
+Installation requires internet on the **build host** on each firmware build.
+No software is downloaded on the device, and the Tailscale CLI is not needed.
+Kernel TUN support is required to start in kernel mode; starting the daemon does
+not enroll the device or enable LAN routing.
 
 Nerves 2 requires a source timestamp. Target builds use the latest Git commit's
 Unix timestamp, or `SOURCE_DATE_EPOCH` when supplied (required for source archives

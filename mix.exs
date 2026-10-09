@@ -34,16 +34,8 @@ defmodule NervesGate.MixProject do
       # to fwup. Export the configured value until that upstream typo is fixed.
       System.put_env("SOURCE_DATE_EPOCH", Application.fetch_env!(:nerves, :source_date_epoch))
       overlay = Application.fetch_env!(:nerves, :firmware) |> Keyword.fetch!(:rootfs_overlay)
-      cache = Path.expand("_build/tailscale")
-      script = Path.join(__DIR__, "scripts/prepare_tailscale.sh")
-
-      case System.cmd("sh", [script, to_string(Mix.target()), overlay, cache],
-             into: IO.stream(),
-             stderr_to_stdout: true
-           ) do
-        {_, 0} -> :ok
-        {_, status} -> Mix.raise("Tailscale firmware packaging failed (exit #{status})")
-      end
+      Mix.Task.reenable("tailscale.install")
+      Mix.Task.run("tailscale.install", [Path.join(overlay, "usr/sbin/tailscaled")])
     end
 
     release
