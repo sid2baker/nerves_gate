@@ -27,12 +27,16 @@ MIX_TARGET=x86_64 mix deps.get
 MIX_TARGET=x86_64 mix compile
 ```
 
-Both systems are pinned to reviewed upstream commits in `mix.exs`. EC100 uses
-its existing Nerves 2 system, bootloader, GPT storage layout and A/B firmware
-contract. Upstream x86 supports Nerves 2, but neither current kernel configuration
-provides the bridge support needed here. System enablement is a separate gate
-from application compilation. The old x86 system is retained temporarily, not
-used by the application.
+Development currently uses these local checkouts in `mix.exs`:
+
+- EC100: `/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100`
+- Tailscale: `/home/n0gg1n/Development/Work/opencode/tailscale_ex`
+
+EC100 retains its existing Nerves 2 system, bootloader, GPT storage layout and
+A/B firmware contract. The x86 variant in `systems/x86_64` adds bridge and firewall
+support to upstream commit `5d755dba94fff478eac2bfd90ba91d2e0025d4eb`.
+Target system enablement/build verification is still in progress. See
+[`systems/README.md`](systems/README.md) for the x86 source and changes.
 
 ## Networking and settings
 
@@ -76,13 +80,16 @@ not in the gateway. This is **not** a Nerves boot or EC100 hardware test.
 The offline LiveView setup and dashboard share the network manager and update
 from discovery automatically. Host mode is explicitly labeled simulation; use
 `NervesGate.Network.Host.simulate/1` in IEx to change observations. Tailscale will
-use only `sid2baker/tailscale_ex`; cellular and firmware upload are not implemented yet.
+use the refactored `sid2baker/tailscale_ex` LocalAPI interface. Its automatic daemon
+startup is disabled (`runtime: false`) until VPN integration is implemented;
+host development must not start or attach to the workstation's Tailscale daemon.
+Cellular and firmware upload are not implemented yet.
 The target web listener remains loopback-only until LAN access controls exist.
 SSH recovery is key-only; set `NERVES_GATE_SSH_KEYS` to public keys at build time.
 
-EC100 upstream currently disables USB following reconnect problems. USB0's
-previous peripheral configuration and USB1 host wiring were found in its history;
-neither is considered fixed or validated. Do not depend on USB provisioning yet.
+The local EC100 checkout includes fixed-role USB restoration (`d375405`). USB0
+reconnection and USB1 modem transport have not been tested by this application
+rebuild. Do not depend on USB provisioning yet.
 Keep serial and Ethernet recovery available. Modem transport remains unverified.
 
 No EC100 hardware behavior has been validated during this rebuild.

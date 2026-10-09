@@ -13,7 +13,12 @@ defmodule NervesGate.MixProject do
       elixirc_paths: if(Mix.env() == :test, do: ["lib", "test/support"], else: ["lib"]),
       deps: deps(),
       lockfile: if(Mix.target() == :host, do: "mix.lock", else: "mix.#{Mix.target()}.lock"),
-      releases: [nerves_gate: [steps: [&Nerves.init_release/1, :assemble]]]
+      releases: [
+        nerves_gate: [
+          include_erts: &Nerves.erts/0,
+          steps: [&Nerves.init_release/1, :assemble]
+        ]
+      ]
     ]
   end
 
@@ -32,8 +37,8 @@ defmodule NervesGate.MixProject do
       {:phoenix_live_view, "~> 1.2"},
       {:phoenix_pubsub, "~> 2.2"},
       {:lazy_html, ">= 0.1.0", only: :test},
-      {:tailscale,
-       github: "sid2baker/tailscale_ex", ref: "374d17ab1b1ef7535b45d4113b104cbaadabf2e2"},
+      # The refactored application owns its daemon. Enable startup when VPN is wired.
+      {:tailscale, path: "/home/n0gg1n/Development/Work/opencode/tailscale_ex", runtime: false},
       {:nerves_runtime, "~> 0.13", targets: @targets},
       {:ring_logger, "~> 0.11", targets: @targets},
       {:nerves_ssh, "~> 1.3", targets: @targets},
@@ -43,15 +48,10 @@ defmodule NervesGate.MixProject do
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", targets: @targets},
       {:nerves_system_ec100,
-       github: "sid2baker/nerves_system_ec100",
-       ref: "9e75902dd6bf33826e1df5c86ba4a84c13511fbf",
+       path: "/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100",
        runtime: false,
        targets: :ec100},
-      {:nerves_system_x86_64,
-       github: "nerves-project/nerves_system_x86_64",
-       ref: "5d755dba94fff478eac2bfd90ba91d2e0025d4eb",
-       runtime: false,
-       targets: :x86_64}
+      {:nerves_system_x86_64, path: "systems/x86_64", runtime: false, targets: :x86_64}
     ]
     |> Enum.filter(fn
       {_name, _source, opts} ->
