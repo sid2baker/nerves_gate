@@ -1,11 +1,11 @@
 # The directory Mix will write compiled artifacts to.
-/_build/
+**/_build/
 
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
 
 # The directory Mix downloads your dependencies sources to.
-/deps/
+**/deps/
 
 # Where third-party dependencies like ExDoc output generated docs.
 /doc/
@@ -13,10 +13,10 @@
 # Temporary files, for example, from tests.
 /tmp/
 
-# Local credentials. Keep the empty template tracked.
+# Local credentials and asset tooling.
 .env
 .env.*
-!.env.example
+/assets/node_modules/
 
 # Local Nerves system build artifacts.
 **/.nerves/

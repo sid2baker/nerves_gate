@@ -6,20 +6,14 @@ defmodule NervesGate.Application do
   def start(_type, _args) do
     children = [
       {Phoenix.PubSub, name: NervesGate.PubSub},
-      NervesGate.Backend,
-      NervesGate.Boot.Gate,
-      NervesGateWeb.Presence,
       NervesGateWeb.Endpoint
     ]
 
-    Supervisor.start_link(children,
-      strategy: :one_for_one,
-      name: NervesGate.Supervisor
-    )
+    Supervisor.start_link(children, strategy: :one_for_one, name: NervesGate.Supervisor)
   end
 
   @impl true
-  def config_change(changed, removed, _extra) do
+  def config_change(changed, _new, removed) do
     NervesGateWeb.Endpoint.config_change(changed, removed)
     :ok
   end

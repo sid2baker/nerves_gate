@@ -1,46 +1,6 @@
 import Config
 
-# Add configuration that is only needed when running on the host here.
-
+# Host development never configures the workstation's network.
 config :nerves_gate,
-  data_dir: Path.join(System.tmp_dir!(), "nerves_gate/#{config_env()}"),
-  internet_adapter: NervesGate.Internet.HostAdapter,
-  internet_poll_interval: 60_000,
-  cluster_poll_interval: 60_000,
-  firmware: [platform: NervesGate.Firmware.Platform.Host]
-
-if config_env() == :test do
-  config :nerves_gate,
-    alarm_timings: %{
-      failure_debounce: 20,
-      flapping_count: 4,
-      flapping_period: 500,
-      flapping_hold: 100
-    }
-end
-
-config :nerves_gate, NervesGateWeb.Endpoint,
-  http: [
-    ip: {127, 0, 0, 1},
-    port: 0,
-    thousand_island_options: [num_acceptors: 4]
-  ]
-
-config :nerves_runtime,
-  kv_backend:
-    {Nerves.Runtime.KVBackend.InMemory,
-     contents: %{
-       # The KV store on Nerves systems is typically read from UBoot-env, but
-       # this allows us to use a pre-populated InMemory store when running on
-       # host for development and testing.
-       #
-       # https://nerves-runtime.hexdocs.pm/readme.html#using-nerves_runtime-in-tests
-       # https://nerves-runtime.hexdocs.pm/readme.html#nerves-system-and-firmware-metadata
-
-       "nerves_fw_active" => "a",
-       "a.nerves_fw_architecture" => "generic",
-       "a.nerves_fw_description" => "N/A",
-       "a.nerves_fw_platform" => "host",
-       "a.nerves_fw_version" => "0.0.0",
-       "nerves_serial_number" => "host-development"
-     }}
+  data_dir: Path.expand("../tmp/#{config_env()}", __DIR__),
+  target: :host
