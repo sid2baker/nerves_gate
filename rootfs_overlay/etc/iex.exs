@@ -1,0 +1,1 @@
+NervesMOTD.print()

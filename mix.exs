@@ -33,7 +33,10 @@ defmodule NervesGate.MixProject do
       # Nerves 2.0.0-pre.3 validates :source_date_epoch but forwards a misspelled key
       # to fwup. Export the configured value until that upstream typo is fixed.
       System.put_env("SOURCE_DATE_EPOCH", Application.fetch_env!(:nerves, :source_date_epoch))
-      overlay = Application.fetch_env!(:nerves, :firmware) |> Keyword.fetch!(:rootfs_overlay)
+
+      [_static_overlay, overlay] =
+        Application.fetch_env!(:nerves, :firmware) |> Keyword.fetch!(:rootfs_overlay)
+
       Mix.Task.reenable("tailscale.install")
       Mix.Task.run("tailscale.install", [Path.join(overlay, "usr/sbin/tailscaled")])
     end
@@ -54,6 +57,7 @@ defmodule NervesGate.MixProject do
       {:tailscale,
        path: "/home/n0gg1n/Development/Work/opencode/tailscale_ex", runtime: Mix.target() != :host},
       {:nerves_runtime, "~> 0.13", targets: @targets},
+      {:nerves_motd, "~> 0.1", targets: @targets},
       {:ring_logger, "~> 0.11", targets: @targets},
       {:nerves_ssh, "~> 1.3", targets: @targets},
       {:nerves_time, "~> 0.4", targets: @targets},

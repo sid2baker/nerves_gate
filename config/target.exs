@@ -2,7 +2,7 @@ import Config
 
 config :nerves_gate,
   data_dir: "/data",
-  target: Mix.target(),
+  target: config_target(),
   network_adapter: {NervesGate.Network.Vintage, nil}
 
 config :logger, backends: [RingLogger]
@@ -24,9 +24,12 @@ end
 
 config :nerves, source_date_epoch: source_date_epoch
 
-# Prepared automatically by the release step; never download software on the device.
+# Static console setup plus target-specific binaries prepared by the release step.
 config :nerves, :firmware,
-  rootfs_overlay: Path.join(Mix.Project.build_path(), "tailscale_rootfs"),
+  rootfs_overlay: [
+    Path.expand("../rootfs_overlay", __DIR__),
+    Path.join(Mix.Project.build_path(), "tailscale_rootfs")
+  ],
   # sqfstar rejects timestamp flags together with SOURCE_DATE_EPOCH. Use the env value.
   rootfs_type: {:squashfs, ["-no-xattrs", "-quiet"]}
 
@@ -39,9 +42,13 @@ config :tailscale,
   manage_daemon: true,
   tun: :kernel
 
-# NervesGate is the sole owner of LAN configuration. Only confirmed JSON is durable.
-config :vintage_net, persistence: VintageNet.Persistence.Null, config: []
+# NervesGate owns LAN configuration; USB provisioning is independent of LAN trials.
+# VintageNetDirect's DHCP server is confined to the point-to-point USB link.
+config :vintage_net,
+  persistence: VintageNet.Persistence.Null,
+  config: if(config_target() == :ec100, do: [{"usb0", %{type: VintageNetDirect}}], else: [])
 
 # Recovery SSH is key-only. Supply a public key at firmware build time.
 config :nerves_ssh,
-  authorized_keys: String.split(System.get_env("NERVES_GATE_SSH_KEYS", ""), "\n", trim: true)
+  authorized_keys: String.split(System.get_env("NERVES_GATE_SSH_KEYS", ""), "\n", trim: true),
+  iex_opts: [dot_iex: "/etc/iex.exs"]

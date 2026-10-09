@@ -16,7 +16,7 @@ defmodule NervesGate.FirmwareBuildTest do
 
   test "target builds use SOURCE_DATE_EPOCH when supplied" do
     with_env([{"SOURCE_DATE_EPOCH", "1700000000"}], fn ->
-      config = Config.Reader.read!(@target_config)
+      config = Config.Reader.read!(@target_config, target: :ec100)
       assert config[:nerves][:source_date_epoch] == "1700000000"
       assert config[:nerves][:firmware][:rootfs_type] == {:squashfs, ["-no-xattrs", "-quiet"]}
       assert config[:tailscale][:daemon_path] == "/usr/sbin/tailscaled"
@@ -31,7 +31,7 @@ defmodule NervesGate.FirmwareBuildTest do
     {timestamp, 0} = System.cmd("git", ["log", "-1", "--format=%ct"])
 
     with_env([{"SOURCE_DATE_EPOCH", nil}], fn ->
-      config = Config.Reader.read!(@target_config)
+      config = Config.Reader.read!(@target_config, target: :ec100)
       assert config[:nerves][:source_date_epoch] == String.trim(timestamp)
     end)
   end
@@ -40,9 +40,33 @@ defmodule NervesGate.FirmwareBuildTest do
     for value <- ["", "tomorrow", "-1", "123oops"] do
       with_env([{"SOURCE_DATE_EPOCH", value}], fn ->
         assert_raise RuntimeError, ~r"SOURCE_DATE_EPOCH must be", fn ->
-          Config.Reader.read!(@target_config)
+          Config.Reader.read!(@target_config, target: :ec100)
         end
       end)
+    end
+  end
+
+  test "EC100 boot configures only USB provisioning, leaving the LAN to the network manager" do
+    config = Config.Reader.read!(@target_config, target: :ec100)
+    assert config[:nerves_gate][:target] == :ec100
+    assert config[:vintage_net][:persistence] == VintageNet.Persistence.Null
+    assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
+  end
+
+  test "x86 firmware does not assume a USB gadget exists" do
+    config = Config.Reader.read!(@target_config, target: :x86_64)
+    assert config[:nerves_gate][:target] == :x86_64
+    assert config[:vintage_net][:config] == []
+  end
+
+  test "firmware includes a static IEx overlay alongside target-specific Tailscale binaries" do
+    for target <- [:ec100, :x86_64] do
+      config = Config.Reader.read!(@target_config, target: target)
+      assert [static, generated] = config[:nerves][:firmware][:rootfs_overlay]
+      assert static == Path.expand("../../rootfs_overlay", __DIR__)
+      assert generated == Path.join(Mix.Project.build_path(), "tailscale_rootfs")
+      assert File.regular?(Path.join(static, "etc/iex.exs"))
+      assert config[:nerves_ssh][:iex_opts] == [dot_iex: "/etc/iex.exs"]
     end
   end
 

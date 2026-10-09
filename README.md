@@ -45,7 +45,9 @@ runs the `tailscale_ex` task `mix tailscale.install` with the selected target.
 The task selects the official static `tailscaled` for the target toolchain and
 verifies its published SHA-256. Each target has a separate generated overlay at
 `_build/<target>_<env>/tailscale_rootfs`; the device binary is `/usr/sbin/tailscaled`.
-The Tailscale version is managed by `tailscale_ex` (currently **1.102.3**).
+The separate, checked-in `rootfs_overlay/etc/iex.exs` prints `NervesMOTD` when
+opening a serial or SSH IEx session. The Tailscale version is managed by
+`tailscale_ex` (currently **1.102.3**).
 
 Installation requires internet on the **build host** on each firmware build.
 No software is downloaded on the device, and the Tailscale CLI is not needed.
@@ -107,9 +109,16 @@ Enrollment UI, subnet forwarding, cellular and firmware upload remain unfinished
 The target web listener remains loopback-only until LAN access controls exist.
 SSH recovery is key-only; set `NERVES_GATE_SSH_KEYS` to public keys at build time.
 
-The local EC100 checkout includes fixed-role USB restoration (`d375405`). USB0
-reconnection and USB1 modem transport have not been tested by this application
-rebuild. Do not depend on USB provisioning yet.
-Keep serial and Ethernet recovery available. Modem transport remains unverified.
+EC100 boot configures `usb0` with `VintageNetDirect`, independently of `br0` and
+LAN configuration trials. Its small DHCP server is confined to USB, never either
+Ethernet port. The kernel must expose `usb0`; this configuration cannot create a
+missing USB gadget. USB currently provides a recovery network for key-only SSH;
+direct browser access is still pending the web listener's access controls.
 
-No EC100 hardware behavior has been validated during this rebuild.
+The local EC100 checkout includes fixed-role USB restoration (`d375405`). USB0
+enumeration/reconnection and USB1 modem transport remain unverified. Keep serial
+and Ethernet recovery available; do not depend on USB provisioning yet.
+
+An operator-reported EC100 boot shows `br0` configured by DHCP with VintageNet
+reporting `:internet`. This confirms that reported boot's bridge addressing and
+internet detection, not two-port forwarding, failover or USB recovery.
