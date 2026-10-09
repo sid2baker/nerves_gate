@@ -46,6 +46,17 @@ defmodule NervesGate.FirmwareBuildTest do
     end
   end
 
+  test "firmware enables the startup guard required by the Heart init timeout" do
+    vm_args = Path.expand("../../rel/vm.args.eex", __DIR__) |> File.read!() |> String.split("\n")
+    assert "-env HEART_INIT_TIMEOUT 600" in vm_args
+    assert "-heart -env HEART_BEAT_TIMEOUT 30" in vm_args
+
+    for target <- [:ec100, :x86_64] do
+      config = Config.Reader.read!(@target_config, target: target)
+      assert config[:nerves_runtime][:startup_guard_enabled] == true
+    end
+  end
+
   test "EC100 boot configures only USB provisioning, leaving the LAN to the network manager" do
     config = Config.Reader.read!(@target_config, target: :ec100)
     assert config[:nerves_gate][:target] == :ec100

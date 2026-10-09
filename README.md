@@ -59,6 +59,11 @@ Unix timestamp, or `SOURCE_DATE_EPOCH` when supplied (required for source archiv
 without Git history). EC100 firmware assembly has been verified with OTP 29;
 this is not an EC100 boot or Tailscale connectivity test.
 
+The standard Nerves startup guard sends Heart's required initialization handshake
+and validates firmware after all expected OTP applications start. It does not
+require internet or completed guided setup. Keep the startup guard enabled while
+`HEART_INIT_TIMEOUT` is set; VM heartbeat monitoring alone does not send that handshake.
+
 ## Networking and settings
 
 `NervesGate.Network` owns Ethernet settings through VintageNet. Both `eth0` and

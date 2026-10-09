@@ -8,6 +8,10 @@ config :nerves_gate,
 config :logger, backends: [RingLogger]
 config :nerves, :erlinit, update_clock: true
 
+# Sends the Heart init handshake required by HEART_INIT_TIMEOUT in vm.args.
+# Validate firmware only after OTP applications start; internet is not required.
+config :nerves_runtime, startup_guard_enabled: true
+
 # Nerves 2 requires an explicit source timestamp. Keep rebuilds deterministic;
 # source-archive builds without Git can supply SOURCE_DATE_EPOCH instead.
 source_date_epoch =
