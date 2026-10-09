@@ -1,6 +1,10 @@
 import Config
 
-config :nerves_gate, data_dir: "/data", target: Mix.target()
+config :nerves_gate,
+  data_dir: "/data",
+  target: Mix.target(),
+  network_adapter: {NervesGate.Network.Vintage, nil}
+
 config :logger, backends: [RingLogger]
 config :nerves, :erlinit, update_clock: true
 

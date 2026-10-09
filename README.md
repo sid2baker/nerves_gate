@@ -34,11 +34,49 @@ provides the bridge support needed here. System enablement is a separate gate
 from application compilation. The old x86 system is retained temporarily, not
 used by the application.
 
+## Networking and settings
+
+`NervesGate.Network` owns Ethernet settings through VintageNet. Both `eth0` and
+`eth1` always belong to `br0`; a missing or disconnected port does not block the
+other. Only the bridge gets a management address. DHCP is the default; static
+IPv4, a contiguous subnet mask (/1–/30), and an optional same-subnet router are
+supported. No Ethernet DHCP server or NAT is configured. STP is enabled to reduce
+loop risk; a newly connected port may take about 30 seconds to forward traffic.
+The Layer 2 bridge stays up during management IP changes.
+
+Settings live in `/data/nerves_gate.json` (host: `tmp/dev/nerves_gate.json`). The
+version-1 file is validated and written by fsync + atomic rename with mode 0600.
+No credentials or discovery status are stored in it. Corrupt/unsupported files
+are not overwritten. Setup reviews changes, starts a 60-second trial, then asks
+you to check equipment connectivity and explicitly confirm. Confirmation requires
+an active bridge and matching address. Internet access is not required.
+
+A GenServer, not the browser, owns the timeout. Only confirmed settings are on
+disk; restarting the manager or rebooting cancels any trial. Failed apply/save
+operations restore previous settings; rejected restore requests are retried.
+VintageNet retries asynchronous interface failures, which remain visible in
+bridge status. Keep an independent recovery path when changing your local IP.
+
+## Tests
+
+```sh
+mix test                           # host simulation, configuration, rollback, LiveView
+scripts/test_bridge.sh             # real Linux bridge in isolated user/network/mount namespaces
+```
+
+The integration script requires Linux user namespaces, `ip`, `brctl`, `ifconfig`,
+`udhcpc`, `dnsmasq`, and `ping` in PATH. It never configures the workstation LAN.
+It creates two disposable LAN peers and tests one/missing/two ports, hotplug,
+gateway-to-peer traffic, transparent peer-to-peer traffic, real DHCP, static IP
+changes and rollback. Its DHCP server exists only in the simulated existing LAN,
+not in the gateway. This is **not** a Nerves boot or EC100 hardware test.
+
 ## Current scope
 
-The replacement host application has an offline LiveView shell. Networking,
-persistence and guarded changes are the next milestone. Tailscale will use only
-`sid2baker/tailscale_ex`; cellular and firmware upload are not implemented yet.
+The offline LiveView setup and dashboard share the network manager and update
+from discovery automatically. Host mode is explicitly labeled simulation; use
+`NervesGate.Network.Host.simulate/1` in IEx to change observations. Tailscale will
+use only `sid2baker/tailscale_ex`; cellular and firmware upload are not implemented yet.
 The target web listener remains loopback-only until LAN access controls exist.
 SSH recovery is key-only; set `NERVES_GATE_SSH_KEYS` to public keys at build time.
 

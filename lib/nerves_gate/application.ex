@@ -4,10 +4,12 @@ defmodule NervesGate.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      {Phoenix.PubSub, name: NervesGate.PubSub},
-      NervesGateWeb.Endpoint
-    ]
+    simulator = if NervesGate.target() == :host, do: [NervesGate.Network.Host], else: []
+
+    children =
+      [{Phoenix.PubSub, name: NervesGate.PubSub}] ++
+        simulator ++
+        [NervesGate.Network, NervesGateWeb.Endpoint]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: NervesGate.Supervisor)
   end
