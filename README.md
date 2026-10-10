@@ -87,6 +87,77 @@ operations restore previous settings; rejected restore requests are retried.
 VintageNet retries asynchronous interface failures, which remain visible in
 bridge status. Keep an independent recovery path when changing your local IP.
 
+## Shared device commands and projection (CQRS)
+
+All client adapters use `NervesGate.Device`, including LiveView and the IEx/SSH
+console. The first domain is Ethernet setup; cellular, remote access and firmware
+actions are not exposed until their executors are implemented.
+
+```elixir
+alias NervesGate.Device
+
+:ok = Device.subscribe()                 # subscribe before reading
+view = Device.projection()
+view.actions["network.propose"]          # enabled, reason, label, required parameters
+
+Device.dispatch("network.validate", %{"network" => %{"ip_method" => "dhcp"}})
+{:ok, %{result: %{trial_id: id}}} =
+  Device.dispatch("network.propose", %{"network" => %{"ip_method" => "dhcp"}},
+    expected_revision: view.revision)
+
+# Only after checking connectivity; or use "network.cancel" to restore.
+Device.dispatch("network.confirm", %{"trial_id" => id})
+```
+
+`projection/0` returns a JSON-encodable map with:
+
+- `version`: projection schema version (currently 1).
+- `revision`: opaque equality token; changes on state changes and gateway restart.
+- `system`: firmware version and target.
+- `network`: durable `desired` settings, trial `pending` settings, hardware
+  `observed` state, readiness, recovery status and a structured error.
+- `actions`: stable string IDs with availability, a disabled reason (`code` and
+  `message`), a display label and required string-keyed parameters.
+
+Commands return `{:ok, %{result: result, projection: view}}` or
+`{:error, %{error: %{code: code, message: message}, projection: view}}`.
+`network.validate` only normalizes/checks a local draft; it does not save or apply
+anything. The server revalidates every command. `expected_revision` is optional;
+confirmation/cancellation always require the specific trial ID, never “whichever
+trial is current”. Unsent form edits, wizard steps and countdown rendering stay
+local to each client.
+
+Changes publish `{:device, projection}` through Phoenix PubSub. These are full
+snapshots, not a durable event log. Subscribe then query on connection/reconnection.
+A notification queued before a synchronous command reply may be older than the
+reply; LiveView re-queries on notifications rather than rewinding its display.
+Other adapters should do the same when mixing replies and notifications.
+
+LiveView uses `Phoenix.LiveView.subscribe/3` from
+[PR #4441](https://github.com/phoenixframework/phoenix_live_view/pull/4441):
+`subscribe(socket, Device.topic(), &__MODULE__.handle_device/2)`. The callback
+returns an updated socket, rather than a `handle_info/2` tuple. LiveView owns the
+subscription lifecycle (including LiveComponent cleanup), and disconnected renders
+do not subscribe. IEx and other OTP clients still use `Device.subscribe/0`.
+LiveView follows Git `main`, with the exact commit locked in the host and EC100
+lockfiles, and requires Phoenix PubSub 2.4+. The browser module is served directly
+from that same LiveView dependency, keeping client and server versions aligned.
+
+`Device.Workflow` runs a pure Runic graph: network policy feeds both the projection
+and command-decision branches. `Device` serializes requests and executes the
+resulting effect descriptions through the existing `Network` OTP process. That
+process remains the safety boundary for fresh readiness checks, durable saves,
+timeouts and retrying rollback, even if the gateway/workflow crashes. A pristine
+graph is reused for each evaluation; historical facts do not accumulate. Settings
+remain in the existing atomic JSON file—this is CQRS, not event sourcing or Runic
+Runner/Mnesia persistence. Runic is pinned to a reviewed alpha Git revision.
+
+There is no durable command queue, automatic effect replay, or exactly-once
+acknowledgement. On a timeout, disconnect or `outcome_unknown`, read the projection
+before retrying. Availability and revisions are **not authorization**. The trusted
+network access limitation below still applies; future remote APIs must add an
+authentication/authorization boundary.
+
 ## Tests
 
 ```sh
@@ -103,8 +174,8 @@ not in the gateway. This is **not** a Nerves boot or EC100 hardware test.
 
 ## Current scope
 
-The offline LiveView setup and dashboard share the network manager and update
-from discovery automatically. Host mode is explicitly labeled simulation; use
+The offline LiveView setup and dashboard share the device projection and command
+API and update from discovery automatically. Host mode is explicitly labeled simulation; use
 `NervesGate.Network.Host.simulate/1` in IEx to change observations. Tailscale will
 use the refactored `sid2baker/tailscale_ex` LocalAPI interface. Its OTP application
 starts automatically on firmware targets, supervising `/usr/sbin/tailscaled` in

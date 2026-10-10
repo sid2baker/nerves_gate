@@ -9,7 +9,7 @@ defmodule NervesGate.Application do
     children =
       [{Phoenix.PubSub, name: NervesGate.PubSub}] ++
         simulator ++
-        [NervesGate.Network, NervesGateWeb.Endpoint]
+        [NervesGate.Network, NervesGate.Device, NervesGateWeb.Endpoint]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: NervesGate.Supervisor)
   end

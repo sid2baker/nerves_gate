@@ -50,8 +50,11 @@ defmodule NervesGate.MixProject do
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
       {:phoenix, "~> 1.8"},
-      {:phoenix_live_view, "~> 1.2"},
-      {:phoenix_pubsub, "~> 2.2"},
+      # PR #4441: lifecycle-managed LiveView/LiveComponent PubSub subscriptions.
+      {:phoenix_live_view, github: "phoenixframework/phoenix_live_view", branch: "main"},
+      {:phoenix_pubsub, "~> 2.4"},
+      # Pin the reviewed workflow API rather than following Runic's alpha main branch.
+      {:runic, github: "zblanco/runic", ref: "6e6373832c00aa9ec5d19faeae945b61e2db50b1"},
       {:lazy_html, ">= 0.1.0", only: :test},
       # tailscale_ex owns its daemon; host simulation must never start the workstation VPN.
       {:tailscale,

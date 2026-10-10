@@ -55,7 +55,7 @@ defmodule NervesGateWeb.NetworkStatus do
           Restoring saved Ethernet settings. New changes are paused; keep your recovery connection available.
         </p>
         <details :if={@status.error} class="text-sm">
-          <summary>Diagnostics</summary><pre class="whitespace-pre-wrap">{inspect(@status.error)}</pre>
+          <summary>Diagnostics</summary><pre class="whitespace-pre-wrap">{@status.error.code}: {@status.error.message}</pre>
         </details>
       </div>
     </section>

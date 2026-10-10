@@ -1,5 +1,8 @@
 defmodule NervesGate.Network do
-  @moduledoc "Owns LAN settings and browser-independent, 60-second configuration trials."
+  @moduledoc """
+  Internal LAN executor and browser-independent, 60-second trial safety boundary.
+  Client adapters should use `NervesGate.Device`, not these low-level commands.
+  """
   use GenServer
   alias NervesGate.Config
 
@@ -47,7 +50,7 @@ defmodule NervesGate.Network do
   @impl true
   def handle_continue(:poll, state) do
     schedule_poll(state)
-    {:noreply, state}
+    {:noreply, publish(state)}
   end
 
   @impl true
