@@ -111,14 +111,19 @@ starts automatically on firmware targets, supervising `/usr/sbin/tailscaled` in
 kernel mode. Identity stays in `/data/tailscale_ex`; the socket is under `/run`.
 Host simulation does not start or attach to the workstation's Tailscale daemon.
 Enrollment UI, subnet forwarding, cellular and firmware upload remain unfinished.
-The target web listener remains loopback-only until LAN access controls exist.
+For development, the target web listener binds to **all IPv4 interfaces on port
+4000** (USB, Ethernet, and other reachable device addresses). Open
+`http://<device-ip>:4000`. The UI is **unauthenticated**: anyone who can reach it
+can change network settings. Use only on trusted networks until access controls
+are added. LiveView same-origin and CSRF checks remain enabled. Host development
+still binds only to `127.0.0.1:4000`.
 SSH recovery is key-only; set `NERVES_GATE_SSH_KEYS` to public keys at build time.
 
 EC100 boot configures `usb0` with `VintageNetDirect`, independently of `br0` and
 LAN configuration trials. Its small DHCP server is confined to USB, never either
 Ethernet port. The kernel must expose `usb0`; this configuration cannot create a
-missing USB gadget. USB currently provides a recovery network for key-only SSH;
-direct browser access is still pending the web listener's access controls.
+missing USB gadget. USB provides a recovery network for key-only SSH and local
+browser access on port 4000, without laptop internet sharing.
 
 The local EC100 checkout includes fixed-role USB restoration (`d375405`). USB0
 enumeration/reconnection and USB1 modem transport remain unverified. Keep serial

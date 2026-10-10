@@ -5,6 +5,10 @@ config :nerves_gate,
   target: config_target(),
   network_adapter: {NervesGate.Network.Vintage, nil}
 
+# Temporary development access on USB, LAN, and other IPv4 interfaces.
+# The UI is unauthenticated; restrict access before deploying on untrusted networks.
+config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {0, 0, 0, 0}, port: 4000]
+
 config :logger, backends: [RingLogger]
 config :nerves, :erlinit, update_clock: true
 

@@ -57,6 +57,16 @@ defmodule NervesGate.FirmwareBuildTest do
     end
   end
 
+  test "firmware allows HTTP on all IPv4 interfaces while host development stays loopback-only" do
+    for target <- [:ec100, :x86_64] do
+      config = Config.Reader.read!(@target_config, target: target)
+      assert config[:nerves_gate][NervesGateWeb.Endpoint][:http] == [ip: {0, 0, 0, 0}, port: 4000]
+    end
+
+    assert Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)[:http] ==
+             [ip: {127, 0, 0, 1}, port: 4000]
+  end
+
   test "EC100 boot configures only USB provisioning, leaving the LAN to the network manager" do
     config = Config.Reader.read!(@target_config, target: :ec100)
     assert config[:nerves_gate][:target] == :ec100

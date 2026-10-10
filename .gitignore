@@ -18,9 +18,10 @@
 .env.*
 /assets/node_modules/
 
-# Local Nerves system build artifacts.
+# Local Nerves system build artifacts and device backups.
 **/.nerves/
 **/build.log
+/ec100-backups/
 
 # If the VM crashes, it generates a dump, let's ignore it too.
 erl_crash.dump
