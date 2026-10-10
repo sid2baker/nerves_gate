@@ -8,7 +8,7 @@ if [[ ${1:-} != --isolated ]]; then
 fi
 [[ -n ${NERVES_GATE_HOST_NETNS:-} && $(readlink /proc/self/ns/net) != "$NERVES_GATE_HOST_NETNS" ]]
 [[ $(ip -o link show | wc -l) == 1 ]] # Fresh namespace, only loopback.
-for command in ip brctl ifconfig udhcpc dnsmasq mix; do command -v "$command" >/dev/null; done
+for command in ip brctl ifconfig udhcpc dnsmasq ping curl mix; do command -v "$command" >/dev/null; done
 mount --make-rprivate /
 mount -t tmpfs tmpfs /run
 mount -t sysfs sysfs /sys

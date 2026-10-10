@@ -17,7 +17,11 @@ defmodule NervesGate.Device.Error do
     do: new("no_matching_trial", "This trial has ended. Review your settings again.")
 
   def from(:not_connected),
-    do: new("not_connected", "The bridge is not ready yet. Check the Ethernet cable and address.")
+    do:
+      new(
+        "not_connected",
+        "Port settings are not ready to save. Check the connection status and any address conflicts below."
+      )
 
   def from(:expired),
     do: new("expired", "The trial expired. Previous settings are being restored.")

@@ -1,6 +1,6 @@
 defmodule NervesGate.Network.LAN do
   @moduledoc """
-  Small VintageNet technology for the fixed two-port LAN.
+  VintageNet technology for explicitly shared or isolated Ethernet ports.
 
   Delegates bridge/DHCP/address management to the standard technologies. Keeps
   the fixed Layer 2 bridge alive when changing its management address, including
@@ -45,7 +45,12 @@ defmodule NervesGate.Network.LAN do
       raw
       | type: __MODULE__,
         source_config: normalize(config),
-        up_cmds: [{:fun, __MODULE__, :ensure_bridge, []} | configure],
+        up_cmds: [
+          {:fun, __MODULE__, :ensure_bridge, []},
+          {:fun, __MODULE__, :sync_members, [config.vintage_net_bridge.interfaces]},
+          {:fun, __MODULE__, :disable_member_ipv6, [ifname]}
+          | configure
+        ],
         down_cmds: down
     }
   end
@@ -69,7 +74,24 @@ defmodule NervesGate.Network.LAN do
     end
   end
 
-  def disable_member_ipv6(ifname) when ifname in ["eth0", "eth1"] do
+  # The previous bridge watcher has been stopped before these commands run.
+  # Detach only ports excluded by the explicit topology; USB is never touched.
+  def sync_members(members) do
+    Enum.reduce_while(["eth0", "eth1"] -- members, :ok, fn name, :ok ->
+      if File.exists?("/sys/class/net/#{name}/master") do
+        case VintageNet.Interface.CommandRunner.run(
+               {:run, "ip", ["link", "set", name, "nomaster"]}
+             ) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      else
+        {:cont, :ok}
+      end
+    end)
+  end
+
+  def disable_member_ipv6(ifname) when ifname in ["eth0", "eth1", "br0"] do
     case File.write("/proc/sys/net/ipv6/conf/#{ifname}/disable_ipv6", "1") do
       # Kernels without IPv6 need no action.
       {:error, :enoent} -> :ok

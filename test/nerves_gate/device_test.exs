@@ -5,10 +5,13 @@ defmodule NervesGate.DeviceTest do
   @moduletag :tmp_dir
 
   @static %{
-    "ip_method" => "static",
-    "static_ip" => "192.168.20.2",
-    "subnet_mask" => "255.255.255.0",
-    "gateway" => nil
+    "mode" => "shared",
+    "equipment" => %{
+      "ip_method" => "static",
+      "static_ip" => "192.168.20.2",
+      "subnet_mask" => "255.255.255.0",
+      "gateway" => nil
+    }
   }
 
   defmodule Adapter do
@@ -54,7 +57,12 @@ defmodule NervesGate.DeviceTest do
 
   test "one versioned, JSON-encodable projection exposes state and action reasons", ctx do
     projection = Device.projection(ctx.device)
-    assert projection.version == 1
+    assert projection.version == 2
+    assert projection.connections.mode == "unconfigured"
+    refute projection.remote_access.verified
+    assert projection.remote_access.state == "unavailable"
+    assert projection.remote_access.permitted_routes == nil
+    assert projection.connections.internet.health == "unverified"
     assert projection.network.desired == Config.defaults()["network"]
     assert projection.network.pending == nil
     assert projection.network.observed.simulated
@@ -65,6 +73,23 @@ defmodule NervesGate.DeviceTest do
     assert Jason.decode!(Jason.encode!(projection))["revision"] == projection.revision
     assert Device.projection(ctx.device) == projection
     refute_receive {:device, _}, 30
+  end
+
+  test "Internet checks are distinct from cable, address and remote readiness", ctx do
+    assert {:ok, %{result: %{trial_id: id}, projection: view}} =
+             dispatch(ctx, "network.propose", %{"network" => @static})
+
+    assert view.connections.internet.link
+    assert view.connections.internet.addressed
+    assert view.connections.internet.health == "unverified"
+    assert {:ok, _} = dispatch(ctx, "network.confirm", %{"trial_id" => id})
+    bridge = %{Host.snapshot(ctx.host).bridge | connection: :internet}
+    Host.simulate(%{bridge: bridge}, ctx.host)
+    eventually(fn -> Device.projection(ctx.device).connections.internet.health == "online" end)
+    view = Device.projection(ctx.device)
+    refute view.remote_access.verified
+    assert view.remote_access.permitted_routes == nil
+    refute view.capabilities.remote_enrollment
   end
 
   test "validation and malformed commands have no effects", ctx do
@@ -192,7 +217,7 @@ defmodule NervesGate.DeviceTest do
 
     assert projection.network.pending == nil
     assert projection.network.desired == Config.defaults()["network"]
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
   test "apply failure rejects the command and blocks new trials until recovery", ctx do
@@ -212,7 +237,7 @@ defmodule NervesGate.DeviceTest do
 
     Agent.update(ctx.adapter, &%{&1 | fail: false})
     eventually(fn -> Device.projection(ctx.device).actions["network.propose"].enabled end)
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
   test "observations notify clients, but queued old network messages cannot rewind state", ctx do
@@ -230,7 +255,7 @@ defmodule NervesGate.DeviceTest do
     {:ok, %{projection: trial}} = dispatch(ctx, "network.propose", %{"network" => @static})
     stop_supervised!(Device)
     eventually(fn -> Network.status(ctx.network).trial == nil end)
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
     device = start_supervised!({Device, ctx.device_opts})
     projection = Device.projection(device)
     assert projection.network.pending == nil
@@ -261,7 +286,7 @@ defmodule NervesGate.DeviceTest do
     eventually(fn -> Device.projection(ctx.device).network.available end)
     projection = Device.projection(ctx.device)
     assert projection.network.pending == nil
-    assert projection.network.observed.bridge.method == "dhcp"
+    assert projection.network.observed.bridge.method == "disabled"
     assert_receive {:device, ^projection}
   end
 
@@ -300,7 +325,7 @@ defmodule NervesGate.DeviceTest do
 
     assert projection.network.pending == nil
     assert projection.network.desired == Config.defaults()["network"]
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
   test "fresh evaluations leave no accumulated Runic facts in the gateway", ctx do

@@ -12,11 +12,10 @@ defmodule NervesGate.MixProject do
       start_permanent: Mix.env() == :prod,
       elixirc_paths: if(Mix.env() == :test, do: ["lib", "test/support"], else: ["lib"]),
       deps: deps(),
-      lockfile: if(Mix.target() == :host, do: "mix.lock", else: "mix.#{Mix.target()}.lock"),
       releases: [
         nerves_gate: [
           include_erts: &Nerves.erts/0,
-          steps: [&prepare_firmware/1, &Nerves.init_release/1, :assemble]
+          steps: [&set_source_date_epoch/1, &Nerves.init_release/1, :assemble]
         ]
       ]
     ]
@@ -28,17 +27,11 @@ defmodule NervesGate.MixProject do
 
   def cli, do: [preferred_targets: [run: :host, test: :host]]
 
-  defp prepare_firmware(release) do
+  defp set_source_date_epoch(release) do
     if Mix.target() in @targets do
       # Nerves 2.0.0-pre.3 validates :source_date_epoch but forwards a misspelled key
       # to fwup. Export the configured value until that upstream typo is fixed.
       System.put_env("SOURCE_DATE_EPOCH", Application.fetch_env!(:nerves, :source_date_epoch))
-
-      [_static_overlay, overlay] =
-        Application.fetch_env!(:nerves, :firmware) |> Keyword.fetch!(:rootfs_overlay)
-
-      Mix.Task.reenable("tailscale.install")
-      Mix.Task.run("tailscale.install", [Path.join(overlay, "usr/sbin/tailscaled")])
     end
 
     release
@@ -58,7 +51,9 @@ defmodule NervesGate.MixProject do
       {:lazy_html, ">= 0.1.0", only: :test},
       # tailscale_ex owns its daemon; host simulation must never start the workstation VPN.
       {:tailscale,
-       path: "/home/n0gg1n/Development/Work/opencode/tailscale_ex", runtime: Mix.target() != :host},
+       github: "sid2baker/tailscale_ex",
+       ref: "5e23c0f3e362ce5e0b330e5f3ff473dec55ca0e1",
+       runtime: Mix.target() != :host},
       {:nerves_runtime, "~> 0.13", targets: @targets},
       {:nerves_motd, "~> 0.1", targets: @targets},
       {:ring_logger, "~> 0.11", targets: @targets},
@@ -74,15 +69,5 @@ defmodule NervesGate.MixProject do
        targets: :ec100},
       {:nerves_system_x86_64, path: "systems/x86_64", runtime: false, targets: :x86_64}
     ]
-    |> Enum.filter(fn
-      {_name, _source, opts} ->
-        Mix.target() in List.wrap(Keyword.get(opts, :targets, Mix.target()))
-
-      {_name, opts} when is_list(opts) ->
-        Mix.target() in List.wrap(Keyword.get(opts, :targets, Mix.target()))
-
-      {_name, _source} ->
-        true
-    end)
   end
 end

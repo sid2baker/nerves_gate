@@ -4,12 +4,14 @@ defmodule NervesGate.NetworkTest do
   alias NervesGate.Network.Host
 
   @static %{
-    "ip_method" => "static",
-    "static_ip" => "192.168.20.2",
-    "subnet_mask" => "255.255.255.0",
-    "gateway" => nil
+    "mode" => "shared",
+    "equipment" => %{
+      "ip_method" => "static",
+      "static_ip" => "192.168.20.2",
+      "subnet_mask" => "255.255.255.0",
+      "gateway" => nil
+    }
   }
-
   defmodule FailingAdapter do
     @behaviour NervesGate.Network
     def apply_config(config, agent) do
@@ -54,7 +56,7 @@ defmodule NervesGate.NetworkTest do
   test "unconfirmed trial expires without any browser process", ctx do
     assert {:ok, _} = Network.propose(@static, ctx.server)
     eventually(fn -> Network.status(ctx.server).trial == nil end)
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
     assert {:ok, config} = Config.load(ctx.path)
     assert config == Config.defaults()
   end
@@ -79,7 +81,7 @@ defmodule NervesGate.NetworkTest do
     assert {:ok, id} = Network.propose(@static, ctx.server)
     assert {:error, :not_connected} = Network.confirm(id, ctx.server)
     assert :ok = Network.cancel(id, ctx.server)
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
   test "reject stale addressing while a change is still being applied", ctx do
@@ -105,7 +107,33 @@ defmodule NervesGate.NetworkTest do
     stop_supervised!(Network)
     server = start_supervised!({Network, ctx.opts})
     assert Network.status(server).trial == nil
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
+  end
+
+  test "version 1 boot preserves the shared LAN without rewriting the file", ctx do
+    stop_supervised!(Network)
+
+    old = %{
+      Config.defaults()
+      | "version" => 1,
+        "network" => @static["equipment"],
+        "setup_completed" => true
+    }
+
+    original = Jason.encode!(old)
+    File.write!(ctx.path, original)
+    server = start_supervised!({Network, ctx.opts})
+    assert Network.status(server).config["network"] == @static
+    assert Host.snapshot(ctx.host).bridge.method == "static"
+    assert Enum.all?(Host.snapshot(ctx.host).ports, &(&1.master == "br0"))
+    assert File.read!(ctx.path) == original
+    assert {:ok, id} = Network.propose(@static, server)
+    assert :ok = Network.cancel(id, server)
+    assert {:ok, saved} = Config.load(ctx.path)
+    assert saved["version"] == 2
+    assert saved["network"] == @static
+    assert saved["mobile"] == old["mobile"]
+    assert saved["vpn"] == old["vpn"]
   end
 
   test "late confirmation is refused even before timer is processed", ctx do
@@ -116,7 +144,7 @@ defmodule NervesGate.NetworkTest do
     end)
 
     assert {:error, :expired} = Network.confirm(id, ctx.server)
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
   test "corrupt saved file is never silently overwritten", ctx do
@@ -146,8 +174,50 @@ defmodule NervesGate.NetworkTest do
     File.rm!(ctx.path)
     File.mkdir!(ctx.path)
     assert {:error, {:save, _}} = Network.confirm(id, ctx.server)
-    assert Host.snapshot(ctx.host).bridge.method == "dhcp"
+    assert Host.snapshot(ctx.host).bridge.method == "disabled"
     assert Network.status(ctx.server).trial == nil
+  end
+
+  test "separate roles can be saved offline without claiming Internet or remote reachability",
+       ctx do
+    network = %{
+      "mode" => "ethernet",
+      "internet_port" => "eth0",
+      "equipment" => @static["equipment"]
+    }
+
+    assert {:ok, id} = Network.propose(network, ctx.server)
+    assert Network.status(ctx.server).ready
+    assert Enum.all?(Host.snapshot(ctx.host).ports, &is_nil(&1.master))
+    assert Host.snapshot(ctx.host).usb.addresses == []
+
+    offline_ports =
+      Enum.map(Host.snapshot(ctx.host).ports, fn port ->
+        port = %{port | link: false}
+        if port.name == "eth0", do: %{port | addresses: []}, else: port
+      end)
+
+    Host.simulate(%{ports: offline_ports}, ctx.host)
+    assert :ok = Network.confirm(id, ctx.server)
+    assert {:ok, saved} = Config.load(ctx.path)
+    assert saved["network"] == network
+  end
+
+  test "overlapping DHCP Internet and equipment subnets block confirmation", ctx do
+    equipment = %{@static["equipment"] | "static_ip" => "192.0.2.20"}
+    network = %{"mode" => "ethernet", "internet_port" => "eth0", "equipment" => equipment}
+    assert {:ok, id} = Network.propose(network, ctx.server)
+    assert {:error, :not_connected} = Network.confirm(id, ctx.server)
+    assert [_] = Network.conflicts(Host.snapshot(ctx.host), network)
+  end
+
+  test "USB subnet overlap is detected and USB observations survive role changes", ctx do
+    usb = %{addresses: [%{address: "192.168.20.1", prefix_length: 30}]}
+    Host.simulate(%{usb: usb}, ctx.host)
+    assert {:ok, id} = Network.propose(@static, ctx.server)
+    assert {:error, :not_connected} = Network.confirm(id, ctx.server)
+    assert :ok = Network.cancel(id, ctx.server)
+    assert Host.snapshot(ctx.host).usb == usb
   end
 
   defp eventually(fun, remaining \\ 100)

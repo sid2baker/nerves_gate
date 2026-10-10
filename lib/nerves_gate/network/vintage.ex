@@ -1,72 +1,115 @@
 defmodule NervesGate.Network.Vintage do
-  @moduledoc "Firmware adapter. No DHCP server, NAT or IP address on either bridge member."
+  @moduledoc "Firmware adapter. USB is never part of a port-role change. No Ethernet DHCP server or NAT."
   @behaviour NervesGate.Network
-  alias NervesGate.Network.LAN
+  alias NervesGate.{Config, Network.LAN}
 
-  @doc "The exact configurations used on both firmware targets."
-  def configurations(network) do
-    ipv4 =
-      case network["ip_method"] do
-        "dhcp" ->
-          %{method: :dhcp}
-
-        "static" ->
-          config = %{
-            method: :static,
-            address: network["static_ip"],
-            netmask: network["subnet_mask"]
-          }
-
-          if network["gateway"], do: Map.put(config, :gateway, network["gateway"]), else: config
-      end
-
+  def configurations(%{"mode" => "shared", "equipment" => address}) do
     [
-      {"eth0", %{type: LAN, ipv4: %{method: :disabled}}},
-      {"eth1", %{type: LAN, ipv4: %{method: :disabled}}},
-      {"br0",
-       %{type: LAN, vintage_net_bridge: %{interfaces: ["eth0", "eth1"], stp: true}, ipv4: ipv4}}
+      {"eth0", port_config(%{method: :disabled})},
+      {"eth1", port_config(%{method: :disabled})},
+      {"br0", bridge_config(["eth0", "eth1"], ipv4(address))}
     ]
+  end
+
+  def configurations(%{"mode" => "ethernet"} = network) do
+    [
+      {"br0", bridge_config([], %{method: :disabled})},
+      {network["internet_port"], port_config(%{method: :dhcp})},
+      {Config.equipment_port(network), port_config(ipv4(network["equipment"]))}
+    ]
+  end
+
+  def configurations(%{"mode" => "unconfigured"}) do
+    [
+      {"br0", bridge_config([], %{method: :disabled})}
+      | Enum.map(["eth0", "eth1"], &{&1, port_config(%{method: :disabled})})
+    ]
+  end
+
+  defp port_config(ipv4), do: %{type: LAN, ipv4: ipv4}
+
+  defp bridge_config(members, ipv4),
+    do: %{type: LAN, vintage_net_bridge: %{interfaces: members, stp: true}, ipv4: ipv4}
+
+  defp ipv4(%{"ip_method" => "dhcp"}), do: %{method: :dhcp}
+
+  defp ipv4(address) do
+    config = %{method: :static, address: address["static_ip"], netmask: address["subnet_mask"]}
+    if address["gateway"], do: Map.put(config, :gateway, address["gateway"]), else: config
   end
 
   @impl true
   def apply_config(network, _) do
-    Enum.reduce_while(configurations(network), :ok, fn {name, config}, :ok ->
-      # VintageNet 0.13 does not accept configure calls during :reconfiguring.
-      # The manager retries restoration rather than crashing an interface owner.
-      result =
-        if get(name, "state") == :reconfiguring do
-          {:error, {:busy, name}}
-        else
-          VintageNet.configure(name, config, persist: false)
-        end
+    configs = configurations(network)
+    desired_members = if network["mode"] == "shared", do: ["eth0", "eth1"], else: []
+    current_members = get_in(get("br0", "config") || %{}, [:vintage_net_bridge, :interfaces])
+    deadline = System.monotonic_time(:millisecond) + 1_500
 
-      case result do
-        :ok -> {:cont, :ok}
-        error -> {:halt, error}
+    # Stop the old bridge membership watcher BEFORE changing port addresses.
+    # configure/3 is asynchronous; its completion is a mandatory safety barrier.
+    preparation =
+      if current_members != desired_members do
+        configure("br0", bridge_config([], %{method: :disabled}), deadline)
+      else
+        :ok
       end
-    end)
+
+    with :ok <- preparation do
+      Enum.reduce_while(configs, :ok, fn {name, config}, :ok ->
+        case configure(name, config, deadline) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  defp configure(name, config, deadline) do
+    with :ok <- settled(name, deadline),
+         :ok <- VintageNet.configure(name, config, persist: false) do
+      settled(name, deadline)
+    end
+  end
+
+  defp settled(name, deadline) do
+    state = get(name, "state")
+
+    cond do
+      state in [nil, :configured] ->
+        :ok
+
+      state == :retrying and get(name, "present") != true and name != "br0" ->
+        :ok
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        {:error, {:busy, name}}
+
+      true ->
+        Process.sleep(20)
+        settled(name, deadline)
+    end
   end
 
   @impl true
   def snapshot(_) do
     %{
       simulated: false,
-      bridge: %{
-        present: get("br0", "present") == true,
-        link: get("br0", "lower_up") == true,
-        state: get("br0", "state"),
-        method: method(get("br0", "config")),
-        addresses: addresses(get("br0", "addresses") || [])
-      },
-      ports:
-        Enum.map(["eth0", "eth1"], fn name ->
-          %{
-            name: name,
-            present: get(name, "present") == true,
-            link: get(name, "lower_up") == true,
-            master: master(name)
-          }
-        end)
+      bridge: interface("br0"),
+      ports: Enum.map(["eth0", "eth1"], &interface/1),
+      usb: interface("usb0")
+    }
+  end
+
+  defp interface(name) do
+    %{
+      name: name,
+      present: get(name, "present") == true,
+      link: get(name, "lower_up") == true,
+      state: get(name, "state"),
+      method: method(get(name, "config")),
+      connection: get(name, "connection"),
+      addresses: addresses(get(name, "addresses") || []),
+      master: master(name)
     }
   end
 

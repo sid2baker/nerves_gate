@@ -3,7 +3,12 @@ defmodule NervesGate.LANTest do
   alias NervesGate.Network.{LAN, Vintage}
 
   test "both Ethernet members have no IP or DHCP server and missing members don't block br0" do
-    configs = Vintage.configurations(NervesGate.Config.defaults()["network"])
+    configs =
+      Vintage.configurations(%{
+        "mode" => "shared",
+        "equipment" => NervesGate.Config.address_defaults()
+      })
+
     assert Enum.map(configs, &elem(&1, 0)) == ["eth0", "eth1", "br0"]
 
     for {name, config} <- configs do
@@ -35,11 +40,56 @@ defmodule NervesGate.LANTest do
       "gateway" => nil
     }
 
-    config = Map.new(Vintage.configurations(network))["br0"]
+    config = Map.new(Vintage.configurations(%{"mode" => "shared", "equipment" => network}))["br0"]
     raw = LAN.to_raw_config("br0", config, [])
     assert raw.source_config.ipv4.address == {10, 0, 1, 10}
     refute Map.has_key?(raw.source_config.ipv4, :gateway)
-    config = Map.new(Vintage.configurations(%{network | "gateway" => "10.0.1.1"}))["br0"]
+
+    config =
+      Map.new(
+        Vintage.configurations(%{
+          "mode" => "shared",
+          "equipment" => %{network | "gateway" => "10.0.1.1"}
+        })
+      )["br0"]
+
     assert LAN.normalize(config).ipv4.gateway == {10, 0, 1, 1}
+  end
+
+  test "new defaults never bridge, serve DHCP, or configure USB" do
+    configs = Vintage.configurations(NervesGate.Config.defaults()["network"])
+    assert Enum.sort(Enum.map(configs, &elem(&1, 0))) == ["br0", "eth0", "eth1"]
+
+    for {_, config} <- configs do
+      assert config.ipv4.method == :disabled
+      refute Map.has_key?(config, :dhcpd)
+    end
+
+    raw = LAN.to_raw_config("br0", Map.new(configs)["br0"], [])
+    assert {:fun, LAN, :sync_members, [[]]} in raw.up_cmds
+  end
+
+  test "either port can provide Internet without a route or DHCP server on equipment" do
+    for internet <- ["eth0", "eth1"] do
+      network = %{
+        "mode" => "ethernet",
+        "internet_port" => internet,
+        "equipment" => %{
+          "ip_method" => "static",
+          "static_ip" => "10.0.1.2",
+          "subnet_mask" => "255.255.255.0",
+          "gateway" => nil
+        }
+      }
+
+      configs = Map.new(Vintage.configurations(network))
+      assert configs[internet].ipv4 == %{method: :dhcp}
+      assert configs["br0"].vintage_net_bridge.interfaces == []
+      equipment = configs[NervesGate.Config.equipment_port(network)]
+      assert equipment.ipv4.method == :static
+      refute Map.has_key?(equipment.ipv4, :gateway)
+      refute Map.has_key?(equipment, :dhcpd)
+      refute Map.has_key?(configs, "usb0")
+    end
   end
 end

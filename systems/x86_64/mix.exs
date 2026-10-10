@@ -55,7 +55,8 @@ defmodule NervesSystemX8664.MixProject do
         {"TARGET_ARCH", "x86_64"},
         {"TARGET_OS", "linux"},
         {"TARGET_ABI", "musl"},
-        {"TARGET_GCC_FLAGS", "-m64 -fstack-protector-strong -march=x86-64 -fPIE -pie -Wl,-z,now -Wl,-z,relro"}
+        {"TARGET_GCC_FLAGS",
+         "-m64 -fstack-protector-strong -march=x86-64 -fPIE -pie -Wl,-z,now -Wl,-z,relro"}
       ],
       checksum: package_files()
     ]
@@ -64,7 +65,8 @@ defmodule NervesSystemX8664.MixProject do
   defp deps do
     [
       {:nerves, "~> 1.11 or ~> 2.0 or ~> 2.0.0-dev", runtime: false},
-      {:nerves_system_br, "1.35.0", runtime: false},
+      # Share the EC100 Buildroot baseline so all targets resolve one dependency graph.
+      {:nerves_system_br, "1.34.5", runtime: false},
       {:nerves_toolchain_x86_64_nerves_linux_musl, "~> 15.3.0", runtime: false},
       {:nerves_system_linter, "~> 0.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.22", only: :docs, runtime: false}

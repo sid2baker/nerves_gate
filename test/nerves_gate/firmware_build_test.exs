@@ -57,14 +57,17 @@ defmodule NervesGate.FirmwareBuildTest do
     end
   end
 
-  test "firmware allows HTTP on all IPv4 interfaces while host development stays loopback-only" do
+  test "firmware serves HTTP on every IPv4 interface while host development stays loopback-only" do
     for target <- [:ec100, :x86_64] do
       config = Config.Reader.read!(@target_config, target: target)
       assert config[:nerves_gate][NervesGateWeb.Endpoint][:http] == [ip: {0, 0, 0, 0}, port: 4000]
+      refute Keyword.has_key?(config[:nerves_gate], :management_interface)
     end
 
-    assert Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)[:http] ==
-             [ip: {127, 0, 0, 1}, port: 4000]
+    assert Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)[:http] == [
+             ip: {127, 0, 0, 1},
+             port: 4000
+           ]
   end
 
   test "EC100 boot configures only USB provisioning, leaving the LAN to the network manager" do
@@ -80,13 +83,13 @@ defmodule NervesGate.FirmwareBuildTest do
     assert config[:vintage_net][:config] == []
   end
 
-  test "firmware includes a static IEx overlay alongside target-specific Tailscale binaries" do
+  test "firmware overlays include shared console setup and only the selected target binaries" do
     for target <- [:ec100, :x86_64] do
       config = Config.Reader.read!(@target_config, target: target)
-      assert [static, generated] = config[:nerves][:firmware][:rootfs_overlay]
-      assert static == Path.expand("../../rootfs_overlay", __DIR__)
-      assert generated == Path.join(Mix.Project.build_path(), "tailscale_rootfs")
-      assert File.regular?(Path.join(static, "etc/iex.exs"))
+      assert [common, binaries] = config[:nerves][:firmware][:rootfs_overlay]
+      assert common == Path.expand("../../rootfs_overlay/common", __DIR__)
+      assert binaries == Path.expand("../../rootfs_overlay/#{target}", __DIR__)
+      assert File.regular?(Path.join(common, "etc/iex.exs"))
       assert config[:nerves_ssh][:iex_opts] == [dot_iex: "/etc/iex.exs"]
     end
   end
@@ -95,17 +98,32 @@ defmodule NervesGate.FirmwareBuildTest do
     refute :tailscale in Enum.map(Application.started_applications(), &elem(&1, 0))
   end
 
-  test "Tailscale installer recognizes both firmware toolchains without using host architecture" do
-    for {target, triple, expected} <- [
-          {:ec100, "armv7-nerves-linux-gnueabihf", "arm"},
-          {:x86_64, "x86_64-nerves-linux-musl", "amd64"}
-        ] do
-      assert Mix.Tasks.Tailscale.Install.architecture!(target, triple, "aarch64-apple-darwin") ==
-               expected
+  test "all targets share a lockfile and use declarative system dependencies" do
+    previous = Mix.target()
+
+    try do
+      for target <- [:host, :ec100, :x86_64] do
+        Mix.target(target)
+        project = NervesGate.MixProject.project()
+        assert Keyword.get(project, :lockfile, "mix.lock") == "mix.lock"
+
+        assert {:nerves_system_ec100, ec100} =
+                 List.keyfind(project[:deps], :nerves_system_ec100, 0)
+
+        assert {:nerves_system_x86_64, x86} =
+                 List.keyfind(project[:deps], :nerves_system_x86_64, 0)
+
+        assert ec100[:targets] == :ec100
+        assert x86[:targets] == :x86_64
+        assert {:tailscale, tailscale} = List.keyfind(project[:deps], :tailscale, 0)
+        assert tailscale[:runtime] == (target != :host)
+      end
+    after
+      Mix.target(previous)
     end
   end
 
-  test "firmware preparation does nothing on the host" do
+  test "source timestamp release step does nothing on the host" do
     [prepare | _] = Mix.Project.config()[:releases][:nerves_gate][:steps]
     release = %Mix.Release{name: :nerves_gate}
     assert prepare.(release) == release

@@ -167,25 +167,69 @@ defmodule NervesGate.Network do
     kind, reason -> %{state | observed: nil, error: {:discovery, {kind, reason}}}
   end
 
-  @doc "Local readiness only; user confirmation verifies the management path, not internet reachability."
-  def ready?(%{bridge: bridge, ports: ports}, network) do
+  @doc "Configuration readiness only. USB access, Internet and remote equipment reachability are separate."
+  def ready?(observed, %{"mode" => "ethernet"} = network) when is_map(observed) do
+    internet = Enum.find(observed.ports, &(&1.name == network["internet_port"]))
+    equipment = Enum.find(observed.ports, &(&1.name == Config.equipment_port(network)))
+
+    internet != nil and equipment != nil and
+      Enum.all?(
+        [internet, equipment],
+        &(&1.present and &1.master == nil and &1.state == :configured)
+      ) and
+      internet.method == "dhcp" and equipment.method == "static" and
+      address_matches?(equipment.addresses, network["equipment"]) and
+      conflicts(observed, network) == []
+  end
+
+  def ready?(
+        %{bridge: bridge, ports: ports} = observed,
+        %{"mode" => "shared", "equipment" => network} = settings
+      ) do
     bridge.present and bridge.link and bridge.state == :configured and
       bridge.method == network["ip_method"] and
       Enum.any?(ports, &(&1.present and &1.link and &1.master == "br0")) and
       Enum.all?(ports, &(not &1.present or &1.master == "br0")) and
-      Enum.any?(bridge.addresses, fn %{address: address, prefix_length: prefix} ->
-        case network["ip_method"] do
-          "dhcp" ->
-            match?({:ok, {a, _, _, _}} when a > 0 and a < 224 and a != 127, Config.ipv4(address))
-
-          "static" ->
-            address == network["static_ip"] and
-              Config.prefix_length(network["subnet_mask"]) == {:ok, prefix}
-        end
-      end)
+      address_matches?(bridge.addresses, network) and conflicts(observed, settings) == []
   end
 
   def ready?(_, _), do: false
+
+  defp address_matches?(addresses, network) do
+    Enum.any?(addresses, fn %{address: address, prefix_length: prefix} ->
+      case network["ip_method"] do
+        "dhcp" ->
+          match?({:ok, {a, _, _, _}} when a > 0 and a < 224 and a != 127, Config.ipv4(address))
+
+        "static" ->
+          address == network["static_ip"] and
+            Config.prefix_length(network["subnet_mask"]) == {:ok, prefix}
+      end
+    end)
+  end
+
+  @doc "Observed overlaps block confirmation; USB's derived subnet is checked too."
+  def conflicts(%{ports: ports, bridge: bridge} = observed, network) do
+    networks = if network["mode"] == "shared", do: [bridge], else: ports
+    usb = Map.get(observed, :usb, %{addresses: []})
+
+    pairs =
+      for {left, i} <- Enum.with_index(networks ++ [usb]),
+          {right, j} <- Enum.with_index(networks ++ [usb]),
+          i < j,
+          a <- Map.get(left, :addresses, []),
+          b <- Map.get(right, :addresses, []),
+          Config.overlap?(a.address, a.prefix_length, b.address, b.prefix_length),
+          do: {i, j}
+
+    if pairs == [],
+      do: [],
+      else: [
+        "Network addresses overlap. Use different Internet, equipment and USB subnets before continuing."
+      ]
+  end
+
+  def conflicts(_, _), do: []
 
   defp public(state) do
     %{

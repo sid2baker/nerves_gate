@@ -6,14 +6,9 @@ defmodule NervesGate.Config do
 
   def defaults do
     %{
-      "version" => 1,
+      "version" => 2,
       "setup_completed" => false,
-      "network" => %{
-        "ip_method" => "dhcp",
-        "static_ip" => nil,
-        "subnet_mask" => nil,
-        "gateway" => nil
-      },
+      "network" => %{"mode" => "unconfigured"},
       "mobile" => %{"enabled" => true, "apn" => "auto"},
       "vpn" => %{"enabled" => false}
     }
@@ -32,9 +27,21 @@ defmodule NervesGate.Config do
     end
   end
 
+  # Preserve an installed v1 gateway's shared network. Migration is in memory;
+  # only an explicit trial/confirmation writes the new format.
+  def validate(%{"version" => 1} = config) do
+    with {:ok, address} <- validate_address(config["network"]) do
+      validate(%{
+        config
+        | "version" => 2,
+          "network" => %{"mode" => "shared", "equipment" => address}
+      })
+    end
+  end
+
   def validate(config) when is_map(config) do
     with true <- Enum.sort(Map.keys(config)) == Enum.sort(Map.keys(defaults())),
-         1 <- config["version"],
+         2 <- config["version"],
          true <- is_boolean(config["setup_completed"]),
          {:ok, network} <- validate_network(config["network"]),
          %{"enabled" => enabled, "apn" => apn} = mobile <- config["mobile"],
@@ -45,13 +52,46 @@ defmodule NervesGate.Config do
       {:ok, %{config | "network" => network}}
     else
       {:error, reason} -> {:error, reason}
-      _ -> {:error, "Invalid or unsupported configuration (expected version 1)."}
+      _ -> {:error, "Invalid or unsupported configuration (expected version 2)."}
     end
   end
 
   def validate(_), do: {:error, "Configuration must be a JSON object."}
 
-  def validate_network(network) when is_map(network) do
+  def address_defaults do
+    %{"ip_method" => "dhcp", "static_ip" => nil, "subnet_mask" => nil, "gateway" => nil}
+  end
+
+  def validate_network(%{"mode" => "unconfigured"} = network) when map_size(network) == 1,
+    do: {:ok, network}
+
+  def validate_network(%{"mode" => "shared", "equipment" => address} = network)
+      when map_size(network) == 2 do
+    with {:ok, address} <- validate_address(address) do
+      {:ok, %{network | "equipment" => address}}
+    end
+  end
+
+  def validate_network(
+        %{"mode" => "ethernet", "internet_port" => port, "equipment" => equipment} = network
+      )
+      when map_size(network) == 3 and port in ["eth0", "eth1"] do
+    with {:ok, %{"ip_method" => "static", "gateway" => nil} = address} <-
+           validate_address(equipment) do
+      {:ok, %{network | "equipment" => address}}
+    else
+      _ ->
+        {:error,
+         "Choose an unused manual address in the equipment network, without a router address. Equipment addresses are not changed."}
+    end
+  end
+
+  def validate_network(_),
+    do:
+      {:error,
+       "Choose separate Internet and equipment ports, or explicitly choose one shared network."}
+
+  def validate_address(network) when is_map(network) do
     allowed = ["ip_method", "static_ip", "subnet_mask", "gateway"]
 
     cond do
@@ -59,7 +99,7 @@ defmodule NervesGate.Config do
         {:error, "Unknown Ethernet setting."}
 
       network["ip_method"] == "dhcp" ->
-        {:ok, defaults()["network"]}
+        {:ok, address_defaults()}
 
       network["ip_method"] == "static" ->
         validate_static(network)
@@ -69,7 +109,23 @@ defmodule NervesGate.Config do
     end
   end
 
-  def validate_network(_), do: {:error, "Ethernet settings must be an object."}
+  def validate_address(_), do: {:error, "Ethernet settings must be an object."}
+
+  def equipment_port(%{"internet_port" => "eth0"}), do: "eth1"
+  def equipment_port(%{"internet_port" => "eth1"}), do: "eth0"
+
+  @doc "Compare IPv4 subnets, including differently sized prefixes."
+  def overlap?(address, prefix, other, other_prefix)
+      when prefix in 0..32 and other_prefix in 0..32 do
+    with {:ok, ip} <- ipv4(address), {:ok, other_ip} <- ipv4(other) do
+      mask = mask_integer(min(prefix, other_prefix))
+      (integer(ip) &&& mask) == (integer(other_ip) &&& mask)
+    else
+      _ -> false
+    end
+  end
+
+  def overlap?(_, _, _, _), do: false
 
   defp validate_static(network) do
     gateway = blank_to_nil(network["gateway"])

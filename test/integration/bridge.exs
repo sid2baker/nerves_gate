@@ -37,6 +37,7 @@ defmodule NervesGate.BridgeIntegrationTest do
       "gateway" => nil
     }
 
+    static = %{"mode" => "shared", "equipment" => static}
     config = %{Config.defaults() | "network" => static}
     :ok = Config.save(config, "/run/nerves_gate.json")
 
@@ -72,7 +73,8 @@ defmodule NervesGate.BridgeIntegrationTest do
     IO.puts("PASS either cable independently; no IP addresses on members")
     bridge_index = File.read!("/sys/class/net/br0/ifindex")
 
-    assert {:ok, trial} = Network.propose(Config.defaults()["network"], server)
+    dhcp = %{"mode" => "shared", "equipment" => Config.address_defaults()}
+    assert {:ok, trial} = Network.propose(dhcp, server)
     wait(fn -> Network.status(server).ready end)
     assert :ok = Network.confirm(trial, server)
     dhcp_ip = hd(Vintage.snapshot(nil).bridge.addresses).address
@@ -88,7 +90,10 @@ defmodule NervesGate.BridgeIntegrationTest do
 
     # Accelerate timeout only; application uses 60 seconds in production.
     :sys.replace_state(server, &%{&1 | trial_ms: 1_000})
-    assert {:ok, _} = Network.propose(%{static | "static_ip" => "10.45.0.20"}, server)
+
+    assert {:ok, _} =
+             Network.propose(put_in(static, ["equipment", "static_ip"], "10.45.0.20"), server)
+
     wait(fn -> Network.status(server).trial == nil end)
     wait(fn -> Network.ready?(Vintage.snapshot(nil), static) end)
     wait(fn -> ping?("10.45.0.3") end)
@@ -96,7 +101,9 @@ defmodule NervesGate.BridgeIntegrationTest do
     assert saved["network"] == static
     IO.puts("PASS timed rollback and durable confirmed configuration")
 
-    assert {:ok, _} = Network.propose(%{static | "static_ip" => "10.45.0.30"}, server)
+    assert {:ok, _} =
+             Network.propose(put_in(static, ["equipment", "static_ip"], "10.45.0.30"), server)
+
     stop_supervised!(Network)
 
     server =
@@ -109,6 +116,119 @@ defmodule NervesGate.BridgeIntegrationTest do
     assert File.read!("/sys/class/net/br0/ifindex") == bridge_index
     assert ping?("10.45.0.2")
     IO.puts("PASS manager restart restores confirmed IP without recreating the bridge")
+
+    # The real settings endpoint starts without USB and accepts either LAN peer.
+    port = start_web()
+    assert settings_http?("peer0", port, "10.45.0.10")
+    assert settings_http?("peer1", port, "10.45.0.10")
+    IO.puts("PASS settings page over both Ethernet ports without USB")
+
+    # USB's independent address remains available through Ethernet role changes.
+    cmd("ip", ~w(link add usb0 type veth peer name setup0))
+    cmd("ip", ~w(netns add setup))
+    cmd("ip", ~w(link set setup0 netns setup))
+    cmd("ip", ~w(link set usb0 up))
+    cmd("ip", ~w(addr add 172.30.0.1/30 dev usb0))
+    cmd("ip", ~w(-n setup link set lo up))
+    cmd("ip", ~w(-n setup link set setup0 up))
+    cmd("ip", ~w(-n setup addr add 172.30.0.2/30 dev setup0))
+
+    assert settings_http?("setup", port)
+    IO.puts("PASS settings page over USB added after the endpoint started")
+
+    separated = %{
+      "mode" => "ethernet",
+      "internet_port" => "eth0",
+      "equipment" => %{static["equipment"] | "static_ip" => "10.46.0.10"}
+    }
+
+    cmd("ip", ~w(-n peer1 addr flush dev lan1))
+    cmd("ip", ~w(-n peer1 addr add 10.46.0.3/24 dev lan1))
+    :sys.replace_state(server, &%{&1 | trial_ms: 60_000})
+    assert {:ok, trial} = Network.propose(separated, server)
+    wait(fn -> Network.status(server).ready end)
+    assert :ok = Network.confirm(trial, server)
+    wait(fn -> hd(Vintage.snapshot(nil).ports).addresses != [] end)
+    assert Enum.all?(Vintage.snapshot(nil).ports, &is_nil(&1.master))
+    assert Vintage.snapshot(nil).bridge.addresses == []
+    assert ping?("10.45.0.2")
+    assert ping?("10.46.0.3")
+    assert settings_http?("setup", port)
+    internet_ip = hd(hd(Vintage.snapshot(nil).ports).addresses).address
+    assert settings_http?("peer0", port, internet_ip)
+    assert settings_http?("peer1", port, "10.46.0.10")
+    IO.puts("PASS settings page on separate Internet, equipment and USB interfaces")
+    # Prove L2 separation using matching peer subnets: traffic cannot cross.
+    cmd("ip", ~w(-n peer1 addr add 10.45.0.3/24 dev lan1))
+
+    {_, code} =
+      System.cmd("ip", ~w(netns exec peer1 ping -c 1 -W 1 10.45.0.2), stderr_to_stdout: true)
+
+    assert code != 0
+    cmd("ip", ~w(-n peer1 addr del 10.45.0.3/24 dev lan1))
+    IO.puts("PASS shared-to-separate roles, independent addressing and USB continuity")
+
+    assert {:ok, trial} = Network.propose(static, server)
+    wait(fn -> Network.status(server).ready end)
+    assert settings_http?("setup", port)
+    assert :ok = Network.cancel(trial, server)
+    wait(fn -> Network.ready?(Vintage.snapshot(nil), separated) end)
+    assert settings_http?("setup", port)
+    assert Enum.all?(Vintage.snapshot(nil).ports, &is_nil(&1.master))
+    IO.puts("PASS separate-to-shared trial and rollback, USB still accessible")
+
+    assert {:ok, trial} = Network.propose(%{separated | "internet_port" => "eth1"}, server)
+    wait(fn -> Network.status(server).ready end)
+    assert settings_http?("setup", port)
+    assert :ok = Network.cancel(trial, server)
+    wait(fn -> Network.ready?(Vintage.snapshot(nil), separated) end)
+    assert settings_http?("setup", port)
+    IO.puts("PASS reversing port roles and restoring, without requiring an Internet lease")
+  end
+
+  defp start_web do
+    for app <- [:bandit, :phoenix_live_view, :runic] do
+      {:ok, _} = Application.ensure_all_started(app)
+    end
+
+    config =
+      Elixir.Config.Reader.read!(Path.expand("../../config/target.exs", __DIR__), target: :ec100)
+
+    http = config[:nerves_gate][NervesGateWeb.Endpoint][:http]
+    endpoint_config = Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)
+
+    Application.put_env(
+      :nerves_gate,
+      NervesGateWeb.Endpoint,
+      Keyword.merge(endpoint_config, http: Keyword.put(http, :port, 0), server: true)
+    )
+
+    start_supervised!(NervesGate.Device)
+    start_supervised!(NervesGateWeb.Endpoint)
+    {:ok, {_ip, port}} = NervesGateWeb.Endpoint.server_info(:http)
+    port
+  end
+
+  defp settings_http?(namespace, port, address \\ "172.30.0.1") do
+    {body, code} =
+      System.cmd(
+        "ip",
+        [
+          "netns",
+          "exec",
+          namespace,
+          "curl",
+          "--noproxy",
+          "*",
+          "-fsS",
+          "--max-time",
+          "2",
+          "http://#{address}:#{port}/settings"
+        ],
+        stderr_to_stdout: true
+      )
+
+    code == 0 and body =~ "Setup &amp; recovery"
   end
 
   defp cmd(command, args) do

@@ -2,48 +2,71 @@ defmodule NervesGate.Network.Host do
   @moduledoc "Explicit host simulator. Never reads or changes the workstation's interfaces."
   use Agent
   @behaviour NervesGate.Network
+  alias NervesGate.Config
 
   def start_link(opts \\ []) do
-    Agent.start_link(
-      fn -> %{network: NervesGate.Config.defaults()["network"], overrides: %{}} end,
+    Agent.start_link(fn -> %{network: Config.defaults()["network"], overrides: %{}} end,
       name: Keyword.get(opts, :name, __MODULE__)
     )
   end
 
   @impl true
-  def apply_config(network, server) do
-    Agent.update(server, &%{&1 | network: network})
-  end
+  def apply_config(network, server), do: Agent.update(server, &%{&1 | network: network})
 
   @impl true
   def snapshot(server) do
     Agent.get(server, fn %{network: network, overrides: overrides} ->
-      {address, prefix} =
-        if network["ip_method"] == "static" do
-          {:ok, prefix} = NervesGate.Config.prefix_length(network["subnet_mask"])
-          {network["static_ip"], prefix}
-        else
-          {"192.0.2.10", 24}
+      shared = network["mode"] == "shared"
+
+      ports =
+        for name <- ["eth0", "eth1"] do
+          address =
+            cond do
+              shared -> nil
+              network["mode"] == "unconfigured" -> nil
+              name == network["internet_port"] -> Config.address_defaults()
+              true -> network["equipment"]
+            end
+
+          interface(name, address, if(shared, do: "br0"), name == "eth0")
         end
 
       Map.merge(
         %{
           simulated: true,
-          bridge: %{
-            present: true,
-            link: true,
-            state: :configured,
-            method: network["ip_method"],
-            addresses: [%{address: address, prefix_length: prefix}]
-          },
-          ports: [
-            %{name: "eth0", present: true, link: true, master: "br0"},
-            %{name: "eth1", present: true, link: false, master: "br0"}
-          ]
+          bridge: interface("br0", if(shared, do: network["equipment"]), nil, shared),
+          ports: ports,
+          usb: interface("usb0", nil, nil, false)
         },
         overrides
       )
     end)
+  end
+
+  defp interface(name, address, master, link) do
+    addresses =
+      case address do
+        %{"ip_method" => "static"} ->
+          {:ok, prefix} = Config.prefix_length(address["subnet_mask"])
+          [%{address: address["static_ip"], prefix_length: prefix}]
+
+        %{"ip_method" => "dhcp"} ->
+          [%{address: "192.0.2.10", prefix_length: 24}]
+
+        _ ->
+          []
+      end
+
+    %{
+      name: name,
+      present: true,
+      link: link,
+      master: master,
+      state: :configured,
+      method: if(address, do: address["ip_method"], else: "disabled"),
+      addresses: addresses,
+      connection: :disconnected
+    }
   end
 
   @doc "Replace simulated observations; use an empty map to restore automatic observations."

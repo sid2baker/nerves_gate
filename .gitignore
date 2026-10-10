@@ -23,5 +23,9 @@
 **/build.log
 /ec100-backups/
 
+# Tailscale binaries installed explicitly for each firmware architecture.
+/rootfs_overlay/ec100/usr/sbin/tailscaled
+/rootfs_overlay/x86_64/usr/sbin/tailscaled
+
 # If the VM crashes, it generates a dump, let's ignore it too.
 erl_crash.dump

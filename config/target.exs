@@ -5,8 +5,8 @@ config :nerves_gate,
   target: config_target(),
   network_adapter: {NervesGate.Network.Vintage, nil}
 
-# Temporary development access on USB, LAN, and other IPv4 interfaces.
-# The UI is unauthenticated; restrict access before deploying on untrusted networks.
+# Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
+# The UI is unauthenticated; use only on trusted networks.
 config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {0, 0, 0, 0}, port: 4000]
 
 config :logger, backends: [RingLogger]
@@ -32,11 +32,11 @@ end
 
 config :nerves, source_date_epoch: source_date_epoch
 
-# Static console setup plus target-specific binaries prepared by the release step.
+# Shared console setup plus binaries explicitly installed for the selected target.
 config :nerves, :firmware,
   rootfs_overlay: [
-    Path.expand("../rootfs_overlay", __DIR__),
-    Path.join(Mix.Project.build_path(), "tailscale_rootfs")
+    Path.expand("../rootfs_overlay/common", __DIR__),
+    Path.expand("../rootfs_overlay/#{config_target()}", __DIR__)
   ],
   # sqfstar rejects timestamp flags together with SOURCE_DATE_EPOCH. Use the env value.
   rootfs_type: {:squashfs, ["-no-xattrs", "-quiet"]}
