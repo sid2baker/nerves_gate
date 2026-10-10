@@ -4,12 +4,17 @@ defmodule NervesGate.Application do
 
   @impl true
   def start(_type, _args) do
-    simulator = if NervesGate.target() == :host, do: [NervesGate.Network.Host], else: []
+    simulator =
+      if NervesGate.target() == :host do
+        [NervesGate.Network.Host, NervesGate.Remote.Host]
+      else
+        []
+      end
 
     children =
-      [{Phoenix.PubSub, name: NervesGate.PubSub}] ++
+      [{Phoenix.PubSub, [name: NervesGate.PubSub]}] ++
         simulator ++
-        [NervesGate.Network, NervesGate.Device, NervesGateWeb.Endpoint]
+        [NervesGate.Network, NervesGate.Remote, NervesGate.Device, NervesGateWeb.Endpoint]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: NervesGate.Supervisor)
   end

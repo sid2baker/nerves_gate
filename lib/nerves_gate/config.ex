@@ -86,13 +86,78 @@ defmodule NervesGate.Config do
     end
   end
 
-  def validate_network(_),
-    do:
-      {:error,
-       "Choose separate Internet and equipment ports, or explicitly choose one shared network."}
+  def validate_network(%{"mode" => "ports", "eth0" => left, "eth1" => right} = network)
+      when map_size(network) == 3 do
+    with {:ok, left} <- validate_port(left),
+         {:ok, right} <- validate_port(right),
+         true <- is_nil(left) or is_nil(right) or left["role"] != right["role"] do
+      {:ok, %{network | "eth0" => left, "eth1" => right}}
+    else
+      _ ->
+        {:error,
+         "Choose at most one Internet port and one equipment port. Equipment needs an unused manual address, without a router."}
+    end
+  end
+
+  def validate_network(_) do
+    {:error,
+     "Choose separate Internet and equipment ports, or explicitly choose one shared network."}
+  end
+
+  defp validate_port(nil) do
+    {:ok, nil}
+  end
+
+  defp validate_port(%{"role" => role, "address" => address} = port)
+       when map_size(port) == 2 and role in ["internet", "equipment"] do
+    with {:ok, address} <- validate_address(address),
+         true <-
+           role == "internet" or
+             (address["ip_method"] == "static" and is_nil(address["gateway"]) and
+                Map.get(address, "nameservers", []) == []) do
+      {:ok, %{port | "address" => address}}
+    else
+      _ -> {:error, :invalid_port}
+    end
+  end
+
+  defp validate_port(_) do
+    {:error, :invalid_port}
+  end
+
+  @doc "Port assignments, including the original separate-network format."
+  def ports(%{"mode" => "ports"} = network) do
+    Map.take(network, ["eth0", "eth1"])
+  end
+
+  def ports(%{"mode" => "ethernet"} = network) do
+    %{
+      network["internet_port"] => %{"role" => "internet", "address" => address_defaults()},
+      equipment_port(network) => %{"role" => "equipment", "address" => network["equipment"]}
+    }
+  end
+
+  def ports(_) do
+    %{"eth0" => nil, "eth1" => nil}
+  end
+
+  def role_port(network, role) do
+    Enum.find_value(ports(network), fn {name, port} ->
+      if port && port["role"] == role do
+        name
+      end
+    end)
+  end
+
+  def role_address(network, role) do
+    case role_port(network, role) do
+      nil -> nil
+      name -> ports(network)[name]["address"]
+    end
+  end
 
   def validate_address(network) when is_map(network) do
-    allowed = ["ip_method", "static_ip", "subnet_mask", "gateway"]
+    allowed = ["ip_method", "static_ip", "subnet_mask", "gateway", "nameservers"]
 
     cond do
       Enum.any?(Map.keys(network), &(&1 not in allowed)) ->
@@ -102,7 +167,15 @@ defmodule NervesGate.Config do
         {:ok, address_defaults()}
 
       network["ip_method"] == "static" ->
-        validate_static(network)
+        with {:ok, address} <- validate_static(network),
+             :ok <- validate_nameservers(Map.get(network, "nameservers", [])) do
+          {:ok,
+           if Map.has_key?(network, "nameservers") do
+             Map.put(address, "nameservers", network["nameservers"])
+           else
+             address
+           end}
+        end
 
       true ->
         {:error, "Choose automatic or manual IP addressing."}
@@ -110,6 +183,23 @@ defmodule NervesGate.Config do
   end
 
   def validate_address(_), do: {:error, "Ethernet settings must be an object."}
+
+  defp validate_nameservers(servers) when is_list(servers) and length(servers) <= 3 do
+    if Enum.all?(servers, fn server ->
+         case ipv4(server) do
+           {:ok, ip} -> unicast?(ip)
+           _ -> false
+         end
+       end) do
+      :ok
+    else
+      {:error, "Enter up to three IPv4 DNS server addresses."}
+    end
+  end
+
+  defp validate_nameservers(_) do
+    {:error, "Enter up to three IPv4 DNS server addresses."}
+  end
 
   def equipment_port(%{"internet_port" => "eth0"}), do: "eth1"
   def equipment_port(%{"internet_port" => "eth1"}), do: "eth0"

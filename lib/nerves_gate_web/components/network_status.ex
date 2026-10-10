@@ -33,11 +33,11 @@ defmodule NervesGateWeb.NetworkStatus do
       <p :if={@projection.connections.mode == "shared"} class="ui-help">
         Both ports are joined into one shared network.
       </p>
-      <p :if={@projection.connections.mode == "ethernet"} class="ui-help">
+      <p :if={@projection.connections.mode in ["ethernet", "ports"]} class="ui-help">
         Separate networks. Equipment is not given Internet access.
       </p>
       <p :if={@projection.connections.mode == "unconfigured"} class="ui-help">
-        Neither port is assigned. The ports are not joined together.
+        Looking for connections automatically. The ports stay separate.
       </p>
       <.notice :if={!@projection.network.observed}>Connection status is unavailable.</.notice>
       <.notice :if={@projection.network.recovering} tone="warning">
@@ -61,12 +61,12 @@ defmodule NervesGateWeb.NetworkStatus do
       <%= cond do %>
         <% !@projection.network.observed -> %>
           <.notice>Connection status is unavailable. Wait for the gateway to reconnect.</.notice>
-        <% @projection.connections.mode in [nil, "unconfigured"] -> %>
+        <% !@internet.link and !@internet.addressed -> %>
           <div class="ui-empty-state">
             <span class="ui-icon-box"><.icon name="internet" /></span><h3>
               Choose an Internet connection
-            </h3><p>Assign a port to your router in guided setup.</p><a
-              href="/setup"
+            </h3><p>Connect your router, or choose a port in Settings.</p><a
+              href="/settings"
               class="ui-text-link"
             >Set up connections <.icon name="arrow" /></a>
           </div>

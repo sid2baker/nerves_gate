@@ -22,7 +22,23 @@ defmodule NervesGate.Network.Vintage do
   def configurations(%{"mode" => "unconfigured"}) do
     [
       {"br0", bridge_config([], %{method: :disabled})}
-      | Enum.map(["eth0", "eth1"], &{&1, port_config(%{method: :disabled})})
+      | Enum.map(["eth0", "eth1"], &{&1, port_config(%{method: :dhcp})})
+    ]
+  end
+
+  def configurations(%{"mode" => "ports"} = network) do
+    [
+      {"br0", bridge_config([], %{method: :disabled})}
+      | Enum.map(["eth0", "eth1"], fn name ->
+          address =
+            if network[name] do
+              ipv4(network[name]["address"])
+            else
+              %{method: :disabled}
+            end
+
+          {name, port_config(address)}
+        end)
     ]
   end
 
@@ -31,11 +47,25 @@ defmodule NervesGate.Network.Vintage do
   defp bridge_config(members, ipv4),
     do: %{type: LAN, vintage_net_bridge: %{interfaces: members, stp: true}, ipv4: ipv4}
 
-  defp ipv4(%{"ip_method" => "dhcp"}), do: %{method: :dhcp}
+  defp ipv4(%{"ip_method" => "dhcp"}) do
+    %{method: :dhcp}
+  end
 
   defp ipv4(address) do
     config = %{method: :static, address: address["static_ip"], netmask: address["subnet_mask"]}
-    if address["gateway"], do: Map.put(config, :gateway, address["gateway"]), else: config
+
+    config =
+      if address["gateway"] do
+        Map.put(config, :gateway, address["gateway"])
+      else
+        config
+      end
+
+    if address["nameservers"] do
+      Map.put(config, :name_servers, address["nameservers"])
+    else
+      config
+    end
   end
 
   @impl true
@@ -101,6 +131,9 @@ defmodule NervesGate.Network.Vintage do
   end
 
   defp interface(name) do
+    dhcp = get(name, "dhcp_options") || %{}
+    ipv4 = get_in(get(name, "config") || %{}, [:ipv4]) || %{}
+
     %{
       name: name,
       present: get(name, "present") == true,
@@ -109,8 +142,22 @@ defmodule NervesGate.Network.Vintage do
       method: method(get(name, "config")),
       connection: get(name, "connection"),
       addresses: addresses(get(name, "addresses") || []),
-      master: master(name)
+      master: master(name),
+      gateway: ip_string(List.first(List.wrap(dhcp[:router])) || ipv4[:gateway]),
+      nameservers: Enum.map(List.wrap(dhcp[:dns] || ipv4[:name_servers]), &ip_string/1)
     }
+  end
+
+  defp ip_string(nil) do
+    nil
+  end
+
+  defp ip_string(ip) when is_binary(ip) do
+    ip
+  end
+
+  defp ip_string(ip) do
+    ip |> :inet.ntoa() |> to_string()
   end
 
   defp get(name, key), do: VintageNet.get(["interface", name, key])

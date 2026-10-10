@@ -32,14 +32,18 @@ defmodule NervesGate.Network.LAN do
     # Do not disrupt equipment-to-equipment traffic on a management IP change.
     [_delete, _create | configure] = raw.up_cmds
 
-    down =
-      Enum.reject(
-        raw.down_cmds,
-        &(&1 in [
-            {:run, "brctl", ["delbr", ifname]},
-            {:run, "ip", ["link", "set", ifname, "down"]}
-          ])
-      )
+    # DHCP down commands only flush the address. Serialize with RouteManager
+    # first so an in-flight lease cannot install a route with a removed source IP.
+    down = [
+      {:fun, VintageNet.RouteManager, :clear_route, [ifname]}
+      | Enum.reject(
+          raw.down_cmds,
+          &(&1 in [
+              {:run, "brctl", ["delbr", ifname]},
+              {:run, "ip", ["link", "set", ifname, "down"]}
+            ])
+        )
+    ]
 
     %{
       raw
@@ -57,13 +61,20 @@ defmodule NervesGate.Network.LAN do
 
   def to_raw_config(ifname, config, opts) when ifname in ["eth0", "eth1"] do
     raw = VintageNetEthernet.to_raw_config(ifname, %{config | type: VintageNetEthernet}, opts)
-    # Called again by VintageNet when a missing member appears.
+
+    # Also runs when VintageNet configures a newly appeared port.
     commands = [
       {:fun, __MODULE__, :disable_member_ipv6, [ifname]},
       {:run, "ip", ["-4", "addr", "flush", "dev", ifname]}
     ]
 
-    %{raw | type: __MODULE__, source_config: normalize(config), up_cmds: commands ++ raw.up_cmds}
+    %{
+      raw
+      | type: __MODULE__,
+        source_config: normalize(config),
+        up_cmds: commands ++ raw.up_cmds,
+        down_cmds: [{:fun, VintageNet.RouteManager, :clear_route, [ifname]} | raw.down_cmds]
+    }
   end
 
   def ensure_bridge do

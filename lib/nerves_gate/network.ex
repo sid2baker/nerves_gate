@@ -1,10 +1,11 @@
 defmodule NervesGate.Network do
   @moduledoc """
-  Internal LAN executor and browser-independent, 60-second trial safety boundary.
+  LAN executor. First setup over verified USB auto-saves; other changes have a
+  browser-independent, 60-second rollback deadline.
   Client adapters should use `NervesGate.Device`, not these low-level commands.
   """
   use GenServer
-  alias NervesGate.Config
+  alias NervesGate.{Config, Network}
 
   @callback apply_config(map(), term()) :: :ok | {:error, term()}
   @callback snapshot(term()) :: map()
@@ -14,7 +15,10 @@ defmodule NervesGate.Network do
   end
 
   def status(server \\ __MODULE__), do: GenServer.call(server, :status)
-  def propose(network, server \\ __MODULE__), do: GenServer.call(server, {:propose, network})
+
+  def propose(network, server \\ __MODULE__, access \\ nil),
+    do: GenServer.call(server, {:propose, network, access}, 15_000)
+
   def confirm(id, server \\ __MODULE__), do: GenServer.call(server, {:confirm, id})
   def cancel(id, server \\ __MODULE__), do: GenServer.call(server, {:cancel, id})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, "network")
@@ -56,27 +60,34 @@ defmodule NervesGate.Network do
   @impl true
   def handle_call(:status, _from, state), do: {:reply, public(state), state}
 
-  def handle_call({:propose, _}, _from, %{config: nil} = state),
+  def handle_call({:propose, _, _}, _from, %{config: nil} = state),
     do: {:reply, {:error, :invalid_saved_config}, state}
 
-  def handle_call({:propose, _}, _from, %{trial: trial} = state) when not is_nil(trial),
+  def handle_call({:propose, _, _}, _from, %{trial: trial} = state) when not is_nil(trial),
     do: {:reply, {:error, :trial_in_progress}, state}
 
-  def handle_call({:propose, _}, _from, %{recovering: true} = state),
+  def handle_call({:propose, _, _}, _from, %{recovering: true} = state),
     do: {:reply, {:error, :recovery_in_progress}, state}
 
-  def handle_call({:propose, network}, _from, state) do
+  def handle_call({:propose, network, access}, _from, state) do
     with {:ok, network} <- Config.validate_network(network),
          # Make even first-run defaults durable BEFORE touching an interface.
          :ok <- Config.save(state.config, state.path) do
       id = Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
-      timer = Process.send_after(self(), {:expire, id}, state.trial_ms)
+      state = refresh(state)
+
+      auto_save =
+        not state.config["setup_completed"] and Network.Access.usb?(state.observed, access)
+
+      timeout = if auto_save, do: 15_000, else: state.trial_ms
+      timer = Process.send_after(self(), {:expire, id}, timeout)
 
       trial = %{
+        auto_save: auto_save,
         id: id,
         network: network,
-        deadline: now() + state.trial_ms,
-        expires_at: System.system_time(:millisecond) + state.trial_ms,
+        deadline: now() + timeout,
+        expires_at: System.system_time(:millisecond) + timeout,
         timer: timer
       }
 
@@ -84,7 +95,9 @@ defmodule NervesGate.Network do
 
       case apply_network(state, network) do
         :ok ->
-          {:reply, {:ok, id}, publish(refresh(state))}
+          state = maybe_save(refresh(state))
+          result = if state.error, do: {:error, state.error}, else: {:ok, id}
+          {:reply, result, publish(state)}
 
         {:error, reason} ->
           state = rollback(state, {:apply, reason})
@@ -133,14 +146,44 @@ defmodule NervesGate.Network do
 
   def handle_info(:poll, state) do
     next = if state.recovering, do: restore(state), else: state
-    next = refresh(next)
+    next = maybe_save(refresh(next))
     if public(next) != public(state), do: publish(next)
     schedule_poll(next)
     {:noreply, next}
   end
 
+  defp maybe_save(%{trial: %{auto_save: true} = trial} = state) do
+    cond do
+      now() >= trial.deadline ->
+        rollback(state, :expired)
+
+      ready?(state.observed, trial.network) ->
+        config = %{state.config | "network" => trial.network, "setup_completed" => true}
+
+        case Config.save(config, state.path) do
+          :ok ->
+            Process.cancel_timer(trial.timer)
+            %{state | config: config, trial: nil, error: nil}
+
+          {:error, reason} ->
+            rollback(state, {:save, reason})
+        end
+
+      conflicts(state.observed, trial.network) != [] ->
+        rollback(state, :conflicting_networks)
+
+      true ->
+        state
+    end
+  end
+
+  defp maybe_save(state) do
+    state
+  end
+
   defp rollback(state, reason) do
     if state.trial, do: Process.cancel_timer(state.trial.timer)
+
     restore(%{state | trial: nil, error: reason})
   end
 
@@ -186,14 +229,36 @@ defmodule NervesGate.Network do
         %{bridge: bridge, ports: ports} = observed,
         %{"mode" => "shared", "equipment" => network} = settings
       ) do
-    bridge.present and bridge.link and bridge.state == :configured and
+    bridge.present and bridge.state == :configured and
       bridge.method == network["ip_method"] and
-      Enum.any?(ports, &(&1.present and &1.link and &1.master == "br0")) and
       Enum.all?(ports, &(not &1.present or &1.master == "br0")) and
-      address_matches?(bridge.addresses, network) and conflicts(observed, settings) == []
+      (network["ip_method"] == "dhcp" or address_matches?(bridge.addresses, network)) and
+      conflicts(observed, settings) == []
   end
 
-  def ready?(_, _), do: false
+  def ready?(%{ports: ports} = observed, %{"mode" => "ports"} = network) do
+    Enum.all?(Config.ports(network), fn {name, setting} ->
+      port = Enum.find(ports, &(&1.name == name))
+
+      cond do
+        is_nil(setting) ->
+          is_nil(port) or not port.present or
+            (port.state == :configured and is_nil(port.master) and port.method == "disabled")
+
+        is_nil(port) or not port.present ->
+          false
+
+        true ->
+          port.state == :configured and is_nil(port.master) and
+            port.method == setting["address"]["ip_method"] and
+            (port.method == "dhcp" or address_matches?(port.addresses, setting["address"]))
+      end
+    end) and conflicts(observed, network) == []
+  end
+
+  def ready?(_, _) do
+    false
+  end
 
   defp address_matches?(addresses, network) do
     Enum.any?(addresses, fn %{address: address, prefix_length: prefix} ->

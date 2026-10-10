@@ -23,6 +23,13 @@ defmodule NervesGate.Device.Error do
         "Port settings are not ready to save. Check the connection status and any address conflicts below."
       )
 
+  def from(:conflicting_networks),
+    do:
+      new(
+        "conflicting_networks",
+        "Network addresses overlap. Previous settings have been restored. Choose different Internet, equipment and USB subnets."
+      )
+
   def from(:expired),
     do: new("expired", "The trial expired. Previous settings are being restored.")
 

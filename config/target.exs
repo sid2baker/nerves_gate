@@ -3,7 +3,8 @@ import Config
 config :nerves_gate,
   data_dir: "/data",
   target: config_target(),
-  network_adapter: {NervesGate.Network.Vintage, nil}
+  network_adapter: {NervesGate.Network.Vintage, nil},
+  remote_adapter: {NervesGate.Remote.Tailscale, nil}
 
 # Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
 # The UI is unauthenticated; use only on trusted networks.

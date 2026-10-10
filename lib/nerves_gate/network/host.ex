@@ -23,18 +23,32 @@ defmodule NervesGate.Network.Host do
           address =
             cond do
               shared -> nil
-              network["mode"] == "unconfigured" -> nil
-              name == network["internet_port"] -> Config.address_defaults()
-              true -> network["equipment"]
+              network["mode"] == "unconfigured" -> Config.address_defaults()
+              true -> get_in(Config.ports(network), [name, "address"])
             end
 
-          interface(name, address, if(shared, do: "br0"), name == "eth0")
+          interface(
+            name,
+            address,
+            if shared do
+              "br0"
+            end,
+            name == "eth0"
+          )
         end
 
       Map.merge(
         %{
           simulated: true,
-          bridge: interface("br0", if(shared, do: network["equipment"]), nil, shared),
+          bridge:
+            interface(
+              "br0",
+              if shared do
+                network["equipment"]
+              end,
+              nil,
+              shared
+            ),
           ports: ports,
           usb: interface("usb0", nil, nil, false)
         },
@@ -50,7 +64,7 @@ defmodule NervesGate.Network.Host do
           {:ok, prefix} = Config.prefix_length(address["subnet_mask"])
           [%{address: address["static_ip"], prefix_length: prefix}]
 
-        %{"ip_method" => "dhcp"} ->
+        %{"ip_method" => "dhcp"} when link ->
           [%{address: "192.0.2.10", prefix_length: 24}]
 
         _ ->

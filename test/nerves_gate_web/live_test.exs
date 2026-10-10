@@ -2,14 +2,13 @@ defmodule NervesGateWeb.LiveTest do
   use ExUnit.Case, async: false
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
-  alias NervesGate.Device
+  alias NervesGate.{Device, Network}
   @endpoint NervesGateWeb.Endpoint
   @moduletag :tmp_dir
   @shared %{"mode" => "shared", "equipment" => NervesGate.Config.address_defaults()}
 
   defmodule PanelHost do
     use Phoenix.LiveView
-
     def mount(_, _, socket), do: {:ok, assign(socket, panels: ["one", "two"])}
 
     def handle_event("remove", %{"id" => id}, socket),
@@ -31,111 +30,223 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   setup %{tmp_dir: dir} do
-    Supervisor.terminate_child(NervesGate.Supervisor, NervesGate.Network)
-    NervesGate.Network.Host.simulate(%{})
-    start_supervised!({NervesGate.Network, path: Path.join(dir, "nerves_gate.json"), poll_ms: 10})
+    Supervisor.terminate_child(NervesGate.Supervisor, Network)
+    Network.Host.simulate(%{})
+    start_supervised!({Network, path: Path.join(dir, "nerves_gate.json"), poll_ms: 10})
 
     on_exit(fn ->
-      NervesGate.Network.Host.simulate(%{})
-      Supervisor.restart_child(NervesGate.Supervisor, NervesGate.Network)
+      Network.Host.simulate(%{})
+      Supervisor.restart_child(NervesGate.Supervisor, Network)
     end)
 
     :ok
   end
 
-  test "USB-first setup validates, trials and saves separate Internet and equipment roles" do
+  test "one screen detects the connected port and equipment is optional" do
     {:ok, view, html} = live(build_conn(), "/setup")
-    assert html =~ "Keep the USB cable connected"
-    refute html =~ "Both belong to the same"
-    view |> element("button", "Set up connections") |> render_click()
+    assert html =~ "Set up your gateway"
+    assert has_element?(view, "#internet-summary", "Port 1")
+    refute has_element?(view, "#internet-options")
+    refute has_element?(view, "#network_equipment_ip")
+    refute html =~ "Review before changing"
+    refute html =~ "Mobile Internet"
+    assert view |> form("#network-form") |> render_submit() =~ "Keep these changes?"
+    assert Network.status().trial.network["eth1"] == nil
+    assert Network.status().trial.network["eth0"]["role"] == "internet"
+    refute Network.status().config["setup_completed"]
+    view |> element("#confirm-settings") |> render_click()
+    assert_redirect(view, "/")
+    assert Network.status().config["setup_completed"]
+    assert {:error, {:live_redirect, %{to: "/settings"}}} = live(build_conn(), "/setup")
+    {:ok, settings, _} = live(build_conn(), "/settings")
+    assert has_element?(settings, "h1", "Settings")
+    assert has_element?(settings, "#apply-settings", "Apply changes")
+  end
 
-    invalid = %{
-      mode: "ethernet",
-      internet_port: "eth0",
-      ip_method: "static",
-      static_ip: "bad",
-      subnet_mask: "255.255.255.0"
-    }
-
-    assert view |> form("#network-form", network: invalid) |> render_submit() =~
-             "Choose an unused manual address"
-
-    valid = %{invalid | static_ip: "192.168.50.10"}
-
-    assert view |> form("#network-form", network: valid) |> render_submit() =~
-             "Review before changing"
-
+  test "first setup really through USB saves without a confirmation screen" do
+    usb_observation()
+    {:ok, view, html} = live(usb_conn(), "/setup")
+    assert html =~ "Settings save directly"
+    refute html =~ "60-second undo window"
+    render_submit(form(view, "#network-form"))
+    assert_redirect(view, "/")
+    assert NervesGate.Network.status().config["setup_completed"]
     refute NervesGate.Network.status().trial
-    assert view |> element("#apply-settings") |> render_click() =~ "Check the port assignments"
-    refute NervesGate.Network.status().config["setup_completed"]
-    html = view |> element("#confirm-settings") |> render_click()
-    assert html =~ "Connection settings saved"
-    assert html =~ "Remote access is not verified"
-    settings = NervesGate.Network.status().config["network"]
-    assert settings["equipment"]["static_ip"] == "192.168.50.10"
-    assert settings["mode"] == "ethernet"
-    assert Enum.all?(NervesGate.Network.status().observed.ports, &is_nil(&1.master))
+    {:ok, settings, html} = live(usb_conn(), "/settings")
+    assert html =~ "60-second undo window"
+    assert render_submit(form(settings, "#network-form")) =~ "Keep these changes?"
+    refute NervesGate.Network.status().trial.auto_save
+  end
+
+  test "Internet uses a button and other disclosures preserve open state" do
+    {:ok, view, _} = live(build_conn(), "/setup")
+
+    assert has_element?(
+             view,
+             "button.ui-button--secondary[aria-controls=internet-options][aria-expanded=false]",
+             "Change Internet connection"
+           )
+
+    refute has_element?(view, "#internet-options")
+    view |> element("button", "Change Internet connection") |> render_click()
+    assert has_element?(view, "#internet-options")
+
+    for id <- ["advanced-network", "connection-details", "gateway-details"] do
+      assert has_element?(view, "##{id}[phx-mounted*=ignore_attrs]")
+    end
+
+    view |> form("#network-form", network: %{internet_method: "static"}) |> render_change()
+    assert has_element?(view, "#network_internet_ip[value='192.0.2.10']")
+    assert has_element?(view, "#internet-options")
+    view |> element("button", "Add equipment") |> render_click()
+    assert has_element?(view, "#network_equipment_ip[value='192.168.10.2']")
+  end
+
+  test "USB present and forged browser hints do not bypass confirmation over LAN" do
+    usb_observation()
+
+    conn =
+      build_conn()
+      |> Plug.Conn.put_req_header("x-forwarded-for", "10.13.0.2")
+      |> put_connect_params(%{"usb" => true, "local_address" => "10.13.0.1"})
+
+    {:ok, view, _} = live(conn, "/setup")
+
+    render_submit(view, "save", %{
+      "network" => %{"usb" => "true", "auto_save" => "true"},
+      "revision" => Device.projection().revision
+    })
+
+    assert has_element?(view, "#confirm-settings")
+    refute Network.status().trial.auto_save
+  end
+
+  test "equipment addresses are validated without another review step" do
+    {:ok, view, _} = live(build_conn(), "/setup")
+    view |> element("button", "Add equipment") |> render_click()
+    assert has_element?(view, "label[for=network_equipment_ip]")
+    assert has_element?(view, "#network_equipment_ip[aria-describedby=network_equipment_ip-help]")
+
+    assert view |> form("#network-form", network: %{equipment_ip: "bad"}) |> render_submit() =~
+             "Equipment needs an unused manual address"
+
+    refute Network.status().trial
+    view |> form("#network-form", network: %{equipment_ip: "192.168.50.10"}) |> render_submit()
+    assert Network.status().trial.network["eth1"]["address"]["static_ip"] == "192.168.50.10"
+    view |> element("#confirm-settings") |> render_click()
+    assert_redirect(view, "/")
     {:ok, equipment, _} = live(build_conn(), "/equipment")
     assert render(equipment) =~ "192.168.50.10"
   end
 
-  test "shared network is an explicit warned choice" do
+  test "shared network remains an explicit warned advanced choice and supports manual DNS" do
     {:ok, view, _} = live(build_conn(), "/setup")
-    view |> element("button", "Set up connections") |> render_click()
 
     assert view |> form("#network-form", network: %{mode: "shared"}) |> render_change() =~
-             "explicitly joins both"
+             "Both Ethernet ports will be joined"
+
+    view |> form("#network-form", network: %{shared_method: "static"}) |> render_change()
 
     view
     |> form("#network-form",
       network: %{
-        mode: "shared",
-        ip_method: "static",
-        static_ip: "192.168.50.2",
-        subnet_mask: "255.255.255.0",
-        gateway: "192.168.50.1"
+        shared_ip: "192.168.50.2",
+        shared_gateway: "192.168.50.1",
+        shared_dns: "1.1.1.1, 9.9.9.9"
       }
     )
     |> render_submit()
 
-    assert has_element?(view, ".ui-setting-row", "Router address")
-    assert has_element?(view, ".ui-setting-row", "192.168.50.1")
-    refute NervesGate.Network.status().trial
-    view |> element("button", "Edit settings") |> render_click()
+    assert Network.status().trial.network["equipment"]["nameservers"] == ["1.1.1.1", "9.9.9.9"]
+    assert Network.status().trial.network["equipment"]["gateway"] == "192.168.50.1"
+  end
 
-    view
-    |> form("#network-form", network: %{mode: "shared", ip_method: "dhcp"})
-    |> render_change()
+  test "live discovery updates suggestions without overwriting explicit choices or equipment drafts" do
+    {:ok, view, _} = live(build_conn(), "/setup")
+    ports = Network.status().observed.ports
 
-    assert view
-           |> form("#network-form", network: %{mode: "shared", ip_method: "dhcp"})
-           |> render_submit() =~ "Both ports will be joined"
+    changed = [
+      %{hd(ports) | link: false, addresses: []},
+      %{
+        List.last(ports)
+        | link: true,
+          addresses: [%{address: "10.3.0.2", prefix_length: 24}],
+          connection: :internet
+      }
+    ]
 
-    refute has_element?(view, ".ui-setting-row", "Router address")
+    Network.Host.simulate(%{ports: changed})
+    eventually(fn -> has_element?(view, "#internet-summary", "Port 2 · Internet connected") end)
+    view |> element("button", "Change Internet connection") |> render_click()
+    view |> form("#network-form", network: %{internet_port: "eth0"}) |> render_change()
+    view |> element("button", "Add equipment") |> render_click()
+    view |> form("#network-form", network: %{equipment_ip: "10.46.0.2"}) |> render_change()
+    Network.Host.simulate(%{})
+    eventually(fn -> has_element?(view, "#internet-summary", "Port 1") end)
+    assert has_element?(view, "#network_equipment_ip[value='10.46.0.2']")
+    assert has_element?(view, "#network_internet_port-eth0:checked")
+    refute Network.status().trial
+  end
+
+  test "two connected networks need a choice, including the option to finish offline" do
+    ports =
+      Enum.map(Network.status().observed.ports, fn port ->
+        %{
+          port
+          | link: true,
+            addresses: [
+              %{
+                address: if(port.name == "eth0", do: "10.1.0.2", else: "10.2.0.2"),
+                prefix_length: 24
+              }
+            ],
+            connection: :internet
+        }
+      end)
+
+    Network.Host.simulate(%{ports: ports})
+    eventually(fn -> Device.projection().connections.suggested_internet_port == nil end)
+    {:ok, view, _} = live(build_conn(), "/setup")
+    assert view |> form("#network-form") |> render_submit() =~ "More than one network"
+    refute Network.status().trial
+    Network.Host.simulate(%{})
+    eventually(fn -> has_element?(view, "#internet-summary", "Port 1") end)
+    view |> form("#network-form", network: %{internet_port: ""}) |> render_submit()
+    assert Network.status().trial.network == %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
+  end
+
+  test "dirty draft cannot overwrite settings saved by another session" do
+    {:ok, view, _} = live(build_conn(), "/settings")
+    view |> element("button", "Change Internet connection") |> render_click()
+    view |> form("#network-form", network: %{internet_port: "eth1"}) |> render_change()
+
+    {:ok, %{result: %{trial_id: id}}} =
+      Device.dispatch("network.propose", %{"network" => @shared})
+
+    assert {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id})
+    eventually(fn -> has_element?(view, "#apply-settings[disabled]") end)
+
+    render_submit(view, "save", %{
+      "network" => %{"internet_port" => "eth1"},
+      "revision" => Device.projection().revision
+    })
+
+    refute Network.status().trial
+    assert render(view) =~ "Settings changed in another session"
+    view |> element("button", "Reload saved settings") |> render_click()
+    assert has_element?(view, "#network_mode-shared:checked")
+    refute has_element?(view, "#apply-settings[disabled]")
   end
 
   test "trial survives browser reconnection and can be cancelled" do
-    assert {:ok, %{result: %{trial_id: id}}} =
-             Device.dispatch("network.propose", %{"network" => @shared})
+    {:ok, %{result: %{trial_id: id}}} =
+      Device.dispatch("network.propose", %{"network" => @shared})
 
-    {:ok, view, _} = live(build_conn(), "/setup")
+    {:ok, view, _} = live(build_conn(), "/settings")
     assert has_element?(view, "#confirm-settings")
-    assert NervesGate.Network.status().trial.id == id
+    assert Network.status().trial.id == id
     view |> element("button", "Restore previous settings") |> render_click()
-    refute NervesGate.Network.status().trial
-  end
-
-  test "discovery publishes live updates" do
-    {:ok, view, _} = live(build_conn(), "/")
-    Device.subscribe()
-
-    NervesGate.Network.Host.simulate(%{
-      ports: [%{name: "eth0", present: false, link: false, master: nil}]
-    })
-
-    assert_receive {:device, projection}
-    refute hd(projection.network.observed.ports).present
-    eventually(fn -> render(view) =~ "Not installed" end)
+    refute Network.status().trial
   end
 
   test "all product pages work offline and never claim remote readiness" do
@@ -143,28 +254,27 @@ defmodule NervesGateWeb.LiveTest do
           {"/", "Equipment access at a glance"},
           {"/equipment", "Equipment network"},
           {"/internet", "Internet &amp; backup"},
-          {"/remote", "Private access"},
-          {"/settings", "Setup &amp; recovery"},
-          {"/setup", "A place for every connection"}
+          {"/remote", "Connect this gateway to your private network"},
+          {"/settings", "Set up your gateway"},
+          {"/setup", "Set up your gateway"}
         ] do
-      {:ok, _view, html} = live(build_conn(), path)
+      {:ok, _, html} = live(build_conn(), path)
       assert html =~ heading
       refute html =~ "Remote access ready"
 
       if path == "/settings" do
         assert html =~ "Firmware listens on every IPv4 interface at port 4000"
         assert html =~ "Anyone who can reach this page can change settings"
-        refute html =~ "EC100 uses USB only"
       end
     end
   end
 
-  test "a CLI command and two browsers share the trial and action availability" do
+  test "a CLI command and two browsers share trial state; old broadcasts do not regress it" do
     {:ok, setup, _} = live(build_conn(), "/setup")
     {:ok, dashboard, _} = live(build_conn(), "/")
 
-    assert {:ok, %{result: %{trial_id: id}, projection: projection}} =
-             Device.dispatch("network.propose", %{"network" => @shared})
+    {:ok, %{result: %{trial_id: id}, projection: projection}} =
+      Device.dispatch("network.propose", %{"network" => @shared})
 
     eventually(fn -> has_element?(setup, "#confirm-settings:not([disabled])") end)
     eventually(fn -> render(dashboard) =~ "Settings are being tried" end)
@@ -210,38 +320,6 @@ defmodule NervesGateWeb.LiveTest do
     end
   end
 
-  test "visible radio choices reverse port roles and keep drafts through live observations" do
-    {:ok, view, _} = live(build_conn(), "/setup")
-    view |> element("button", "Set up connections") |> render_click()
-    refute has_element?(view, "select")
-    assert has_element?(view, "#network_internet_port-eth0:checked")
-    assert has_element?(view, "label[for=network_static_ip]")
-    assert has_element?(view, "#network_static_ip[aria-describedby=network_static_ip-help]")
-
-    view
-    |> form("#network-form", network: %{internet_port: "eth1", static_ip: "10.46.0.2"})
-    |> render_change()
-
-    assert has_element?(view, "#network_internet_port-eth1:checked")
-    assert has_element?(view, ".ui-port-tag", "Port 1")
-    Device.subscribe()
-
-    NervesGate.Network.Host.simulate(%{
-      ports: [%{name: "eth0", present: false, link: false, master: nil}]
-    })
-
-    assert_receive {:device, _}
-    eventually(fn -> has_element?(view, "#setup-connections", "Not installed") end)
-    assert has_element?(view, "#network_static_ip[value='10.46.0.2']")
-    assert has_element?(view, "#network_internet_port-eth1:checked")
-    refute NervesGate.Network.status().trial
-
-    view |> form("#network-form") |> render_submit()
-    assert has_element?(view, ".ui-setting-row", "Port 2")
-    view |> element("#apply-settings") |> render_click()
-    assert NervesGate.Network.status().trial.network["internet_port"] == "eth1"
-  end
-
   test "components own deduplicated subscriptions and clean up without a subscribing parent" do
     {:ok, view, _} = live_isolated(build_conn(), PanelHost)
     topic = Device.topic()
@@ -252,26 +330,19 @@ defmodule NervesGateWeb.LiveTest do
     end
 
     assert [{^pid, [Phoenix.LiveView.PubSub | _]}] = subscribers.()
-
     old = Device.projection()
     assert {:ok, _} = Device.dispatch("network.propose", %{"network" => @shared})
 
-    for id <- ["one", "two"] do
-      eventually(fn -> has_element?(view, "##{id}", "Shared network") end)
-    end
+    for id <- ["one", "two"],
+        do: eventually(fn -> has_element?(view, "##{id}", "Shared network") end)
 
     Phoenix.PubSub.broadcast(NervesGate.PubSub, topic, {:device, old})
     refute has_element?(view, "#one", "Unassigned")
     refute has_element?(view, "#two", "Unassigned")
-
     render_click(view, "remove", %{"id" => "one"})
     refute has_element?(view, "#one")
     assert length(subscribers.()) == 1
-
-    NervesGate.Network.Host.simulate(%{
-      ports: [%{name: "eth0", present: false, link: false, master: nil}]
-    })
-
+    Network.Host.simulate(%{ports: [%{name: "eth0", present: false, link: false, master: nil}]})
     eventually(fn -> has_element?(view, "#two", "Not installed") end)
     render_click(view, "remove", %{"id" => "two"})
     eventually(fn -> subscribers.() == [] end)
@@ -298,6 +369,35 @@ defmodule NervesGateWeb.LiveTest do
         ] do
       assert build_conn() |> get(path) |> response(200) != ""
     end
+  end
+
+  defp usb_observation do
+    Network.Host.simulate(%{
+      usb: %{present: true, link: true, addresses: [%{address: "10.13.0.1", prefix_length: 30}]}
+    })
+
+    eventually(fn ->
+      Network.Access.usb?(Device.projection().network.observed, %{
+        local: "10.13.0.1",
+        peer: {10, 13, 0, 2}
+      })
+    end)
+  end
+
+  defp usb_conn do
+    conn = build_conn()
+    {adapter, payload} = conn.adapter
+
+    %{
+      conn
+      | adapter:
+          {adapter,
+           %{
+             payload
+             | sock_data: %{address: {10, 13, 0, 1}, port: 4000},
+               peer_data: %{address: {10, 13, 0, 2}, port: 5000, ssl_cert: nil}
+           }}
+    }
   end
 
   defp eventually(fun, remaining \\ 100)

@@ -10,7 +10,7 @@ defmodule NervesGateWeb.Endpoint do
   ]
 
   socket("/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options], check_origin: :conn],
+    websocket: [connect_info: [:peer_data, session: @session_options], check_origin: :conn],
     longpoll: false
   )
 

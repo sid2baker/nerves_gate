@@ -1,457 +1,469 @@
 defmodule NervesGateWeb.SetupLive do
   use Phoenix.LiveView
-  alias NervesGate.{Config, Device}
+  alias NervesGate.{Device, Network}
+  alias NervesGateWeb.NetworkForm
   import NervesGateWeb.NetworkStatus, only: [port_label: 1]
   import NervesGateWeb.CoreComponents
 
-  def mount(_, _, socket) do
+  def mount(_, session, socket) do
     subscribe(socket, Device.topic(), &__MODULE__.handle_device/2)
     if connected?(socket), do: Process.send_after(self(), :tick, 1_000)
     projection = Device.projection()
-    network = projection.network
-    settings = if network.pending, do: network.pending.network, else: network.desired
+    peer = get_connect_info(socket, :peer_data)
 
-    {:ok,
-     assign(socket,
-       projection: projection,
-       form: to_form(form_settings(settings), as: :network),
-       step: :welcome,
-       message: nil,
-       now: System.system_time(:millisecond)
-     )}
+    socket =
+      assign(socket,
+        projection: projection,
+        access: %{local: session["local_address"], peer: peer && peer.address},
+        form: to_form(NetworkForm.from_settings(projection.network.desired), as: :network),
+        base: projection.network.desired,
+        dirty: false,
+        editing_internet: projection.connections.suggested_internet_port == nil,
+        own_save: false,
+        saving_network: nil,
+        initial: not projection.network.setup_completed,
+        message: nil,
+        now: System.system_time(:millisecond)
+      )
+
+    if socket.assigns.live_action == :setup and projection.network.setup_completed,
+      do: {:ok, push_navigate(socket, to: "/settings")},
+      else: {:ok, socket}
   end
 
-  def handle_event("begin", _, socket),
-    do: {:noreply, assign(socket, step: :connections, message: nil)}
+  def handle_event("edit-internet", _, socket) do
+    {:noreply, assign(socket, editing_internet: not socket.assigns.editing_internet)}
+  end
 
   def handle_event("change", %{"network" => params}, socket) do
-    params =
-      if params["mode"] == "ethernet",
-        do: Map.merge(params, %{"ip_method" => "static", "gateway" => nil}),
-        else: params
-
-    {:noreply, assign(socket, form: to_form(params, as: :network), message: nil)}
+    {:noreply, assign(socket, form: draft(socket, params), dirty: true, message: nil)}
   end
 
-  def handle_event("review", %{"network" => params}, socket) do
-    case Device.dispatch("network.validate", %{"network" => network_settings(params)}) do
-      {:ok, %{result: %{network: network}, projection: projection}} ->
+  def handle_event("add-equipment", _, socket) do
+    internet =
+      NetworkForm.internet_port(
+        socket.assigns.form.params,
+        socket.assigns.projection.connections.ports
+      )
+
+    port = if internet == "eth1", do: "eth0", else: "eth1"
+    {:noreply, assign(socket, form: draft(socket, %{"equipment_port" => port}), dirty: true)}
+  end
+
+  def handle_event("remove-equipment", _, socket),
+    do: {:noreply, assign(socket, form: draft(socket, %{"equipment_port" => ""}), dirty: true)}
+
+  def handle_event("reload", _, socket) do
+    {:noreply, socket |> assign(dirty: false, message: nil) |> refresh(Device.projection())}
+  end
+
+  def handle_event("save", %{"network" => params, "revision" => revision}, socket) do
+    projection = Device.projection()
+    socket = assign(socket, form: draft(socket, params))
+
+    cond do
+      socket.assigns.base != projection.network.desired ->
         {:noreply,
          assign(socket,
            projection: projection,
-           form: to_form(form_settings(network), as: :network),
-           step: :review,
-           message: nil
+           dirty: true,
+           message: "Settings changed in another session. Reload saved settings before editing."
          )}
 
-      {:error, %{error: error, projection: projection}} ->
-        {:noreply, assign(socket, projection: projection, message: error.message)}
+      true ->
+        case NetworkForm.to_network(socket.assigns.form.params, projection.connections.ports) do
+          {:ok, network} ->
+            result =
+              Device.dispatch("network.propose", %{"network" => network},
+                expected_revision: revision,
+                access: socket.assigns.access
+              )
+
+            reply(assign(socket, own_save: true, saving_network: network), result)
+
+          {:error, message} ->
+            {:noreply, assign(socket, message: message)}
+        end
     end
   end
 
-  def handle_event("apply", %{"revision" => revision}, %{assigns: %{step: :review}} = socket) do
-    result =
-      Device.dispatch(
-        "network.propose",
-        %{"network" => network_settings(socket.assigns.form.params)},
-        expected_revision: revision
+  def handle_event("confirm", params, socket),
+    do:
+      reply(
+        assign(socket,
+          own_save: true,
+          saving_network:
+            socket.assigns.projection.network.pending &&
+              socket.assigns.projection.network.pending.network
+        ),
+        Device.dispatch("network.confirm", Map.take(params, ["trial_id"]))
       )
 
-    command_reply(socket, result, [])
-  end
-
-  def handle_event("apply", _, socket),
-    do: {:noreply, assign(socket, message: "Review your settings before applying them.")}
-
-  def handle_event("confirm", params, socket) do
-    command_reply(socket, Device.dispatch("network.confirm", Map.take(params, ["trial_id"])),
-      step: :done
-    )
-  end
-
-  def handle_event("cancel", params, socket) do
-    command_reply(socket, Device.dispatch("network.cancel", Map.take(params, ["trial_id"])),
-      step: :connections,
-      message: "Restoring previous settings."
-    )
-  end
+  def handle_event("cancel", params, socket),
+    do:
+      reply(
+        assign(socket, own_save: false),
+        Device.dispatch("network.cancel", Map.take(params, ["trial_id"]))
+      )
 
   @doc false
-  def handle_device({:device, _projection}, socket),
-    do: assign(socket, projection: Device.projection())
+  def handle_device({:device, _}, socket), do: refresh(socket, Device.projection())
 
   def handle_info(:tick, socket) do
     Process.send_after(self(), :tick, 1_000)
     {:noreply, assign(socket, now: System.system_time(:millisecond))}
   end
 
-  def render(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :progress,
-        cond do
-          assigns.step == :done -> 4
-          assigns.projection.network.pending -> 3
-          assigns.step == :review -> 2
-          true -> 1
+  defp draft(socket, params) do
+    previous = socket.assigns.form.params
+    merged = Map.merge(previous, Map.take(params, Map.keys(previous)))
+
+    merged =
+      Enum.reduce(["internet", "shared", "equipment"], merged, fn prefix, acc ->
+        added =
+          prefix == "equipment" and previous["equipment_port"] == "" and
+            acc["equipment_port"] != ""
+
+        manual =
+          previous[prefix <> "_method"] != "static" and acc[prefix <> "_method"] == "static"
+
+        if added or manual do
+          NetworkForm.static_defaults(acc, prefix, socket.assigns.projection.network.observed)
+        else
+          acc
         end
+      end)
+
+    to_form(merged, as: :network)
+  end
+
+  defp refresh(socket, projection) do
+    previous = socket.assigns.projection.network
+
+    socket =
+      assign(socket, projection: projection, initial: not projection.network.setup_completed)
+
+    cond do
+      socket.assigns.own_save and projection.network.pending == nil and
+        projection.network.setup_completed and projection.network.error == nil and
+          projection.network.desired == socket.assigns.saving_network ->
+        socket =
+          assign(socket,
+            own_save: false,
+            dirty: false,
+            initial: false,
+            base: projection.network.desired,
+            form: to_form(NetworkForm.from_settings(projection.network.desired), as: :network),
+            message: "Settings saved."
+          )
+
+        if not previous.setup_completed or socket.assigns.live_action == :setup,
+          do: push_navigate(socket, to: "/"),
+          else: socket
+
+      socket.assigns.own_save and projection.network.pending == nil ->
+        assign(socket, own_save: false)
+
+      not socket.assigns.dirty and projection.network.desired != socket.assigns.base ->
+        assign(socket,
+          base: projection.network.desired,
+          initial: not projection.network.setup_completed,
+          form: to_form(NetworkForm.from_settings(projection.network.desired), as: :network)
+        )
+
+      true ->
+        socket
+    end
+  end
+
+  defp reply(socket, {:ok, %{projection: projection}}),
+    do: {:noreply, refresh(socket, projection)}
+
+  defp reply(socket, {:error, %{error: error, projection: projection}}),
+    do:
+      {:noreply, assign(socket, projection: projection, own_save: false, message: error.message)}
+
+  def render(assigns) do
+    internet =
+      NetworkForm.internet_port(assigns.form.params, assigns.projection.connections.ports)
+
+    assigns =
+      assign(assigns,
+        usb: Network.Access.usb?(assigns.projection.network.observed, assigns.access),
+        internet: internet,
+        internet_status:
+          if(assigns.form.params["internet_port"] == "",
+            do: "Not configured",
+            else: internet_status(internet, assigns.projection.connections.ports)
+          ),
+        stale: assigns.base != assigns.projection.network.desired,
+        pending: assigns.projection.network.pending
       )
 
     ~H"""
     <.page_header
-      eyebrow="Guided setup"
-      title="A place for every connection"
-      description="Choose how the gateway reaches the Internet and where your equipment connects."
+      title={if @initial, do: "Set up your gateway", else: "Settings"}
+      description={
+        if @initial,
+          do: "Connect what you need. Everything else can wait.",
+          else: "Change your connections here."
+      }
     />
     <div class="ui-disconnected">
       <.notice tone="warning" role="alert">
-        Connection lost. Keep USB connected and reload this page. Unconfirmed changes still roll back automatically.
+        Connection lost. Reconnect or use USB. Unconfirmed network changes restore automatically.
       </.notice>
     </div>
-    <.stepper current={@progress} labels={["Connections", "Review", "Save"]} />
-    <.notice :if={@message} tone="warning" role="alert">{@message}</.notice>
+    <.notice :if={@message} role="status">{@message}</.notice>
     <.notice :if={@projection.network.error} tone="warning" role="alert">
       {@projection.network.error.message}
     </.notice>
-    <div class="ui-content-grid">
-      <div class="ui-stack">
-        <%= cond do %>
-          <% !@projection.network.available -> %>
-            <.panel title="Connection settings are restarting" icon="clock">
-              <p>Wait for the gateway to reconnect. Unconfirmed changes still roll back.</p>
-            </.panel>
-          <% @projection.network.desired == nil -> %>
-            <.panel title="Saved settings need attention" icon="info">
-              <p>
-                Your saved file could not be read and has not been overwritten. Use recovery SSH or serial to inspect /data/nerves_gate.json.
-              </p>
-            </.panel>
-          <% @projection.network.pending != nil -> %>
-            <.panel
-              title="Check the port assignments"
-              description="The new connections are being tried. Nothing is saved yet."
-              icon="clock"
-            >
-              <div class="ui-trial-clock">
-                <span role="timer">{max(
-                  0,
-                  div(@projection.network.pending.expires_at - @now + 999, 1000)
-                )}<small>seconds</small></span><div>
-                  <strong>Automatic restore is on</strong><p>
-                    Keep these settings, or let the gateway return to the previous connections.
-                  </p>
-                </div>
+    <%= cond do %>
+      <% !@projection.network.available or @projection.network.desired == nil -> %>
+        <.notice tone="warning">
+          Saved settings are unavailable. They have not been overwritten. Reconnect, or inspect /data/nerves_gate.json using recovery SSH.
+        </.notice>
+      <% @pending != nil -> %>
+        <.panel
+          title={if @pending.auto_save, do: "Saving settings…", else: "Keep these changes?"}
+          icon="clock"
+        >
+          <%= if @pending.auto_save do %>
+            <p>Applying your connections. USB stays available. No confirmation is needed.</p>
+          <% else %>
+            <div class="ui-trial-clock">
+              <span role="timer">{max(0, div(@pending.expires_at - @now + 999, 1000))}<small>seconds</small></span>
+              <div>
+                <strong>Previous settings return automatically</strong><p>
+                  Keep the changes now, or let the timer run out.
+                </p>
               </div>
+            </div>
+            <p class="ui-help">
+              Internet access is not required. Check that your local settings are correct.
+            </p>
+            <.notice :if={!@projection.actions["network.confirm"].enabled} tone="warning">
+              {@projection.actions["network.confirm"].reason.message}
+            </.notice>
+            <div class="ui-actions">
+              <.button
+                id="confirm-settings"
+                phx-click="confirm"
+                phx-value-trial_id={@pending.id}
+                disabled={!@projection.actions["network.confirm"].enabled}
+              >Keep changes</.button>
+              <.button variant="secondary" phx-click="cancel" phx-value-trial_id={@pending.id}>Restore previous settings</.button>
+            </div>
+          <% end %>
+        </.panel>
+      <% true -> %>
+        <.notice :if={@stale} tone="warning">
+          Settings changed in another session. Your draft has not been applied.
+          <.button variant="secondary" phx-click="reload">Reload saved settings</.button>
+        </.notice>
+        <.form for={@form} id="network-form" phx-change="change" phx-submit="save" class="ui-stack">
+          <input type="hidden" name="revision" value={@projection.revision} />
+          <%= if @form.params["mode"] == "ports" do %>
+            <.panel title="Internet" icon="internet">
+              <p id="internet-summary">
+                <strong>{if @internet, do: port_label(@internet) <> " · "}{@internet_status}</strong>
+              </p>
               <p class="ui-help">
-                USB setup stays separate. Saving does not verify Internet or remote equipment access.
+                {if @internet,
+                  do: "Your gateway uses this connection. Equipment is not given Internet access.",
+                  else: "You can finish offline and add an Internet connection later."}
               </p>
-              <.notice :if={!@projection.actions["network.confirm"].enabled} tone="warning">
-                {@projection.actions["network.confirm"].reason.message}
-              </.notice>
-              <:footer>
-                <div class="ui-actions">
-                  <.button
-                    id="confirm-settings"
-                    phx-click="confirm"
-                    phx-value-trial_id={@projection.network.pending.id}
-                    disabled={!@projection.actions["network.confirm"].enabled}
-                    icon="check"
-                  >Keep these settings</.button>
-                  <.button
-                    variant="secondary"
-                    phx-click="cancel"
-                    phx-value-trial_id={@projection.network.pending.id}
-                    disabled={!@projection.actions["network.cancel"].enabled}
-                  >Restore previous settings</.button>
-                </div>
-              </:footer>
-            </.panel>
-          <% @step == :welcome -> %>
-            <.panel
-              title="Start with the connections"
-              description="Two Ethernet ports. One independent setup connection."
-              icon="network"
-            >
-              <div
-                class="ui-setup-diagram"
-                role="img"
-                aria-label="USB for setup; Ethernet for Internet and equipment"
-              >
-                <div><.icon name="internet" /><strong>Internet</strong><span>Your router</span></div><span
-                  class="ui-diagram-line"
-                  aria-hidden="true"
-                ></span><div class="ui-diagram-gateway">
-                  <.icon name="port" /><strong>Gateway</strong><span>USB setup</span>
-                </div><span class="ui-diagram-line" aria-hidden="true"></span><div>
-                  <.icon name="equipment" /><strong>Equipment</strong><span>Your network</span>
-                </div>
-              </div>
-              <p>
-                Choose a connection for each side, then give the gateway an unused address in your equipment network. Your equipment keeps its existing addresses.
-              </p>
-              <.notice icon="usb" title="Keep the USB cable connected">
-                Setup works without Internet and uses neither Ethernet port. USB does not automatically share your laptop's Internet.
-              </.notice>
-              <p class="ui-help">
-                Mobile Internet, automatic backup and remote-access enrollment are not available in this build.
-              </p>
-              <:footer><.button phx-click="begin" icon="arrow">Set up connections</.button></:footer>
-            </.panel>
-          <% @step == :connections -> %>
-            <.form
-              for={@form}
-              id="network-form"
-              phx-change="change"
-              phx-submit="review"
-              class="ui-stack"
-            >
-              <.panel
-                title="Internet connection"
-                description="How should the two Ethernet ports work together?"
-                icon="internet"
-              >
-                <.choice_group field={@form[:mode]} label="Connection arrangement">
+              <.button
+                variant="secondary"
+                phx-click="edit-internet"
+                aria-expanded={to_string(@editing_internet)}
+                aria-controls="internet-options"
+              >{if @editing_internet, do: "Hide Internet settings", else: "Change Internet connection"}</.button>
+              <div :if={@editing_internet} id="internet-options">
+                <.choice_group field={@form[:internet_port]} label="Internet port">
                   <:option
-                    value="ethernet"
-                    title="Separate networks"
-                    description="One port for your router. The other for equipment."
-                    icon="network"
+                    :if={@initial}
+                    value="auto"
+                    title="Automatic"
+                    description="Use the detected connection."
                   />
-                  <:option
-                    value="shared"
-                    title="One shared network"
-                    description="Router and equipment already belong to the same network."
-                    icon="port"
-                  />
-                </.choice_group>
-                <.choice_group
-                  :if={@form.params["mode"] == "ethernet"}
-                  field={@form[:internet_port]}
-                  label="Which port connects to your Internet router?"
-                  description="The other port is automatically reserved for equipment."
-                >
                   <:option
                     value="eth0"
-                    title="Port 1 → Internet"
-                    description="Port 2 → Equipment"
-                    icon="port"
+                    title="Port 1"
+                    description={internet_status("eth0", @projection.connections.ports)}
                   />
                   <:option
                     value="eth1"
-                    title="Port 2 → Internet"
-                    description="Port 1 → Equipment"
-                    icon="port"
+                    title="Port 2"
+                    description={internet_status("eth1", @projection.connections.ports)}
                   />
+                  <:option value="" title="Not now" />
                 </.choice_group>
-                <p :if={@form.params["mode"] == "ethernet"} class="ui-help">
-                  The Internet router assigns its address automatically (DHCP).
-                </p>
-                <.notice
-                  :if={@form.params["mode"] == "shared"}
-                  tone="warning"
-                  title="Both ports will be joined"
-                >
-                  This explicitly joins both Ethernet ports. Use only for one trusted network, never two different networks.
-                </.notice>
-              </.panel>
-              <.panel
-                title="Equipment connection"
-                description="An address for the gateway, not a change to your equipment."
-                icon="equipment"
-              >
-                <:meta :if={@form.params["mode"] == "ethernet"}>
-                  <span class="ui-port-tag">{port_label(
-                    if @form.params["internet_port"] == "eth0", do: "eth1", else: "eth0"
-                  )}</span>
-                </:meta>
-                <.choice_group
-                  :if={@form.params["mode"] == "shared"}
-                  field={@form[:ip_method]}
-                  label="Gateway address assignment"
-                >
-                  <:option
-                    value="static"
-                    title="Choose an address"
-                    description="Use an unused address in the existing subnet."
-                    icon="settings"
-                  />
-                  <:option
-                    value="dhcp"
-                    title="Automatic"
-                    description="Let the existing router assign an address."
-                    icon="network"
-                  />
-                </.choice_group>
-                <input
-                  :if={@form.params["mode"] == "ethernet"}
-                  type="hidden"
-                  name="network[ip_method]"
-                  value="static"
+                <.address_fields
+                  :if={@form.params["internet_port"] != ""}
+                  form={@form}
+                  prefix="internet"
                 />
-                <div :if={@form.params["ip_method"] == "static"} class="ui-field-grid">
+              </div>
+            </.panel>
+            <.panel title="Equipment" icon="equipment">
+              <%= if @form.params["equipment_port"] == "" do %>
+                <input type="hidden" name="network[equipment_port]" value="" />
+                <p>Not configured. Add your equipment now or later.</p>
+                <.button variant="secondary" phx-click="add-equipment">Add equipment</.button>
+              <% else %>
+                <.choice_group field={@form[:equipment_port]} label="Equipment port">
+                  <:option value="eth0" title="Port 1" />
+                  <:option value="eth1" title="Port 2" />
+                </.choice_group>
+                <div class="ui-field-grid">
                   <.field
-                    field={@form[:static_ip]}
-                    label="Gateway's equipment-side address"
-                    help="An unused address in your equipment's subnet."
+                    field={@form[:equipment_ip]}
+                    label="Gateway address on the equipment network"
+                    help="An unused address in your equipment’s subnet. Your equipment keeps its own addresses."
                     placeholder="192.168.10.2"
-                    inputmode="decimal"
-                    autocomplete="off"
                     required
+                    autocomplete="off"
                   />
                   <.field
-                    field={@form[:subnet_mask]}
-                    label="Equipment subnet mask"
-                    help="Use the mask your equipment network uses."
-                    placeholder="255.255.255.0"
-                    inputmode="decimal"
-                    autocomplete="off"
+                    field={@form[:equipment_mask]}
+                    label="Subnet mask"
                     required
-                  />
-                  <.field
-                    :if={@form.params["mode"] == "shared"}
-                    field={@form[:gateway]}
-                    label="Router address (optional)"
-                    inputmode="decimal"
                     autocomplete="off"
                   />
                 </div>
                 <p class="ui-help">
-                  Not sure which address is free? Ask your network administrator. Automatic discovery is not available yet; no Ethernet DHCP server is started.
+                  Suggested address—check that it matches your equipment’s subnet and is unused. No equipment addresses are changed and no DHCP server is started.
                 </p>
-                <:footer>
-                  <div class="ui-actions ui-actions--between">
-                    <span class="ui-help">Nothing changes until you review.</span><.button
-                      type="submit"
-                      icon="arrow"
-                    >Review settings</.button>
-                  </div>
-                </:footer>
-              </.panel>
-            </.form>
-          <% @step == :review -> %>
-            <.panel
-              title="Review before changing anything"
-              description="Your connection plan"
-              icon="network"
-            >
-              <div class="ui-settings-list">
-                <.setting_row
-                  :if={@form.params["mode"] == "ethernet"}
-                  label="Internet"
-                  description="Address assigned by your router"
-                >
-                  {port_label(@form.params["internet_port"])}
-                </.setting_row>
-                <.setting_row :if={@form.params["mode"] == "ethernet"} label="Equipment">
-                  {port_label(if @form.params["internet_port"] == "eth0", do: "eth1", else: "eth0")}
-                </.setting_row>
-                <.setting_row label="Arrangement">
-                  {if @form.params["mode"] == "shared",
-                    do: "One shared network",
-                    else: "Separate networks"}
-                </.setting_row>
-                <.setting_row label="Gateway's equipment-side address">
-                  <code>{if @form.params["ip_method"] == "dhcp",
-                    do: "Automatic (DHCP)",
-                    else: @form.params["static_ip"]}</code>
-                </.setting_row>
-                <.setting_row :if={@form.params["ip_method"] == "static"} label="Subnet mask">
-                  <code>{@form.params["subnet_mask"]}</code>
-                </.setting_row>
-                <.setting_row
-                  :if={@form.params["mode"] == "shared" && @form.params["ip_method"] == "static"}
-                  label="Router address"
-                >
-                  <code>{@form.params["gateway"] || "Not set"}</code>
-                </.setting_row>
-              </div>
-              <.notice :if={@form.params["mode"] == "shared"} tone="warning">
-                Both ports will be joined into one shared network.
-              </.notice>
-              <.notice icon="clock" title="A 60-second safety check">
-                Ethernet traffic may pause. USB setup is unchanged. Confirm within 60 seconds, or the previous settings return automatically.
-              </.notice>
-              <.notice :if={!@projection.actions["network.propose"].enabled} tone="warning">
-                {@projection.actions["network.propose"].reason.message}
-              </.notice>
-              <:footer>
-                <div class="ui-actions">
-                  <.button
-                    id="apply-settings"
-                    phx-click="apply"
-                    phx-value-revision={@projection.revision}
-                    disabled={!@projection.actions["network.propose"].enabled}
-                  >Try for 60 seconds</.button><.button phx-click="begin" variant="secondary">Edit settings</.button>
-                </div>
-              </:footer>
+                <.button variant="quiet" phx-click="remove-equipment">Add equipment later</.button>
+              <% end %>
             </.panel>
-          <% @step == :done -> %>
-            <.panel
-              title="Connection settings saved"
-              description="Your local connection plan is in place."
-              icon="check"
-            >
-              <p>Your port assignments and local address will survive a restart.</p>
-              <.notice title="Next: private remote access" icon="shield">
-                Remote access is not verified. This build cannot check enrollment, network permissions or reachability from your remote computer.
+          <% else %>
+            <.panel title="Shared network" icon="network">
+              <.notice tone="warning">
+                Both Ethernet ports will be joined. Only use this for one trusted network, never two different networks.
               </.notice>
-              <:footer><.button href="/" icon="arrow">Open overview</.button></:footer>
+              <.address_fields form={@form} prefix="shared" />
             </.panel>
-        <% end %>
-      </div>
-      <aside class="ui-stack ui-context-rail" aria-label="Connection context">
-        <.live_component module={NervesGateWeb.ConnectionPanel} id="setup-connections" kind={:ports} />
-        <div class="ui-rail-note">
-          <.icon name="usb" /><div>
-            <strong>USB stays independent</strong><p>
-              Change Ethernet connections without moving your setup cable.
-            </p>
+          <% end %>
+          <details
+            id="advanced-network"
+            open={@form.params["mode"] == "shared"}
+            phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+          >
+            <summary>Advanced: shared network</summary>
+            <.choice_group field={@form[:mode]} label="Port arrangement">
+              <:option
+                value="ports"
+                title="Separate ports"
+                description="Internet and equipment stay separate."
+              />
+              <:option
+                value="shared"
+                title="One shared network"
+                description="Explicitly join both Ethernet ports."
+              />
+            </.choice_group>
+          </details>
+          <.notice :if={@initial and @usb} icon="usb">
+            You’re connected through USB. Settings save directly; USB stays available.
+          </.notice>
+          <p :if={!@initial or !@usb} class="ui-help">
+            Network changes have a 60-second undo window. Keep them when ready, or they restore automatically.
+          </p>
+          <.notice :if={!@projection.actions["network.propose"].enabled} tone="warning">
+            {@projection.actions["network.propose"].reason.message}
+          </.notice>
+          <div class="ui-actions">
+            <.button
+              id="apply-settings"
+              type="submit"
+              disabled={@stale or !@projection.actions["network.propose"].enabled}
+              phx-disable-with="Applying…"
+            >{if @initial, do: "Finish setup", else: "Apply changes"}</.button>
+            <.button :if={@initial} href="/" variant="quiet">Do this later</.button>
           </div>
-        </div>
-      </aside>
+        </.form>
+    <% end %>
+    <.panel :if={!@initial} title="Tailscale" icon="shield" class="ui-settings-details">
+      <p>
+        {if @projection.remote_access.state == "online",
+          do: "Connected to your private network.",
+          else: "Private access to this gateway, without an auth key."}
+      </p>
+      <.button href="/remote" variant="secondary">Configure Tailscale</.button>
+    </.panel>
+    <details
+      id="connection-details"
+      class="ui-settings-details"
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
+      <summary>Connection details</summary>
+      <.live_component module={NervesGateWeb.ConnectionPanel} id="setup-connections" kind={:ports} />
+      <p class="ui-help">
+        USB is independent. It does not share your computer’s Internet connection.
+      </p>
+    </details>
+    <details
+      id="gateway-details"
+      class="ui-settings-details"
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
+      <summary>Gateway &amp; access</summary>
+      <p>Firmware {@projection.system.firmware} · {@projection.system.target}</p>
+      <p>Firmware listens on every IPv4 interface at port 4000.</p>
+      <.notice tone="warning">
+        Anyone who can reach this page can change settings. Use trusted networks only; authentication is not enabled.
+      </.notice>
+    </details>
+    """
+  end
+
+  attr(:form, :any, required: true)
+  attr(:prefix, :string, required: true)
+
+  defp address_fields(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :fields,
+        Map.new(~w(method ip mask gateway dns), fn key ->
+          {key, assigns.form[assigns.prefix <> "_" <> key]}
+        end)
+      )
+
+    ~H"""
+    <.choice_group field={@fields["method"]} label="Address assignment">
+      <:option value="dhcp" title="Automatic (DHCP)" />
+      <:option value="static" title="Manual" />
+    </.choice_group>
+    <p :if={@fields["method"].value == "static"} class="ui-help">
+      We filled in the current network details when available, otherwise example defaults. Check them before saving; reserve a DHCP address on your router before using it manually.
+    </p>
+    <div :if={@fields["method"].value == "static"} class="ui-field-grid">
+      <.field field={@fields["ip"]} label="Gateway address" required autocomplete="off" />
+      <.field field={@fields["mask"]} label="Subnet mask" required autocomplete="off" />
+      <.field field={@fields["gateway"]} label="Router address (optional)" autocomplete="off" />
+      <.field
+        field={@fields["dns"]}
+        label="DNS servers (optional)"
+        help="IPv4 addresses, separated by commas."
+        autocomplete="off"
+      />
     </div>
     """
   end
 
-  defp form_settings(settings) do
-    address =
-      (settings && settings["equipment"]) ||
-        %{
-          "ip_method" => "static",
-          "static_ip" => "",
-          "subnet_mask" => "255.255.255.0",
-          "gateway" => nil
-        }
-
-    Map.merge(address, %{
-      "mode" => if(settings && settings["mode"] == "shared", do: "shared", else: "ethernet"),
-      "internet_port" => (settings && settings["internet_port"]) || "eth0"
-    })
+  defp internet_status(nil, ports) do
+    if Enum.count(ports, &(&1.link and Map.get(&1, :addresses, []) != [])) > 1,
+      do: "Choose which connection to use",
+      else: "No Internet connection selected"
   end
 
-  defp network_settings(params) do
-    address = Map.take(params, Map.keys(Config.address_defaults()))
-
-    case params["mode"] do
-      "shared" ->
-        %{"mode" => "shared", "equipment" => address}
-
-      "ethernet" ->
-        %{
-          "mode" => "ethernet",
-          "internet_port" => params["internet_port"],
-          "equipment" => address
-        }
-
-      _ ->
-        %{}
+  defp internet_status(name, ports) do
+    case Enum.find(ports, &(&1.name == name)) do
+      nil -> "Not installed"
+      port -> Network.Discovery.status(port)
     end
   end
-
-  defp command_reply(socket, {:ok, %{projection: projection}}, assigns),
-    do: {:noreply, socket |> assign(projection: projection, message: nil) |> assign(assigns)}
-
-  defp command_reply(socket, {:error, %{error: error, projection: projection}}, _),
-    do: {:noreply, assign(socket, projection: projection, message: error.message)}
 end

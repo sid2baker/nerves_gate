@@ -57,16 +57,42 @@ defmodule NervesGate.LANTest do
   end
 
   test "new defaults never bridge, serve DHCP, or configure USB" do
-    configs = Vintage.configurations(NervesGate.Config.defaults()["network"])
+    configs = NervesGate.Network.Vintage.configurations(NervesGate.Config.defaults()["network"])
     assert Enum.sort(Enum.map(configs, &elem(&1, 0))) == ["br0", "eth0", "eth1"]
 
-    for {_, config} <- configs do
-      assert config.ipv4.method == :disabled
+    for {name, config} <- configs do
+      assert config.ipv4.method ==
+               (if name == "br0" do
+                  :disabled
+                else
+                  :dhcp
+                end)
+
       refute Map.has_key?(config, :dhcpd)
     end
 
-    raw = LAN.to_raw_config("br0", Map.new(configs)["br0"], [])
-    assert {:fun, LAN, :sync_members, [[]]} in raw.up_cmds
+    raw = NervesGate.Network.LAN.to_raw_config("br0", Map.new(configs)["br0"], [])
+    assert {:fun, NervesGate.Network.LAN, :sync_members, [[]]} in raw.up_cmds
+  end
+
+  test "DHCP teardown clears routes before removing the source address" do
+    for name <- ["eth0", "eth1", "br0"] do
+      config = %{type: LAN, ipv4: %{method: :dhcp}}
+
+      config =
+        if name == "br0" do
+          Map.put(config, :vintage_net_bridge, %{interfaces: ["eth0", "eth1"]})
+        else
+          config
+        end
+
+      raw = LAN.to_raw_config(name, config, [])
+      assert hd(raw.down_cmds) == {:fun, VintageNet.RouteManager, :clear_route, [name]}
+
+      assert Enum.any?(tl(raw.down_cmds), fn cmd ->
+               match?({:run_ignore_errors, "ip", ["addr", "flush" | _]}, cmd)
+             end)
+    end
   end
 
   test "either port can provide Internet without a route or DHCP server on equipment" do

@@ -38,15 +38,61 @@ defmodule NervesGate.BridgeIntegrationTest do
     }
 
     static = %{"mode" => "shared", "equipment" => static}
-    config = %{Config.defaults() | "network" => static}
-    :ok = Config.save(config, "/run/nerves_gate.json")
 
     server =
       start_supervised!(
         {Network, path: "/run/nerves_gate.json", adapter: {Vintage, nil}, poll_ms: 100}
       )
 
-    wait(fn -> Network.ready?(Vintage.snapshot(nil), static) end)
+    # Fresh boot discovers the router, without USB or a saved role assignment.
+    wait(fn -> hd(Vintage.snapshot(nil).ports).addresses != [] end)
+    snapshot = Vintage.snapshot(nil)
+    assert NervesGate.Network.Discovery.internet_port(snapshot.ports) == "eth0"
+    assert Enum.all?(snapshot.ports, &is_nil(&1.master))
+    assert snapshot.bridge.addresses == []
+    detected_ip = hd(hd(snapshot.ports).addresses).address
+    port = start_web()
+    assert settings_http?("peer0", port, detected_ip)
+    IO.puts("PASS fresh DHCP detection and setup over Ethernet before USB exists")
+
+    cmd("ip", ~w(link add usb0 type veth peer name setup0))
+    cmd("ip", ~w(netns add setup))
+    cmd("ip", ~w(link set setup0 netns setup))
+    cmd("ip", ~w(-n setup link set lo up))
+    cmd("ip", ~w(-n setup link set setup0 up))
+    cmd("ip", ~w(-n setup addr add 172.30.0.2/30 dev setup0))
+
+    :ok =
+      VintageNet.configure(
+        "usb0",
+        %{
+          type: VintageNetEthernet,
+          ipv4: %{method: :static, address: "172.30.0.1", netmask: "255.255.255.252"}
+        },
+        persist: false
+      )
+
+    access = %{local: "172.30.0.1", peer: {172, 30, 0, 2}}
+    wait(fn -> Network.Access.usb?(Vintage.snapshot(nil), access) end)
+    assert settings_http?("setup", port)
+
+    partial = %{
+      "mode" => "ports",
+      "eth0" => %{"role" => "internet", "address" => Config.address_defaults()},
+      "eth1" => nil
+    }
+
+    assert {:ok, _} = Network.propose(partial, server, access)
+    wait(fn -> Network.status(server).trial == nil end)
+    assert Network.status(server).config["setup_completed"]
+    assert Network.status(server).config["network"] == partial
+    assert settings_http?("setup", port)
+    IO.puts("PASS first USB setup auto-saves Internet-only settings; equipment can wait")
+
+    assert {:ok, trial} = Network.propose(static, server, access)
+    refute Network.status(server).trial.auto_save
+    wait(fn -> Network.status(server).ready end)
+    assert :ok = Network.confirm(trial, server)
     wait(fn -> ping?("10.45.0.2") end)
     cmd("ip", ~w(netns exec peer0 ping -c 1 -W 1 10.45.0.10))
     IO.puts("PASS single-port gateway-to-peer and peer-to-gateway")
@@ -77,6 +123,7 @@ defmodule NervesGate.BridgeIntegrationTest do
     assert {:ok, trial} = Network.propose(dhcp, server)
     wait(fn -> Network.status(server).ready end)
     assert :ok = Network.confirm(trial, server)
+    wait(fn -> Vintage.snapshot(nil).bridge.addresses != [] end)
     dhcp_ip = hd(Vintage.snapshot(nil).bridge.addresses).address
     assert dhcp_ip in Enum.map(50..55, &"10.45.0.#{&1}")
     IO.puts("PASS real DHCP client on br0: #{dhcp_ip}")
@@ -117,24 +164,11 @@ defmodule NervesGate.BridgeIntegrationTest do
     assert ping?("10.45.0.2")
     IO.puts("PASS manager restart restores confirmed IP without recreating the bridge")
 
-    # The real settings endpoint starts without USB and accepts either LAN peer.
-    port = start_web()
+    # The same endpoint accepts both LAN peers after a topology change.
     assert settings_http?("peer0", port, "10.45.0.10")
     assert settings_http?("peer1", port, "10.45.0.10")
-    IO.puts("PASS settings page over both Ethernet ports without USB")
-
-    # USB's independent address remains available through Ethernet role changes.
-    cmd("ip", ~w(link add usb0 type veth peer name setup0))
-    cmd("ip", ~w(netns add setup))
-    cmd("ip", ~w(link set setup0 netns setup))
-    cmd("ip", ~w(link set usb0 up))
-    cmd("ip", ~w(addr add 172.30.0.1/30 dev usb0))
-    cmd("ip", ~w(-n setup link set lo up))
-    cmd("ip", ~w(-n setup link set setup0 up))
-    cmd("ip", ~w(-n setup addr add 172.30.0.2/30 dev setup0))
-
     assert settings_http?("setup", port)
-    IO.puts("PASS settings page over USB added after the endpoint started")
+    IO.puts("PASS settings page over both Ethernet ports and independent USB")
 
     separated = %{
       "mode" => "ethernet",
@@ -228,7 +262,7 @@ defmodule NervesGate.BridgeIntegrationTest do
         stderr_to_stdout: true
       )
 
-    code == 0 and body =~ "Setup &amp; recovery"
+    code == 0 and body =~ "id=\"gateway-details\""
   end
 
   defp cmd(command, args) do

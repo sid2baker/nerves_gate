@@ -38,7 +38,7 @@ defmodule NervesGate.DeviceTest do
     ]
 
     network = start_supervised!({Network, opts})
-    device_opts = [name: nil, network: opts[:name], topic: "device:#{dir}"]
+    device_opts = [name: nil, network: opts[:name], remote: nil, topic: "device:#{dir}"]
     device = start_supervised!({Device, device_opts})
     Device.subscribe(device)
     Device.projection(device)
@@ -192,7 +192,7 @@ defmodule NervesGate.DeviceTest do
     assert trial.actions["network.confirm"].enabled
 
     Host.simulate(
-      %{ports: [%{name: "eth0", present: true, link: false, master: "br0"}]},
+      %{ports: [%{name: "eth0", present: true, link: true, master: nil}]},
       ctx.host
     )
 

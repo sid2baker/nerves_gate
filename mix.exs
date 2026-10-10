@@ -17,7 +17,9 @@ defmodule NervesGate.MixProject do
           include_erts: &Nerves.erts/0,
           steps: [&set_source_date_epoch/1, &Nerves.init_release/1, :assemble]
         ]
-      ]
+      ],
+      dialyzer: [plt_add_apps: [:ex_unit]],
+      aliases: aliases()
     ]
   end
 
@@ -25,7 +27,7 @@ defmodule NervesGate.MixProject do
     [extra_applications: [:logger, :crypto], mod: {NervesGate.Application, []}]
   end
 
-  def cli, do: [preferred_targets: [run: :host, test: :host]]
+  def cli, do: [preferred_targets: [run: :host, test: :host], preferred_envs: [ci: :test]]
 
   defp set_source_date_epoch(release) do
     if Mix.target() in @targets do
@@ -39,6 +41,12 @@ defmodule NervesGate.MixProject do
 
   defp deps do
     [
+      {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
+      {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
+      {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:vibe_kit, "~> 0.1", only: [:dev, :test]},
       {:nerves, "~> 2.0.0-pre.3", runtime: false},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
@@ -52,7 +60,7 @@ defmodule NervesGate.MixProject do
       # tailscale_ex owns its daemon; host simulation must never start the workstation VPN.
       {:tailscale,
        github: "sid2baker/tailscale_ex",
-       ref: "5e23c0f3e362ce5e0b330e5f3ff473dec55ca0e1",
+       ref: "3a859e7dc30c14b993c43b7b9b93c9d2f38c99a6",
        runtime: Mix.target() != :host},
       {:nerves_runtime, "~> 0.13", targets: @targets},
       {:nerves_motd, "~> 0.1", targets: @targets},
@@ -68,6 +76,20 @@ defmodule NervesGate.MixProject do
        runtime: false,
        targets: :ec100},
       {:nerves_system_x86_64, path: "systems/x86_64", runtime: false, targets: :x86_64}
+    ]
+  end
+
+  defp aliases() do
+    [
+      ci: [
+        "compile --warnings-as-errors",
+        "format --check-formatted",
+        "test",
+        "credo --strict",
+        "dialyzer",
+        "ex_dna --max-clones 0",
+        "reach.check --arch --smells"
+      ]
     ]
   end
 end

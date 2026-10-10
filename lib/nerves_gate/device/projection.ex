@@ -3,14 +3,19 @@ defmodule NervesGate.Device.Projection do
   alias NervesGate.Config
   alias NervesGate.Device.Error
 
-  def build(%{status: status, actions: actions}) do
+  def build(%{status: status, actions: actions, remote: remote}) do
     %{
       version: 2,
       system: %{firmware: NervesGate.version(), target: to_string(NervesGate.target())},
       network: network(status),
       connections: connections(status),
-      capabilities: %{ethernet: true, mobile: false, failover: false, remote_enrollment: false},
-      remote_access: %{state: "unavailable", verified: false, permitted_routes: nil},
+      capabilities: %{
+        ethernet: true,
+        mobile: false,
+        failover: false,
+        remote_enrollment: remote.available
+      },
+      remote_access: remote,
       actions: actions
     }
   end
@@ -25,24 +30,25 @@ defmodule NervesGate.Device.Projection do
     mode = settings && settings["mode"]
     ports = if observed, do: observed.ports, else: []
 
+    suggested = NervesGate.Network.Discovery.internet_port(ports)
+
+    internet_port =
+      if mode == "unconfigured", do: suggested, else: Config.role_port(settings, "internet")
+
     internet =
-      cond do
-        !observed -> nil
-        mode == "ethernet" -> Enum.find(ports, &(&1.name == settings["internet_port"]))
-        mode == "shared" -> observed.bridge
-        true -> nil
-      end
+      if mode == "shared" and observed,
+        do: observed.bridge,
+        else: Enum.find(ports, &(&1.name == internet_port))
 
     %{
       mode: mode,
+      suggested_internet_port: suggested,
       ports:
         Enum.map(ports, fn port ->
           role =
             cond do
               mode == "shared" -> "shared"
-              mode != "ethernet" -> "unassigned"
-              port.name == settings["internet_port"] -> "internet"
-              true -> "equipment"
+              true -> get_in(Config.ports(settings), [port.name, "role"]) || "unassigned"
             end
 
           Map.put(port, :role, role)
@@ -51,7 +57,9 @@ defmodule NervesGate.Device.Projection do
         link: internet != nil and internet.link,
         addressed: internet != nil and Map.get(internet, :addresses, []) != [],
         health:
-          if(internet && Map.get(internet, :connection) == :internet,
+          if(
+            internet && internet.link && Map.get(internet, :addresses, []) != [] &&
+              Map.get(internet, :connection) == :internet,
             do: "online",
             else: "unverified"
           ),

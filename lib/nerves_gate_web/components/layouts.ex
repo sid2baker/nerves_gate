@@ -43,7 +43,6 @@ defmodule NervesGateWeb.Layouts do
               ><.icon name={icon} /><span>{label}</span></a>
             </nav>
             <div class="ui-sidebar-bottom">
-              <a href="/setup" class="ui-setup-link" aria-current={if @path == "/setup", do: "page"}><.icon name="settings" />Guided setup<.icon name="arrow" /></a>
               <div class="ui-local-label">
                 <.icon name="usb" /><div>
                   <strong>Local management</strong><span>Setup & recovery</span>

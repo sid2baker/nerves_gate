@@ -92,7 +92,7 @@ defmodule NervesGateWeb.CoreComponents do
   attr(:type, :string, default: "button")
   attr(:variant, :string, values: ["primary", "secondary", "quiet"], default: "primary")
   attr(:icon, :string, default: nil)
-  attr(:rest, :global, include: ~w(disabled form name value))
+  attr(:rest, :global, include: ~w(disabled form name value target rel referrerpolicy))
   slot(:inner_block, required: true)
 
   def button(assigns) do

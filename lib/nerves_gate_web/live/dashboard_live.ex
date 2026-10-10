@@ -30,7 +30,7 @@ defmodule NervesGateWeb.DashboardLive do
       </.notice>
     </div>
     <.notice :if={@projection.network.pending} tone="warning" icon="clock">
-      Settings are being tried, not yet saved. <a href="/setup" class="ui-text-link">Confirm or restore them</a>.
+      Settings are being tried, not yet saved. <a href="/settings" class="ui-text-link">Confirm or restore them</a>.
     </.notice>
     <%= case @live_action do %>
       <% :overview -> %>
@@ -50,14 +50,17 @@ defmodule NervesGateWeb.DashboardLive do
             <p>
               {if @projection.network.setup_completed,
                 do:
-                  "Your equipment's remote reachability is still unverified. This build cannot check private-network enrollment or permissions.",
+                  "Local connections are saved. Connect Tailscale for private access to this gateway; equipment access remains separate.",
                 else:
                   "Choose how your gateway reaches the Internet and connects to equipment. USB keeps setup separate from both."}
             </p>
             <div class="ui-actions">
-              <.button href="/setup" icon="arrow">{if @projection.network.setup_completed,
-                do: "Review connections",
-                else: "Set up connections"}</.button><.button href="/remote" variant="quiet">About remote access</.button>
+              <.button
+                href={if @projection.network.setup_completed, do: "/settings", else: "/setup"}
+                icon="arrow"
+              >{if @projection.network.setup_completed,
+                do: "Change settings",
+                else: "Set up connections"}</.button><.button href="/remote" variant="quiet">Configure Tailscale</.button>
             </div>
           </div>
           <div class="ui-hero-symbol" aria-hidden="true"><.icon name="shield" /></div>
@@ -75,9 +78,11 @@ defmodule NervesGateWeb.DashboardLive do
               icon="equipment"
             >
               <.status>
-                {if @settings && @settings["mode"] != "unconfigured",
-                  do: "Network assigned · Reachability unverified",
-                  else: "No network assigned"}
+                {if @settings &&
+                      (@settings["mode"] == "shared" or
+                         NervesGate.Config.role_port(@settings, "equipment") != nil),
+                    do: "Network assigned · Reachability unverified",
+                    else: "No network assigned"}
               </.status>
               <p class="ui-muted">
                 Connecting equipment does not expose it remotely. Network permissions and a check from a remote computer are separate steps.
@@ -127,7 +132,7 @@ defmodule NervesGateWeb.DashboardLive do
                 Use an unused gateway address in the existing subnet. No Ethernet DHCP server is started and no remote permissions are changed by this setup.
               </.notice>
               <:footer>
-                <.button href="/setup" variant="secondary" icon="arrow">Configure equipment connection</.button>
+                <.button href="/settings" variant="secondary" icon="arrow">Configure equipment connection</.button>
               </:footer>
             </.panel>
           </div>
@@ -155,13 +160,19 @@ defmodule NervesGateWeb.DashboardLive do
             <.panel title="Connection settings" icon="settings">
               <.setting_row
                 label="Internet source"
-                description="Automatic or manual addressing, as set in guided setup."
+                description="Automatic or manual addressing, as set in Settings."
               >
-                {if @settings && @settings["mode"] != "unconfigured",
-                  do: "Ethernet",
-                  else: "Not assigned"}
+                {if @settings &&
+                      (@settings["mode"] == "shared" or
+                         NervesGate.Config.role_port(@settings, "internet") != nil),
+                    do: "Ethernet",
+                    else: "Not assigned"}
               </.setting_row>
-              <.notice :if={@settings && @settings["mode"] != "unconfigured"}>
+              <.notice :if={
+                @settings &&
+                  (@settings["mode"] == "shared" or
+                     NervesGate.Config.role_port(@settings, "internet") != nil)
+              }>
                 {cond do
                   !@projection.connections.internet.link ->
                     "Connect the Internet port to your router and check the cable status."
@@ -177,7 +188,7 @@ defmodule NervesGateWeb.DashboardLive do
                 end}
               </.notice>
               <:footer>
-                <.button href="/setup" variant="secondary" icon="arrow">Change connections</.button>
+                <.button href="/settings" variant="secondary" icon="arrow">Change connections</.button>
               </:footer>
             </.panel>
             <.panel title="Mobile Internet & automatic backup" icon="internet">
@@ -197,113 +208,14 @@ defmodule NervesGateWeb.DashboardLive do
             />
           </aside>
         </div>
-      <% :remote -> %>
-        <.page_header
-          eyebrow="Private network"
-          title="Remote access"
-          description="Access to the equipment you choose. Not public exposure."
-        />
-        <.panel
-          title="Private access, not public exposure"
-          description="The next part of your gateway's setup"
-          icon="shield"
-        >
-          <:meta>
-            <.status>Setup unavailable</.status>
-          </:meta>
-          <p class="ui-prose">
-            Remote access will use Tailscale. This build does not inspect existing enrollment or route permissions, and local setup alone does not grant equipment access.
-          </p>
-          <div class="ui-roadmap">
-            <div>
-              <span>01</span><div>
-                <h3>Join your private network</h3><p>
-                  Enroll the gateway in Tailscale under your account.
-                </p>
-              </div>
-            </div>
-            <div>
-              <span>02</span><div>
-                <h3>Choose permitted equipment</h3><p>
-                  Allow only the networks and access rules you need.
-                </p>
-              </div>
-            </div>
-            <div>
-              <span>03</span><div>
-                <h3>Verify from your remote computer</h3><p>
-                  Check the equipment itself, not just the VPN connection.
-                </p>
-              </div>
-            </div>
-          </div>
-          <:footer>
-            <span class="ui-help">Remote access is not reported as ready until it can actually be verified.</span>
-          </:footer>
-        </.panel>
-      <% :settings -> %>
-        <.page_header
-          eyebrow="Gateway"
-          title="Settings"
-          description="Local access, firmware information and technical details."
-        />
-        <div class="ui-stack">
-          <.panel
-            title="Setup & recovery"
-            icon="usb"
-            description="Temporary network access and USB recovery."
-          >
-            <div class="ui-settings-list">
-              <.setting_row
-                label="Web setup"
-                description="Firmware listens on every IPv4 interface at port 4000. Development preview stays on this computer."
-              >
-                <.status tone="warning">Temporary access</.status>
-              </.setting_row>
-              <.setting_row
-                label="Ethernet & VPN web access"
-                description="Available at reachable gateway addresses; VPN enrollment is still separate."
-              >
-                Enabled on firmware
-              </.setting_row>
-              <.setting_row
-                label="Owner account"
-                description="Anyone who can reach this page can change settings. Use only on trusted networks."
-              >
-                <.status>Not available yet</.status>
-              </.setting_row>
-            </div>
-            <:footer>
-              <.button href="/setup" variant="secondary" icon="arrow">Open guided setup</.button>
-            </:footer>
-          </.panel>
-          <.panel
-            title="Firmware & diagnostics"
-            icon="settings"
-            description="Details for maintenance and troubleshooting."
-          >
-            <div class="ui-settings-list">
-              <.setting_row label="Firmware version">
-                <code>{@projection.system.firmware}</code>
-              </.setting_row>
-              <.setting_row label="Platform"><code>{@projection.system.target}</code></.setting_row>
-              <.setting_row label="Browser updates & log downloads">
-                <.status>Not available yet</.status>
-              </.setting_row>
-            </div>
-            <.notice :if={@projection.network.error} tone="warning">
-              {@projection.network.error.message} <code>({@projection.network.error.code})</code>
-            </.notice>
-            <details class="ui-details">
-              <summary>Connection diagnostics</summary><pre>{inspect(@projection.network.observed, pretty: true)}</pre>
-            </details>
-          </.panel>
-        </div>
     <% end %>
     """
   end
 
-  defp arrangement(%{"mode" => "ethernet"}), do: "Separate networks"
+  defp arrangement(%{"mode" => mode}) when mode in ["ethernet", "ports"] do
+    "Separate networks"
+  end
+
   defp arrangement(%{"mode" => "shared"}), do: "One shared network"
   defp arrangement(_), do: "Not assigned"
 
@@ -311,5 +223,9 @@ defmodule NervesGateWeb.DashboardLive do
     do: "Assigned by the existing router"
 
   defp equipment_address(%{"equipment" => address}), do: address["static_ip"]
-  defp equipment_address(_), do: "Not assigned"
+
+  defp equipment_address(network) do
+    get_in(NervesGate.Config.role_address(network, "equipment") || %{}, ["static_ip"]) ||
+      "Not assigned"
+  end
 end

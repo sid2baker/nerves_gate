@@ -37,15 +37,24 @@ defmodule NervesGate.Device do
   def dispatch(action, params \\ %{}, opts \\ []) do
     server = Keyword.get(opts, :server, __MODULE__)
     command = %{action: action, params: params}
-    GenServer.call(server, {:dispatch, command, Keyword.get(opts, :expected_revision)}, 15_000)
+    access = Keyword.get(opts, :access)
+
+    GenServer.call(
+      server,
+      {:dispatch, command, Keyword.get(opts, :expected_revision), access},
+      20_000
+    )
   end
 
   @impl true
   def init(opts) do
     Network.subscribe()
+    NervesGate.Remote.subscribe()
 
     state = %{
       network: Keyword.get(opts, :network, Network),
+      remote: Keyword.get(opts, :remote, NervesGate.Remote),
+      remote_status: nil,
       topic: Keyword.get(opts, :topic, "device"),
       workflow: Workflow.new(),
       epoch: Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false),
@@ -68,7 +77,7 @@ defmodule NervesGate.Device do
     {:reply, state.projection, state}
   end
 
-  def handle_call({:dispatch, command, expected}, _from, state) do
+  def handle_call({:dispatch, command, expected, access}, _from, state) do
     state = refresh(state)
 
     result =
@@ -83,8 +92,15 @@ defmodule NervesGate.Device do
           {:error, Error.new("invalid_parameters", "Parameters must contain only JSON values.")}
 
         true ->
-          %{decision: decision} = Workflow.evaluate(state.workflow, state.status, command)
-          execute(decision, state.network)
+          %{decision: decision} =
+            NervesGate.Device.Workflow.evaluate(
+              state.workflow,
+              state.status,
+              command,
+              state.remote_status
+            )
+
+          execute(decision, state, access)
       end
 
     state = refresh(state)
@@ -99,48 +115,72 @@ defmodule NervesGate.Device do
   end
 
   @impl true
-  def handle_info({:network, _snapshot}, state) do
-    # PubSub is a wake-up, not authoritative state. A queued old snapshot must
-    # never overwrite the post-command projection or another server's status.
+  def handle_info(:remote_changed, state) do
     {:noreply, refresh(state)}
   end
 
-  defp execute({:result, result}, _network), do: {:ok, result}
-  defp execute({:error, error}, _network), do: {:error, error}
+  def handle_info({:network, _snapshot}, state) do
+    {:noreply, refresh(state)}
+  end
 
-  defp execute({:effect, {action, value}}, network) do
-    result =
-      case action do
-        :propose -> Network.propose(value, network)
-        :confirm -> Network.confirm(value, network)
-        :cancel -> Network.cancel(value, network)
-      end
+  defp execute({:result, result}, _network, _access), do: {:ok, result}
+  defp execute({:error, error}, _network, _access), do: {:error, error}
 
-    case result do
-      :ok -> {:ok, %{}}
-      {:ok, id} -> {:ok, %{trial_id: id}}
-      {:error, reason} -> {:error, Error.from(reason)}
+  defp execute({:effect, {:remote, :login_url, _}}, %{remote: remote}, _) do
+    {:ok, %{url: NervesGate.Remote.login_url(remote)}}
+  catch
+    :exit, _ -> {:error, Error.new("remote_unavailable", "Tailscale is unavailable.")}
+  end
+
+  defp execute({:effect, {:remote, action, params}}, %{remote: remote}, _) do
+    case NervesGate.Remote.command(action, params, remote) do
+      :ok -> {:ok, %{accepted: true}}
+      {:error, error} -> {:error, error}
     end
   catch
     :exit, _ -> {:error, Error.from(:outcome_unknown)}
   end
 
+  defp execute({:effect, {action, value}}, %{network: network}, access) do
+    result =
+      case action do
+        :propose -> NervesGate.Network.propose(value, network, access)
+        :confirm -> NervesGate.Network.confirm(value, network)
+        :cancel -> NervesGate.Network.cancel(value, network)
+      end
+
+    case result do
+      :ok -> {:ok, %{}}
+      {:ok, id} -> {:ok, %{trial_id: id}}
+      {:error, reason} -> {:error, NervesGate.Device.Error.from(reason)}
+    end
+  catch
+    :exit, _ -> {:error, NervesGate.Device.Error.from(:outcome_unknown)}
+  end
+
   # Fail closed if a graph change ever stops producing a decision.
-  defp execute(_, _),
+  defp execute(_, _, _),
     do: {:error, Error.new("decision_failed", "No device decision was produced.")}
 
   defp refresh(state) do
     status = network_status(state.network)
+    remote = remote_status(state.remote)
 
-    if state.projection != nil and status == state.status do
+    if state.projection != nil and status == state.status and remote == state.remote_status do
       state
     else
-      %{projection: projection} = Workflow.evaluate(state.workflow, status)
+      %{projection: projection} = Workflow.evaluate(state.workflow, status, nil, remote)
       sequence = state.sequence + 1
       projection = Map.put(projection, :revision, "#{state.epoch}:#{sequence}")
       Phoenix.PubSub.broadcast(NervesGate.PubSub, state.topic, {:device, projection})
-      %{state | status: status, projection: projection, sequence: sequence}
+      %{state | status: status, remote_status: remote, projection: projection, sequence: sequence}
     end
+  end
+
+  defp remote_status(remote) do
+    NervesGate.Remote.status(remote)
+  catch
+    :exit, _ -> NervesGate.Remote.unavailable()
   end
 
   defp network_status(network) do

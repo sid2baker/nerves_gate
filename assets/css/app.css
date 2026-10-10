@@ -190,6 +190,12 @@ code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; fo
 .ui-roadmap > div > span { color: var(--ui-muted); font-size: 11px; font-variant-numeric: tabular-nums; padding-top: 2px; }
 .ui-roadmap h3 { font-size: 13px; font-weight: 600; }
 .ui-roadmap p { color: var(--ui-muted); font-size: 12px; margin-top: 5px; }
+.ui-settings-details { border-top: 1px solid var(--ui-line); padding-top: 18px; }
+.ui-settings-details > summary { color: var(--ui-muted); font-size: 13px; }
+.ui-settings-details[open] > summary { margin-bottom: 18px; }
+#internet-options > summary, #advanced-network > summary { color: var(--ui-accent); cursor: pointer; font-size: 13px; }
+#internet-options[open] > summary, #advanced-network[open] > summary { margin-bottom: 18px; }
+#internet-options .ui-choice-group + .ui-choice-group { margin-top: 20px; }
 .ui-details { border-top: 1px solid var(--ui-line); padding-top: 18px; }
 .ui-details summary { color: var(--ui-muted); font-size: 12px; }
 .ui-details pre { max-width: 100%; overflow-x: auto; padding: 18px; background: #f6f8f8; border-radius: 8px; margin-top: 16px; line-height: 1.6; }
