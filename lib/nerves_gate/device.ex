@@ -7,7 +7,8 @@ defmodule NervesGate.Device do
   opaque equality token, valid only for this gateway incarnation. Notifications
   are snapshots, not a durable event stream. Re-read after reconnecting.
 
-  `dispatch/3` accepts a string action ID and string-keyed parameters. Both
+  **Entry point:** `dispatch/3` accepts a string action ID and string-keyed parameters.
+  All eight supported actions and their routing live in `NervesGate.Device.Actions`. Both
   success and rejection include the current projection. `:expected_revision`
   optionally rejects stale clients. Availability is advisory, not authorization;
   commands are revalidated and the network executor enforces its own safeguards.
@@ -17,8 +18,8 @@ defmodule NervesGate.Device do
   the explicit trial ID, so an old command cannot affect a newer trial.
   """
   use GenServer
-  alias NervesGate.Network
   alias NervesGate.Device.{Error, Workflow}
+  alias NervesGate.Network
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))

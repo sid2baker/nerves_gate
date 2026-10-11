@@ -51,56 +51,7 @@ defmodule NervesGateWeb.NetworkStatus do
     """
   end
 
-  attr(:projection, :map, required: true)
-
-  def internet_progress(assigns) do
-    assigns = assign(assigns, :internet, assigns.projection.connections.internet)
-
-    ~H"""
-    <div class="ui-internet-status">
-      <%= cond do %>
-        <% !@projection.network.observed -> %>
-          <.notice>Connection status is unavailable. Wait for the gateway to reconnect.</.notice>
-        <% !@internet.link and !@internet.addressed -> %>
-          <div class="ui-empty-state">
-            <span class="ui-icon-box"><.icon name="internet" /></span><h3>
-              Choose an Internet connection
-            </h3><p>Connect your router, or choose a port in Settings.</p><a
-              href="/settings"
-              class="ui-text-link"
-            >Set up connections <.icon name="arrow" /></a>
-          </div>
-        <% true -> %>
-          <dl class="ui-health-list">
-            <div>
-              <dt><.icon name="port" />Cable</dt><dd>
-                <.status tone={if @internet.link, do: "good", else: "neutral"}>
-                  {if @internet.link, do: "Connected", else: "Not connected"}
-                </.status>
-              </dd>
-            </div>
-            <div>
-              <dt><.icon name="network" />Address</dt><dd>
-                <.status tone={if @internet.addressed, do: "good", else: "neutral"}>
-                  {if @internet.addressed, do: "Assigned", else: "Waiting"}
-                </.status>
-              </dd>
-            </div>
-            <div>
-              <dt><.icon name="internet" />Internet check</dt><dd>
-                <.status tone={if @internet.health == "online", do: "good", else: "neutral"}>
-                  {if @internet.health == "online", do: "Reachable", else: "Not verified"}
-                </.status>
-              </dd>
-            </div>
-          </dl>
-          <p class="ui-help">A cable or address alone does not confirm Internet access.</p>
-      <% end %>
-    </div>
-    """
-  end
-
-  # Reused in setup, review and observed port tiles; never expose interface names
+  # Reused in setup and observed port tiles; never expose interface names
   # in everyday controls. Technical names remain available under diagnostics.
   def port_label("eth0"), do: "Port 1"
   def port_label("eth1"), do: "Port 2"

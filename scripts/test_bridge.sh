@@ -26,4 +26,4 @@ ip -n peer0 addr add 10.45.0.2/24 dev lan0
 ip netns exec peer0 dnsmasq --no-daemon --user=root --group=root --conf-file=/dev/null --port=0 --interface=lan0 --bind-interfaces --dhcp-range=10.45.0.50,10.45.0.55,255.255.255.0,1h --dhcp-leasefile=/run/dnsmasq/test.leases --pid-file=/run/dnsmasq.pid >/run/dnsmasq.log 2>&1 &
 trap 'tail -30 /run/dnsmasq.log; kill $! 2>/dev/null || true' EXIT
 # Do not pass the developer shell's large environment (or credentials) to DHCP.
-env -i HOME="$HOME" PATH="$PATH" LANG="${LANG:-C.UTF-8}" MIX_HOME="${MIX_HOME:-$HOME/.mix}" MIX_ARCHIVES="${MIX_ARCHIVES:-${MIX_HOME:-$HOME/.mix}/archives}" NERVES_GATE_HOST_NETNS="$NERVES_GATE_HOST_NETNS" MIX_TARGET=host MIX_ENV=test mix do compile + run --no-start test/integration/bridge.exs
+env -i HOME="$HOME" PATH="$PATH" LANG="${LANG:-C.UTF-8}" MIX_HOME="${MIX_HOME:-$HOME/.mix}" MIX_ARCHIVES="${MIX_ARCHIVES:-${MIX_HOME:-$HOME/.mix}/archives}" NERVES_GATE_HOST_NETNS="$NERVES_GATE_HOST_NETNS" MIX_TARGET=host MIX_ENV=test mix do compile + run --no-start test/integration/bridge_test.exs

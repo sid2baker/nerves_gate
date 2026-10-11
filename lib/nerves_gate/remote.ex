@@ -111,8 +111,6 @@ defmodule NervesGate.Remote do
         Task.async(fn ->
           try do
             module.execute(action, validated, context)
-          rescue
-            _ -> {:error, :failed}
           catch
             _, _ -> {:error, :failed}
           end
@@ -225,8 +223,6 @@ defmodule NervesGate.Remote do
     observed =
       try do
         module.snapshot(context)
-      rescue
-        _ -> unavailable()
       catch
         _, _ -> unavailable()
       end

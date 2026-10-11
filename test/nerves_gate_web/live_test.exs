@@ -20,7 +20,7 @@ defmodule NervesGateWeb.LiveTest do
       ~H"""
       <div>
         <div :for={id <- @panels}>
-          <.live_component module={NervesGateWeb.ConnectionPanel} id={id} kind={:ports} />
+          <.live_component module={NervesGateWeb.ConnectionPanel} id={id} />
           <button phx-click="remove" phx-value-id={id}>Remove {id}</button>
         </div>
         <button phx-click="show">Show panels</button>
@@ -42,6 +42,34 @@ defmodule NervesGateWeb.LiveTest do
     :ok
   end
 
+  test "saved offline settings do not label a detected cable as the Internet port" do
+    offline = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
+
+    {:ok, %{result: %{trial_id: id}}} =
+      Device.dispatch("network.propose", %{"network" => offline})
+
+    {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id})
+
+    Network.Host.simulate(%{
+      ports: [
+        %{
+          name: "eth0",
+          present: true,
+          link: true,
+          master: nil,
+          method: "disabled",
+          state: :configured,
+          addresses: [%{address: "192.0.2.10", prefix_length: 24}]
+        }
+      ]
+    })
+
+    eventually(fn -> Device.projection().connections.suggested_internet_port == "eth0" end)
+    {:ok, view, _} = live(build_conn(), "/")
+    refute has_element?(view, "#connection-internet", "Port 1")
+    assert has_element?(view, "#connection-internet", "Choose an Internet connection")
+  end
+
   test "one screen detects the connected port and equipment is optional" do
     {:ok, view, html} = live(build_conn(), "/setup")
     assert html =~ "Set up your gateway"
@@ -59,7 +87,7 @@ defmodule NervesGateWeb.LiveTest do
     assert Network.status().config["setup_completed"]
     assert {:error, {:live_redirect, %{to: "/settings"}}} = live(build_conn(), "/setup")
     {:ok, settings, _} = live(build_conn(), "/settings")
-    assert has_element?(settings, "h1", "Settings")
+    assert has_element?(settings, "h1", "Network")
     assert has_element?(settings, "#apply-settings", "Apply changes")
   end
 
@@ -91,7 +119,7 @@ defmodule NervesGateWeb.LiveTest do
     view |> element("button", "Change Internet connection") |> render_click()
     assert has_element?(view, "#internet-options")
 
-    for id <- ["advanced-network", "connection-details", "gateway-details"] do
+    for id <- ["advanced-network", "connection-details"] do
       assert has_element?(view, "##{id}[phx-mounted*=ignore_attrs]")
     end
 
@@ -135,7 +163,7 @@ defmodule NervesGateWeb.LiveTest do
     assert Network.status().trial.network["eth1"]["address"]["static_ip"] == "192.168.50.10"
     view |> element("#confirm-settings") |> render_click()
     assert_redirect(view, "/")
-    {:ok, equipment, _} = live(build_conn(), "/equipment")
+    {:ok, equipment, _} = live(build_conn(), "/")
     assert render(equipment) =~ "192.168.50.10"
   end
 
@@ -249,24 +277,32 @@ defmodule NervesGateWeb.LiveTest do
     refute Network.status().trial
   end
 
-  test "all product pages work offline and never claim remote readiness" do
+  test "three product pages work offline without claiming equipment reachability" do
     for {path, heading} <- [
-          {"/", "Equipment access at a glance"},
-          {"/equipment", "Equipment network"},
-          {"/internet", "Internet &amp; backup"},
-          {"/remote", "Connect this gateway to your private network"},
+          {"/", "Gateway"},
+          {"/remote", "Tailscale"},
           {"/settings", "Set up your gateway"},
           {"/setup", "Set up your gateway"}
         ] do
-      {:ok, _, html} = live(build_conn(), path)
-      assert html =~ heading
+      {:ok, view, html} = live(build_conn(), path)
+      assert has_element?(view, "h1", heading)
+      assert html =~ "This interface has no sign-in protection"
       refute html =~ "Remote access ready"
-
-      if path == "/settings" do
-        assert html =~ "Firmware listens on every IPv4 interface at port 4000"
-        assert html =~ "Anyone who can reach this page can change settings"
-      end
+      refute html =~ "Internet &amp; backup"
     end
+
+    for path <- ["/equipment", "/internet"] do
+      assert {:error, {:live_redirect, %{to: "/settings"}}} = live(build_conn(), path)
+    end
+  end
+
+  test "gateway shows three actionable summaries and keeps diagnostics collapsed" do
+    {:ok, view, _} = live(build_conn(), "/")
+    assert has_element?(view, "#connection-internet[href='/settings']")
+    assert has_element?(view, "#connection-equipment[href='/settings']", "Not configured")
+    assert has_element?(view, "#connection-tailscale[href='/remote']")
+    refute has_element?(view, "#connection-details[open]")
+    refute has_element?(view, ".ui-hero")
   end
 
   test "a CLI command and two browsers share trial state; old broadcasts do not regress it" do
@@ -277,13 +313,13 @@ defmodule NervesGateWeb.LiveTest do
       Device.dispatch("network.propose", %{"network" => @shared})
 
     eventually(fn -> has_element?(setup, "#confirm-settings:not([disabled])") end)
-    eventually(fn -> render(dashboard) =~ "Settings are being tried" end)
+    eventually(fn -> render(dashboard) =~ "Network changes are not saved yet" end)
     assert {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id})
     eventually(fn -> not has_element?(setup, "#confirm-settings") end)
-    eventually(fn -> not (render(dashboard) =~ "Settings are being tried") end)
+    eventually(fn -> not (render(dashboard) =~ "Network changes are not saved yet") end)
     Phoenix.PubSub.broadcast(NervesGate.PubSub, Device.topic(), {:device, projection})
     refute has_element?(setup, "#confirm-settings")
-    refute render(dashboard) =~ "Settings are being tried"
+    refute render(dashboard) =~ "Network changes are not saved yet"
   end
 
   test "an old browser click cannot confirm a newer client's trial" do
@@ -341,20 +377,20 @@ defmodule NervesGateWeb.LiveTest do
     refute has_element?(view, "#two", "Unassigned")
     render_click(view, "remove", %{"id" => "one"})
     refute has_element?(view, "#one")
-    assert length(subscribers.()) == 1
+    assert match?([_], subscribers.())
     Network.Host.simulate(%{ports: [%{name: "eth0", present: false, link: false, master: nil}]})
     eventually(fn -> has_element?(view, "#two", "Not installed") end)
     render_click(view, "remove", %{"id" => "two"})
     eventually(fn -> subscribers.() == [] end)
     view |> element("button", "Show panels") |> render_click()
-    assert length(subscribers.()) == 1
+    assert match?([_], subscribers.())
     assert has_element?(view, "#one", "Not installed")
     GenServer.stop(pid)
     eventually(fn -> subscribers.() == [] end)
   end
 
   test "navigation marks the current page" do
-    for path <- ["/", "/equipment", "/internet", "/remote", "/settings"] do
+    for path <- ["/", "/remote", "/settings"] do
       html = build_conn() |> get(path) |> response(200)
       assert html =~ "href=\"#{path}\" aria-current=\"page\""
     end

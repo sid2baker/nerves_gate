@@ -262,7 +262,8 @@ defmodule NervesGate.BridgeIntegrationTest do
         stderr_to_stdout: true
       )
 
-    code == 0 and body =~ "id=\"gateway-details\""
+    # Both the editable form and an active rollback trial keep this diagnostics section.
+    code == 0 and body =~ "id=\"connection-details\""
   end
 
   defp cmd(command, args) do

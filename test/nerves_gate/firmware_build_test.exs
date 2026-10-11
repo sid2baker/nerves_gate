@@ -123,9 +123,10 @@ defmodule NervesGate.FirmwareBuildTest do
     end
   end
 
-  test "source timestamp release step does nothing on the host" do
-    [prepare | _] = Mix.Project.config()[:releases][:nerves_gate][:steps]
-    release = %Mix.Release{name: :nerves_gate}
-    assert prepare.(release) == release
+  test "release uses the native Nerves initialization step" do
+    assert Mix.Project.config()[:releases][:nerves_gate][:steps] == [
+             &Nerves.init_release/1,
+             :assemble
+           ]
   end
 end

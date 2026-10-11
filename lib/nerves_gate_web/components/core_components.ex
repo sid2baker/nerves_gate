@@ -182,10 +182,6 @@ defmodule NervesGateWeb.CoreComponents do
             checked={to_string(@field.value) == option.value}
           />
           <span class="ui-choice-content">
-            <span class="ui-choice-top"><.icon :if={option[:icon]} name={option.icon} /><span
-              class="ui-choice-check"
-              aria-hidden="true"
-            ><.icon name="check" /></span></span>
             <span class="ui-choice-title">{option.title}</span>
             <span :if={option[:description]} class="ui-choice-description">{option.description}</span>
           </span>
@@ -207,26 +203,6 @@ defmodule NervesGateWeb.CoreComponents do
       </div>
       <div class="ui-setting-value">{render_slot(@inner_block)}</div>
     </div>
-    """
-  end
-
-  attr(:current, :integer, required: true)
-  attr(:labels, :list, required: true)
-
-  def stepper(assigns) do
-    ~H"""
-    <ol class="ui-stepper" aria-label="Setup progress">
-      <li
-        :for={{label, index} <- Enum.with_index(@labels, 1)}
-        class={[index == @current && "is-current", index < @current && "is-complete"]}
-        aria-current={index == @current && "step"}
-      >
-        <span class="ui-step-number"><.icon :if={index < @current} name="check" /><span :if={
-          index >= @current
-        }>{index}</span></span>
-        <span>{label}</span>
-      </li>
-    </ol>
     """
   end
 end

@@ -96,7 +96,7 @@ defmodule NervesGate.Network do
       case apply_network(state, network) do
         :ok ->
           state = maybe_save(refresh(state))
-          result = if state.error, do: {:error, state.error}, else: {:ok, id}
+          result = trial_result(state.error, id)
           {:reply, result, publish(state)}
 
         {:error, reason} ->
@@ -181,6 +181,9 @@ defmodule NervesGate.Network do
     state
   end
 
+  defp trial_result(nil, id), do: {:ok, id}
+  defp trial_result(error, _), do: {:error, error}
+
   defp rollback(state, reason) do
     if state.trial, do: Process.cancel_timer(state.trial.timer)
 
@@ -238,26 +241,31 @@ defmodule NervesGate.Network do
 
   def ready?(%{ports: ports} = observed, %{"mode" => "ports"} = network) do
     Enum.all?(Config.ports(network), fn {name, setting} ->
-      port = Enum.find(ports, &(&1.name == name))
-
-      cond do
-        is_nil(setting) ->
-          is_nil(port) or not port.present or
-            (port.state == :configured and is_nil(port.master) and port.method == "disabled")
-
-        is_nil(port) or not port.present ->
-          false
-
-        true ->
-          port.state == :configured and is_nil(port.master) and
-            port.method == setting["address"]["ip_method"] and
-            (port.method == "dhcp" or address_matches?(port.addresses, setting["address"]))
-      end
+      port_ready?(Enum.find(ports, &(&1.name == name)), setting)
     end) and conflicts(observed, network) == []
   end
 
-  def ready?(_, _) do
-    false
+  def ready?(_, _), do: false
+
+  defp port_ready?(nil, setting) do
+    is_nil(setting)
+  end
+
+  defp port_ready?(%{present: false}, setting) do
+    is_nil(setting)
+  end
+
+  defp port_ready?(port, nil) do
+    configured_port?(port) and port.method == "disabled"
+  end
+
+  defp port_ready?(port, %{"address" => address}) do
+    configured_port?(port) and port.method == address["ip_method"] and
+      (port.method == "dhcp" or address_matches?(port.addresses, address))
+  end
+
+  defp configured_port?(port) do
+    port.state == :configured and is_nil(port.master)
   end
 
   defp address_matches?(addresses, network) do

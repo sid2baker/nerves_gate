@@ -89,17 +89,19 @@ defmodule NervesGate.Network.LAN do
   # Detach only ports excluded by the explicit topology; USB is never touched.
   def sync_members(members) do
     Enum.reduce_while(["eth0", "eth1"] -- members, :ok, fn name, :ok ->
-      if File.exists?("/sys/class/net/#{name}/master") do
-        case VintageNet.Interface.CommandRunner.run(
-               {:run, "ip", ["link", "set", name, "nomaster"]}
-             ) do
-          :ok -> {:cont, :ok}
-          error -> {:halt, error}
-        end
-      else
-        {:cont, :ok}
+      case detach(name) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
       end
     end)
+  end
+
+  defp detach(name) do
+    if File.exists?("/sys/class/net/#{name}/master") do
+      VintageNet.Interface.CommandRunner.run({:run, "ip", ["link", "set", name, "nomaster"]})
+    else
+      :ok
+    end
   end
 
   def disable_member_ipv6(ifname) when ifname in ["eth0", "eth1", "br0"] do

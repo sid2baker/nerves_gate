@@ -2,7 +2,6 @@ defmodule NervesGateWeb.ConnectionPanel do
   @moduledoc "Self-updating connection panels, using LiveView's managed component subscriptions."
   use Phoenix.LiveComponent
   alias NervesGate.Device
-  import NervesGateWeb.CoreComponents
   import NervesGateWeb.NetworkStatus
 
   @impl true
@@ -28,13 +27,7 @@ defmodule NervesGateWeb.ConnectionPanel do
   def render(assigns) do
     ~H"""
     <div id={@id}>
-      <.topology :if={@kind == :ports} projection={@projection} />
-      <.panel :if={@kind == :internet} title="Internet connection" icon="internet">
-        <.internet_progress projection={@projection} />
-        <:footer>
-          <a href="/internet" class="ui-text-link">Internet &amp; backup <.icon name="arrow" /></a>
-        </:footer>
-      </.panel>
+      <.topology projection={@projection} />
     </div>
     """
   end

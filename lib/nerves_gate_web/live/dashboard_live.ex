@@ -1,231 +1,217 @@
 defmodule NervesGateWeb.DashboardLive do
   use Phoenix.LiveView
-  alias NervesGate.Device
+  alias NervesGate.{Config, Device}
   import NervesGateWeb.CoreComponents
+  import NervesGateWeb.NetworkStatus, only: [port_label: 1]
 
   def mount(_, _, socket) do
     subscribe(socket, Device.topic(), &__MODULE__.handle_device/2)
-    {:ok, assign(socket, projection: Device.projection())}
+    socket = assign(socket, projection: Device.projection())
+
+    if socket.assigns.live_action in [:equipment, :internet] do
+      {:ok, push_navigate(socket, to: "/settings")}
+    else
+      {:ok, socket}
+    end
   end
 
   @doc false
-  def handle_device({:device, _projection}, socket),
-    do: assign(socket, projection: Device.projection())
+  def handle_device({:device, _}, socket) do
+    assign(socket, projection: Device.projection())
+  end
 
   def render(assigns) do
+    settings =
+      (assigns.projection.network.pending && assigns.projection.network.pending.network) ||
+        assigns.projection.network.desired
+
     assigns =
-      assign(
-        assigns,
-        :settings,
-        if(assigns.projection.network.pending,
-          do: assigns.projection.network.pending.network,
-          else: assigns.projection.network.desired
-        )
+      assign(assigns,
+        settings: settings,
+        equipment: equipment_port(settings, assigns.projection),
+        remote: assigns.projection.remote_access
       )
 
     ~H"""
+    <.page_header title="Gateway" description={@remote.hostname || "Your connections at a glance."} />
     <div class="ui-disconnected">
-      <.notice tone="warning" role="alert">
-        Connection lost — displayed status may be out of date.
-      </.notice>
+      <.notice tone="warning" role="alert">Connection lost. Status may be out of date.</.notice>
     </div>
-    <.notice :if={@projection.network.pending} tone="warning" icon="clock">
-      Settings are being tried, not yet saved. <a href="/settings" class="ui-text-link">Confirm or restore them</a>.
+    <.notice :if={@projection.network.observed && @projection.network.observed.simulated}>
+      Preview mode · simulated connections
     </.notice>
-    <%= case @live_action do %>
-      <% :overview -> %>
-        <.page_header
-          eyebrow="Overview"
-          title="Equipment access at a glance"
-          description="Your connections, their status, and what to do next."
+    <.notice :if={@projection.network.pending} tone="warning" icon="clock">
+      Network changes are not saved yet. <a href="/settings" class="ui-text-link">Keep or restore changes</a>.
+    </.notice>
+    <.notice :if={!@projection.network.setup_completed}>
+      We look for Internet automatically.
+      <a href="/setup" class="ui-text-link">Set up your connections</a>
+      when you’re ready.
+    </.notice>
+    <.notice :if={@projection.network.error} tone="warning" role="alert">
+      {@projection.network.error.message}
+    </.notice>
+    <.notice :for={problem <- @projection.connections.problems} tone="warning">{problem}</.notice>
+    <section class="ui-connections" aria-label="Gateway connections">
+      <.connection
+        title="Internet"
+        icon="internet"
+        href="/settings"
+        id="internet"
+        tone={if @projection.connections.internet.health == "online", do: "good", else: "neutral"}
+        status={internet_status(@projection)}
+      >
+        {internet_detail(@projection, @settings)}
+      </.connection>
+      <.connection
+        title="Equipment"
+        icon="equipment"
+        href="/settings"
+        id="equipment"
+        status={equipment_status(@equipment)}
+      >
+        {equipment_detail(@equipment)}
+      </.connection>
+      <.connection
+        title="Tailscale"
+        icon="shield"
+        href="/remote"
+        id="tailscale"
+        tone={if @remote.state == "online", do: "good", else: "neutral"}
+        status={remote_status(@remote)}
+      >
+        {@remote.ipv4 || "Private access to this gateway"}
+      </.connection>
+    </section>
+    <p class="ui-help">
+      Tailscale connects this gateway. Equipment sharing is not enabled by this interface.
+    </p>
+    <details
+      id="connection-details"
+      class="ui-details"
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
+      <summary>Device details</summary>
+      <div class="ui-stack">
+        <.live_component
+          module={NervesGateWeb.ConnectionPanel}
+          id="gateway-connections"
         />
-        <section class="ui-hero" aria-label="Remote access status">
-          <div class="ui-hero-copy">
-            <.status tone="warning">Remote access · Not verified</.status>
-            <h2>
-              {if @projection.network.setup_completed,
-                do: "Local connections are saved.",
-                else: "Start local. Connect with confidence."}
-            </h2>
-            <p>
-              {if @projection.network.setup_completed,
-                do:
-                  "Local connections are saved. Connect Tailscale for private access to this gateway; equipment access remains separate.",
-                else:
-                  "Choose how your gateway reaches the Internet and connects to equipment. USB keeps setup separate from both."}
-            </p>
-            <div class="ui-actions">
-              <.button
-                href={if @projection.network.setup_completed, do: "/settings", else: "/setup"}
-                icon="arrow"
-              >{if @projection.network.setup_completed,
-                do: "Change settings",
-                else: "Set up connections"}</.button><.button href="/remote" variant="quiet">Configure Tailscale</.button>
-            </div>
-          </div>
-          <div class="ui-hero-symbol" aria-hidden="true"><.icon name="shield" /></div>
-        </section>
-        <div class="ui-content-grid">
-          <div class="ui-stack">
-            <.live_component
-              module={NervesGateWeb.ConnectionPanel}
-              id="overview-internet"
-              kind={:internet}
-            />
-            <.panel
-              title="Equipment network"
-              description="Your devices keep their existing addresses."
-              icon="equipment"
-            >
-              <.status>
-                {if @settings &&
-                      (@settings["mode"] == "shared" or
-                         NervesGate.Config.role_port(@settings, "equipment") != nil),
-                    do: "Network assigned · Reachability unverified",
-                    else: "No network assigned"}
-              </.status>
-              <p class="ui-muted">
-                Connecting equipment does not expose it remotely. Network permissions and a check from a remote computer are separate steps.
-              </p>
-              <:footer>
-                <a href="/equipment" class="ui-text-link">Equipment network <.icon name="arrow" /></a>
-              </:footer>
-            </.panel>
-          </div>
-          <aside class="ui-stack" aria-label="Connection context">
-            <.live_component
-              module={NervesGateWeb.ConnectionPanel}
-              id="overview-connections"
-              kind={:ports}
-            />
-          </aside>
-        </div>
-      <% :equipment -> %>
-        <.page_header
-          eyebrow="Connections"
-          title="Equipment"
-          description="A local connection to the machines and devices you need."
-        />
-        <div class="ui-content-grid">
-          <div class="ui-stack">
-            <.panel
-              title="Equipment network"
-              icon="equipment"
-              description="The gateway joins your existing network."
-            >
-              <div class="ui-settings-list">
-                <.setting_row label="Connection arrangement">{arrangement(@settings)}</.setting_row>
-                <.setting_row
-                  label="Gateway address"
-                  description="This is not your equipment's address."
-                >
-                  {equipment_address(@settings)}
-                </.setting_row>
-                <.setting_row label="Device discovery">
-                  <.status>Not available yet</.status>
-                </.setting_row>
-                <.setting_row label="Remote reachability">
-                  <.status>Not verified</.status>
-                </.setting_row>
-              </div>
-              <.notice title="Equipment keeps its settings">
-                Use an unused gateway address in the existing subnet. No Ethernet DHCP server is started and no remote permissions are changed by this setup.
-              </.notice>
-              <:footer>
-                <.button href="/settings" variant="secondary" icon="arrow">Configure equipment connection</.button>
-              </:footer>
-            </.panel>
-          </div>
-          <aside>
-            <.live_component
-              module={NervesGateWeb.ConnectionPanel}
-              id="equipment-connections"
-              kind={:ports}
-            />
-          </aside>
-        </div>
-      <% :internet -> %>
-        <.page_header
-          eyebrow="Connections"
-          title="Internet & backup"
-          description="How your gateway reaches the Internet, and what is verified."
-        />
-        <div class="ui-content-grid">
-          <div class="ui-stack">
-            <.live_component
-              module={NervesGateWeb.ConnectionPanel}
-              id="internet-health"
-              kind={:internet}
-            />
-            <.panel title="Connection settings" icon="settings">
-              <.setting_row
-                label="Internet source"
-                description="Automatic or manual addressing, as set in Settings."
-              >
-                {if @settings &&
-                      (@settings["mode"] == "shared" or
-                         NervesGate.Config.role_port(@settings, "internet") != nil),
-                    do: "Ethernet",
-                    else: "Not assigned"}
-              </.setting_row>
-              <.notice :if={
-                @settings &&
-                  (@settings["mode"] == "shared" or
-                     NervesGate.Config.role_port(@settings, "internet") != nil)
-              }>
-                {cond do
-                  !@projection.connections.internet.link ->
-                    "Connect the Internet port to your router and check the cable status."
-
-                  !@projection.connections.internet.addressed ->
-                    "The cable is connected. Check the gateway's address settings and your router."
-
-                  @projection.connections.internet.health != "online" ->
-                    "An address is assigned, but Internet access is not verified. Check your router's Internet connection."
-
-                  true ->
-                    "The gateway's Internet check is passing. This does not verify remote equipment access."
-                end}
-              </.notice>
-              <:footer>
-                <.button href="/settings" variant="secondary" icon="arrow">Change connections</.button>
-              </:footer>
-            </.panel>
-            <.panel title="Mobile Internet & automatic backup" icon="internet">
-              <:meta>
-                <.status>Unavailable</.status>
-              </:meta>
-              <p class="ui-muted">
-                Mobile connectivity and failover are not configured by this build. USB is a setup connection, not an Internet backup.
-              </p>
-            </.panel>
-          </div>
-          <aside>
-            <.live_component
-              module={NervesGateWeb.ConnectionPanel}
-              id="internet-connections"
-              kind={:ports}
-            />
-          </aside>
-        </div>
-    <% end %>
+        <p class="ui-help">
+          Firmware {@projection.system.firmware} · {@projection.system.target}. USB remains separate for setup and recovery.
+        </p>
+      </div>
+    </details>
     """
   end
 
-  defp arrangement(%{"mode" => mode}) when mode in ["ethernet", "ports"] do
-    "Separate networks"
+  attr(:title, :string, required: true)
+  attr(:icon, :string, required: true)
+  attr(:href, :string, required: true)
+  attr(:id, :string, required: true)
+  attr(:status, :string, required: true)
+  attr(:tone, :string, default: "neutral")
+  slot(:inner_block, required: true)
+
+  defp connection(assigns) do
+    ~H"""
+    <a href={@href} class="ui-connection" id={"connection-#{@id}"}>
+      <span class="ui-icon-box"><.icon name={@icon} /></span>
+      <div class="ui-connection-copy">
+        <h2>{@title}</h2><p>{render_slot(@inner_block)}</p>
+      </div>
+      <.status tone={@tone}>{@status}</.status>
+      <.icon name="arrow" />
+    </a>
+    """
   end
 
-  defp arrangement(%{"mode" => "shared"}), do: "One shared network"
-  defp arrangement(_), do: "Not assigned"
+  defp internet_status(%{network: %{observed: nil}}) do
+    "Unavailable"
+  end
 
-  defp equipment_address(%{"equipment" => %{"ip_method" => "dhcp"}}),
-    do: "Assigned by the existing router"
+  defp internet_status(%{connections: %{internet: %{health: "online"}}}) do
+    "Online"
+  end
 
-  defp equipment_address(%{"equipment" => address}), do: address["static_ip"]
+  defp internet_status(%{connections: %{internet: %{addressed: true}}}) do
+    "Internet unverified"
+  end
 
-  defp equipment_address(network) do
-    get_in(NervesGate.Config.role_address(network, "equipment") || %{}, ["static_ip"]) ||
-      "Not assigned"
+  defp internet_status(%{connections: %{internet: %{link: true}}}) do
+    "Waiting for address"
+  end
+
+  defp internet_status(_) do
+    "Not connected"
+  end
+
+  defp internet_detail(%{connections: %{mode: "shared"}}, _) do
+    "Shared Ethernet network"
+  end
+
+  defp internet_detail(projection, settings) do
+    port =
+      if settings && settings["mode"] == "unconfigured" do
+        projection.connections.suggested_internet_port
+      else
+        Config.role_port(settings, "internet")
+      end
+
+    if port do
+      port_label(port)
+    else
+      "Choose an Internet connection in Network"
+    end
+  end
+
+  defp equipment_port(%{"mode" => "shared"}, %{network: %{observed: observed}}) do
+    observed && observed.bridge
+  end
+
+  defp equipment_port(settings, projection) do
+    name = Config.role_port(settings, "equipment")
+    Enum.find(projection.connections.ports, &(&1.name == name))
+  end
+
+  defp equipment_status(nil) do
+    "Not configured"
+  end
+
+  defp equipment_status(%{link: true}) do
+    "Cable connected"
+  end
+
+  defp equipment_status(_) do
+    "No cable"
+  end
+
+  defp equipment_detail(nil) do
+    "Add an equipment network when you need it"
+  end
+
+  defp equipment_detail(port) do
+    addresses = Enum.map_join(port.addresses, ", ", & &1.address)
+    Enum.join(Enum.reject([port_label(port.name), addresses], &(&1 == "")), " · ")
+  end
+
+  defp remote_status(%{state: "online"}) do
+    "Connected"
+  end
+
+  defp remote_status(%{auth_state: "needs_approval"}) do
+    "Awaiting approval"
+  end
+
+  defp remote_status(%{auth_state: "authenticating"}) do
+    "Awaiting sign-in"
+  end
+
+  defp remote_status(%{available: false}) do
+    "Unavailable"
+  end
+
+  defp remote_status(_) do
+    "Not connected"
   end
 end

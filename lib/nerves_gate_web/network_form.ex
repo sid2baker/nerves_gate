@@ -32,7 +32,7 @@ defmodule NervesGateWeb.NetworkForm do
         {:error,
          "More than one network is connected. Choose an Internet port, or choose Not now."}
 
-      internet != nil and internet == equipment ->
+      same_port?(internet, equipment) ->
         {:error,
          "Internet and equipment need different ports. Choose a different equipment port."}
 
@@ -48,6 +48,8 @@ defmodule NervesGateWeb.NetworkForm do
   end
 
   def to_network(_, _), do: {:error, "Choose separate ports or one shared network."}
+
+  defp same_port?(internet, equipment), do: internet != nil and internet == equipment
 
   defp assign_port(network, nil, _, _), do: network
 
@@ -66,7 +68,7 @@ defmodule NervesGateWeb.NetworkForm do
         "dns" => Enum.join(Map.get(address, "nameservers", []), ", ")
       },
       params,
-      fn {key, value}, acc -> Map.put(acc, prefix <> "_" <> key, value) end
+      fn {key, value}, acc -> Map.put(acc, "#{prefix}_#{key}", value) end
     )
   end
 
@@ -90,15 +92,12 @@ defmodule NervesGateWeb.NetworkForm do
   end
 
   def static_defaults(params, prefix, observed) do
-    if params[prefix <> "_ip"] not in [nil, ""] do
-      params
-    else
+    if params[prefix <> "_ip"] in [nil, ""] do
       observed = observed || %{ports: [], bridge: nil, usb: nil}
-      ports = observed.ports
 
       name =
         if prefix == "internet" do
-          internet_port(params, ports)
+          internet_port(params, observed.ports)
         else
           params["equipment_port"]
         end
@@ -107,50 +106,58 @@ defmodule NervesGateWeb.NetworkForm do
         if prefix == "shared" do
           observed.bridge
         else
-          Enum.find(ports, &(&1.name == name))
+          Enum.find(observed.ports, &(&1.name == name))
         end
 
-      address =
-        interface && Enum.find(Map.get(interface, :addresses, []), &(&1.prefix_length in 1..30))
-
-      fallback = fallback_address(prefix, name, observed)
-
-      defaults =
-        if address do
-          %{
-            "ip" => address.address,
-            "mask" => mask(address.prefix_length),
-            "gateway" => Map.get(interface, :gateway) || "",
-            "dns" => Enum.join(Map.get(interface, :nameservers, []), ", ")
-          }
-        else
-          %{
-            "ip" => fallback,
-            "mask" => "255.255.255.0",
-            "gateway" =>
-              if prefix == "equipment" do
-                ""
-              else
-                String.replace_suffix(fallback, ".2", ".1")
-              end,
-            "dns" =>
-              if prefix == "equipment" do
-                ""
-              else
-                String.replace_suffix(fallback, ".2", ".1")
-              end
-          }
-        end
+      defaults = observed_defaults(interface) || example_defaults(prefix, name, observed)
 
       Enum.reduce(defaults, params, fn {key, value}, acc ->
-        field = prefix <> "_" <> key
-
-        if acc[field] in [nil, ""] or key == "mask" do
-          Map.put(acc, field, value)
-        else
-          acc
-        end
+        put_default(acc, prefix, key, value)
       end)
+    else
+      params
+    end
+  end
+
+  defp observed_defaults(nil) do
+    nil
+  end
+
+  defp observed_defaults(interface) do
+    case Enum.find(Map.get(interface, :addresses, []), &(&1.prefix_length in 1..30)) do
+      nil ->
+        nil
+
+      address ->
+        %{
+          "ip" => address.address,
+          "mask" => mask(address.prefix_length),
+          "gateway" => Map.get(interface, :gateway) || "",
+          "dns" => Enum.join(Map.get(interface, :nameservers, []), ", ")
+        }
+    end
+  end
+
+  defp example_defaults(prefix, name, observed) do
+    ip = fallback_address(prefix, name, observed)
+
+    gateway =
+      if prefix == "equipment" do
+        ""
+      else
+        String.replace_suffix(ip, ".2", ".1")
+      end
+
+    %{"ip" => ip, "mask" => "255.255.255.0", "gateway" => gateway, "dns" => gateway}
+  end
+
+  defp put_default(params, prefix, key, value) do
+    field = prefix <> "_" <> key
+
+    if params[field] in [nil, ""] or key == "mask" do
+      Map.put(params, field, value)
+    else
+      params
     end
   end
 
@@ -162,14 +169,14 @@ defmodule NervesGateWeb.NetworkForm do
         ["192.168.1.2", "192.168.10.2", "10.42.0.2", "172.22.0.2"]
       end
 
-    others = Enum.reject(observed.ports, &(&1.name == name)) ++ [observed.usb]
+    addresses =
+      (Enum.reject(observed.ports, &(&1.name == name)) ++ [observed.usb])
+      |> Enum.flat_map(fn interface ->
+        (interface && Map.get(interface, :addresses, [])) || []
+      end)
 
     Enum.find(candidates, "", fn ip ->
-      not Enum.any?(others, fn interface ->
-        Enum.any?((interface && Map.get(interface, :addresses, [])) || [], fn address ->
-          Config.overlap?(ip, 24, address.address, address.prefix_length)
-        end)
-      end)
+      not Enum.any?(addresses, &Config.overlap?(ip, 24, &1.address, &1.prefix_length))
     end)
   end
 

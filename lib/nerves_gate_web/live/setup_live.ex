@@ -61,29 +61,30 @@ defmodule NervesGateWeb.SetupLive do
     projection = Device.projection()
     socket = assign(socket, form: draft(socket, params))
 
-    cond do
-      socket.assigns.base != projection.network.desired ->
-        {:noreply,
-         assign(socket,
-           projection: projection,
-           dirty: true,
-           message: "Settings changed in another session. Reload saved settings before editing."
-         )}
+    if socket.assigns().base() != projection.network().desired() do
+      {:noreply,
+       assign(socket,
+         projection: projection,
+         dirty: true,
+         message: "Settings changed in another session. Reload saved settings before editing."
+       )}
+    else
+      case NervesGateWeb.NetworkForm.to_network(
+             socket.assigns().form().params(),
+             projection.connections().ports()
+           ) do
+        {:ok, network} ->
+          result =
+            NervesGate.Device.dispatch("network.propose", %{"network" => network},
+              expected_revision: revision,
+              access: socket.assigns().access()
+            )
 
-      true ->
-        case NetworkForm.to_network(socket.assigns.form.params, projection.connections.ports) do
-          {:ok, network} ->
-            result =
-              Device.dispatch("network.propose", %{"network" => network},
-                expected_revision: revision,
-                access: socket.assigns.access
-              )
+          reply(assign(socket, own_save: true, saving_network: network), result)
 
-            reply(assign(socket, own_save: true, saving_network: network), result)
-
-          {:error, message} ->
-            {:noreply, assign(socket, message: message)}
-        end
+        {:error, message} ->
+          {:noreply, assign(socket, message: message)}
+      end
     end
   end
 
@@ -125,7 +126,7 @@ defmodule NervesGateWeb.SetupLive do
             acc["equipment_port"] != ""
 
         manual =
-          previous[prefix <> "_method"] != "static" and acc[prefix <> "_method"] == "static"
+          previous["#{prefix}_method"] != "static" and acc["#{prefix}_method"] == "static"
 
         if added or manual do
           NetworkForm.static_defaults(acc, prefix, socket.assigns.projection.network.observed)
@@ -139,40 +140,48 @@ defmodule NervesGateWeb.SetupLive do
 
   defp refresh(socket, projection) do
     previous = socket.assigns.projection.network
-
-    socket =
-      assign(socket, projection: projection, initial: not projection.network.setup_completed)
+    network = projection.network
+    socket = assign(socket, projection: projection, initial: not network.setup_completed)
 
     cond do
-      socket.assigns.own_save and projection.network.pending == nil and
-        projection.network.setup_completed and projection.network.error == nil and
-          projection.network.desired == socket.assigns.saving_network ->
-        socket =
-          assign(socket,
-            own_save: false,
-            dirty: false,
-            initial: false,
-            base: projection.network.desired,
-            form: to_form(NetworkForm.from_settings(projection.network.desired), as: :network),
-            message: "Settings saved."
-          )
+      saved?(socket.assigns, network) ->
+        saved(socket, network, previous)
 
-        if not previous.setup_completed or socket.assigns.live_action == :setup,
-          do: push_navigate(socket, to: "/"),
-          else: socket
-
-      socket.assigns.own_save and projection.network.pending == nil ->
+      socket.assigns.own_save and network.pending == nil ->
         assign(socket, own_save: false)
 
-      not socket.assigns.dirty and projection.network.desired != socket.assigns.base ->
+      not socket.assigns.dirty and network.desired != socket.assigns.base ->
         assign(socket,
-          base: projection.network.desired,
-          initial: not projection.network.setup_completed,
-          form: to_form(NetworkForm.from_settings(projection.network.desired), as: :network)
+          base: network.desired,
+          form: to_form(NetworkForm.from_settings(network.desired), as: :network)
         )
 
       true ->
         socket
+    end
+  end
+
+  defp saved?(assigns, network) do
+    assigns.own_save and network.pending == nil and network.setup_completed and
+      network.error == nil and
+      network.desired == assigns.saving_network
+  end
+
+  defp saved(socket, network, previous) do
+    socket =
+      assign(socket,
+        own_save: false,
+        dirty: false,
+        initial: false,
+        base: network.desired,
+        form: to_form(NetworkForm.from_settings(network.desired), as: :network),
+        message: "Settings saved."
+      )
+
+    if not previous.setup_completed or socket.assigns.live_action == :setup do
+      push_navigate(socket, to: "/")
+    else
+      socket
     end
   end
 
@@ -202,11 +211,11 @@ defmodule NervesGateWeb.SetupLive do
 
     ~H"""
     <.page_header
-      title={if @initial, do: "Set up your gateway", else: "Settings"}
+      title={if @initial, do: "Set up your gateway", else: "Network"}
       description={
         if @initial,
           do: "Connect what you need. Everything else can wait.",
-          else: "Change your connections here."
+          else: "Choose how the Ethernet ports are used."
       }
     />
     <div class="ui-disconnected">
@@ -268,11 +277,7 @@ defmodule NervesGateWeb.SetupLive do
               <p id="internet-summary">
                 <strong>{if @internet, do: port_label(@internet) <> " · "}{@internet_status}</strong>
               </p>
-              <p class="ui-help">
-                {if @internet,
-                  do: "Your gateway uses this connection. Equipment is not given Internet access.",
-                  else: "You can finish offline and add an Internet connection later."}
-              </p>
+              <p :if={!@internet} class="ui-help">You can finish offline and add Internet later.</p>
               <.button
                 variant="secondary"
                 phx-click="edit-internet"
@@ -320,7 +325,7 @@ defmodule NervesGateWeb.SetupLive do
                   <.field
                     field={@form[:equipment_ip]}
                     label="Gateway address on the equipment network"
-                    help="An unused address in your equipment’s subnet. Your equipment keeps its own addresses."
+                    help="Use an unused address in your equipment’s subnet."
                     placeholder="192.168.10.2"
                     required
                     autocomplete="off"
@@ -333,9 +338,9 @@ defmodule NervesGateWeb.SetupLive do
                   />
                 </div>
                 <p class="ui-help">
-                  Suggested address—check that it matches your equipment’s subnet and is unused. No equipment addresses are changed and no DHCP server is started.
+                  Check the suggested address before saving. Your equipment keeps its own addresses.
                 </p>
-                <.button variant="quiet" phx-click="remove-equipment">Add equipment later</.button>
+                <.button variant="quiet" phx-click="remove-equipment">Remove equipment connection</.button>
               <% end %>
             </.panel>
           <% else %>
@@ -385,36 +390,14 @@ defmodule NervesGateWeb.SetupLive do
           </div>
         </.form>
     <% end %>
-    <.panel :if={!@initial} title="Tailscale" icon="shield" class="ui-settings-details">
-      <p>
-        {if @projection.remote_access.state == "online",
-          do: "Connected to your private network.",
-          else: "Private access to this gateway, without an auth key."}
-      </p>
-      <.button href="/remote" variant="secondary">Configure Tailscale</.button>
-    </.panel>
     <details
       id="connection-details"
       class="ui-settings-details"
       phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
     >
       <summary>Connection details</summary>
-      <.live_component module={NervesGateWeb.ConnectionPanel} id="setup-connections" kind={:ports} />
-      <p class="ui-help">
-        USB is independent. It does not share your computer’s Internet connection.
-      </p>
-    </details>
-    <details
-      id="gateway-details"
-      class="ui-settings-details"
-      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
-    >
-      <summary>Gateway &amp; access</summary>
-      <p>Firmware {@projection.system.firmware} · {@projection.system.target}</p>
-      <p>Firmware listens on every IPv4 interface at port 4000.</p>
-      <.notice tone="warning">
-        Anyone who can reach this page can change settings. Use trusted networks only; authentication is not enabled.
-      </.notice>
+      <.live_component module={NervesGateWeb.ConnectionPanel} id="setup-connections" />
+      <p class="ui-help">USB stays separate for setup and recovery.</p>
     </details>
     """
   end
@@ -438,7 +421,7 @@ defmodule NervesGateWeb.SetupLive do
       <:option value="static" title="Manual" />
     </.choice_group>
     <p :if={@fields["method"].value == "static"} class="ui-help">
-      We filled in the current network details when available, otherwise example defaults. Check them before saving; reserve a DHCP address on your router before using it manually.
+      Check these suggested addresses. Reserve an address on your router before using it manually.
     </p>
     <div :if={@fields["method"].value == "static"} class="ui-field-grid">
       <.field field={@fields["ip"]} label="Gateway address" required autocomplete="off" />

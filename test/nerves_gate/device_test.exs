@@ -70,6 +70,18 @@ defmodule NervesGate.DeviceTest do
     refute projection.actions["network.confirm"].enabled
     assert projection.actions["network.confirm"].reason.code == "no_matching_trial"
     assert projection.actions["network.confirm"].required == ["trial_id"]
+
+    assert Enum.sort(Map.keys(projection.actions)) == [
+             "network.cancel",
+             "network.confirm",
+             "network.propose",
+             "network.validate",
+             "remote.configure",
+             "remote.connect",
+             "remote.disconnect",
+             "remote.login_url"
+           ]
+
     assert Jason.decode!(Jason.encode!(projection))["revision"] == projection.revision
     assert Device.projection(ctx.device) == projection
     refute_receive {:device, _}, 30

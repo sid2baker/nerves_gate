@@ -15,10 +15,21 @@ defmodule NervesGate.MixProject do
       releases: [
         nerves_gate: [
           include_erts: &Nerves.erts/0,
-          steps: [&set_source_date_epoch/1, &Nerves.init_release/1, :assemble]
+          steps: [&Nerves.init_release/1, :assemble]
         ]
       ],
-      dialyzer: [plt_add_apps: [:ex_unit]],
+      # Standalone integration scripts bootstrap their own isolated runtimes.
+      test_load_filters: [~r{^test/(?!integration/).*_test\.exs$}],
+      test_ignore_filters: [&String.starts_with?(&1, "test/integration/")],
+      dialyzer: [
+        plt_add_apps: [
+          :ex_unit,
+          :tailscale,
+          :vintage_net,
+          :vintage_net_bridge,
+          :vintage_net_ethernet
+        ]
+      ],
       aliases: aliases()
     ]
   end
@@ -27,17 +38,8 @@ defmodule NervesGate.MixProject do
     [extra_applications: [:logger, :crypto], mod: {NervesGate.Application, []}]
   end
 
-  def cli, do: [preferred_targets: [run: :host, test: :host], preferred_envs: [ci: :test]]
-
-  defp set_source_date_epoch(release) do
-    if Mix.target() in @targets do
-      # Nerves 2.0.0-pre.3 validates :source_date_epoch but forwards a misspelled key
-      # to fwup. Export the configured value until that upstream typo is fixed.
-      System.put_env("SOURCE_DATE_EPOCH", Application.fetch_env!(:nerves, :source_date_epoch))
-    end
-
-    release
-  end
+  def cli,
+    do: [preferred_targets: [run: :host, test: :host, ci: :host], preferred_envs: [ci: :test]]
 
   defp deps do
     [
@@ -47,7 +49,7 @@ defmodule NervesGate.MixProject do
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
       {:vibe_kit, "~> 0.1", only: [:dev, :test]},
-      {:nerves, "~> 2.0.0-pre.3", runtime: false},
+      {:nerves, "~> 2.0.0-pre.4", runtime: false},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
       {:phoenix, "~> 1.8"},

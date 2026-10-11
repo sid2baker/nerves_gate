@@ -15,46 +15,48 @@ defmodule NervesGate.Network.Host do
 
   @impl true
   def snapshot(server) do
-    Agent.get(server, fn %{network: network, overrides: overrides} ->
-      shared = network["mode"] == "shared"
+    Agent.get(server, &observed/1)
+  end
 
-      ports =
-        for name <- ["eth0", "eth1"] do
-          address =
-            cond do
-              shared -> nil
-              network["mode"] == "unconfigured" -> Config.address_defaults()
-              true -> get_in(Config.ports(network), [name, "address"])
-            end
+  defp observed(%{network: network, overrides: overrides}) do
+    shared = network["mode"] == "shared"
 
-          interface(
-            name,
-            address,
-            if shared do
-              "br0"
-            end,
-            name == "eth0"
-          )
-        end
+    bridge_address =
+      if shared do
+        network["equipment"]
+      end
 
-      Map.merge(
-        %{
-          simulated: true,
-          bridge:
-            interface(
-              "br0",
-              if shared do
-                network["equipment"]
-              end,
-              nil,
-              shared
-            ),
-          ports: ports,
-          usb: interface("usb0", nil, nil, false)
-        },
-        overrides
-      )
-    end)
+    master =
+      if shared do
+        "br0"
+      end
+
+    ports =
+      Enum.map(["eth0", "eth1"], fn name ->
+        interface(name, port_address(network, name), master, name == "eth0")
+      end)
+
+    Map.merge(
+      %{
+        simulated: true,
+        bridge: interface("br0", bridge_address, nil, shared),
+        ports: ports,
+        usb: interface("usb0", nil, nil, false)
+      },
+      overrides
+    )
+  end
+
+  defp port_address(%{"mode" => "shared"}, _) do
+    nil
+  end
+
+  defp port_address(%{"mode" => "unconfigured"}, _) do
+    Config.address_defaults()
+  end
+
+  defp port_address(network, name) do
+    get_in(Config.ports(network), [name, "address"])
   end
 
   defp interface(name, address, master, link) do

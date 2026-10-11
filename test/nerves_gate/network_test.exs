@@ -164,7 +164,7 @@ defmodule NervesGate.NetworkTest do
 
     assert Network.status(server).recovering
     assert {:error, :recovery_in_progress} = Network.propose(@static, server)
-    eventually(fn -> Agent.get(agent, &(length(&1.attempts) >= 2)) end)
+    eventually(fn -> Agent.get(agent, &match?([_, _ | _], &1.attempts)) end)
     Agent.update(agent, &%{&1 | fail: false})
     eventually(fn -> not Network.status(server).recovering end)
   end

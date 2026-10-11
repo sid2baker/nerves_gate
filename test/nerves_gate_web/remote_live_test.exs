@@ -2,7 +2,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
   use ExUnit.Case, async: false
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
-  alias NervesGate.{Remote, Device}
+  alias NervesGate.{Device, Remote}
   @endpoint NervesGateWeb.Endpoint
 
   defmodule Adapter do

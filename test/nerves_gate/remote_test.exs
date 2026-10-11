@@ -1,6 +1,6 @@
 defmodule NervesGate.RemoteTest do
   use ExUnit.Case, async: true
-  alias NervesGate.{Remote, Device}
+  alias NervesGate.{Device, Remote}
 
   defmodule Adapter do
     @behaviour Remote
@@ -61,6 +61,18 @@ defmodule NervesGate.RemoteTest do
     assert {:error, %{code: "remote_busy"}} = Remote.command(:disconnect, %{}, ctx.remote)
     send(worker, {:finish, :ok})
     eventually(fn -> Remote.status(ctx.remote).operation == nil end)
+  end
+
+  test "configure and disconnect route to their explicit adapter actions", ctx do
+    for {id, input, action, expected} <- [
+          {"remote.configure", %{"hostname" => "New-Name"}, :configure, %{hostname: "new-name"}},
+          {"remote.disconnect", %{}, :disconnect, %{}}
+        ] do
+      assert {:ok, %{result: %{accepted: true}}} = dispatch(ctx, id, input)
+      assert_receive {:remote_command, worker, ^action, ^expected}
+      send(worker, {:finish, :ok})
+      eventually(fn -> Remote.status(ctx.remote).operation == nil end)
+    end
   end
 
   test "login URL is explicit, HTTPS-only and absent from projections and broadcasts", ctx do

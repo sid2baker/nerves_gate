@@ -76,10 +76,10 @@ defmodule NervesGate.Config do
         %{"mode" => "ethernet", "internet_port" => port, "equipment" => equipment} = network
       )
       when map_size(network) == 3 and port in ["eth0", "eth1"] do
-    with {:ok, %{"ip_method" => "static", "gateway" => nil} = address} <-
-           validate_address(equipment) do
-      {:ok, %{network | "equipment" => address}}
-    else
+    case validate_address(equipment) do
+      {:ok, %{"ip_method" => "static", "gateway" => nil} = address} ->
+        {:ok, %{network | "equipment" => address}}
+
       _ ->
         {:error,
          "Choose an unused manual address in the equipment network, without a router address. Equipment addresses are not changed."}
@@ -184,13 +184,8 @@ defmodule NervesGate.Config do
 
   def validate_address(_), do: {:error, "Ethernet settings must be an object."}
 
-  defp validate_nameservers(servers) when is_list(servers) and length(servers) <= 3 do
-    if Enum.all?(servers, fn server ->
-         case ipv4(server) do
-           {:ok, ip} -> unicast?(ip)
-           _ -> false
-         end
-       end) do
+  defp validate_nameservers(servers) when is_list(servers) do
+    if Enum.count_until(servers, 4) <= 3 and Enum.all?(servers, &valid_nameserver?/1) do
       :ok
     else
       {:error, "Enter up to three IPv4 DNS server addresses."}
@@ -199,6 +194,13 @@ defmodule NervesGate.Config do
 
   defp validate_nameservers(_) do
     {:error, "Enter up to three IPv4 DNS server addresses."}
+  end
+
+  defp valid_nameserver?(server) do
+    case ipv4(server) do
+      {:ok, ip} -> unicast?(ip)
+      _ -> false
+    end
   end
 
   def equipment_port(%{"internet_port" => "eth0"}), do: "eth1"

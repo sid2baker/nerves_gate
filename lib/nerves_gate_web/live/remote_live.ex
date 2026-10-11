@@ -116,32 +116,42 @@ defmodule NervesGateWeb.RemoteLive do
     do: {:noreply, refresh(assign(socket, message: error.message), projection)}
 
   defp refresh(socket, projection) do
-    remote = projection.remote_access
+    socket
+    |> assign(projection: projection)
+    |> refresh_name(projection.remote_access)
+    |> refresh_login(projection.remote_access)
+  end
+
+  defp refresh_name(socket, remote) do
     name = hostname(remote)
-    socket = assign(socket, projection: projection)
 
-    socket =
-      cond do
-        socket.assigns.pending_name == name ->
-          unchanged = String.downcase(socket.assigns.form.params["hostname"] || "") == name
-          socket = assign(socket, base: name, pending_name: nil, dirty: not unchanged)
+    cond do
+      socket.assigns.pending_name == name ->
+        accept_name(socket, name)
 
-          if unchanged do
-            assign(socket, form: to_form(%{"hostname" => name}, as: :remote))
-          else
-            socket
-          end
+      not socket.assigns.dirty ->
+        assign(socket, form: to_form(%{"hostname" => name}, as: :remote), base: name)
 
-        not socket.assigns.dirty ->
-          assign(socket, form: to_form(%{"hostname" => name}, as: :remote), base: name)
+      remote.operation == nil ->
+        assign(socket, pending_name: nil)
 
-        remote.operation == nil ->
-          assign(socket, pending_name: nil)
+      true ->
+        socket
+    end
+  end
 
-        true ->
-          socket
-      end
+  defp accept_name(socket, name) do
+    unchanged = String.downcase(socket.assigns.form.params["hostname"] || "") == name
+    socket = assign(socket, base: name, pending_name: nil, dirty: not unchanged)
 
+    if unchanged do
+      assign(socket, form: to_form(%{"hostname" => name}, as: :remote))
+    else
+      socket
+    end
+  end
+
+  defp refresh_login(socket, remote) do
     cond do
       not remote.available or remote.state == "online" or remote.error != nil ->
         assign(socket, login_url: nil, login_requested: false)
@@ -153,13 +163,17 @@ defmodule NervesGateWeb.RemoteLive do
         assign(socket, login_url: nil, login_requested: false)
 
       socket.assigns.login_requested and remote.operation == nil ->
-        case Device.dispatch("remote.login_url") do
-          {:ok, %{result: %{url: url}}} -> assign(socket, login_url: url)
-          _ -> assign(socket, login_url: nil)
-        end
+        read_login_url(socket)
 
       true ->
         socket
+    end
+  end
+
+  defp read_login_url(socket) do
+    case Device.dispatch("remote.login_url") do
+      {:ok, %{result: %{url: url}}} -> assign(socket, login_url: url)
+      _ -> assign(socket, login_url: nil)
     end
   end
 
@@ -181,7 +195,7 @@ defmodule NervesGateWeb.RemoteLive do
     <.notice :if={@remote.auth_state == "error" and @remote.error == nil} tone="warning" role="alert">
       Tailscale sign-in failed. Check your Internet connection and try connecting again.
     </.notice>
-    <.panel title="Private connection" icon="shield">
+    <.panel title="Connection" icon="shield">
       <:meta>
         <.status tone={if @remote.state == "online", do: "good", else: "neutral"}>
           {status_label(@remote)}
@@ -210,48 +224,55 @@ defmodule NervesGateWeb.RemoteLive do
         </.setting_row>
         <.setting_row :if={@remote.dns_name} label="DNS name">{@remote.dns_name}</.setting_row>
       </div>
-      <.form for={@form} id="tailscale-form" phx-change="change" phx-submit="save" class="ui-stack">
-        <.field
-          field={@form[:hostname]}
-          label="Device name"
-          help="The name shown in your Tailscale account."
-          disabled={@remote.operation != nil}
-          required
-          autocomplete="off"
-        />
-        <div class="ui-actions">
-          <.button
-            id="tailscale-save"
-            type="submit"
-            disabled={
-              !@projection.actions[
-                if(@remote.state == "online", do: "remote.configure", else: "remote.connect")
-              ].enabled
-            }
-            phx-disable-with="Working…"
-          >{if @remote.state == "online", do: "Save device name", else: "Connect Tailscale"}</.button>
-          <.button
-            :if={
-              @remote.state == "online" or
-                @remote.auth_state in ["authenticating", "needs_approval", "stopped"]
-            }
-            variant="secondary"
-            phx-click="ask-disconnect"
-            disabled={!@projection.actions["remote.disconnect"].enabled}
-          >Disconnect</.button>
-        </div>
-      </.form>
-      <.notice :if={@disconnecting} tone="warning" role="alert">
-        <p>
-          Disconnect this gateway from Tailscale? If you’re using Tailscale now, you’ll lose this page. USB and local access stay available.
-        </p>
-        <div class="ui-actions">
-          <.button phx-click="disconnect">Disconnect Tailscale</.button><.button
-            variant="secondary"
-            phx-click="cancel-disconnect"
-          >Cancel</.button>
-        </div>
-      </.notice>
+      <details
+        id="tailscale-settings"
+        open={@remote.state != "online"}
+        phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+      >
+        <summary>Device name &amp; connection</summary>
+        <.form for={@form} id="tailscale-form" phx-change="change" phx-submit="save" class="ui-stack">
+          <.field
+            field={@form[:hostname]}
+            label="Device name"
+            help="The name shown in your Tailscale account."
+            disabled={@remote.operation != nil}
+            required
+            autocomplete="off"
+          />
+          <div class="ui-actions">
+            <.button
+              id="tailscale-save"
+              type="submit"
+              disabled={
+                !@projection.actions[
+                  if(@remote.state == "online", do: "remote.configure", else: "remote.connect")
+                ].enabled
+              }
+              phx-disable-with="Working…"
+            >{if @remote.state == "online", do: "Save device name", else: "Connect Tailscale"}</.button>
+            <.button
+              :if={
+                @remote.state == "online" or
+                  @remote.auth_state in ["authenticating", "needs_approval", "stopped"]
+              }
+              variant="secondary"
+              phx-click="ask-disconnect"
+              disabled={!@projection.actions["remote.disconnect"].enabled}
+            >Disconnect</.button>
+          </div>
+        </.form>
+        <.notice :if={@disconnecting} tone="warning" role="alert">
+          <p>
+            Disconnect this gateway from Tailscale? If you’re using Tailscale now, you’ll lose this page. USB and local access stay available.
+          </p>
+          <div class="ui-actions">
+            <.button phx-click="disconnect">Disconnect Tailscale</.button><.button
+              variant="secondary"
+              phx-click="cancel-disconnect"
+            >Cancel</.button>
+          </div>
+        </.notice>
+      </details>
       <p>
         <a
           href="https://login.tailscale.com/admin/machines"
@@ -260,22 +281,24 @@ defmodule NervesGateWeb.RemoteLive do
           class="ui-text-link"
         >Open Tailscale admin console</a>
       </p>
-      <p class="ui-help">
-        Tailscale keeps its own saved identity. DNS stays managed by the gateway. No auth key is needed.
-      </p>
-      <p :if={@remote.version} class="ui-help">Daemon {@remote.version}</p>
     </.panel>
-    <.panel title="Equipment access" icon="equipment">
-      <p>
-        This connects the gateway itself. Sharing equipment networks and verifying remote equipment access are separate; this page does not enable subnet routing.
-      </p>
+    <p class="ui-help">
+      Tailscale connects this gateway. Equipment sharing is not enabled by this interface.
+    </p>
+    <details
+      id="tailscale-details"
+      class="ui-details"
+      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
+    >
+      <summary>Connection details</summary>
+      <p :if={@remote.version} class="ui-help">Tailscale {@remote.version}</p>
       <p :if={@remote.advertised_routes not in [nil, []]} class="ui-help">
-        Existing advertised routes: {Enum.join(@remote.advertised_routes, ", ")}. They are left unchanged; advertisement does not prove approval or reachability.
+        Advertised routes: {Enum.join(@remote.advertised_routes, ", ")}. Advertisement does not prove approval or reachability.
       </p>
       <p class="ui-help">
-        The web interface has no authentication yet. Anyone allowed to reach port 4000 can change settings. Restrict access with your Tailscale policy.
+        Existing identity, routes and sharing settings are preserved. Restrict access to port 4000 with your Tailscale policy.
       </p>
-    </.panel>
+    </details>
     <.panel :if={@remote.health != []} title="Tailscale needs attention" icon="info">
       <p :for={warning <- @remote.health}>{warning}</p>
     </.panel>

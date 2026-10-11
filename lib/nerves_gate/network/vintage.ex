@@ -85,13 +85,17 @@ defmodule NervesGate.Network.Vintage do
       end
 
     with :ok <- preparation do
-      Enum.reduce_while(configs, :ok, fn {name, config}, :ok ->
-        case configure(name, config, deadline) do
-          :ok -> {:cont, :ok}
-          error -> {:halt, error}
-        end
-      end)
+      configure_all(configs, deadline)
     end
+  end
+
+  defp configure_all(configs, deadline) do
+    Enum.reduce_while(configs, :ok, fn {name, config}, :ok ->
+      case configure(name, config, deadline) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   defp configure(name, config, deadline) do

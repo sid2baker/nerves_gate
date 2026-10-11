@@ -22,50 +22,87 @@ defmodule NervesGate.Device.Projection do
 
   defp connections(status) do
     observed = status && status.observed
-
-    settings =
-      status &&
-        ((status.trial && status.trial.network) || (status.config && status.config["network"]))
-
+    settings = connection_settings(status)
     mode = settings && settings["mode"]
-    ports = if observed, do: observed.ports, else: []
+
+    ports =
+      if observed do
+        observed.ports
+      else
+        []
+      end
 
     suggested = NervesGate.Network.Discovery.internet_port(ports)
 
     internet_port =
-      if mode == "unconfigured", do: suggested, else: Config.role_port(settings, "internet")
+      if mode == "unconfigured" do
+        suggested
+      else
+        Config.role_port(settings, "internet")
+      end
 
-    internet =
-      if mode == "shared" and observed,
-        do: observed.bridge,
-        else: Enum.find(ports, &(&1.name == internet_port))
+    internet = internet_interface(mode, observed, ports, internet_port)
 
     %{
       mode: mode,
       suggested_internet_port: suggested,
-      ports:
-        Enum.map(ports, fn port ->
-          role =
-            cond do
-              mode == "shared" -> "shared"
-              true -> get_in(Config.ports(settings), [port.name, "role"]) || "unassigned"
-            end
+      ports: Enum.map(ports, &Map.put(&1, :role, port_role(settings, &1.name))),
+      internet: internet_status(internet),
+      problems:
+        if settings do
+          NervesGate.Network.conflicts(observed, settings)
+        else
+          []
+        end
+    }
+  end
 
-          Map.put(port, :role, role)
-        end),
-      internet: %{
-        link: internet != nil and internet.link,
-        addressed: internet != nil and Map.get(internet, :addresses, []) != [],
-        health:
-          if(
-            internet && internet.link && Map.get(internet, :addresses, []) != [] &&
-              Map.get(internet, :connection) == :internet,
-            do: "online",
-            else: "unverified"
-          ),
-        backup: "unavailable"
-      },
-      problems: if(settings, do: NervesGate.Network.conflicts(observed, settings), else: [])
+  defp connection_settings(nil) do
+    nil
+  end
+
+  defp connection_settings(%{trial: %{network: network}}) do
+    network
+  end
+
+  defp connection_settings(%{config: config}) do
+    config && config["network"]
+  end
+
+  defp internet_interface("shared", observed, _, _) do
+    observed && observed.bridge
+  end
+
+  defp internet_interface(_, _, ports, name) do
+    Enum.find(ports, &(&1.name == name))
+  end
+
+  defp port_role(%{"mode" => "shared"}, _) do
+    "shared"
+  end
+
+  defp port_role(settings, name) do
+    get_in(Config.ports(settings), [name, "role"]) || "unassigned"
+  end
+
+  defp internet_status(nil) do
+    %{link: false, addressed: false, health: "unverified", backup: "unavailable"}
+  end
+
+  defp internet_status(internet) do
+    addressed = Map.get(internet, :addresses, []) != []
+    online = internet.link and addressed and Map.get(internet, :connection) == :internet
+
+    %{
+      link: internet.link,
+      addressed: addressed,
+      health:
+        if online do
+          "online"
+        else
+          "unverified"
+        end,
+      backup: "unavailable"
     }
   end
 
