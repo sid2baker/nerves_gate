@@ -160,12 +160,17 @@ defmodule NervesGate.Network.Vintage do
 
   defp apply_network(network, force) do
     configs = configurations(network)
-    desired_members = if network["mode"] == "shared", do: ["eth0", "eth1"], else: []
-    current_members = get_in(get("br0", "config") || %{}, [:vintage_net_bridge, :interfaces])
-    deadline = System.monotonic_time(:millisecond) + 1_500
 
-    # Stop the old bridge membership watcher BEFORE changing port addresses.
-    # configure/3 is asynchronous; its completion is a mandatory safety barrier.
+    desired_members =
+      if network["mode"] == "shared" do
+        ["eth0", "eth1"]
+      else
+        []
+      end
+
+    current_members = get_in(get("br0", "config") || %{}, [:vintage_net_bridge, :interfaces])
+    deadline = System.monotonic_time(:millisecond) + 1500
+
     preparation =
       if current_members != desired_members do
         configure("br0", bridge_config([], %{method: :disabled}), deadline)

@@ -70,7 +70,7 @@ defmodule NervesGate.NetworkWorkflowTest do
     assert {:ok, _} = advance(Runtime.admission(ctx.runtime))
 
     assert {:error, :no_matching_trial} =
-             Runtime.execute(ctx.runtime(), %NervesGate.Network.Effect{
+             Runtime.execute(ctx.runtime, %NervesGate.Network.Effect{
                operation: :auto_confirm,
                id: id
              })
@@ -99,7 +99,7 @@ defmodule NervesGate.NetworkWorkflowTest do
 
     for operation <- [:auto_confirm, :auto_cancel, :await] do
       assert {:error, :confirmation_required} =
-               Runtime.execute(ctx.runtime(), %NervesGate.Network.Effect{
+               Runtime.execute(ctx.runtime, %NervesGate.Network.Effect{
                  operation: operation,
                  id: id
                })
@@ -118,7 +118,7 @@ defmodule NervesGate.NetworkWorkflowTest do
     try do
       for operation <- [:auto_confirm, :auto_cancel] do
         assert {:error, :stale_decision} =
-                 Runtime.execute(ctx.runtime(), %NervesGate.Network.Effect{
+                 Runtime.execute(ctx.runtime, %NervesGate.Network.Effect{
                    operation: operation,
                    id: id
                  })
@@ -127,20 +127,20 @@ defmodule NervesGate.NetworkWorkflowTest do
       Host.simulate(%{usb: @usb}, ctx.host)
 
       assert {:error, :stale_decision} =
-               Runtime.execute(ctx.runtime(), %NervesGate.Network.Effect{
+               Runtime.execute(ctx.runtime, %NervesGate.Network.Effect{
                  operation: :await,
                  id: id
                })
 
       assert {:error, :no_matching_trial} =
-               Runtime.execute(ctx.runtime(), %NervesGate.Network.Effect{
+               Runtime.execute(ctx.runtime, %NervesGate.Network.Effect{
                  operation: :auto_confirm,
                  id: "old"
                })
 
       assert {:ok, _, [save]} = advance(Runtime.admission(ctx.runtime))
       Host.simulate(unready, ctx.host)
-      assert {:error, :stale_decision} = Runtime.execute(ctx.runtime(), save)
+      assert {:error, :stale_decision} = Runtime.execute(ctx.runtime, save)
       assert Host.load(ctx.host) == {:ok, Config.defaults()}
       Host.simulate(%{usb: @usb}, ctx.host)
     after

@@ -1,328 +1,247 @@
 defmodule NervesGateWeb.RemoteLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
+  alias NervesGate.Remote.Sharing
+  alias NervesGateWeb.RemoteStatus
 
-  def mount(_, _, socket) do
-    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
+  on_mount({NervesGateWeb.Observations, :status})
 
-    if connected?(socket) do
-      Process.send_after(self(), :check_login, 1000)
-    end
-
-    projection = NervesGate.status()
-    name = hostname(projection.remote_access)
-
-    {:ok,
-     assign(socket,
-       projection: projection,
-       form: to_form(%{"hostname" => name}, as: :remote),
-       base: name,
-       dirty: false,
-       pending_name: nil,
-       message: nil,
-       login_requested: false,
-       login_url: nil,
-       disconnecting: false
-     )}
-  end
-
-  def handle_event("change", %{"remote" => %{"hostname" => name}}, socket),
+  def mount(_, _, socket),
     do:
-      {:noreply,
+      {:ok,
        assign(socket,
-         form: to_form(%{"hostname" => name}, as: :remote),
-         dirty: true,
+         sharing_form: to_form(%{"site" => "", "confirmed" => "false"}, as: :sharing),
+         busy: false,
          message: nil
        )}
 
-  def handle_event("save", %{"remote" => params}, socket) do
-    projection = NervesGate.status()
-    online = projection.remote_access.state == "online"
+  def handle_event("change-sharing", %{"sharing" => params}, socket),
+    do: {:noreply, assign(socket, :sharing_form, to_form(params, as: :sharing))}
 
-    socket =
-      assign(socket, form: to_form(Map.take(params, ["hostname"]), as: :remote), dirty: true)
-
-    if socket.assigns.base != hostname(projection.remote_access) do
-      {:noreply,
-       assign(socket,
-         message: "The device name changed in another session. Reload before saving."
-       )}
-    else
-      result =
-        if online do
-          NervesGate.remote_configure(params["hostname"])
-        else
-          NervesGate.remote_connect(params["hostname"])
-        end
-
-      socket =
-        if result == :ok do
-          assign(socket,
-            pending_name: String.downcase(params["hostname"]),
-            login_requested: not online,
-            login_url: nil
-          )
-        else
-          socket
-        end
-
-      reply(socket, result)
-    end
+  def handle_event("enable-sharing", %{"sharing" => params}, socket) do
+    {:noreply,
+     socket
+     |> assign(busy: true, message: nil)
+     |> start_async(:sharing, fn ->
+       NervesGate.equipment_share(params["site"], params["confirmed"] == "true")
+     end)}
   end
 
-  def handle_event("ask-disconnect", _, socket),
-    do: {:noreply, assign(socket, disconnecting: true)}
-
-  def handle_event("cancel-disconnect", _, socket),
-    do: {:noreply, assign(socket, disconnecting: false)}
-
-  def handle_event("disconnect", _, socket) do
-    reply(
-      assign(socket, disconnecting: false, login_requested: false, login_url: nil),
-      NervesGate.remote_disconnect()
-    )
+  def handle_event("disable-sharing", %{"route" => route}, socket) do
+    {:noreply,
+     socket
+     |> assign(busy: true, message: nil)
+     |> start_async(:sharing, fn -> NervesGate.equipment_unshare(route) end)}
   end
 
-  @doc false
-  def refresh_observations(socket) do
-    refresh(socket, NervesGate.status())
-  end
+  def handle_async(:sharing, result, socket) do
+    message =
+      case result do
+        {:ok, :ok} ->
+          "Route change verified locally. Tailnet approval, access policy and equipment reachability still need separate checks."
 
-  def handle_info(:check_login, socket) do
-    Process.send_after(self(), :check_login, 1000)
+        {:ok, {:error, error}} ->
+          error.message
 
-    socket =
-      if socket.assigns.login_requested do
-        refresh(socket, NervesGate.status())
-      else
-        socket
+        {:exit, _} ->
+          "The reply was lost. Check route state before retrying; the change may still complete."
       end
 
-    {:noreply, socket}
+    {:noreply, assign(socket, busy: false, message: message, projection: NervesGate.status())}
   end
 
-  defp reply(socket, :ok) do
-    {:noreply, refresh(assign(socket, message: nil), NervesGate.status())}
-  end
-
-  defp reply(socket, {:error, error}) do
-    {:noreply, refresh(assign(socket, message: error.message), NervesGate.status())}
-  end
-
-  defp refresh(socket, projection) do
-    socket
-    |> assign(projection: projection)
-    |> refresh_name(projection.remote_access)
-    |> refresh_login(projection.remote_access)
-  end
-
-  defp refresh_name(socket, remote) do
-    name = hostname(remote)
-
-    cond do
-      socket.assigns.pending_name == name ->
-        accept_name(socket, name)
-
-      not socket.assigns.dirty ->
-        assign(socket, form: to_form(%{"hostname" => name}, as: :remote), base: name)
-
-      remote.operation == nil ->
-        assign(socket, pending_name: nil)
-
-      true ->
-        socket
-    end
-  end
-
-  defp accept_name(socket, name) do
-    unchanged = String.downcase(socket.assigns.form.params["hostname"] || "") == name
-    socket = assign(socket, base: name, pending_name: nil, dirty: not unchanged)
-
-    if unchanged do
-      assign(socket, form: to_form(%{"hostname" => name}, as: :remote))
+  defp preview(scope, site) do
+    with scope when is_map(scope) <- scope, {:ok, site} <- Sharing.site_id(site) do
+      Sharing.route(scope, site)
     else
-      socket
+      _ -> nil
     end
   end
 
-  defp refresh_login(socket, remote) do
-    cond do
-      not remote.available or remote.state == "online" or remote.error != nil ->
-        assign(socket, login_url: nil, login_requested: false)
-
-      remote.operation == "connect" ->
-        socket
-
-      remote.auth_state not in ["authenticating", "needs_login"] ->
-        assign(socket, login_url: nil, login_requested: false)
-
-      socket.assigns.login_requested and remote.operation == nil ->
-        read_login_url(socket)
-
-      true ->
-        socket
+  defp endpoint(scope, site, ip) do
+    with scope when is_map(scope) <- scope,
+         {:ok, site} <- Sharing.site_id(site),
+         true <- NervesGate.Equipment.Subnet.host?(scope, ip) do
+      Sharing.address(ip, site)
+    else
+      _ -> nil
     end
   end
 
-  defp read_login_url(socket) do
-    case NervesGate.remote_login_url() do
-      {:ok, url} -> assign(socket, login_url: url)
-      _ -> assign(socket, login_url: nil)
+  defp destinations(route, entries, scope) do
+    with true <- Sharing.matches?(route, scope), {:ok, %{site: site}} <- Sharing.decode(route) do
+      Enum.map(entries, fn entry ->
+        %{
+          id: "via6-#{site}-#{entry.id}",
+          local: entry.ip,
+          label: entry.label,
+          address: Sharing.address(entry.ip, site)
+        }
+      end)
+    else
+      _ -> []
     end
   end
 
   def render(assigns) do
-    assigns = assign(assigns, remote: assigns.projection.remote_access)
+    assigns =
+      assign(assigns,
+        remote: assigns.projection.remote_access,
+        route_preview:
+          preview(assigns.projection.sharing.scope, assigns.sharing_form[:site].value),
+        endpoint:
+          endpoint(
+            assigns.projection.sharing.scope,
+            assigns.sharing_form[:site].value,
+            assigns.sharing_form[:address].value
+          )
+      )
 
     ~H"""
-    <.page_header title="Tailscale" description="Connect this gateway to your private network." />
-    <div class="ui-disconnected">
-      <.notice tone="warning" role="alert">
-        Connection lost. Reconnect locally or through USB to check Tailscale.
-      </.notice>
-    </div>
+    <.page_header
+      title="Remote access"
+      description="Access to this gateway and its equipment networks."
+    />
     <.notice :if={@remote.simulated}>
-      Development preview. Tailscale is simulated; your computer’s VPN is never changed.
+      Preview mode · Tailscale and route changes are simulated. Your computer’s VPN is never changed.
     </.notice>
-    <.notice :if={@message} tone="warning" role="alert">{@message}</.notice>
-    <.notice :if={@remote.error} tone="warning" role="alert">{@remote.error.message}</.notice>
-    <.notice :if={@remote.auth_state == "error" and @remote.error == nil} tone="warning" role="alert">
-      Tailscale sign-in failed. Check your Internet connection and try connecting again.
-    </.notice>
-    <.panel title="Connection" icon="shield">
-      <:meta>
-        <.status tone={if @remote.state == "online", do: "good", else: "neutral"}>
-          {status_label(@remote)}
-        </.status>
-      </:meta>
-      <p :if={!@remote.available}>
-        Tailscale is starting or unavailable. Check that the daemon is installed and the gateway has Internet access.
-      </p>
-      <p :if={@remote.auth_state == "needs_approval"} role="status">
-        Approve this gateway in your Tailscale admin console. This page updates automatically.
-      </p>
-      <p :if={@remote.operation} role="status">{operation(@remote.operation)}</p>
-      <.notice :if={@login_url}>
-        <p>Open Tailscale to sign in, then return here. Keep this login link private.</p>
-        <.button
-          id="tailscale-login-link"
-          href={@login_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          referrerpolicy="no-referrer"
-        >Continue in Tailscale</.button>
-      </.notice>
-      <div :if={@remote.state == "online"} class="ui-settings-list">
-        <.setting_row label="Tailscale address">
-          {@remote.ipv4 || "Waiting for an address"}
-        </.setting_row>
-        <.setting_row :if={@remote.dns_name} label="DNS name">{@remote.dns_name}</.setting_row>
-      </div>
-      <details
-        id="tailscale-settings"
-        open={@remote.state != "online"}
-        phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
-      >
-        <summary>Device name &amp; connection</summary>
-        <.form for={@form} id="tailscale-form" phx-change="change" phx-submit="save" class="ui-stack">
-          <.field
-            field={@form[:hostname]}
-            label="Device name"
-            help="The name shown in your Tailscale account."
-            disabled={@remote.operation != nil}
-            required
-            autocomplete="off"
-          />
-          <div class="ui-actions">
-            <.button
-              id="tailscale-save"
-              type="submit"
-              disabled={
-                !@projection.actions[
-                  if(@remote.state == "online", do: "remote.configure", else: "remote.connect")
-                ].enabled
-              }
-              phx-disable-with="Working…"
-            >{if @remote.state == "online", do: "Save device name", else: "Connect Tailscale"}</.button>
-            <.button
-              :if={
-                @remote.state == "online" or
-                  @remote.auth_state in ["authenticating", "needs_approval", "stopped"]
-              }
-              variant="secondary"
-              phx-click="ask-disconnect"
-              disabled={!@projection.actions["remote.disconnect"].enabled}
-            >Disconnect</.button>
-          </div>
-        </.form>
-        <.notice :if={@disconnecting} tone="warning" role="alert">
-          <p>
-            Disconnect this gateway from Tailscale? If you’re using Tailscale now, you’ll lose this page. USB and local access stay available.
-          </p>
-          <div class="ui-actions">
-            <.button phx-click="disconnect">Disconnect Tailscale</.button><.button
-              variant="secondary"
-              phx-click="cancel-disconnect"
-            >Cancel</.button>
-          </div>
-        </.notice>
-      </details>
+    <RemoteStatus.connection remote={@remote}>
+      <p>These addresses belong to the gateway, not to equipment connected behind it.</p>
+      <.link navigate="/settings/tailscale" class="ui-text-link">
+        {if @remote.state == "online", do: "Manage Tailscale connection", else: "Set up Tailscale"}
+      </.link>
+    </RemoteStatus.connection>
+    <.panel title="Equipment networks" icon="equipment" id="equipment-remote-access">
       <p>
-        <a
-          href="https://login.tailscale.com/admin/machines"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="ui-text-link"
-        >Open Tailscale admin console</a>
+        Sharing is opt-in. A dedicated equipment port can be advertised using 4via6 addresses,
+        so identical IPv4 subnets at different sites remain distinct. No ordinary IPv4 route is added.
       </p>
-    </.panel>
-    <p class="ui-help">
-      Tailscale connects this gateway. Equipment sharing is not enabled by this interface.
-    </p>
-    <details
-      id="tailscale-details"
-      class="ui-details"
-      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
-    >
-      <summary>Connection details</summary>
-      <p :if={@remote.version} class="ui-help">Tailscale {@remote.version}</p>
-      <p :if={@remote.advertised_routes not in [nil, []]} class="ui-help">
-        Advertised routes: {Enum.join(@remote.advertised_routes, ", ")}. Advertisement does not prove approval or reachability.
+      <.notice :if={@message} role="status">{@message}</.notice>
+      <.notice :if={@projection.sharing.uncertain != []} tone="warning">
+        A route change has an unknown outcome. LAN changes stay blocked until the affected route
+        is explicitly withdrawn and verified. A missing advertisement alone does not resolve this.
+      </.notice>
+      <%= cond do %>
+        <% !@remote.available || @remote.advertised_routes == nil -> %>
+          <p class="ui-help">
+            Advertised routes are unavailable. Equipment access cannot be determined.
+          </p>
+        <% @remote.advertised_routes == [] -> %>
+          <p class="ui-help">Tailscale reports no advertised subnet routes on this gateway.</p>
+        <% true -> %>
+          <p class="ui-help">
+            The daemon’s advertised routes are listed below, including routes configured elsewhere.
+          </p>
+      <% end %>
+      <div :for={route <- @projection.sharing.routes} class="ui-stack ui-route">
+        <.setting_row label={
+          if route in @projection.sharing.uncertain, do: "Uncertain route", else: "Advertised route"
+        }>
+          <code>{route}</code>
+        </.setting_row>
+        <.button
+          :if={match?({:ok, _}, Sharing.decode(route))}
+          phx-click="disable-sharing"
+          phx-value-route={route}
+          disabled={@busy || !@projection.actions["equipment.unshare"].enabled}
+          variant="quiet"
+        >
+          Withdraw this route
+        </.button>
+        <p :if={!match?({:ok, _}, Sharing.decode(route))} class="ui-help">
+          External route: preserved, not managed here. Review it in your Tailscale configuration.
+        </p>
+        <div
+          :for={
+            device <- destinations(route, @projection.equipment.entries, @projection.sharing.scope)
+          }
+          class="ui-field"
+        >
+          <label for={device.id}>{if device.label == "",
+            do: device.local,
+            else: "#{device.label} · #{device.local}"}</label>
+          <input
+            id={device.id}
+            value={device.address}
+            readonly
+            phx-hook="CopyAddress"
+            aria-describedby="via6-help"
+          />
+          <span class="ui-help">Select the address, then copy it.</span>
+        </div>
+      </div>
+      <.notice tone="warning">
+        Advertisement does not prove approval or reachability. Approve the route and restrict access
+        in your tailnet policy, then test the intended equipment service from an authorized client.
+      </.notice>
+      <.form
+        for={@sharing_form}
+        id="equipment-sharing-form"
+        class="ui-stack"
+        phx-change="change-sharing"
+        phx-submit="enable-sharing"
+      >
+        <.field
+          field={@sharing_form[:site]}
+          label="Tailnet-unique site ID"
+          inputmode="numeric"
+          help="0–65535. Ask your tailnet administrator to assign an unused ID. This gateway cannot verify uniqueness."
+        />
+        <label class="ui-check">
+          <input type="hidden" name="sharing[confirmed]" value="false" />
+          <input
+            type="checkbox"
+            name="sharing[confirmed]"
+            value="true"
+            checked={@sharing_form[:confirmed].value == "true"}
+          />
+          I am authorized to share this equipment and have confirmed this site ID is unique in my tailnet.
+        </label>
+        <p :if={@route_preview}>Route to advertise: <code>{@route_preview}</code></p>
+        <.field
+          field={@sharing_form[:address]}
+          label="Equipment IPv4 address (optional address calculator)"
+          help="Enter a known equipment address, even if discovery did not find it. Use the site ID of its advertised route."
+        />
+        <div :if={@endpoint} class="ui-field">
+          <label for="calculated-via6">Equipment IPv6 address · select, then copy</label>
+          <input id="calculated-via6" value={@endpoint} readonly phx-hook="CopyAddress" />
+        </div>
+        <.button
+          type="submit"
+          id="enable-equipment-sharing"
+          disabled={@busy || !@projection.actions["equipment.share"].enabled}
+        >
+          {if @busy || @remote.operation in ["sharing_enable", "sharing_disable", "sharing_sync"],
+            do: "Updating sharing…",
+            else: "Share equipment subnet"}
+        </.button>
+        <p :if={@projection.actions["equipment.share"].reason} class="ui-help">
+          {@projection.actions["equipment.share"].reason.message}
+        </p>
+      </.form>
+      <p id="via6-help" class="ui-help">
+        Clients and applications must support IPv6. Use brackets around IPv6 literals in URLs,
+        for example http://[address]:port. IPv4-only applications and broadcast discovery are not
+        supported by 4via6. There is no ambiguous IPv4 fallback. Local discovery is optional; silent
+        equipment can still be addressed using the same site ID and its known IPv4 address.
       </p>
       <p class="ui-help">
-        Existing identity, routes and sharing settings are preserved. Restrict access to port 4000 with your Tailscale policy.
+        This page changes advertisements only; it does not install a firewall or pin traffic to a port.
+        Tailscale uses the gateway’s routing table. Withdrawing a route or disconnecting Tailscale
+        is not proof that existing sessions have ended. Other preferences and enrollment are preserved.
       </p>
-    </details>
-    <.panel :if={@remote.health != []} title="Tailscale needs attention" icon="info">
-      <p :for={warning <- @remote.health}>{warning}</p>
+      <.link navigate="/equipment" class="ui-text-link">View local equipment connection</.link>
     </.panel>
+    <p class="ui-help">
+      <a
+        href="https://login.tailscale.com/admin/machines"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="ui-text-link"
+      >Open Tailscale admin console</a>.
+      Restrict access to port 4000 with your Tailscale policy. This web interface has no sign-in protection.
+    </p>
     """
   end
-
-  defp hostname(remote),
-    do: if(remote.hostname in [nil, ""], do: "nerves-gate", else: remote.hostname)
-
-  defp status_label(%{state: "online"}) do
-    "Connected"
-  end
-
-  defp status_label(%{auth_state: "needs_approval"}) do
-    "Waiting for approval"
-  end
-
-  defp status_label(%{auth_state: "authenticating"}) do
-    "Waiting for sign-in"
-  end
-
-  defp status_label(%{available: false}) do
-    "Unavailable"
-  end
-
-  defp status_label(_) do
-    "Not connected"
-  end
-
-  defp operation("connect"), do: "Connecting to Tailscale…"
-  defp operation("disconnect"), do: "Disconnecting…"
-  defp operation(_), do: "Saving device name…"
 end

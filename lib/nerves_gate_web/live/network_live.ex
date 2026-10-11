@@ -1,9 +1,10 @@
-defmodule NervesGateWeb.SetupLive do
+defmodule NervesGateWeb.NetworkLive do
   use Phoenix.LiveView
   alias NervesGate.Network
   alias NervesGateWeb.NetworkForm
   import NervesGateWeb.NetworkStatus, only: [port_label: 1]
   import NervesGateWeb.CoreComponents
+  import NervesGateWeb.Layouts, only: [settings_nav: 1]
 
   def mount(_, session, socket) do
     socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
@@ -26,9 +27,7 @@ defmodule NervesGateWeb.SetupLive do
         now: System.system_time(:millisecond)
       )
 
-    if socket.assigns.live_action == :setup and projection.network.setup_completed,
-      do: {:ok, push_navigate(socket, to: "/settings")},
-      else: {:ok, socket}
+    {:ok, socket}
   end
 
   def handle_event("edit-internet", _, socket) do
@@ -176,10 +175,10 @@ defmodule NervesGateWeb.SetupLive do
         message: "Settings saved."
       )
 
-    if not previous.setup_completed or socket.assigns.live_action == :setup do
-      push_navigate(socket, to: "/")
-    else
+    if previous.setup_completed do
       socket
+    else
+      push_navigate(socket, to: "/")
     end
   end
 
@@ -215,18 +214,14 @@ defmodule NervesGateWeb.SetupLive do
 
     ~H"""
     <.page_header
-      title={if @initial, do: "Set up your gateway", else: "Network"}
-      description={
-        if @initial,
-          do: "Connect what you need. Everything else can wait.",
-          else: "Choose how the Ethernet ports are used."
-      }
+      eyebrow="Settings"
+      title="Network"
+      description="Choose how the Ethernet ports are used. USB stays independent for recovery."
     />
-    <div class="ui-disconnected">
-      <.notice tone="warning" role="alert">
-        Connection lost. Reconnect or use USB. Unconfirmed network changes restore automatically.
-      </.notice>
-    </div>
+    <.settings_nav current={:network} />
+    <p :if={@initial} class="ui-help">
+      First setup · Connect what you need. Everything else can wait.
+    </p>
     <.notice :if={@message} role="status">{@message}</.notice>
     <.notice :if={@projection.network.error} tone="warning" role="alert">
       {@projection.network.error.message}
@@ -401,7 +396,7 @@ defmodule NervesGateWeb.SetupLive do
       <summary>Connection details</summary>
       <.live_component
         module={NervesGateWeb.ConnectionPanel}
-        id="setup-connections"
+        id="network-connections"
         projection={@projection}
       />
       <p class="ui-help">USB stays separate for setup and recovery.</p>

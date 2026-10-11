@@ -18,13 +18,16 @@ defmodule NervesGateWeb.Router do
   scope("/", NervesGateWeb) do
     pipe_through(:browser)
 
-    live_session(:management, session: {NervesGateWeb.Access, :session, []}) do
+    live_session(:management,
+      session: {NervesGateWeb.Access, :session, []},
+      layout: {NervesGateWeb.Layouts, :app}
+    ) do
       live("/", DashboardLive, :overview)
-      live("/equipment", DashboardLive, :equipment)
-      live("/internet", DashboardLive, :internet)
+      live("/equipment", EquipmentLive, :equipment)
       live("/remote", RemoteLive, :remote)
-      live("/settings", SetupLive, :settings)
-      live("/setup", SetupLive, :setup)
+      live("/settings", SettingsLive, :settings)
+      live("/settings/network", NetworkLive, :network_settings)
+      live("/settings/tailscale", TailscaleLive, :tailscale_settings)
     end
   end
 end

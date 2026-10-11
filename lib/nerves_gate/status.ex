@@ -1,10 +1,17 @@
 defmodule NervesGate.Status do
   @moduledoc "Pure status builder behind `NervesGate.status/1`. No process, cache or command execution."
-  alias NervesGate.{Config, Network, Remote}
+  alias NervesGate.{Config, Equipment, Indicators, Network, Remote}
+  alias NervesGate.Equipment.Subnet
   alias NervesGate.Error
   alias NervesGate.Observations.Network, as: NetworkObservation
+  alias NervesGate.Remote.Sharing
 
-  def build(status, remote) do
+  def build(
+        status,
+        remote,
+        equipment \\ Equipment.unavailable(),
+        indicators \\ Indicators.unavailable()
+      ) do
     %{
       version: 2,
       system: %{firmware: NervesGate.version(), target: to_string(NervesGate.target())},
@@ -17,26 +24,116 @@ defmodule NervesGate.Status do
         remote_enrollment: remote.available
       },
       remote_access: remote,
-      actions: actions(status, remote)
+      sharing: sharing(status, remote),
+      equipment: equipment(status, equipment),
+      indicators: indicators,
+      actions: actions(status, remote, equipment, indicators)
     }
   end
 
   # Presentation metadata only. Admission belongs to the domain servers.
-  defp actions(status, remote) do
+  defp actions(status, remote, equipment, indicators) do
     trial = if status && status.trial, do: :ok, else: {:error, :no_matching_trial}
     confirm = if trial == :ok and not status.ready, do: {:error, :not_connected}, else: trial
     remote_ready = Remote.Policy.available(remote)
 
     %{
       "network.validate" => action("Review settings", ["network"], :ok),
-      "network.propose" => action("Try settings", ["network"], Network.Policy.available(status)),
+      "network.propose" => action("Try settings", ["network"], lan_available(status)),
       "network.confirm" => action("Keep settings", ["trial_id"], confirm),
       "network.cancel" => action("Restore saved settings", ["trial_id"], trial),
       "remote.connect" => action("Connect Tailscale", ["hostname"], remote_ready),
       "remote.configure" => action("Save device name", ["hostname"], remote_ready),
       "remote.disconnect" => action("Disconnect Tailscale", [], remote_ready),
-      "remote.login_url" => action("Continue Tailscale login", [], remote_ready)
+      "remote.login_url" => action("Continue Tailscale login", [], remote_ready),
+      "equipment.scan" => action("Scan equipment subnet", [], scan_available(status, equipment)),
+      "equipment.label" => action("Save label", ["id", "label"], labels_available(equipment)),
+      "equipment.share" =>
+        action(
+          "Share equipment",
+          ["site_id", "unique_confirmed"],
+          sharing_available(status, remote)
+        ),
+      "equipment.unshare" =>
+        action("Withdraw route", ["route"], unshare_available(status, remote)),
+      "identify" => action("Identify gateway", [], identify_available(indicators)),
+      "button_mode" =>
+        action(
+          "Set button behavior",
+          ["mode"],
+          if(indicators.button.available, do: :ok, else: {:error, :button_unavailable})
+        )
     }
+  end
+
+  defp identify_available(%{led: %{identifying: true}}), do: {:error, :operation_in_progress}
+  defp identify_available(%{led: %{restore_pending: true}}), do: {:error, :led_restore_failed}
+  defp identify_available(%{led: %{available: true}}), do: :ok
+  defp identify_available(_), do: {:error, :led_unavailable}
+
+  defp sharing(status, remote) do
+    scope =
+      case Sharing.scope(status) do
+        {:ok, scope} -> scope
+        _ -> nil
+      end
+
+    %{
+      scope: scope,
+      uncertain: remote.sharing.uncertain,
+      routes: Enum.uniq((remote.advertised_routes || []) ++ remote.sharing.uncertain)
+    }
+  end
+
+  defp lan_available(status) do
+    with :ok <- Network.Policy.available(status),
+         do: Map.get(status, :sharing_admission, :ok)
+  end
+
+  defp sharing_available(status, remote) do
+    with :ok <- Network.Policy.available(status),
+         {:ok, _} <- Sharing.enable(status, remote, 0, true),
+         do: :ok
+  end
+
+  defp unshare_available(status, remote) do
+    with :ok <- Network.Policy.available(status), do: Remote.Policy.available(remote)
+  end
+
+  defp equipment(status, equipment) do
+    scope =
+      case Subnet.from_status(status) do
+        {:ok, scope} -> scope
+        _ -> nil
+      end
+
+    if equipment.scope == scope and scope != nil do
+      equipment
+    else
+      %{equipment | scope: scope, entries: [], last_scan: nil, operation: nil, error: nil}
+    end
+  end
+
+  defp scan_available(_, %{available: false}) do
+    {:error, :equipment_unavailable}
+  end
+
+  defp scan_available(status, _) do
+    with :ok <- Network.Policy.available(status), {:ok, _} <- Subnet.active(status) do
+      :ok
+    end
+  end
+
+  defp labels_available(%{available: false}) do
+    {:error, :equipment_unavailable}
+  end
+
+  defp labels_available(%{labels_error: nil}) do
+    :ok
+  end
+
+  defp labels_available(_) do
+    {:error, :labels_unavailable}
   end
 
   defp action(label, required, result) do

@@ -87,6 +87,53 @@ defmodule NervesGate.TailscaleIntegration do
     )
   end
 
+  test "real 4via6 route merge, readback and exact withdrawal preserve other preferences" do
+    other = ["192.168.80.0/24", "fd00::/64"]
+    :ok = Tailscale.update_configuration(%{advertise_routes: other, accept_routes: true})
+    {:ok, ^other} = Remote.sharing(:sharing_sync, %{})
+    before = Tailscale.get_configuration()
+    :ok = Tailscale.down()
+    before_prefs = preferences()
+
+    {:ok, scope} =
+      NervesGate.Equipment.Subnet.build("eth1", %{
+        "ip_method" => "static",
+        "static_ip" => "192.168.50.2",
+        "subnet_mask" => "255.255.255.0"
+      })
+
+    route = NervesGate.Remote.Sharing.route(scope, 7)
+    assert {:ok, routes} = Remote.sharing(:sharing_enable, %{route: route, scope: scope})
+    assert routes == Enum.sort(other ++ [route])
+    assert Remote.status().advertised_routes == routes
+
+    assert Map.delete(Tailscale.get_configuration(), :advertise_routes) ==
+             Map.delete(before, :advertise_routes)
+
+    assert {:ok, ^other} = Remote.sharing(:sharing_disable, %{route: route})
+    assert Tailscale.get_configuration() == before
+    assert preferences() == before_prefs
+  end
+
+  test "up and gateway disconnect change only running intent, without logout or reset" do
+    :ok = Tailscale.down()
+    before = preferences()
+    assert before["WantRunning"] == false
+
+    assert :ok = Tailscale.up()
+    assert preferences() == Map.put(before, "WantRunning", true)
+    assert :ok = NervesGate.remote_disconnect()
+    eventually(fn -> Remote.status().operation == nil end)
+    assert Remote.status().error == nil
+    assert preferences() == before
+  end
+
+  defp preferences do
+    opts = [socket: Application.fetch_env!(:tailscale, :socket)]
+    {:ok, prefs, _} = Tailscale.LocalAPI.request(opts, "GET", "prefs")
+    prefs
+  end
+
   defp eventually(fun, attempts \\ 200)
   defp eventually(fun, 0), do: assert(fun.())
 

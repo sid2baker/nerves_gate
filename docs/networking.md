@@ -8,7 +8,7 @@ linked, addressed port is suggested. Ambiguous connections require a choice.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change automatically when a cable disappears or moves.
-Use **Network** to change them. Neither setup nor discovery bridges networks,
+Use **Settings → Network** to change them. Neither setup nor discovery bridges networks,
 enables failover or assigns an equipment address behind your back.
 
 - **Separate ports:** at most one Internet port (DHCP or static IPv4), optionally
@@ -87,24 +87,27 @@ the browser, Jido timer or successful notification delivery.
 
 ## Tailscale
 
-In **Tailscale**, enter a device name, select **Connect Tailscale**, then follow the
-private sign-in link. Return to see connection or machine-approval status. No auth
-key is needed. Once connected, the address is shown first; rename and disconnect
-are under **Device name and connection**. Disconnecting interrupts a browser using
-that VPN. USB and LAN remain available. These operations do not use Ethernet's
+In **Settings → Tailscale**, enter a device name, select **Connect Tailscale**, then
+follow the private sign-in link. Return to see connection or machine-approval
+status. No auth key is needed. **Remote access** shows gateway addresses and
+advertised routes and explicit 4via6 equipment sharing; rename and disconnect remain
+in Settings. Disconnect uses `Tailscale.down/0`, preserving enrollment and preferences.
+Reconnect uses `up/0` for an enrolled profile, or login when enrollment is needed.
+Disconnecting may interrupt a browser using that VPN. USB and LAN remain available. These operations do not use Ethernet's
 rollback timer.
 
 Remote is one GenServer admitting one bounded, linked daemon worker at a time.
 Acceptance does not mean completion. Crashes or timeouts stop the worker;
 startup only observes
-the daemon, never replays a connect/rename/logout. Daemon-side work may still have
+the daemon, never replays a connect/rename/disconnect. Daemon-side work may still have
 completed, so read status before retrying.
 
 The Tailscale OTP application supervises `/usr/sbin/tailscaled` in kernel mode.
 Kernel TUN support is required. Identity and settings stay daemon-owned in
 `/data/tailscale_ex`; the socket is `/run/tailscale/tailscaled.sock`. Starting the
-daemon does not enroll it or enable equipment routing. Firmware builds preserve
-existing enrollment rather than resetting preferences.
+daemon does not enroll it or add equipment routes. Existing daemon preferences,
+including advertisements and running intent, still apply at startup. Firmware builds
+preserve existing enrollment rather than resetting preferences.
 
 Connect/rename set `accept_dns: false` so VintageNet retains DNS ownership, while
 preserving omitted preferences, routes and Serve settings. Startup observes an
@@ -121,8 +124,34 @@ restart; the library's default configuration is not an automatic startup policy.
 
 Daemon health URLs are redacted before publishing status. Private enrollment URLs
 are explicit reads and the UI accepts only HTTPS links to official Tailscale login
-hosts. The UI does not advertise equipment subnets, enable forwarding, grant
-tailnet permissions, configure Serve/Funnel or verify equipment reachability.
+hosts. The UI does not grant tailnet permissions, configure Serve/Funnel or verify
+equipment reachability.
+
+### Equipment sharing
+
+Sharing is explicit and uses **4via6**, never an ordinary overlapping IPv4 route.
+It requires a confirmed, active dedicated equipment port, Tailscale 1.102.3 or newer,
+and confirmation that the operator assigned a tailnet-unique site ID (0–65535).
+Shared LAN and USB are not eligible. Clients must support IPv6; approve the route,
+restrict access in tailnet policy and test the intended service separately.
+
+Enable merges one route into the current advertisement list; withdrawal removes
+exactly the displayed route. Other preferences, Serve settings and enrollment are
+preserved. These actions never bring a stopped VPN up or stop a running one.
+Withdrawal works without an equipment link or an online account, provided LocalAPI
+is available. Do not edit route preferences concurrently through another LocalAPI
+client: read/merge/write is serialized within this application, not across clients.
+
+Route operations hold the existing LAN worker. LAN proposals are blocked while
+4via6 routes are advertised or an outcome is unknown; independent rollback and USB
+recovery remain available. A timed-out mutation may still complete. Explicitly
+withdraw its uncertain route and wait for readback; an empty cached route list
+alone does not clear uncertainty. Restart reads preferences without replaying writes.
+
+**No custom firewall or traffic barrier is installed.** Tailscale handles 4via6 in
+userspace using the gateway’s routing table, not an interface-pinned kernel FORWARD
+rule. Route withdrawal and `down/0` readback are not proof that existing sessions
+have ended. The UI reports advertisements, not isolation, approval or reachability.
 
 ## Observations
 
@@ -142,7 +171,7 @@ Firmware listens on **all IPv4 interfaces, port 4000**. The listener starts with
 USB and accepts connections on interfaces added later. This does not configure an
 address or enroll a VPN. Host preview listens only on `127.0.0.1`.
 
-For USB recovery, open `http://<gateway-usb-address>:4000/settings`. VintageNetDirect
+For USB recovery, open `http://<gateway-usb-address>:4000/settings/network`. VintageNetDirect
 derives the USB /30 subnet at runtime; there is no fixed device IP. From serial or
 SSH IEx, inspect:
 

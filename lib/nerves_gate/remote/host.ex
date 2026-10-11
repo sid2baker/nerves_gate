@@ -17,7 +17,8 @@ defmodule NervesGate.Remote.Host do
       state: "offline",
       auth_state: "needs_login",
       hostname: "nerves-gate",
-      advertised_routes: []
+      advertised_routes: [],
+      sharing: %{ready: true, uncertain: []}
     })
   end
 
@@ -41,8 +42,18 @@ defmodule NervesGate.Remote.Host do
   def execute(:configure, %{hostname: name}, server),
     do: update(server, &%{&1 | hostname: name})
 
-  def execute(:disconnect, _, server),
-    do: update(server, &Map.merge(defaults(), %{hostname: &1.hostname}))
+  def execute(:disconnect, _, server) do
+    update(server, &%{&1 | state: "offline", auth_state: "stopped"})
+  end
+
+  def execute(operation, params, server)
+      when operation in [:sharing_enable, :sharing_disable, :sharing_sync] do
+    with {:ok, routes} <-
+           NervesGate.Remote.Routes.change(operation, params, snapshot(server).advertised_routes),
+         :ok <- update(server, &%{&1 | advertised_routes: routes}) do
+      {:ok, routes}
+    end
+  end
 
   @impl true
   def login_url(_), do: nil

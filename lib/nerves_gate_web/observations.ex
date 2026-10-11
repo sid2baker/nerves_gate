@@ -6,6 +6,14 @@ defmodule NervesGateWeb.Observations do
   """
   import Phoenix.Component, only: [assign: 3]
 
+  # Read-only pages share this hook. Editors retain their own refresh functions
+  # so observation updates never overwrite drafts.
+  def on_mount(:status, _, _, socket) do
+    {:cont, socket |> subscribe(&refresh_status/1) |> refresh_status()}
+  end
+
+  defp refresh_status(socket), do: assign(socket, :projection, NervesGate.status())
+
   def subscribe(socket, refresh) do
     if Phoenix.LiveView.connected?(socket), do: bind()
 

@@ -35,6 +35,12 @@ defmodule NervesGate.BridgeIntegrationTest do
     start_supervised!({Registry, keys: :unique, name: NervesGate.Registry})
     start_supervised!({PropertyTable, name: NervesGate.Properties})
     start_supervised!({Jido, name: NervesGate.Jido})
+    # LAN isolation test: explicit in-memory empty route authority, never a host VPN.
+    start_supervised!(NervesGate.Remote.Host)
+
+    start_supervised!(
+      {NervesGate.Remote, adapter: {NervesGate.Remote.Host, NervesGate.Remote.Host}}
+    )
 
     static = %{
       "ip_method" => "static",
@@ -290,7 +296,7 @@ defmodule NervesGate.BridgeIntegrationTest do
           "-fsS",
           "--max-time",
           "2",
-          "http://#{address}:#{port}/settings"
+          "http://#{address}:#{port}/settings/network"
         ],
         stderr_to_stdout: true
       )

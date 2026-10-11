@@ -28,7 +28,7 @@ defmodule NervesGate do
       :ok = NervesGate.subscribe()
       status = NervesGate.status()
 
-  Status reads the two domains independently; it is not an atomic snapshot or
+  Status reads the domains independently; it is not an atomic snapshot or
   cached state. Subscriptions belong to the caller. Property notifications are
   hints to read again; subscribe before reading and after reconnecting.
 
@@ -40,10 +40,10 @@ defmodule NervesGate do
 
     * `:access` — trusted server-observed USB access for `network_propose/2` only.
       Never populate it from user parameters or forwarded headers.
-    * `:network`, `:remote` — domain servers for tests or independent instances.
+    * `:network`, `:remote`, `:equipment`, `:indicators` — domain servers for tests or independent instances.
       No client object or extra process is required.
   """
-  alias NervesGate.{Error, Network, Remote, Status}
+  alias NervesGate.{Equipment, Error, Indicators, Network, Remote, Status}
 
   @type error :: %{code: String.t(), message: String.t()}
   @type result(value) :: {:ok, value} | {:error, error()}
@@ -87,7 +87,7 @@ defmodule NervesGate do
   def remote_configure(hostname, opts \\ []),
     do: remote_command(:configure, %{"hostname" => hostname}, opts)
 
-  @doc "Request Tailscale sign-out. May interrupt callers using that VPN."
+  @doc "Request Tailscale down without signing out. May interrupt callers using that VPN."
   @spec remote_disconnect(keyword()) :: command_result()
   def remote_disconnect(opts \\ []), do: remote_command(:disconnect, %{}, opts)
 
@@ -100,18 +100,70 @@ defmodule NervesGate do
     end
   end
 
-  @doc "Read current network/Tailscale status, capabilities and action availability."
+  @doc "Blink the mapped run LED for five seconds, then restore its previous raw value."
+  @spec identify(keyword()) :: command_result()
+  def identify(opts \\ []),
+    do: invoke(fn -> Indicators.identify(indicators(opts)) end) |> result()
+
+  @doc "Set the button to disabled or identify until the indicators service restarts. No reset action."
+  @spec button_mode(String.t(), keyword()) :: command_result()
+  def button_mode(mode, opts \\ []),
+    do: invoke(fn -> Indicators.button_mode(mode, indicators(opts)) end) |> result()
+
+  @doc "Read domain status, capabilities and action availability."
   @spec status(keyword()) :: map()
   def status(opts \\ []),
-    do: Status.build(network_status(network(opts)), remote_status(remote(opts)))
+    do:
+      Status.build(
+        network_status(network(opts)),
+        remote_status(remote(opts)),
+        equipment_status(equipment(opts)),
+        indicators_status(indicators(opts))
+      )
 
   @doc "Subscribe the calling process to domain observations; read status afterward."
   @spec subscribe(keyword()) :: command_result()
   def subscribe(opts \\ []) do
-    with :ok <- observe(Network, network(opts)), do: observe(Remote, remote(opts))
+    with :ok <- observe(Network, network(opts)),
+         :ok <- observe(Remote, remote(opts)),
+         :ok <- observe(Equipment, equipment(opts)),
+         do: observe(Indicators, indicators(opts))
   end
 
-  def target, do: Application.fetch_env!(:nerves_gate, :target)
+  @doc "Run one explicit ARP-only scan of the confirmed equipment subnet (at most /24 and five seconds)."
+  @spec equipment_scan(keyword()) :: command_result()
+  def equipment_scan(opts \\ []) do
+    invoke(fn -> Network.scan(equipment(opts), network(opts)) end) |> result()
+  end
+
+  @doc "Save a local equipment label. IDs come from status; an empty label removes it."
+  @spec equipment_label(String.t(), String.t(), keyword()) :: command_result()
+  def equipment_label(id, label, opts \\ []) do
+    invoke(fn -> Equipment.label(id, label, equipment(opts)) end) |> result()
+  end
+
+  @doc "Share the confirmed dedicated equipment subnet using a tailnet-unique 4via6 site ID."
+  def equipment_share(site_id, unique_confirmed, opts \\ []) do
+    invoke(fn ->
+      Network.sharing(
+        :sharing_enable,
+        %{site: site_id, confirmed: unique_confirmed},
+        network(opts)
+      )
+    end)
+    |> result()
+  end
+
+  @doc "Withdraw exactly one displayed 4via6 route, preserving all other Tailscale preferences."
+  def equipment_unshare(route, opts \\ []) do
+    invoke(fn -> Network.sharing(:sharing_disable, %{route: route}, network(opts)) end)
+    |> result()
+  end
+
+  def target do
+    Application.fetch_env!(:nerves_gate, :target)
+  end
+
   def version, do: Application.spec(:nerves_gate, :vsn) |> to_string()
 
   defp remote_command(operation, params, opts) do
@@ -120,6 +172,8 @@ defmodule NervesGate do
 
   defp network(opts), do: Keyword.get(opts, :network, Network)
   defp remote(opts), do: Keyword.get(opts, :remote, Remote)
+  defp equipment(opts), do: Keyword.get(opts, :equipment, Equipment)
+  defp indicators(opts), do: Keyword.get(opts, :indicators, Indicators)
 
   defp trial_id(id) when is_binary(id), do: :ok
   defp trial_id(_), do: {:error, Error.new("invalid_parameters", "Supply a trial ID string.")}
@@ -133,6 +187,20 @@ defmodule NervesGate do
   defp remote_status(server) do
     case invoke(fn -> Remote.status(server) end) do
       {:error, _} -> Remote.unavailable()
+      status -> status
+    end
+  end
+
+  defp equipment_status(server) do
+    case invoke(fn -> Equipment.status(server) end) do
+      {:error, _} -> Equipment.unavailable()
+      status -> status
+    end
+  end
+
+  defp indicators_status(server) do
+    case invoke(fn -> Indicators.status(server) end) do
+      {:error, _} -> Indicators.unavailable()
       status -> status
     end
   end

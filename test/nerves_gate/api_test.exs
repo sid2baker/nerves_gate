@@ -26,7 +26,7 @@ defmodule NervesGate.APITest do
     ]
 
     network = start_supervised!({Network, opts})
-    api = [network: opts[:name], remote: nil]
+    api = [network: opts[:name], remote: nil, indicators: nil]
     NervesGate.subscribe(api)
     NervesGate.status(api)
     flush_observations()
@@ -50,6 +50,10 @@ defmodule NervesGate.APITest do
           remote_disconnect: 1,
           remote_login_url: 0,
           remote_login_url: 1,
+          identify: 0,
+          identify: 1,
+          button_mode: 1,
+          button_mode: 2,
           status: 0,
           status: 1,
           subscribe: 0,
@@ -77,7 +81,7 @@ defmodule NervesGate.APITest do
     refute status.actions["network.confirm"].enabled
     assert status.actions["network.confirm"].reason.code == "no_matching_trial"
     assert status.actions["network.confirm"].required == ["trial_id"]
-    assert map_size(status.actions) == 8
+    assert map_size(status.actions) == 14
     assert Jason.decode!(Jason.encode!(status))["version"] == 2
     refute Map.has_key?(status, :revision)
     assert NervesGate.status(ctx.api) == status

@@ -3,7 +3,13 @@ import Config
 config :nerves_gate,
   target: config_target(),
   network_adapter: {NervesGate.Network.Vintage, nil},
-  remote_adapter: {NervesGate.Remote.Tailscale, nil}
+  remote_adapter: {NervesGate.Remote.Tailscale, nil},
+  equipment_adapter: {NervesGate.Equipment.Linux, nil},
+  indicators_adapter:
+    if(config_target() == :ec100,
+      do: {NervesGate.Indicators.EC100, "/sys/class/leds/ec100:run"},
+      else: nil
+    )
 
 # Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
 # The UI is unauthenticated; use only on trusted networks.

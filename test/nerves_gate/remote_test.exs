@@ -143,6 +143,25 @@ defmodule NervesGate.RemoteTest do
     refute Jason.encode!(changed) =~ "private-token"
   end
 
+  test "host disconnect and reconnect preserve identity, routes and unrelated settings" do
+    host = start_supervised!({Remote.Host, name: nil})
+    :ok = Remote.Host.execute(:connect, %{hostname: "retained-gateway"}, host)
+    before = Remote.Host.snapshot(host)
+
+    :ok =
+      Remote.Host.simulate(
+        Map.merge(before, %{advertised_routes: ["fd00::/64"], serve: [:kept]}),
+        host
+      )
+
+    before = Remote.Host.snapshot(host)
+
+    assert :ok = Remote.Host.execute(:disconnect, %{}, host)
+    assert Remote.Host.snapshot(host) == %{before | state: "offline", auth_state: "stopped"}
+    assert :ok = Remote.Host.execute(:connect, %{hostname: "retained-gateway"}, host)
+    assert Remote.Host.snapshot(host) == before
+  end
+
   defp eventually(fun, attempts \\ 60)
   defp eventually(fun, 0), do: assert(fun.())
 

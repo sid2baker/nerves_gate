@@ -6,7 +6,12 @@ defmodule NervesGate.Application do
   def start(_type, _args) do
     simulator =
       if NervesGate.target() == :host do
-        [NervesGate.Network.Host, NervesGate.Remote.Host]
+        [
+          NervesGate.Network.Host,
+          NervesGate.Remote.Host,
+          NervesGate.Equipment.Host,
+          NervesGate.Indicators.Host
+        ]
       else
         []
       end
@@ -22,6 +27,8 @@ defmodule NervesGate.Application do
         [
           NervesGate.Network,
           NervesGate.Remote,
+          NervesGate.Equipment,
+          NervesGate.Indicators,
           NervesGateWeb.Endpoint
         ]
 

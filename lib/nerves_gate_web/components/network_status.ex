@@ -51,7 +51,18 @@ defmodule NervesGateWeb.NetworkStatus do
     """
   end
 
-  # Reused in setup and observed port tiles; never expose interface names
+  def equipment_interface(%{connections: %{mode: "shared"}, network: %{observed: observed}}),
+    do: observed && observed.bridge
+
+  def equipment_interface(projection),
+    do: Enum.find(projection.connections.ports, &(&1.role == "equipment"))
+
+  def equipment_status(nil), do: "Not configured"
+  def equipment_status(%{present: false}), do: "Not installed"
+  def equipment_status(%{link: true}), do: "Cable connected"
+  def equipment_status(_), do: "No cable"
+
+  # Reused in settings and observed port tiles; never expose interface names
   # in everyday controls. Technical names remain available under diagnostics.
   def port_label("eth0"), do: "Port 1"
   def port_label("eth1"), do: "Port 2"

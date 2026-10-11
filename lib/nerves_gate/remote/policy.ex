@@ -17,7 +17,8 @@ defmodule NervesGate.Remote.Policy do
       operation: nil,
       error: nil,
       verified: false,
-      permitted_routes: nil
+      permitted_routes: nil,
+      sharing: %{ready: false, uncertain: []}
     }
   end
 

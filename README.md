@@ -7,13 +7,15 @@ Phoenix LiveView. EC100 is the primary target; x86_64 support is in progress.
 
 Open `http://<gateway-address>:4000` through LAN, USB or Tailscale.
 
-- **Gateway** — Internet, equipment and Tailscale status at a glance.
-- **Network** — choose an Internet connection and optionally add equipment.
-- **Tailscale** — connect the gateway, see its address, rename or disconnect it.
+- **Overview** — equipment, remote access and Internet status at a glance.
+- **Equipment** — scoped neighbor observations, bounded ARP scan and local device labels.
+- **Remote access** — gateway addresses and explicit 4via6 equipment route sharing.
+- **Settings** — Ethernet configuration, Tailscale enrollment/name, and safe button/LED controls.
 
 A new gateway tries DHCP on both Ethernet ports independently. It suggests the
 only plausible Internet port; it never joins networks or silently reassigns saved
-roles. First setup is one form. Equipment and Internet are both optional.
+roles. First setup and later changes use the same form under **Settings → Network**.
+Equipment and Internet are both optional.
 
 First setup through verified USB saves directly. Other network changes have a
 60-second **Keep changes / Restore previous settings** window. USB remains
@@ -23,9 +25,14 @@ independent for recovery. Technical details are collapsed until needed.
 settings. Use trusted networks and restrict access with your Tailscale policy;
 do not expose it to the public Internet. CSRF and same-origin checks remain enabled.
 
-Tailscale connects **the gateway itself**. Equipment subnet routing, permissions,
-remote equipment verification, cellular, failover and web firmware upload are not
-implemented. This software does not start an Ethernet DHCP server or configure NAT.
+Tailscale connects **the gateway itself** and optionally advertises a dedicated equipment
+subnet using 4via6. Route approval and permissions belong to your tailnet; reachability
+and traffic isolation are not verified. Settings can identify the gateway with a
+five-second run-LED blink, and optionally bind the button to identify until restart.
+There is no reset gesture; the second LED remains unsupported until mapped.
+CAN/RS485 workspaces, cellular, failover and web firmware upload are not implemented yet. This software
+does not start an Ethernet DHCP server or configure NAT.
+See the [UI structure and next stages](docs/ui.md).
 
 See [networking and recovery](docs/networking.md) for addressing, rollback and
 Tailscale behavior.
@@ -53,8 +60,10 @@ status = NervesGate.status()
 | `network_cancel(trial_id, opts \\ [])` | `:ok`; restore saved settings |
 | `remote_connect(hostname, opts \\ [])` | `:ok`; connection/enrollment accepted |
 | `remote_configure(hostname, opts \\ [])` | `:ok`; hostname change accepted |
-| `remote_disconnect(opts \\ [])` | `:ok`; sign-out accepted |
+| `remote_disconnect(opts \\ [])` | `:ok`; disconnect accepted; enrollment kept |
 | `remote_login_url(opts \\ [])` | `{:ok, url_or_nil}`; private sign-in URL |
+| `identify(opts \\ [])` | `:ok`; five-second LED identification started |
+| `button_mode("disabled" or "identify", opts \\ [])` | `:ok`; lasts until service restart |
 
 Failures return `{:error, %{code: code, message: message}}`. Read `NervesGate.status()`
 separately after commands. Remote acceptance is not completion; check its operation
@@ -87,9 +96,11 @@ mix ci                    # compile, format, tests, Credo, Dialyzer, duplication
 mix phx.server            # http://localhost:4000
 ```
 
-Host mode simulates Ethernet and Tailscale. It never modifies the workstation's
-network or starts its VPN daemon. In IEx, `NervesGate.Network.Host.simulate/1`
-changes simulated observations. Host HTTP listens on loopback only.
+Host mode simulates Ethernet, Tailscale, button and LED. It never modifies the
+workstation's network, starts its VPN daemon or opens hardware controls. In IEx,
+`NervesGate.Network.Host.simulate/1` changes simulated observations, and
+`NervesGate.Indicators.Host.button(1)` / `.button(0)` simulate a press/release.
+Host HTTP listens on loopback only.
 
 All browser assets are local and checked in. Rebuild CSS with
 `cd assets && npm ci && npm run build`. Node.js is not needed on the device or to

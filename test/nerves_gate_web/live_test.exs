@@ -56,7 +56,7 @@ defmodule NervesGateWeb.LiveTest do
     eventually(
       fn ->
         Enum.count(Registry.lookup(registry, :subscriptions), fn {pid, _} -> pid == view.pid end) ==
-          4
+          6
       end,
       200
     )
@@ -92,8 +92,9 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   test "one screen detects the connected port and equipment is optional" do
-    {:ok, view, html} = live(build_conn(), "/setup")
-    assert html =~ "Set up your gateway"
+    {:ok, view, html} = live(build_conn(), "/settings/network")
+    assert html =~ "First setup"
+    assert has_element?(view, "h1", "Network")
     assert has_element?(view, "#internet-summary", "Port 1")
     refute has_element?(view, "#internet-options")
     refute has_element?(view, "#network_equipment_ip")
@@ -103,32 +104,38 @@ defmodule NervesGateWeb.LiveTest do
     assert Network.status().trial.network["eth1"] == nil
     assert Network.status().trial.network["eth0"]["role"] == "internet"
     refute Network.status().config["setup_completed"]
-    view |> element("#confirm-settings") |> render_click()
-    assert_redirect(view, "/")
+    result = view |> element("#confirm-settings") |> render_click()
+    assert {:ok, overview, _} = follow_redirect(result, build_conn(), "/")
+
+    assert has_element?(
+             overview,
+             "nav[aria-label='Main navigation'] a[href='/'][aria-current=page]"
+           )
+
     assert Network.status().config["setup_completed"]
-    assert {:error, {:live_redirect, %{to: "/settings"}}} = live(build_conn(), "/setup")
-    {:ok, settings, _} = live(build_conn(), "/settings")
+
+    {:ok, settings, _} = live(build_conn(), "/settings/network")
     assert has_element?(settings, "h1", "Network")
     assert has_element?(settings, "#apply-settings", "Apply changes")
   end
 
   test "first setup really through USB saves without a confirmation screen" do
     usb_observation()
-    {:ok, view, html} = live(usb_conn(), "/setup")
+    {:ok, view, html} = live(usb_conn(), "/settings/network")
     assert html =~ "Settings save directly"
     refute html =~ "60-second undo window"
     render_submit(form(view, "#network-form"))
     assert_redirect(view, "/")
     assert NervesGate.Network.status().config["setup_completed"]
     refute NervesGate.Network.status().trial
-    {:ok, settings, html} = live(usb_conn(), "/settings")
+    {:ok, settings, html} = live(usb_conn(), "/settings/network")
     assert html =~ "60-second undo window"
     assert render_submit(form(settings, "#network-form")) =~ "Keep these changes?"
     refute NervesGate.Network.status().trial.auto_save
   end
 
   test "Internet uses a button and other disclosures preserve open state" do
-    {:ok, view, _} = live(build_conn(), "/setup")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
 
     assert has_element?(
              view,
@@ -159,7 +166,7 @@ defmodule NervesGateWeb.LiveTest do
       |> Plug.Conn.put_req_header("x-forwarded-for", "10.13.0.2")
       |> put_connect_params(%{"usb" => true, "local_address" => "10.13.0.1"})
 
-    {:ok, view, _} = live(conn, "/setup")
+    {:ok, view, _} = live(conn, "/settings/network")
 
     render_submit(view, "save", %{
       "network" => %{"usb" => "true", "auto_save" => "true"}
@@ -170,7 +177,7 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   test "equipment addresses are validated without another review step" do
-    {:ok, view, _} = live(build_conn(), "/setup")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
     view |> element("button", "Add equipment") |> render_click()
     assert has_element?(view, "label[for=network_equipment_ip]")
     assert has_element?(view, "#network_equipment_ip[aria-describedby=network_equipment_ip-help]")
@@ -188,7 +195,7 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   test "shared network remains an explicit warned advanced choice and supports manual DNS" do
-    {:ok, view, _} = live(build_conn(), "/setup")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
 
     assert view |> form("#network-form", network: %{mode: "shared"}) |> render_change() =~
              "Both Ethernet ports will be joined"
@@ -210,7 +217,7 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   test "live discovery updates suggestions without overwriting explicit choices or equipment drafts" do
-    {:ok, view, _} = live(build_conn(), "/setup")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
     ports = Network.status().observed.ports
 
     changed = [
@@ -254,7 +261,7 @@ defmodule NervesGateWeb.LiveTest do
 
     Network.Host.simulate(%{ports: ports})
     eventually(fn -> NervesGate.status().connections.suggested_internet_port == nil end)
-    {:ok, view, _} = live(build_conn(), "/setup")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
     assert view |> form("#network-form") |> render_submit() =~ "More than one network"
     refute Network.status().trial
     Network.Host.simulate(%{})
@@ -264,7 +271,7 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   test "dirty draft cannot overwrite settings saved by another session" do
-    {:ok, view, _} = live(build_conn(), "/settings")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
     view |> element("button", "Change Internet connection") |> render_click()
     view |> form("#network-form", network: %{internet_port: "eth1"}) |> render_change()
 
@@ -287,19 +294,21 @@ defmodule NervesGateWeb.LiveTest do
   test "trial survives browser reconnection and can be cancelled" do
     {:ok, id} = NervesGate.network_propose(@shared)
 
-    {:ok, view, _} = live(build_conn(), "/settings")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
     assert has_element?(view, "#confirm-settings")
     assert Network.status().trial.id == id
     view |> element("button", "Restore previous settings") |> render_click()
     refute Network.status().trial
   end
 
-  test "three product pages work offline without claiming equipment reachability" do
+  test "operations and settings pages work offline without claiming equipment reachability" do
     for {path, heading} <- [
-          {"/", "Gateway"},
-          {"/remote", "Tailscale"},
-          {"/settings", "Set up your gateway"},
-          {"/setup", "Set up your gateway"}
+          {"/", "Overview"},
+          {"/equipment", "Equipment"},
+          {"/remote", "Remote access"},
+          {"/settings", "Settings"},
+          {"/settings/network", "Network"},
+          {"/settings/tailscale", "Tailscale"}
         ] do
       {:ok, view, html} = live(build_conn(), path)
       assert has_element?(view, "h1", heading)
@@ -308,22 +317,22 @@ defmodule NervesGateWeb.LiveTest do
       refute html =~ "Internet &amp; backup"
     end
 
-    for path <- ["/equipment", "/internet"] do
-      assert {:error, {:live_redirect, %{to: "/settings"}}} = live(build_conn(), path)
+    for path <- ["/setup", "/internet"] do
+      assert build_conn() |> get(path) |> response(404) != ""
     end
   end
 
   test "gateway shows three actionable summaries and keeps diagnostics collapsed" do
     {:ok, view, _} = live(build_conn(), "/")
-    assert has_element?(view, "#connection-internet[href='/settings']")
-    assert has_element?(view, "#connection-equipment[href='/settings']", "Not configured")
+    assert has_element?(view, "#connection-internet[href='/settings/network']")
+    assert has_element?(view, "#connection-equipment[href='/equipment']", "Not configured")
     assert has_element?(view, "#connection-tailscale[href='/remote']")
     refute has_element?(view, "#connection-details[open]")
     refute has_element?(view, ".ui-hero")
   end
 
   test "a CLI command and two browsers share trial state; old broadcasts do not regress it" do
-    {:ok, setup, _} = live(build_conn(), "/setup")
+    {:ok, setup, _} = live(build_conn(), "/settings/network")
     {:ok, dashboard, _} = live(build_conn(), "/")
 
     {:ok, id} = NervesGate.network_propose(@shared)
@@ -345,7 +354,7 @@ defmodule NervesGateWeb.LiveTest do
   test "an old browser click cannot confirm a newer client's trial" do
     {:ok, old} = NervesGate.network_propose(@shared)
 
-    {:ok, view, _} = live(build_conn(), "/setup")
+    {:ok, view, _} = live(build_conn(), "/settings/network")
     assert :ok = NervesGate.network_cancel(old)
 
     {:ok, current} = NervesGate.network_propose(@shared)
@@ -362,12 +371,19 @@ defmodule NervesGateWeb.LiveTest do
       Enum.filter(Registry.lookup(registry, :subscriptions), fn {p, _} -> p == pid end)
     end
 
-    for path <- ["/", "/setup", "/remote"] do
+    for path <- [
+          "/",
+          "/equipment",
+          "/remote",
+          "/settings",
+          "/settings/network",
+          "/settings/tailscale"
+        ] do
       assert build_conn() |> get(path) |> response(200) != ""
       assert subscriptions.(self()) == []
       {:ok, view, _} = live(build_conn(), path)
       pid = view.pid
-      assert [_, _, _, _] = subscriptions.(pid)
+      assert [_, _, _, _, _, _] = subscriptions.(pid)
 
       for topic <- ["network:events", "remote:events"] do
         assert [] ==
@@ -392,7 +408,7 @@ defmodule NervesGateWeb.LiveTest do
       Registry.lookup(registry, :subscriptions) |> Enum.filter(fn {p, _} -> p == pid end)
     end
 
-    assert [_, _, _, _] = subscriptions.()
+    assert [_, _, _, _, _, _] = subscriptions.()
     old = NervesGate.status()
     assert {:ok, _} = NervesGate.network_propose(@shared)
 
@@ -405,22 +421,152 @@ defmodule NervesGateWeb.LiveTest do
     refute has_element?(view, "#two", "Unassigned")
     render_click(view, "remove", %{"id" => "one"})
     refute has_element?(view, "#one")
-    assert [_, _, _, _] = subscriptions.()
+    assert [_, _, _, _, _, _] = subscriptions.()
     Network.Host.simulate(%{ports: [%{name: "eth0", present: false, link: false, master: nil}]})
     eventually(fn -> has_element?(view, "#two", "Not installed") end)
     render_click(view, "remove", %{"id" => "two"})
     view |> element("button", "Show panels") |> render_click()
-    assert [_, _, _, _] = subscriptions.()
+    assert [_, _, _, _, _, _] = subscriptions.()
     assert has_element?(view, "#one", "Not installed")
     GenServer.stop(pid)
     eventually(fn -> subscriptions.() == [] end)
   end
 
-  test "navigation marks the current page" do
-    for path <- ["/", "/remote", "/settings"] do
-      html = build_conn() |> get(path) |> response(200)
-      assert html =~ "href=\"#{path}\" aria-current=\"page\""
+  test "navigation keeps settings selected on nested pages" do
+    for {path, parent} <- [
+          {"/", "/"},
+          {"/equipment", "/equipment"},
+          {"/remote", "/remote"},
+          {"/settings", "/settings"},
+          {"/settings/network", "/settings"},
+          {"/settings/tailscale", "/settings"}
+        ] do
+      {:ok, view, _} = live(build_conn(), path)
+
+      assert has_element?(
+               view,
+               "nav[aria-label='Main navigation'] a[href='#{parent}'][aria-current=page]"
+             )
+
+      refute has_element?(
+               view,
+               "nav[aria-label='Main navigation'] a:not([href='#{parent}'])[aria-current=page]"
+             )
+
+      if parent == "/settings",
+        do:
+          assert(
+            has_element?(view, "nav[aria-label='Settings'] a[href='#{path}'][aria-current=page]")
+          )
     end
+  end
+
+  test "equipment shows gateway observations, not an invented device inventory" do
+    {:ok, view, _} = live(build_conn(), "/equipment")
+    assert has_element?(view, "#equipment-connection", "No equipment connection is configured")
+    refute has_element?(view, "form")
+    refute has_element?(view, "button", "Discover devices")
+
+    equipment = %{
+      "role" => "equipment",
+      "address" => %{
+        "ip_method" => "static",
+        "static_ip" => "192.168.50.10",
+        "subnet_mask" => "255.255.255.0",
+        "gateway" => nil
+      }
+    }
+
+    {:ok, id} =
+      NervesGate.network_propose(%{"mode" => "ports", "eth0" => nil, "eth1" => equipment})
+
+    :ok = NervesGate.network_confirm(id)
+    eventually(fn -> has_element?(view, "#equipment-connection", "192.168.50.10/24") end)
+    assert has_element?(view, "#equipment-connection", "Gateway address on this network")
+    assert has_element?(view, "#equipment-connection", "Port 2")
+    assert has_element?(view, "#equipment-discovery", "not a complete inventory")
+    assert has_element?(view, "#scan-equipment[disabled]")
+  end
+
+  test "equipment scan and local label editing use observations without replacing a draft" do
+    address = %{
+      "ip_method" => "static",
+      "static_ip" => "192.168.80.2",
+      "subnet_mask" => "255.255.255.0",
+      "gateway" => nil
+    }
+
+    {:ok, id} = NervesGate.network_propose(%{"mode" => "shared", "equipment" => address})
+    :ok = NervesGate.network_confirm(id)
+
+    NervesGate.Equipment.Host.simulate([
+      %{ip: "192.168.80.10", mac: "02:00:00:00:80:10", last_seen: nil, source: "simulated"}
+    ])
+
+    on_exit(fn -> NervesGate.Equipment.Host.simulate([]) end)
+    {:ok, view, _} = live(build_conn(), "/equipment")
+    view |> element("#scan-equipment") |> render_click()
+    assert render_async(view) =~ "Scan completed"
+    assert has_element?(view, "#equipment-discovery", "192.168.80.10")
+    assert has_element?(view, "#equipment-discovery", "unknown (no activity timestamp)")
+    view |> element("button", "Edit label") |> render_click()
+    view |> form("#equipment-label-form", equipment: %{label: "Pump draft"}) |> render_change()
+    send(view.pid, %PropertyTable.Event{property: ["equipment"], value: %{}})
+    assert has_element?(view, "#equipment_label[value='Pump draft']")
+
+    assert view
+           |> form("#equipment-label-form", equipment: %{label: "Pump <A>"})
+           |> render_submit() =~ "Label saved"
+
+    assert has_element?(view, "#equipment-discovery h3", "Pump <A>")
+    refute has_element?(view, "#equipment-label-form")
+    [entry] = NervesGate.status().equipment.entries
+    assert :ok = NervesGate.equipment_label(entry.id, "")
+  end
+
+  test "equipment handles shared topology and unavailable observations honestly" do
+    {:ok, id} = NervesGate.network_propose(@shared)
+    :ok = NervesGate.network_confirm(id)
+    {:ok, shared, _} = live(build_conn(), "/equipment")
+    assert has_element?(shared, "#equipment-connection", "Shared network · Port 1 + Port 2")
+    stop_supervised!(Network)
+    {:ok, unavailable, _} = live(build_conn(), "/equipment")
+    assert has_element?(unavailable, "#equipment-connection", "observations are unavailable")
+
+    refute has_element?(
+             unavailable,
+             "#equipment-connection",
+             "No equipment connection is configured"
+           )
+
+    {:ok, overview, _} = live(build_conn(), "/")
+    assert has_element?(overview, "#connection-equipment", "Unavailable")
+  end
+
+  test "pending network recovery stays accessible from every operational page" do
+    views =
+      for path <- ["/", "/equipment", "/remote", "/settings", "/settings/tailscale"] do
+        {:ok, view, _} = live(build_conn(), path)
+        view
+      end
+
+    {:ok, id} = NervesGate.network_propose(@shared)
+
+    for view <- views do
+      eventually(fn ->
+        has_element?(view, "#pending-network-notice a[href='/settings/network']")
+      end)
+    end
+
+    assert :ok = NervesGate.network_cancel(id)
+    for view <- views, do: eventually(fn -> not has_element?(view, "#pending-network-notice") end)
+  end
+
+  test "settings index contains configuration links rather than duplicate forms" do
+    {:ok, view, _} = live(build_conn(), "/settings")
+    assert has_element?(view, "#settings-network[href='/settings/network']")
+    assert has_element?(view, "#settings-tailscale[href='/settings/tailscale']")
+    refute has_element?(view, "form")
   end
 
   test "assets are served locally" do

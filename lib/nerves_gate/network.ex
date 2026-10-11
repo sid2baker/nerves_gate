@@ -39,8 +39,16 @@ defmodule NervesGate.Network do
   def propose(network, server \\ __MODULE__, access \\ nil),
     do: GenServer.call(runtime(server), {:propose, network, access}, 15_000)
 
-  def confirm(id, server \\ __MODULE__),
-    do: GenServer.call(runtime(server), {:confirm, id}, 15_000)
+  def scan(equipment, server \\ __MODULE__) do
+    GenServer.call(runtime(server), {:scan, equipment}, 15_000)
+  end
+
+  def sharing(operation, params, server \\ __MODULE__),
+    do: GenServer.call(runtime(server), {:sharing, operation, params}, 70_000)
+
+  def confirm(id, server \\ __MODULE__) do
+    GenServer.call(runtime(server), {:confirm, id}, 15_000)
+  end
 
   def cancel(id, server \\ __MODULE__),
     do: GenServer.call(runtime(server), {:cancel, id}, 15_000)

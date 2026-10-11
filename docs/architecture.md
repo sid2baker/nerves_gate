@@ -28,6 +28,7 @@ application persistence journal, connectivity retry graph or AI dependency.
 | Network Agent | Decide whether first verified USB setup should await readiness, auto-save or cancel |
 | Network Runtime | Command admission/replies, RAM trial, live effect guards, deadline, serial work and rollback |
 | Remote | One bounded daemon worker and sanitized operation/error metadata |
+| Equipment | Bounded passive neighbor polling, scope-local inventory and persistent labels; monitors the runtime-owned active scan |
 | PropertyTable | Existing subsystem properties plus ephemeral workflow/host-simulation observations |
 | NervesGate / Status | Named public functions and on-demand interpretation; no stored read model |
 | LiveView | Drafts, presentation, lifecycle-bound subscriptions and command submission |
@@ -42,8 +43,9 @@ LiveView / IEx → NervesGate named API
 Subsystem properties + workflow metadata → LiveView → fresh status read
 ```
 
-Pure validation calls `Config.validate_network/1` directly. Status reads Network
-and Remote independently, not as an atomic cross-domain snapshot. There are no
+Pure validation calls `Config.validate_network/1` directly. Status reads domains
+independently, not as an atomic cross-domain snapshot. Equipment entries from a
+different scope are suppressed immediately by the pure status builder. There are no
 optimistic revision tokens; exact trial IDs and serialized operations protect the
 workflow. LiveViews also compare saved draft bases. See [action-api.md](action-api.md).
 
@@ -51,7 +53,7 @@ workflow. LiveViews also compare saved draft bases. See [action-api.md](action-a
 
 Application `rest_for_one` order is PubSub (Phoenix infrastructure), Registry,
 workflow PropertyTable, managed `NervesGate.Jido`, host simulators (host only),
-Network, Remote, then Endpoint. Firmware dependencies supervise VintageNet and
+Network, Remote, Equipment, then Endpoint. Firmware dependencies supervise VintageNet and
 Tailscale themselves.
 
 Network is a `rest_for_one` supervisor: runtime first, permanent Jido AgentServer
@@ -131,12 +133,59 @@ One GenServer admits one bounded asynchronous daemon operation. Acceptance is no
 completion. Timeout/crash stops the worker; restart observes the daemon and never
 replays a mutation. Daemon-side work may already have completed, so read status
 before retrying. Connect/rename patch hostname and `accept_dns: false`, preserving
-omitted preferences. Startup does not rewrite the profile.
+omitted preferences. Disconnect calls `down/0`, not logout; connect resumes an enrolled
+profile with `up/0` or starts login when needed. Startup does not rewrite the profile.
+
+Equipment sharing holds the existing LAN worker while Remote merges or withdraws
+one 4via6 advertisement and verifies preference readback. LAN proposals are blocked
+by advertised or uncertain 4via6 routes; rollback remains independent. Initial route
+observation uses a read-only Controller mailbox barrier so earlier accepted work
+finishes before admission. No mutation is replayed. There is no second forwarding
+state, custom firewall, launcher or lifecycle coordinator. Route changes do not
+change running intent. Preference readback is not a traffic-termination guarantee;
+see [networking.md](networking.md#equipment-sharing).
 
 Status reads sanitized adapter observations directly. Login URLs are private
 queries, validated against official HTTPS login hosts, and never retained in
 server state, public status or properties. Health URLs and raw errors are redacted.
 The workflow property contains only a status-change hash, not another daemon mirror.
+
+## Equipment observations
+
+Equipment polls only the confirmed static equipment interface, reading the Linux
+neighbor table over rtnetlink. A bounded passive worker cannot send probes. An
+explicit ARP scan is admitted by Network Runtime, which owns the sole active LAN
+worker and blocks trials until that scan finishes. Equipment monitors that worker;
+it does not create a second scan task. Timeout/restart closes its raw socket and
+clears scan progress without invoking LAN restoration. Interface names and source
+addresses are derived from confirmed settings and live readiness, never submitted
+by the browser. USB is not eligible.
+
+Inventory and labels are each bounded to 256 entries. Firmware labels use a small
+validated JSON file with synchronous temporary-file/rename writes; host labels
+stay in an Agent. They are scoped by confirmed interface, subnet, gateway address
+and MAC. The IP is not treated as a global or authenticated identity. A changed
+scope clears observations, not saved labels. Invalid saved labels block writes
+rather than silently replacing a corrupt file. See [ui.md](ui.md) for scan limits.
+
+## Button and LED
+
+`Indicators` is one small GenServer, independent of network and remote commands.
+It owns a monotonic five-second identify deadline, restores the previous raw LED
+value, and rejects overlaps. Failed restoration blocks identification and retries
+on the five-second device-availability poll. Graceful shutdown also attempts restoration;
+there is no durable recovery journal for abrupt process/VM loss or power failure.
+
+The EC100 adapter only touches `/sys/class/leds/ec100:run/brightness`, accepts raw
+0/1 with `max_brightness=1`, and refuses active kernel triggers. Physical polarity
+and the second LED mapping are unverified. Input discovery requires exactly one
+`gpio-keys` device with KEY_PROG1 (148) in the EC100 32-bit capability bitmap.
+`InputEvent` supplies events; disconnects clear availability and discovery retries.
+Only a rising press is accepted, with a one-second debounce/rate limit. Repeats and
+holds cannot extend identification. The two modes, disabled and identify, are
+memory-only and default to disabled after any service restart. No reset or network
+action exists. Other targets are unsupported; the host adapter uses memory only.
+Existing PropertyTable observations carry status hints, not another event bus.
 
 ## Notifications
 
@@ -151,6 +200,21 @@ notifications are best effort, not an event log.
 There is no Alarmist/Connectivity agent that repeatedly rereads cached status.
 Internet observations already belong to VintageNet. The application does not
 perform automatic DHCP restarts, VPN reconnects, DNS resets, failover or enrollment.
+
+## Web interface
+
+Operations and commissioning have separate pages: Equipment offers explicit scans
+and local labels; Overview and Remote access display current status. Settings
+contains the network and Tailscale editors plus button/LED controls.
+First-time and subsequent network configuration use the same form. The old setup
+and redirect-only Internet routes are removed, not retained as compatibility paths.
+
+Read-only pages use the existing observation module’s `on_mount` hook. Editors
+keep their draft-aware refresh callbacks. Navigation lives inside the LiveView
+layout so current-page markers update on live navigation. A pending network trial
+remains visible across pages, with a direct link to keep or restore it.
+Equipment uses the same property subscriptions, without another lifecycle notification system.
+See [ui.md](ui.md) for scope and future hardware interfaces.
 
 ## Dependencies
 

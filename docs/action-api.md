@@ -35,8 +35,14 @@ Commands return their result, not a status envelope:
 | `network_cancel(trial_id, opts)` | `:ok` after restoration |
 | `remote_connect(hostname, opts)` | `:ok` after accepting connection/enrollment |
 | `remote_configure(hostname, opts)` | `:ok` after accepting a hostname change |
-| `remote_disconnect(opts)` | `:ok` after accepting sign-out |
+| `remote_disconnect(opts)` | `:ok` after accepting `down`; enrollment is kept |
 | `remote_login_url(opts)` | `{:ok, url_or_nil}`; private query |
+| `equipment_scan(opts)` | `:ok` after a bounded ARP scan |
+| `equipment_label(id, label, opts)` | `:ok` after saving a scope-local label |
+| `equipment_share(site_id, unique_confirmed, opts)` | `:ok` after 4via6 advertisement readback |
+| `equipment_unshare(route, opts)` | `:ok` after exact route withdrawal readback |
+| `identify(opts)` | `:ok` once the five-second run-LED identification starts; observe completion/restoration |
+| `button_mode(mode, opts)` | `:ok`; `"disabled"` or `"identify"`, until indicators-service restart |
 | `status(opts)` | A current status map |
 | `subscribe(opts)` | `:ok`; subscriptions belong to the caller |
 
@@ -73,9 +79,14 @@ of the caller; a daemon mutation may complete after its caller dies. Uncertain
 commands are not automatically replayed. There is no exactly-once acknowledgment
 or durable command queue.
 
+Identify preserves the previous raw LED value. Overlapping requests cannot extend it.
+Only the mapped EC100 run LED is supported; active kernel triggers are not replaced.
+Button mode defaults to disabled and is never persisted. No reset action exists.
+See [button and LED safety limits](ui.md#button-and-led).
+
 ## Status and stale requests
 
-`NervesGate.status/1` reads Network and Remote independently; it is **not an atomic
+`NervesGate.status/1` reads each domain independently; it is **not an atomic
 cross-domain snapshot**. [`NervesGate.Status`](../lib/nerves_gate/status.ex) builds
 the JSON-encodable v2 map without a process or cache:
 
@@ -84,6 +95,10 @@ the JSON-encodable v2 map without a process or cache:
   recovery and structured errors.
 - `connections`: port roles, cable/address/Internet observations and conflicts.
 - `remote_access`: sanitized Tailscale observations, routes, operation and error.
+- `sharing`: eligible equipment scope, displayed routes and uncertain mutations.
+- `equipment`: scoped neighbor observations, labels and scan status.
+- `indicators`: simulated/available flags, button mode and last press, LED identification,
+  restoration-pending state and errors.
 - `capabilities`, `actions`: presentation-only availability, labels and reasons.
   Existing dotted action labels such as `"network.propose"` remain metadata;
   call `NervesGate.network_propose/2`, not a string dispatcher.
@@ -94,7 +109,10 @@ Equipment reachability remains unverified. Permitted Tailscale routes are unknow
 Confirm/cancel require the exact current trial ID. Only one trial and one remote
 operation can run at a time. LiveViews compare drafts with their saved base before
 submitting, but there is no cross-interface revision-token protocol. Network and
-Remote commands remain independent.
+Remote connection commands remain independent. Equipment route changes hold the LAN
+worker, and advertised or uncertain 4via6 routes block new LAN proposals. Sharing
+never changes Tailscale running intent. No route result proves approval, isolation,
+reachability or termination of existing sessions.
 
 ## Subscriptions
 
@@ -112,7 +130,8 @@ editing, disclosures and countdowns stay in the UI; backend safety does not.
 
 ## Independent test instances
 
-Pass domain server references directly; no client object or `server:` wrapper:
+Pass domain server references (`:network`, `:remote`, `:equipment`, `:indicators`)
+directly; no client object or `server:` wrapper:
 
 ```elixir
 opts = [network: network_supervisor, remote: remote_server]

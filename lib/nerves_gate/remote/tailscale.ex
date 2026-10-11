@@ -44,16 +44,41 @@ defmodule NervesGate.Remote.Tailscale do
 
   @impl true
   def execute(:connect, %{hostname: hostname}, _) do
-    # Don't let Tailscale take DNS away from VintageNet. Preserve all other preferences,
-    # especially existing route/Serve settings installed outside this UI.
-    with :ok <- Tailscale.update_configuration(%{hostname: hostname, accept_dns: false}),
-         do: Tailscale.login(timeout: 30_000)
+    with :ok <- Tailscale.update_configuration(%{hostname: hostname, accept_dns: false}) do
+      if Tailscale.get(["auth", "state"]) in [:authenticated, :stopped, :needs_approval] do
+        Tailscale.up()
+      else
+        Tailscale.login(timeout: 30_000)
+      end
+    end
   end
 
   def execute(:configure, %{hostname: hostname}, _),
     do: Tailscale.update_configuration(%{hostname: hostname, accept_dns: false})
 
-  def execute(:disconnect, _, _), do: Tailscale.logout()
+  def execute(:disconnect, _, _) do
+    Tailscale.down()
+  end
+
+  def execute(operation, params, _)
+      when operation in [:sharing_enable, :sharing_disable, :sharing_sync] do
+    # An empty update is a Controller mailbox barrier and fresh readback, not a
+    # replay. Earlier accepted changes finish before this read, even if their
+    # original caller was killed. Only the route list is ever patched here.
+    with :ok <- Tailscale.update_configuration(%{}),
+         config when is_map(config) <- Tailscale.get_configuration(),
+         {:ok, routes} <-
+           NervesGate.Remote.Routes.change(operation, params, config.advertise_routes),
+         :ok <- write_routes(operation, routes),
+         %{advertise_routes: ^routes} <- Tailscale.get_configuration() do
+      {:ok, routes}
+    else
+      _ -> {:error, :sharing_unknown}
+    end
+  end
+
+  defp write_routes(:sharing_sync, _), do: :ok
+  defp write_routes(_, routes), do: Tailscale.update_configuration(%{advertise_routes: routes})
 
   @impl true
   def login_url(_) do

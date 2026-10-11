@@ -191,6 +191,27 @@ defmodule NervesGateWeb.CoreComponents do
     """
   end
 
+  attr(:title, :string, required: true)
+  attr(:icon, :string, required: true)
+  attr(:href, :string, required: true)
+  attr(:status, :string, default: nil)
+  attr(:tone, :string, default: "neutral")
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  def navigation_card(assigns) do
+    ~H"""
+    <.link navigate={@href} class="ui-connection" {@rest}>
+      <span class="ui-icon-box"><.icon name={@icon} /></span>
+      <div class="ui-connection-copy">
+        <h2>{@title}</h2><p>{render_slot(@inner_block)}</p>
+      </div>
+      <.status :if={@status} tone={@tone}>{@status}</.status>
+      <.icon name="arrow" />
+    </.link>
+    """
+  end
+
   attr(:label, :string, required: true)
   attr(:description, :string, default: nil)
   slot(:inner_block, required: true)

@@ -5,14 +5,19 @@ defmodule NervesGate.Network.Runtime do
   VintageNet owns saved settings. Jido decides first-USB-setup auto-save.
   """
   use GenServer
-  alias NervesGate.{Config, Observations}
+  alias NervesGate.{Config, Observations, Remote}
   alias NervesGate.Network.{Access, Adapter, Policy}
+  alias NervesGate.Remote.Sharing, as: Routes
 
   def via(id), do: {:via, Registry, {NervesGate.Registry, {:network_runtime, id}}}
   def agent_via(id), do: {:via, Registry, {NervesGate.Registry, {:network_agent, id}}}
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: via(opts[:id]))
   def status(server), do: GenServer.call(server, :status)
-  def admission(server), do: status(server)
+
+  def admission(server) do
+    GenServer.call(server, :admission)
+  end
+
   def execute(server, effect), do: GenServer.call(server, {:execute, effect})
 
   @impl true
@@ -25,6 +30,7 @@ defmodule NervesGate.Network.Runtime do
     state = %{
       id: opts[:id],
       adapter: adapter,
+      remote: Keyword.get(opts, :remote, NervesGate.Remote),
       config: config,
       error: error,
       trial: nil,
@@ -49,10 +55,41 @@ defmodule NervesGate.Network.Runtime do
   @impl true
   def handle_call(:status, _, state) do
     state = refresh(state)
+    {:reply, Map.put(public(state), :sharing_admission, lan_change(state)), state}
+  end
+
+  def handle_call(:admission, _, state) do
+    state = refresh(state)
     {:reply, public(state), state}
   end
 
-  def handle_call(:observations, _, state), do: {:reply, sources(state), state}
+  def handle_call(:observations, _, state) do
+    {:reply, sources(state), state}
+  end
+
+  def handle_call({:scan, equipment}, from, state) do
+    state = refresh(state)
+
+    with :ok <- Policy.available(public(state)),
+         {:ok, scope} <- NervesGate.Equipment.Subnet.active(public(state)) do
+      {:noreply,
+       work(state, :scan, from, fn -> NervesGate.Equipment.scan(scope, equipment) end)
+       |> publish()}
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:sharing, operation, params}, from, state) do
+    state = refresh(state)
+
+    with :ok <- Policy.available(public(state)),
+         {:ok, params} <- sharing_params(operation, params, state) do
+      {:noreply, share(state, operation, params, from) |> publish()}
+    else
+      error -> {:reply, error, state}
+    end
+  end
 
   def handle_call({:propose, network, access}, from, state) do
     state |> refresh() |> propose(network, access, from) |> respond()
@@ -73,6 +110,7 @@ defmodule NervesGate.Network.Runtime do
   defp propose(state, input, access, from) do
     with :ok <- Policy.available(public(state)),
          {:ok, network} <- Config.validate_network(input),
+         :ok <- lan_change(state),
          agent when is_pid(agent) <- GenServer.whereis(agent_via(state.id)) do
       auto = not state.config["setup_completed"] and Access.usb?(state.observed, access)
       timeout = if auto, do: 15_000, else: state.trial_ms
@@ -202,7 +240,7 @@ defmodule NervesGate.Network.Runtime do
       cond do
         state.trial != nil and now() >= state.deadline -> expire(state, nil)
         state.recovering and state.worker == nil -> restore(state, state.error, nil, :ok)
-        true -> state
+        true -> reconcile_sharing(state)
       end
 
     publish(state)
@@ -210,8 +248,26 @@ defmodule NervesGate.Network.Runtime do
 
   defp work(state, operation, from, fun) do
     task = Task.async(fun)
-    timer = Process.send_after(self(), {:work_timeout, task.ref}, state.effect_ms)
+    timeout = if operation == :sharing, do: 65_000, else: state.effect_ms
+    timer = Process.send_after(self(), {:work_timeout, task.ref}, timeout)
     %{state | worker: %{task: task, timer: timer, operation: operation, from: from}}
+  end
+
+  defp complete(state, %{operation: :sharing, from: from}, result) do
+    reply(
+      from,
+      case result do
+        {:ok, _routes} -> :ok
+        error -> error
+      end
+    )
+
+    state
+  end
+
+  defp complete(state, %{operation: :scan, from: from}, result) do
+    reply(from, result)
+    state
   end
 
   defp complete(state, %{operation: :apply}, :ok) do
@@ -266,6 +322,12 @@ defmodule NervesGate.Network.Runtime do
     work(state, :restore, {from, result}, fn ->
       Adapter.restore(state.adapter, state.config["network"])
     end)
+  end
+
+  defp interrupt(%{worker: %{operation: operation} = worker} = state, reason)
+       when operation in [:sharing, :scan] do
+    {state, _} = stop_work(state)
+    complete(state, worker, {:error, reason})
   end
 
   defp interrupt(state, reason) do
@@ -374,6 +436,45 @@ defmodule NervesGate.Network.Runtime do
       {:exit, reason} -> {:error, {:worker_failed, reason}}
       nil -> {:error, :operation_timeout}
     end
+  end
+
+  defp lan_change(state), do: remote_snapshot(state.remote) |> Routes.lan_change()
+
+  defp sharing_params(:sharing_enable, %{site: site, confirmed: confirmed}, state),
+    do: Routes.enable(public(state), remote_snapshot(state.remote), site, confirmed)
+
+  defp sharing_params(:sharing_disable, %{route: route}, _) do
+    with {:ok, _} <- Routes.decode(route) do
+      {:ok, %{route: route}}
+    end
+  end
+
+  defp sharing_params(_, _, _), do: {:error, :sharing_route}
+
+  defp share(state, operation, params, from) do
+    work(state, :sharing, from, fn -> Remote.sharing(operation, params, state.remote) end)
+  end
+
+  defp reconcile_sharing(%{worker: nil, trial: nil, recovering: false} = state) do
+    maybe_sync(state, remote_snapshot(state.remote))
+  end
+
+  defp reconcile_sharing(state), do: state
+
+  # One read-only Controller barrier after Remote starts. Never replay a route write.
+  defp maybe_sync(state, %{
+         available: true,
+         operation: nil,
+         sharing: %{ready: false, uncertain: []}
+       }),
+       do: share(state, :sharing_sync, %{}, nil)
+
+  defp maybe_sync(state, _), do: state
+
+  defp remote_snapshot(server) do
+    Remote.status(server)
+  catch
+    :exit, {_, {GenServer, :call, _}} -> Remote.unavailable()
   end
 
   defp now, do: System.monotonic_time(:millisecond)

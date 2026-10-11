@@ -6,7 +6,14 @@ defmodule NervesGate.Network.Policy do
   def available(%{config: nil}), do: {:error, :invalid_saved_config}
   def available(%{recovering: true}), do: {:error, :recovery_in_progress}
   def available(%{trial: trial}) when not is_nil(trial), do: {:error, :trial_in_progress}
-  def available(_), do: :ok
+
+  def available(%{phase: phase}) when phase not in [:idle, :pending] do
+    {:error, :operation_in_progress}
+  end
+
+  def available(_) do
+    :ok
+  end
 
   def matching(%{trial: %{id: id}}, id), do: :ok
   def matching(_, _), do: {:error, :no_matching_trial}

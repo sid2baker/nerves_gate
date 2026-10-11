@@ -31,6 +31,12 @@
          "NervesGate.Remote.command",
          "NervesGate.Remote.status",
          "NervesGate.Remote.login_url",
+         "NervesGate.Equipment.status",
+         "NervesGate.Equipment.scan",
+         "NervesGate.Equipment.label",
+         "NervesGate.Equipment.Linux.*",
+         "NervesGate.Indicators.*",
+         "NervesGate.Linux.*",
          "VintageNet.configure",
          "VintageNet.Persistence.*",
          "Tailscale.*"
