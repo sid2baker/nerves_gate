@@ -43,6 +43,9 @@ Commands return their result, not a status envelope:
 | `equipment_unshare(route, opts)` | `:ok` after exact route withdrawal readback |
 | `identify(opts)` | `:ok` once the five-second run-LED identification starts; observe completion/restoration |
 | `button_mode(mode, opts)` | `:ok`; `"disabled"` or `"identify"`, until indicators-service restart |
+| `bus_configure(port, params, opts)` | `:ok`; accepted live CAN configuration, or RS485 opt-in changed |
+| `bus_capture(port, opts)` | `:ok`; receive-only capture accepted |
+| `modbus_read(port, params, opts)` | `:ok`; one authorized RTU read accepted |
 | `status(opts)` | A current status map |
 | `subscribe(opts)` | `:ok`; subscriptions belong to the caller |
 
@@ -84,6 +87,26 @@ Only the mapped EC100 run LED is supported; active kernel triggers are not repla
 Button mode defaults to disabled and is never persisted. No reset action exists.
 See [button and LED safety limits](ui.md#button-and-led).
 
+## Bus parameters
+
+`bus_configure("can0", %{"enabled" => true, "bitrate" => 125000})` applies only
+listen-only CAN configuration. `bus_configure("ttyS3", %{"enabled" => true})`
+permits diagnostics without opening the UART; serial opt-in resets on service restart.
+Only can0/can1 and ttyS3/ttyS4 are eligible. `bus_capture(port)` accepts a receive-only
+capture once enabled. No caller-controlled duration or arbitrary device path exists.
+
+`modbus_read("ttyS3", %{"unit" => 1, "function" => 3, "address" => 0, "count" => 2,
+"authorized" => true})` sends one read, not a scan. Numbers may also be decimal strings;
+booleans may be `"true"` / `"false"`. Authorization means the operator is authorized
+and has ensured no other master is using the bus; it is not access control.
+
+Acceptance is **not completion**. Observe `status.buses.operation`, `.error` and
+`.result`. Each result includes `port`, `kind`, `completed_at` and bounded `data`:
+`frames` for CAN, `hex`/`bytes` for serial, or `unit`/`function`/`address`/`count`/
+`registers` for Modbus. One bus worker runs at a time. Configuration is non-atomic,
+there is no automatic retry, and results/settings are not persisted. See
+[bus limits, ownership and qualification](buses.md).
+
 ## Status and stale requests
 
 `NervesGate.status/1` reads each domain independently; it is **not an atomic
@@ -99,6 +122,8 @@ the JSON-encodable v2 map without a process or cache:
 - `equipment`: scoped neighbor observations, labels and scan status.
 - `indicators`: simulated/available flags, button mode and last press, LED identification,
   restoration-pending state and errors.
+- `buses`: supported/simulated flags, detected ports and observed/configured state,
+  one active operation, last bounded result and errors (idle observations refresh every five seconds).
 - `capabilities`, `actions`: presentation-only availability, labels and reasons.
   Existing dotted action labels such as `"network.propose"` remain metadata;
   call `NervesGate.network_propose/2`, not a string dispatcher.
@@ -130,7 +155,7 @@ editing, disclosures and countdowns stay in the UI; backend safety does not.
 
 ## Independent test instances
 
-Pass domain server references (`:network`, `:remote`, `:equipment`, `:indicators`)
+Pass domain server references (`:network`, `:remote`, `:equipment`, `:indicators`, `:buses`)
 directly; no client object or `server:` wrapper:
 
 ```elixir

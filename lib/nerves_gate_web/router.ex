@@ -24,10 +24,12 @@ defmodule NervesGateWeb.Router do
     ) do
       live("/", DashboardLive, :overview)
       live("/equipment", EquipmentLive, :equipment)
+      live("/equipment/buses", BusesLive, :buses)
       live("/remote", RemoteLive, :remote)
       live("/settings", SettingsLive, :settings)
       live("/settings/network", NetworkLive, :network_settings)
       live("/settings/tailscale", TailscaleLive, :tailscale_settings)
+      live("/settings/buses", BusesLive, :bus_settings)
     end
   end
 end

@@ -68,10 +68,12 @@ defmodule NervesGateWeb.Layouts do
       <.link navigate="/settings" aria-current={if @current == :settings, do: "page"}>All settings</.link>
       <.link navigate="/settings/network" aria-current={if @current == :network, do: "page"}>Network</.link>
       <.link navigate="/settings/tailscale" aria-current={if @current == :tailscale, do: "page"}>Tailscale</.link>
+      <.link navigate="/settings/buses" aria-current={if @current == :buses, do: "page"}>Buses</.link>
     </nav>
     """
   end
 
+  defp section(:buses), do: :equipment
   defp section(action) when action in [:overview, :equipment, :remote], do: action
   defp section(_), do: :settings
 end

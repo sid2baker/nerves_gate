@@ -40,10 +40,10 @@ defmodule NervesGate do
 
     * `:access` — trusted server-observed USB access for `network_propose/2` only.
       Never populate it from user parameters or forwarded headers.
-    * `:network`, `:remote`, `:equipment`, `:indicators` — domain servers for tests or independent instances.
+    * `:network`, `:remote`, `:equipment`, `:indicators`, `:buses` — domain servers for tests or independent instances.
       No client object or extra process is required.
   """
-  alias NervesGate.{Equipment, Error, Indicators, Network, Remote, Status}
+  alias NervesGate.{Buses, Equipment, Error, Indicators, Network, Remote, Status}
 
   @type error :: %{code: String.t(), message: String.t()}
   @type result(value) :: {:ok, value} | {:error, error()}
@@ -110,6 +110,18 @@ defmodule NervesGate do
   def button_mode(mode, opts \\ []),
     do: invoke(fn -> Indicators.button_mode(mode, indicators(opts)) end) |> result()
 
+  @doc "Configure an allowlisted bus port. CAN applies to the kernel; RS485 opt-in resets on restart."
+  def bus_configure(port, params, opts \\ []),
+    do: invoke(fn -> Buses.configure(port, params, buses(opts)) end) |> result()
+
+  @doc "Start a receive-only capture: at most five seconds, 200 CAN frames or 4096 serial bytes."
+  def bus_capture(port, opts \\ []),
+    do: invoke(fn -> Buses.capture(port, buses(opts)) end) |> result()
+
+  @doc "Send one explicitly authorized Modbus RTU read (function 3/4), with no retry or scan."
+  def modbus_read(port, params, opts \\ []),
+    do: invoke(fn -> Buses.modbus_read(port, params, buses(opts)) end) |> result()
+
   @doc "Read domain status, capabilities and action availability."
   @spec status(keyword()) :: map()
   def status(opts \\ []),
@@ -118,7 +130,8 @@ defmodule NervesGate do
         network_status(network(opts)),
         remote_status(remote(opts)),
         equipment_status(equipment(opts)),
-        indicators_status(indicators(opts))
+        indicators_status(indicators(opts)),
+        buses_status(buses(opts))
       )
 
   @doc "Subscribe the calling process to domain observations; read status afterward."
@@ -127,7 +140,8 @@ defmodule NervesGate do
     with :ok <- observe(Network, network(opts)),
          :ok <- observe(Remote, remote(opts)),
          :ok <- observe(Equipment, equipment(opts)),
-         do: observe(Indicators, indicators(opts))
+         :ok <- observe(Indicators, indicators(opts)),
+         do: observe(Buses, buses(opts))
   end
 
   @doc "Run one explicit ARP-only scan of the confirmed equipment subnet (at most /24 and five seconds)."
@@ -174,6 +188,7 @@ defmodule NervesGate do
   defp remote(opts), do: Keyword.get(opts, :remote, Remote)
   defp equipment(opts), do: Keyword.get(opts, :equipment, Equipment)
   defp indicators(opts), do: Keyword.get(opts, :indicators, Indicators)
+  defp buses(opts), do: Keyword.get(opts, :buses, Buses)
 
   defp trial_id(id) when is_binary(id), do: :ok
   defp trial_id(_), do: {:error, Error.new("invalid_parameters", "Supply a trial ID string.")}
@@ -201,6 +216,13 @@ defmodule NervesGate do
   defp indicators_status(server) do
     case invoke(fn -> Indicators.status(server) end) do
       {:error, _} -> Indicators.unavailable()
+      status -> status
+    end
+  end
+
+  defp buses_status(server) do
+    case invoke(fn -> Buses.status(server) end) do
+      {:error, _} -> Buses.unavailable()
       status -> status
     end
   end

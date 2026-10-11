@@ -9,10 +9,12 @@ Navigation is **Overview · Equipment · Remote access · Settings**.
 | --- | --- | --- |
 | Overview | `/` | Current equipment, remote and Internet connection summaries |
 | Equipment | `/equipment` | Scoped neighbor observations, bounded ARP scan, local labels and gateway addresses |
+| Bus workspace | `/equipment/buses` | Bounded CAN/RS485 captures and one-shot Modbus register reads |
 | Remote access | `/remote` | Gateway Tailscale addresses, opt-in 4via6 equipment sharing and exact withdrawal |
 | Settings | `/settings` | Configuration entry points, button/LED controls and device information |
 | Network settings | `/settings/network` | First-time setup and later Ethernet configuration |
 | Tailscale settings | `/settings/tailscale` | Enrollment, private sign-in, hostname and disconnect |
+| Bus settings | `/settings/buses` | CAN listen-only bitrate and RS485 diagnostic opt-in |
 
 Equipment observations are **not a complete inventory or reachability test**.
 The neighbor cache supplies IP, MAC and last-seen time (unknown for static entries).
@@ -72,19 +74,22 @@ every five seconds. Graceful shutdown attempts restoration; abrupt VM terminatio
 power loss, external writers and broken hardware cannot guarantee it. These are
 software-tested controls, not a claim of physical LED polarity or on-device validation.
 
-## Next stages — not implemented
+## Bus observation and diagnostics
 
-1. **Bus observation and diagnostics.** The EC100 has two CAN and two RS485
-   interfaces. Treat them as distinct transports, not generic discoverable IP
-   devices. Begin with real detected/configured interface status, bounded passive
-   CAN capture where supported, and explicitly selected RS485 protocols. RS485
-   polling can interfere with another master; do not send automatic discovery
-   traffic. Remote bus access requires a separate service/protocol bridge.
+The bus workspace distinguishes unsupported targets, missing kernel devices,
+disabled interfaces and active operations. CAN status reports observed bitrate,
+listen-only mode, controller state and counters. Explicit captures are receive-only,
+limited to five seconds / 200 frames. CAN settings only enable listen-only mode.
+RS485 capture is limited to five seconds / 4096 bytes at the qualified 9600 8N1 profile.
+The Modbus form requires renewed authorization for one read of 1–32 registers using
+function 3 or 4. There are no broadcasts, writes, scans, automatic retries or polling.
 
-Future interface configuration belongs under Settings, while live observation and
-use belong under Equipment. Distinguish unsupported software, missing hardware,
-disabled interfaces and active operation. Do not ship inactive controls or invent
-hardware state merely because a port exists on the EC100.
+Settings change live CAN state without persistence, and enable RS485 diagnostic
+access until service restart. No UART is opened merely by enabling it. Only
+can0/can1 and ttyS3/ttyS4 are eligible; UART0 remains untouched. Empty captures and
+device presence are not health or reachability checks. Remote bus access still
+requires a separate service/protocol bridge and is not provided.
+See [bus limits and qualification](buses.md).
 
 Host mode remains isolated simulation. The existing trusted-network HTTP exposure,
 CSRF/origin safeguards, and independent USB recovery behavior are unchanged.

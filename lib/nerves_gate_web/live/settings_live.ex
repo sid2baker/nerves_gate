@@ -46,6 +46,9 @@ defmodule NervesGateWeb.SettingsLive do
       >
         Connect to your tailnet, change the gateway name, or disconnect.
       </.navigation_card>
+      <.navigation_card title="Buses" icon="port" href="/settings/buses" id="settings-buses">
+        CAN listen-only bitrate and RS485 diagnostic opt-in. No automatic bus traffic.
+      </.navigation_card>
     </section>
     <.panel title="Button and LED" icon="settings" id="physical-controls">
       <.notice :if={@projection.indicators.simulated}>

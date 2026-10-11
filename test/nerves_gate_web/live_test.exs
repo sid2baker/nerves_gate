@@ -56,7 +56,7 @@ defmodule NervesGateWeb.LiveTest do
     eventually(
       fn ->
         Enum.count(Registry.lookup(registry, :subscriptions), fn {pid, _} -> pid == view.pid end) ==
-          6
+          7
       end,
       200
     )
@@ -383,7 +383,7 @@ defmodule NervesGateWeb.LiveTest do
       assert subscriptions.(self()) == []
       {:ok, view, _} = live(build_conn(), path)
       pid = view.pid
-      assert [_, _, _, _, _, _] = subscriptions.(pid)
+      assert [_, _, _, _, _, _, _] = subscriptions.(pid)
 
       for topic <- ["network:events", "remote:events"] do
         assert [] ==
@@ -408,7 +408,7 @@ defmodule NervesGateWeb.LiveTest do
       Registry.lookup(registry, :subscriptions) |> Enum.filter(fn {p, _} -> p == pid end)
     end
 
-    assert [_, _, _, _, _, _] = subscriptions.()
+    assert [_, _, _, _, _, _, _] = subscriptions.()
     old = NervesGate.status()
     assert {:ok, _} = NervesGate.network_propose(@shared)
 
@@ -421,12 +421,12 @@ defmodule NervesGateWeb.LiveTest do
     refute has_element?(view, "#two", "Unassigned")
     render_click(view, "remove", %{"id" => "one"})
     refute has_element?(view, "#one")
-    assert [_, _, _, _, _, _] = subscriptions.()
+    assert [_, _, _, _, _, _, _] = subscriptions.()
     Network.Host.simulate(%{ports: [%{name: "eth0", present: false, link: false, master: nil}]})
     eventually(fn -> has_element?(view, "#two", "Not installed") end)
     render_click(view, "remove", %{"id" => "two"})
     view |> element("button", "Show panels") |> render_click()
-    assert [_, _, _, _, _, _] = subscriptions.()
+    assert [_, _, _, _, _, _, _] = subscriptions.()
     assert has_element?(view, "#one", "Not installed")
     GenServer.stop(pid)
     eventually(fn -> subscriptions.() == [] end)

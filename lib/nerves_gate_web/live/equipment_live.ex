@@ -204,6 +204,9 @@ defmodule NervesGateWeb.EquipmentLive do
       </.form>
     </.panel>
     <section class="ui-connections" aria-label="Equipment access">
+      <.navigation_card title="CAN and RS485" icon="port" href="/equipment/buses" id="equipment-buses">
+        Bounded receive-only captures and explicitly authorized Modbus register reads.
+      </.navigation_card>
       <.navigation_card title="Remote access" icon="shield" href="/remote">
         Gateway access and advertised equipment routes through Tailscale.
       </.navigation_card>

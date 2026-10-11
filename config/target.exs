@@ -5,6 +5,7 @@ config :nerves_gate,
   network_adapter: {NervesGate.Network.Vintage, nil},
   remote_adapter: {NervesGate.Remote.Tailscale, nil},
   equipment_adapter: {NervesGate.Equipment.Linux, nil},
+  buses_adapter: if(config_target() == :ec100, do: {NervesGate.Buses.EC100, nil}, else: nil),
   indicators_adapter:
     if(config_target() == :ec100,
       do: {NervesGate.Indicators.EC100, "/sys/class/leds/ec100:run"},

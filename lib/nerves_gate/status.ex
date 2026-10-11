@@ -1,6 +1,6 @@
 defmodule NervesGate.Status do
   @moduledoc "Pure status builder behind `NervesGate.status/1`. No process, cache or command execution."
-  alias NervesGate.{Config, Equipment, Indicators, Network, Remote}
+  alias NervesGate.{Buses, Config, Equipment, Indicators, Network, Remote}
   alias NervesGate.Equipment.Subnet
   alias NervesGate.Error
   alias NervesGate.Observations.Network, as: NetworkObservation
@@ -10,7 +10,8 @@ defmodule NervesGate.Status do
         status,
         remote,
         equipment \\ Equipment.unavailable(),
-        indicators \\ Indicators.unavailable()
+        indicators \\ Indicators.unavailable(),
+        buses \\ Buses.unavailable()
       ) do
     %{
       version: 2,
@@ -27,12 +28,13 @@ defmodule NervesGate.Status do
       sharing: sharing(status, remote),
       equipment: equipment(status, equipment),
       indicators: indicators,
-      actions: actions(status, remote, equipment, indicators)
+      buses: buses,
+      actions: actions(status, remote, equipment, indicators, buses)
     }
   end
 
   # Presentation metadata only. Admission belongs to the domain servers.
-  defp actions(status, remote, equipment, indicators) do
+  defp actions(status, remote, equipment, indicators, buses) do
     trial = if status && status.trial, do: :ok, else: {:error, :no_matching_trial}
     confirm = if trial == :ok and not status.ready, do: {:error, :not_connected}, else: trial
     remote_ready = Remote.Policy.available(remote)
@@ -56,6 +58,15 @@ defmodule NervesGate.Status do
         ),
       "equipment.unshare" =>
         action("Withdraw route", ["route"], unshare_available(status, remote)),
+      "bus.configure" =>
+        action("Configure bus", ["port", "enabled"], Buses.Policy.available(buses)),
+      "bus.capture" => action("Capture bus", ["port"], Buses.Policy.available(buses)),
+      "bus.modbus_read" =>
+        action(
+          "Read Modbus registers",
+          ["port", "unit", "function", "address", "count", "authorized"],
+          Buses.Policy.available(buses)
+        ),
       "identify" => action("Identify gateway", [], identify_available(indicators)),
       "button_mode" =>
         action(

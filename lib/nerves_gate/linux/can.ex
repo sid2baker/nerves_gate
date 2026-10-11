@@ -6,20 +6,18 @@ defmodule NervesGate.Linux.CAN do
   def snapshot(name) when name in ["can0", "can1"] do
     with {:ok, index} <- :net.if_name2index(String.to_charlist(name)),
          {:ok, links} <- Netlink.request(18, 5, info(index, 0, 0)),
-         {16, <<_::binary-size(8), flags::native-32, _::native-32, attrs::binary>>} <-
+         {16,
+          <<_::16, 280::native-16, _::native-32, flags::native-32, _::native-32, attrs::binary>>} <-
            List.first(links) do
       link = Netlink.attributes(attrs)
 
-      data =
-        link
-        |> Map.get(18, <<>>)
-        |> Netlink.attributes()
-        |> Map.get(2, <<>>)
-        |> Netlink.attributes()
+      info = link |> Map.get(18, <<>>) |> Netlink.attributes()
+      data = info |> Map.get(2, <<>>) |> Netlink.attributes()
 
       %{
         name: name,
         present: true,
+        kind: info |> Map.get(1, "") |> String.trim_trailing(<<0>>),
         up: (flags &&& 1) != 0,
         bitrate: uint32(data[1]),
         state: state(uint32(data[4])),
@@ -33,6 +31,7 @@ defmodule NervesGate.Linux.CAN do
         %{
           name: name,
           present: false,
+          kind: nil,
           up: false,
           state: "undetected",
           bitrate: nil,
@@ -46,13 +45,16 @@ defmodule NervesGate.Linux.CAN do
 
   def configure(name, %{enabled: enabled, bitrate: bitrate, listen_only: listen_only})
       when name in ["can0", "can1"] do
-    with {:ok, index} <- :net.if_name2index(String.to_charlist(name)),
+    with %{present: true, kind: "can"} <- snapshot(name),
+         {:ok, index} <- :net.if_name2index(String.to_charlist(name)),
          {:ok, _} <- Netlink.request(16, 5, info(index, 0, 1)) do
       if enabled do
         enable(index, bitrate, listen_only)
       else
         :ok
       end
+    else
+      _ -> {:error, :can_not_passive}
     end
   end
 

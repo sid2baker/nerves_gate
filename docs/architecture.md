@@ -29,6 +29,8 @@ application persistence journal, connectivity retry graph or AI dependency.
 | Network Runtime | Command admission/replies, RAM trial, live effect guards, deadline, serial work and rollback |
 | Remote | One bounded daemon worker and sanitized operation/error metadata |
 | Equipment | Bounded passive neighbor polling, scope-local inventory and persistent labels; monitors the runtime-owned active scan |
+| Indicators | Bounded run-LED identification, restoration and optional button handling |
+| Buses | One bounded diagnostic worker, read-only port observations and ephemeral serial opt-in/results |
 | PropertyTable | Existing subsystem properties plus ephemeral workflow/host-simulation observations |
 | NervesGate / Status | Named public functions and on-demand interpretation; no stored read model |
 | LiveView | Drafts, presentation, lifecycle-bound subscriptions and command submission |
@@ -53,7 +55,7 @@ workflow. LiveViews also compare saved draft bases. See [action-api.md](action-a
 
 Application `rest_for_one` order is PubSub (Phoenix infrastructure), Registry,
 workflow PropertyTable, managed `NervesGate.Jido`, host simulators (host only),
-Network, Remote, Equipment, then Endpoint. Firmware dependencies supervise VintageNet and
+Network, Remote, Equipment, Indicators, Buses, then Endpoint. Firmware dependencies supervise VintageNet and
 Tailscale themselves.
 
 Network is a `rest_for_one` supervisor: runtime first, permanent Jido AgentServer
@@ -187,6 +189,23 @@ memory-only and default to disabled after any service restart. No reset or netwo
 action exists. Other targets are unsupported; the host adapter uses memory only.
 Existing PropertyTable observations carry status hints, not another event bus.
 
+## CAN and RS485
+
+`Buses` owns one linked, monitored task and a 6.5-second outer deadline. The task owns
+its SocketCAN socket or linked Circuits.UART process. Completion, failure and timeout
+clear the worker before new work is admitted. There is no queue, replay or durable
+bus configuration. CAN state is read from the kernel; serial enable is a memory-only
+permission, not an open port. Idle five-second snapshots never open UARTs or send traffic.
+The service exposes bounded results and operation state through existing PropertyTable
+subscriptions. UI drafts are separate from these observations.
+
+`Buses.Policy` restricts ports and input ranges. The EC100 adapter rechecks CAN up /
+listen-only state at capture, and only opens ttyS3/ttyS4 at 9600 8N1. The serial worker
+assembles bounded RTU replies; pure `Buses.Modbus` validates CRC and exact responses.
+The host Agent simulates all behavior, without any workstation bus access. No new
+coordinator, generic transport framework or dependency was added. See [buses.md](buses.md)
+for bounds, physical qualification and the lack of cross-process exclusivity guarantees.
+
 ## Notifications
 
 The UI subscribes to existing VintageNet/Tailscale properties and workflow metadata,
@@ -205,7 +224,8 @@ perform automatic DHCP restarts, VPN reconnects, DNS resets, failover or enrollm
 
 Operations and commissioning have separate pages: Equipment offers explicit scans
 and local labels; Overview and Remote access display current status. Settings
-contains the network and Tailscale editors plus button/LED controls.
+contains network, Tailscale and bus editors plus button/LED controls. The separate
+Equipment bus workspace offers bounded captures and explicit Modbus reads.
 First-time and subsequent network configuration use the same form. The old setup
 and redirect-only Internet routes are removed, not retained as compatibility paths.
 
@@ -214,7 +234,7 @@ keep their draft-aware refresh callbacks. Navigation lives inside the LiveView
 layout so current-page markers update on live navigation. A pending network trial
 remains visible across pages, with a direct link to keep or restore it.
 Equipment uses the same property subscriptions, without another lifecycle notification system.
-See [ui.md](ui.md) for scope and future hardware interfaces.
+See [ui.md](ui.md) for page scope and [buses.md](buses.md) for hardware limits.
 
 ## Dependencies
 

@@ -10,7 +10,8 @@ defmodule NervesGate.Application do
           NervesGate.Network.Host,
           NervesGate.Remote.Host,
           NervesGate.Equipment.Host,
-          NervesGate.Indicators.Host
+          NervesGate.Indicators.Host,
+          NervesGate.Buses.Host
         ]
       else
         []
@@ -29,6 +30,7 @@ defmodule NervesGate.Application do
           NervesGate.Remote,
           NervesGate.Equipment,
           NervesGate.Indicators,
+          NervesGate.Buses,
           NervesGateWeb.Endpoint
         ]
 

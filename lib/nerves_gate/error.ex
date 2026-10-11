@@ -158,6 +158,60 @@ defmodule NervesGate.Error do
         "An advertised 4via6 route does not match the active dedicated equipment subnet. Withdraw stale routes before adding another."
       )
 
+  def from(:bus_unsupported),
+    do: new("bus_unsupported", "Bus diagnostics are unsupported on this target or unavailable.")
+
+  def from(:bus_missing), do: new("bus_missing", "The selected bus interface is not detected.")
+  def from(:bus_disabled), do: new("bus_disabled", "Enable this interface in Bus settings first.")
+
+  def from(:bus_parameters),
+    do: new("invalid_parameters", "Choose a supported bus port, enabled state and CAN bitrate.")
+
+  def from(:can_not_passive),
+    do:
+      new(
+        "can_not_passive",
+        "CAN capture requires an enabled interface in listen-only mode. Configure it in Settings."
+      )
+
+  def from(:bus_failed),
+    do:
+      new(
+        "bus_failed",
+        "Bus operation failed. Check wiring, permissions and interface state. Settings may be partially applied; no retry was sent."
+      )
+
+  def from(:bus_timeout),
+    do:
+      new(
+        "bus_timeout",
+        "Bus operation exceeded its time limit and was stopped. Recheck interface state; no retry was sent."
+      )
+
+  def from(:serial_busy),
+    do:
+      new(
+        "serial_busy",
+        "Serial traffic was observed before the request. Nothing was sent; do not compete with another master."
+      )
+
+  def from(:modbus_parameters),
+    do:
+      new(
+        "invalid_parameters",
+        "Authorize one read on ttyS3/ttyS4: unit 1–247, function 3/4, zero-based address 0–65535 and 1–32 registers within range."
+      )
+
+  def from(:modbus_timeout),
+    do: new("modbus_timeout", "No complete Modbus response within one second. No retry was sent.")
+
+  def from(:modbus_response),
+    do:
+      new(
+        "modbus_response",
+        "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
+      )
+
   def from(:led_unavailable),
     do: new("led_unavailable", "The run LED is unavailable or controlled by a kernel trigger.")
 

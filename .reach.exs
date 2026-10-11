@@ -36,6 +36,7 @@
          "NervesGate.Equipment.label",
          "NervesGate.Equipment.Linux.*",
          "NervesGate.Indicators.*",
+         "NervesGate.Buses.*",
          "NervesGate.Linux.*",
          "VintageNet.configure",
          "VintageNet.Persistence.*",
