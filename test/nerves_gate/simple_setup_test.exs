@@ -19,7 +19,7 @@ defmodule NervesGate.SimpleSetupTest do
   }
 
   defmodule SaveFailure do
-    @behaviour Network
+    @behaviour NervesGate.Network.Adapter
     def apply_config(network, {host, path}) do
       Host.apply_config(network, host)
 
@@ -43,7 +43,7 @@ defmodule NervesGate.SimpleSetupTest do
       path: Path.join(dir, "config.json"),
       adapter: {Host, host},
       poll_ms: 10,
-      trial_ms: 100
+      trial_ms: 2_000
     ]
 
     server = start_supervised!({Network, opts})
@@ -130,9 +130,15 @@ defmodule NervesGate.SimpleSetupTest do
     assert {:ok, saved} = Config.load(ctx.path)
     assert saved["setup_completed"]
     assert saved["network"] == @wan
+    :sys.replace_state(Network.runtime(ctx.server), &%{&1 | trial_ms: 200})
     assert {:ok, _} = Network.propose(@empty, ctx.server, @access)
     refute Network.status(ctx.server).trial.auto_save
-    eventually(fn -> Network.status(ctx.server).trial == nil end)
+
+    eventually(fn ->
+      status = Network.status(ctx.server)
+      status.trial == nil and not status.recovering
+    end)
+
     assert Host.snapshot(ctx.host).ports |> hd() |> Map.get(:method) == "dhcp"
     assert {:ok, ^saved} = Config.load(ctx.path)
   end
@@ -179,12 +185,17 @@ defmodule NervesGate.SimpleSetupTest do
     Host.simulate(%{usb: @usb, ports: Host.snapshot(ctx.host).ports}, ctx.host)
     assert {:ok, _} = Network.propose(@empty, ctx.server, @access)
 
-    :sys.replace_state(ctx.server, fn state ->
-      put_in(state.trial.deadline, System.monotonic_time(:millisecond) - 1)
+    :sys.replace_state(Network.runtime(ctx.server), fn state ->
+      %{state | deadline: System.monotonic_time(:millisecond) - 1}
     end)
 
-    send(ctx.server, :poll)
-    eventually(fn -> Network.status(ctx.server).trial == nil end)
+    send(Network.runtime(ctx.server), :poll)
+
+    eventually(fn ->
+      status = Network.status(ctx.server)
+      status.trial == nil and not status.recovering
+    end)
+
     refute Network.status(ctx.server).config["setup_completed"]
     assert {:ok, _} = Network.propose(@empty, ctx.server, @access)
     stop_supervised!(Network)

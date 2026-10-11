@@ -6,6 +6,7 @@ ExUnit.start()
 Application.ensure_all_started(:logger)
 Application.ensure_all_started(:phoenix_pubsub)
 Application.ensure_all_started(:jason)
+{:ok, _} = Application.ensure_all_started(:jido)
 Application.load(:vintage_net)
 
 for {key, value} <- [
@@ -29,6 +30,9 @@ defmodule NervesGate.BridgeIntegrationTest do
 
   test "real bridge: absent port, hotplug, both directions, DHCP, static and rollback" do
     start_supervised!({Phoenix.PubSub, name: NervesGate.PubSub})
+    start_supervised!({Registry, keys: :unique, name: NervesGate.Registry})
+    start_supervised!({PropertyTable, name: NervesGate.Properties})
+    start_supervised!({Jido, name: NervesGate.Jido})
 
     static = %{
       "ip_method" => "static",
@@ -136,12 +140,16 @@ defmodule NervesGate.BridgeIntegrationTest do
     IO.puts("PASS live DHCP-to-static reconfiguration")
 
     # Accelerate timeout only; application uses 60 seconds in production.
-    :sys.replace_state(server, &%{&1 | trial_ms: 1_000})
+    :sys.replace_state(Network.runtime(server), &%{&1 | trial_ms: 1_000})
 
     assert {:ok, _} =
              Network.propose(put_in(static, ["equipment", "static_ip"], "10.45.0.20"), server)
 
-    wait(fn -> Network.status(server).trial == nil end)
+    wait(fn ->
+      status = Network.status(server)
+      status.trial == nil and not status.recovering
+    end)
+
     wait(fn -> Network.ready?(Vintage.snapshot(nil), static) end)
     wait(fn -> ping?("10.45.0.3") end)
     assert {:ok, saved} = Config.load("/run/nerves_gate.json")
@@ -178,7 +186,7 @@ defmodule NervesGate.BridgeIntegrationTest do
 
     cmd("ip", ~w(-n peer1 addr flush dev lan1))
     cmd("ip", ~w(-n peer1 addr add 10.46.0.3/24 dev lan1))
-    :sys.replace_state(server, &%{&1 | trial_ms: 60_000})
+    :sys.replace_state(Network.runtime(server), &%{&1 | trial_ms: 60_000})
     assert {:ok, trial} = Network.propose(separated, server)
     wait(fn -> Network.status(server).ready end)
     assert :ok = Network.confirm(trial, server)
@@ -221,7 +229,7 @@ defmodule NervesGate.BridgeIntegrationTest do
   end
 
   defp start_web do
-    for app <- [:bandit, :phoenix_live_view, :runic] do
+    for app <- [:bandit, :phoenix_live_view, :jido] do
       {:ok, _} = Application.ensure_all_started(app)
     end
 
@@ -237,7 +245,6 @@ defmodule NervesGate.BridgeIntegrationTest do
       Keyword.merge(endpoint_config, http: Keyword.put(http, :port, 0), server: true)
     )
 
-    start_supervised!(NervesGate.Device)
     start_supervised!(NervesGateWeb.Endpoint)
     {:ok, {_ip, port}} = NervesGateWeb.Endpoint.server_info(:http)
     port

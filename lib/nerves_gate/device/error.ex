@@ -3,6 +3,9 @@ defmodule NervesGate.Device.Error do
 
   def new(code, message), do: %{code: code, message: message}
 
+  def from(%{code: code, message: message}) when is_binary(code) and is_binary(message),
+    do: new(code, message)
+
   def from(:invalid_saved_config),
     do:
       new("invalid_saved_config", "Saved settings could not be read. Use recovery SSH or serial.")

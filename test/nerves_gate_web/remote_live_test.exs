@@ -6,7 +6,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
   @endpoint NervesGateWeb.Endpoint
 
   defmodule Adapter do
-    @behaviour Remote
+    @behaviour NervesGate.Remote.Adapter
     def snapshot(agent), do: Agent.get(agent, & &1.snapshot)
     def login_url(agent), do: Agent.get(agent, & &1.url)
 

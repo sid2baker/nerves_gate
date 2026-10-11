@@ -14,10 +14,12 @@ defmodule NervesGate.Config do
     }
   end
 
-  def load(path \\ path()) do
-    case File.read(path) do
+  def load(path \\ path(), storage \\ NervesGate.AtomicFile) do
+    case storage.read(path) do
       {:ok, json} ->
-        with {:ok, config} <- Jason.decode(json), do: validate(config)
+        with {:ok, config} <- Jason.decode(json) do
+          validate(config)
+        end
 
       {:error, :enoent} ->
         {:ok, defaults()}
@@ -284,43 +286,9 @@ defmodule NervesGate.Config do
   defp blank_to_nil(value), do: value
 
   @doc "Write a validated file atomically. Never replace a working file with partial JSON."
-  def save(config, path \\ path()) do
-    with {:ok, normalized} <- validate(config),
-         :ok <- File.mkdir_p(Path.dirname(path)) do
-      temporary = path <> "." <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
-
-      try do
-        with {:ok, file} <- File.open(temporary, [:write, :exclusive, :binary, :raw]) do
-          result =
-            try do
-              with :ok <- File.chmod(temporary, 0o600),
-                   :ok <- :file.write(file, Jason.encode!(normalized, pretty: true) <> "\n") do
-                :file.sync(file)
-              end
-            after
-              File.close(file)
-            end
-
-          with :ok <- result, :ok <- File.rename(temporary, path) do
-            # Rename is the commit point. Directory sync improves power-loss durability.
-            sync_directory(Path.dirname(path))
-            :ok
-          end
-        end
-      after
-        File.rm(temporary)
-      end
-    end
-  end
-
-  defp sync_directory(path) do
-    case :file.open(String.to_charlist(path), [:read, :raw, :directory]) do
-      {:ok, directory} ->
-        :file.sync(directory)
-        :file.close(directory)
-
-      _ ->
-        :ok
+  def save(config, path \\ path(), storage \\ NervesGate.AtomicFile) do
+    with {:ok, normalized} <- validate(config) do
+      storage.write(path, Jason.encode!(normalized, pretty: true) <> "\n")
     end
   end
 end

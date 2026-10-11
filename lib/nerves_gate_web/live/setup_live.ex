@@ -6,7 +6,7 @@ defmodule NervesGateWeb.SetupLive do
   import NervesGateWeb.CoreComponents
 
   def mount(_, session, socket) do
-    subscribe(socket, Device.topic(), &__MODULE__.handle_device/2)
+    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
     if connected?(socket), do: Process.send_after(self(), :tick, 1_000)
     projection = Device.projection()
     peer = get_connect_info(socket, :peer_data)
@@ -61,7 +61,7 @@ defmodule NervesGateWeb.SetupLive do
     projection = Device.projection()
     socket = assign(socket, form: draft(socket, params))
 
-    if socket.assigns().base() != projection.network().desired() do
+    if socket.assigns.base != projection.network.desired do
       {:noreply,
        assign(socket,
          projection: projection,
@@ -69,15 +69,12 @@ defmodule NervesGateWeb.SetupLive do
          message: "Settings changed in another session. Reload saved settings before editing."
        )}
     else
-      case NervesGateWeb.NetworkForm.to_network(
-             socket.assigns().form().params(),
-             projection.connections().ports()
-           ) do
+      case NetworkForm.to_network(socket.assigns.form.params, projection.connections.ports) do
         {:ok, network} ->
           result =
-            NervesGate.Device.dispatch("network.propose", %{"network" => network},
+            Device.dispatch("network.propose", %{"network" => network},
               expected_revision: revision,
-              access: socket.assigns().access()
+              access: socket.assigns.access
             )
 
           reply(assign(socket, own_save: true, saving_network: network), result)
@@ -108,7 +105,9 @@ defmodule NervesGateWeb.SetupLive do
       )
 
   @doc false
-  def handle_device({:device, _}, socket), do: refresh(socket, Device.projection())
+  def refresh_observations(socket) do
+    refresh(socket, NervesGate.Device.projection())
+  end
 
   def handle_info(:tick, socket) do
     Process.send_after(self(), :tick, 1_000)
@@ -396,7 +395,11 @@ defmodule NervesGateWeb.SetupLive do
       phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
     >
       <summary>Connection details</summary>
-      <.live_component module={NervesGateWeb.ConnectionPanel} id="setup-connections" />
+      <.live_component
+        module={NervesGateWeb.ConnectionPanel}
+        id="setup-connections"
+        projection={@projection}
+      />
       <p class="ui-help">USB stays separate for setup and recovery.</p>
     </details>
     """

@@ -4,7 +4,7 @@ defmodule NervesGateWeb.RemoteLive do
   import NervesGateWeb.CoreComponents
 
   def mount(_, _, socket) do
-    subscribe(socket, Device.topic(), &__MODULE__.handle_device/2)
+    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
 
     if connected?(socket) do
       Process.send_after(self(), :check_login, 1000)
@@ -92,8 +92,8 @@ defmodule NervesGateWeb.RemoteLive do
   end
 
   @doc false
-  def handle_device({:device, _}, socket) do
-    refresh(socket, Device.projection())
+  def refresh_observations(socket) do
+    refresh(socket, NervesGate.Device.projection())
   end
 
   def handle_info(:check_login, socket) do

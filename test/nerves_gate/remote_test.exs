@@ -3,7 +3,7 @@ defmodule NervesGate.RemoteTest do
   alias NervesGate.{Device, Remote}
 
   defmodule Adapter do
-    @behaviour Remote
+    @behaviour NervesGate.Remote.Adapter
     def snapshot(agent), do: Agent.get(agent, & &1.snapshot)
     def login_url(agent), do: Agent.get(agent, & &1.url)
 
@@ -34,11 +34,7 @@ defmodule NervesGate.RemoteTest do
         {Remote, name: nil, adapter: {Adapter, adapter}, poll_ms: 10, timeout: 150}
       )
 
-    device =
-      start_supervised!(
-        {Device,
-         name: nil, network: nil, remote: remote, topic: "remote-test:#{inspect(make_ref())}"}
-      )
+    device = Device.new(network: nil, remote: remote)
 
     %{adapter: adapter, remote: remote, device: device}
   end
@@ -94,7 +90,9 @@ defmodule NervesGate.RemoteTest do
     end
 
     Agent.update(ctx.adapter, &put_in(&1.snapshot.state, "online"))
-    assert_receive {:device, changed}
+    eventually(fn -> Device.projection(ctx.device).remote_access.state == "online" end)
+    assert_receive %PropertyTable.Event{}
+    changed = Device.projection(ctx.device)
     assert changed.remote_access.state == "online"
     refute changed.remote_access.verified
     assert changed.remote_access.permitted_routes == nil
@@ -144,7 +142,7 @@ defmodule NervesGate.RemoteTest do
     projection = Device.projection(ctx.device)
     assert projection.remote_access.health == ["Sign in at [private URL]", "DNS warning"]
     refute Jason.encode!(projection) =~ "private-token"
-    assert_receive {:device, changed}
+    assert_receive %PropertyTable.Event{value: changed}
     refute Jason.encode!(changed) =~ "private-token"
   end
 

@@ -1,7 +1,7 @@
 # Nerves Gate
 
-An Ethernet gateway with a small, local web UI, built with Nerves 2 and Phoenix
-LiveView. EC100 is the primary target; x86_64 support is in progress.
+An Ethernet gateway with a small, local web UI, built with Nerves 2, Jido v3 and
+Phoenix LiveView. EC100 is the primary target; x86_64 support is in progress.
 
 ## Use it
 
@@ -32,8 +32,9 @@ Tailscale behavior.
 
 ## Backend entry point
 
-**All clients use `NervesGate.Device`.** The action catalog and explicit router are
-in [`lib/nerves_gate/device/actions.ex`](lib/nerves_gate/device/actions.ex).
+**Clients use the stateless `NervesGate.Device` facade.** Domain Jido Actions
+validate commands; supervised Network, Remote and Connectivity agents coordinate
+workflows. Pure selectors read current domain state without a central state server.
 
 ```elixir
 alias NervesGate.Device
@@ -56,13 +57,24 @@ Device.dispatch("remote.configure", %{"hostname" => "my-gateway"})
 | `remote.disconnect` | none | Sign out of Tailscale |
 | `remote.login_url` | none | Explicitly read the private sign-in URL |
 
-The path is **Device → Actions (via the pure Runic workflow) → Network or Remote**.
-LiveViews own drafts and presentation, not hardware policy. Network owns persistence
-and rollback; Remote owns bounded asynchronous daemon calls. No durable command queue
-or event sourcing is involved.
+The command path is **Device → domain API → Jido AgentServer / Action → typed
+directive → infrastructure runtime**. Draft validation runs a pure Jido Action.
+Network trials have a durable decision journal and an independent safety watchdog.
+Remote operations run in bounded, owned workers. VintageNet and Tailscale remain
+authoritative for their configuration and observations. PropertyTable subscriptions
+and Alarmist conditions drive conservative, read-only connectivity rechecks.
 
-See the [action API](docs/action-api.md) for examples, return values, concurrency
-and the exact UI-to-action mapping.
+LiveViews own drafts and presentation. They subscribe directly to properties and
+application facts, then re-read; there is no projection server, durable event log
+or replayed command queue.
+
+Jido v3 is pinned to immutable source commits. **Approved dependency exception:**
+Jido's v3 Action engine requires Runic internally. NervesGate has no direct Runic
+calls or workflows, and introduces no AI dependencies.
+
+See the [action API](docs/action-api.md) for return values and UI mapping, and the
+[architecture and migration map](docs/architecture.md) for ownership, lifecycle,
+signal delivery and the exact dependency pins.
 
 ## Develop
 
@@ -108,8 +120,9 @@ Neither check substitutes for a firmware boot or hardware test.
 
 ```sh
 export MIX_TARGET=ec100    # or x86_64
+export MIX_ENV=prod        # omit development tooling from firmware
 mix deps.get
-mix firmware
+mix firmware --overwrite
 ```
 
 All targets share `mix.lock`. EC100 uses the local system checkout at

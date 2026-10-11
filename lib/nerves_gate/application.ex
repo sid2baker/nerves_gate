@@ -12,11 +12,21 @@ defmodule NervesGate.Application do
       end
 
     children =
-      [{Phoenix.PubSub, [name: NervesGate.PubSub]}] ++
+      [
+        {Phoenix.PubSub, [name: NervesGate.PubSub]},
+        {Registry, keys: :unique, name: NervesGate.Registry},
+        {PropertyTable, name: NervesGate.Properties},
+        {Jido, name: NervesGate.Jido}
+      ] ++
         simulator ++
-        [NervesGate.Network, NervesGate.Remote, NervesGate.Device, NervesGateWeb.Endpoint]
+        [
+          NervesGate.Network,
+          NervesGate.Remote,
+          NervesGate.Connectivity,
+          NervesGateWeb.Endpoint
+        ]
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: NervesGate.Supervisor)
+    Supervisor.start_link(children, strategy: :rest_for_one, name: NervesGate.Supervisor)
   end
 
   @impl true

@@ -15,7 +15,7 @@ defmodule NervesGate.DeviceTest do
   }
 
   defmodule Adapter do
-    @behaviour NervesGate.Network
+    @behaviour NervesGate.Network.Adapter
     def apply_config(config, agent) do
       %{host: host, fail: fail} = Agent.get(agent, & &1)
       Agent.update(agent, &Map.update!(&1, :attempts, fn n -> n + 1 end))
@@ -23,6 +23,7 @@ defmodule NervesGate.DeviceTest do
     end
 
     def snapshot(agent), do: Host.snapshot(Agent.get(agent, & &1.host))
+    def observations(agent), do: Host.observations(Agent.get(agent, & &1.host))
   end
 
   setup %{tmp_dir: dir} do
@@ -38,8 +39,8 @@ defmodule NervesGate.DeviceTest do
     ]
 
     network = start_supervised!({Network, opts})
-    device_opts = [name: nil, network: opts[:name], remote: nil, topic: "device:#{dir}"]
-    device = start_supervised!({Device, device_opts})
+    device_opts = [network: opts[:name], remote: nil]
+    device = NervesGate.Device.new(device_opts)
     Device.subscribe(device)
     Device.projection(device)
     flush_projections()
@@ -142,7 +143,8 @@ defmodule NervesGate.DeviceTest do
     assert trial.network.observed.bridge.method == "static"
     assert trial.actions["network.confirm"].enabled
     refute trial.actions["network.propose"].enabled
-    assert_receive {:device, ^trial}
+    assert_receive %PropertyTable.Event{}
+    assert Device.projection(ctx.device) == trial
     assert {:ok, config} = Config.load(ctx.path)
     assert config == Config.defaults()
 
@@ -152,7 +154,8 @@ defmodule NervesGate.DeviceTest do
     assert saved.network.setup_completed
     assert saved.revision != trial.revision
     assert Device.projection(ctx.device) == saved
-    assert_receive {:device, ^saved}
+    assert_receive %PropertyTable.Event{}
+    assert Device.projection(ctx.device) == saved
     assert {:ok, config} = Config.load(ctx.path)
     assert config["network"] == @static
   end
@@ -220,8 +223,8 @@ defmodule NervesGate.DeviceTest do
   test "late confirmation is rejected even before the expiry message is processed", ctx do
     {:ok, %{result: %{trial_id: id}}} = dispatch(ctx, "network.propose", %{"network" => @static})
 
-    :sys.replace_state(ctx.network, fn state ->
-      put_in(state.trial.deadline, System.monotonic_time(:millisecond) - 1)
+    :sys.replace_state(Network.runtime(ctx.network), fn state ->
+      %{state | deadline: System.monotonic_time(:millisecond) - 1}
     end)
 
     assert {:error, %{error: %{code: "expired"}, projection: projection}} =
@@ -252,36 +255,46 @@ defmodule NervesGate.DeviceTest do
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
-  test "observations notify clients, but queued old network messages cannot rewind state", ctx do
+  test("observation notifications are hints; stale payloads cannot rewind a fresh read", ctx) do
     old = Network.status(ctx.network)
     Host.simulate(%{ports: [%{name: "eth0", present: false, link: false, master: nil}]}, ctx.host)
-    assert_receive {:device, projection}
+    assert_receive %PropertyTable.Event{}
+    projection = Device.projection(ctx.device)
     refute hd(projection.network.observed.ports).present
-    send(ctx.device, {:network, old})
+
+    send(self(), %PropertyTable.Event{
+      table: NervesGate.Properties,
+      property: ["network", "stale"],
+      value: old
+    })
+
     assert Device.projection(ctx.device) == projection
   end
 
-  test "trial rollback runs while the decision gateway is stopped; restart rehydrates it", ctx do
-    # Shorten just this trial, leaving the network's real timer responsible for expiry.
-    :sys.replace_state(ctx.network, &%{&1 | trial_ms: 100})
-    {:ok, %{projection: trial}} = dispatch(ctx, "network.propose", %{"network" => @static})
-    stop_supervised!(Device)
-    eventually(fn -> Network.status(ctx.network).trial == nil end)
+  test("trial rollback outlives its caller and requires no Device process", ctx) do
+    :sys.replace_state(Network.runtime(ctx.network), &%{&1 | trial_ms: 200})
+    task = Task.async(fn -> dispatch(ctx, "network.propose", %{"network" => @static}) end)
+    assert {:ok, %{projection: trial}} = Task.await(task)
+    refute Process.alive?(task.pid)
+
+    eventually(fn ->
+      status = Network.status(ctx.network)
+      status.trial == nil and not status.recovering
+    end)
+
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
-    device = start_supervised!({Device, ctx.device_opts})
-    projection = Device.projection(device)
+    projection = Device.projection(Device.new(ctx.device_opts))
     assert projection.network.pending == nil
     assert projection.network.error.code == "expired"
     assert projection.revision != trial.revision
     assert projection.network.desired == Config.defaults()["network"]
   end
 
-  test "gateway restart does not abandon an active trial", ctx do
+  test("independent clients read and confirm the same authoritative trial", ctx) do
     {:ok, %{result: %{trial_id: id}}} = dispatch(ctx, "network.propose", %{"network" => @static})
-    stop_supervised!(Device)
-    device = start_supervised!({Device, ctx.device_opts})
-    assert Device.projection(device).network.pending.id == id
-    assert {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id}, server: device)
+    client = Device.new(ctx.device_opts)
+    assert Device.projection(client).network.pending.id == id
+    assert {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id}, server: client)
   end
 
   test "network restart restores saved state and republishes without a client command", ctx do
@@ -299,7 +312,8 @@ defmodule NervesGate.DeviceTest do
     projection = Device.projection(ctx.device)
     assert projection.network.pending == nil
     assert projection.network.observed.bridge.method == "disabled"
-    assert_receive {:device, ^projection}
+    Device.subscribe(ctx.device)
+    assert Device.projection(ctx.device) == projection
   end
 
   test "corrupt settings and restoration failure disable unsafe actions", ctx do
@@ -340,18 +354,23 @@ defmodule NervesGate.DeviceTest do
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
-  test "fresh evaluations leave no accumulated Runic facts in the gateway", ctx do
-    workflow = :sys.get_state(ctx.device).workflow
-    for _ <- 1..20, do: dispatch(ctx, "network.validate", %{"network" => @static})
-    assert :sys.get_state(ctx.device).workflow == workflow
-    assert Runic.Workflow.facts(workflow) == []
+  test("network observations do not invalidate a configuration revision", ctx) do
+    revision = Device.projection(ctx.device).revision
+    Host.simulate(%{ports: [%{name: "eth0", present: false, link: false, master: nil}]}, ctx.host)
+    assert Device.projection(ctx.device).revision == revision
+
+    assert {:ok, _} =
+             Device.dispatch("network.propose", %{"network" => @static},
+               server: ctx.device,
+               expected_revision: revision
+             )
   end
 
   defp dispatch(ctx, action, params), do: Device.dispatch(action, params, server: ctx.device)
 
   defp flush_projections do
     receive do
-      {:device, _} -> flush_projections()
+      %PropertyTable.Event{} -> flush_projections()
     after
       0 -> :ok
     end

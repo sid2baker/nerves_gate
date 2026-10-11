@@ -5,7 +5,7 @@ defmodule NervesGateWeb.DashboardLive do
   import NervesGateWeb.NetworkStatus, only: [port_label: 1]
 
   def mount(_, _, socket) do
-    subscribe(socket, Device.topic(), &__MODULE__.handle_device/2)
+    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
     socket = assign(socket, projection: Device.projection())
 
     if socket.assigns.live_action in [:equipment, :internet] do
@@ -16,8 +16,8 @@ defmodule NervesGateWeb.DashboardLive do
   end
 
   @doc false
-  def handle_device({:device, _}, socket) do
-    assign(socket, projection: Device.projection())
+  def refresh_observations(socket) do
+    assign(socket, projection: NervesGate.Device.projection())
   end
 
   def render(assigns) do
@@ -96,6 +96,7 @@ defmodule NervesGateWeb.DashboardLive do
         <.live_component
           module={NervesGateWeb.ConnectionPanel}
           id="gateway-connections"
+          projection={@projection}
         />
         <p class="ui-help">
           Firmware {@projection.system.firmware} · {@projection.system.target}. USB remains separate for setup and recovery.

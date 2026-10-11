@@ -1,8 +1,8 @@
 defmodule NervesGate.Network.Host do
   @moduledoc "Explicit host simulator. Never reads or changes the workstation's interfaces."
   use Agent
-  @behaviour NervesGate.Network
-  alias NervesGate.Config
+  @behaviour NervesGate.Network.Adapter
+  alias NervesGate.{Config, Observations}
 
   def start_link(opts \\ []) do
     Agent.start_link(fn -> %{network: Config.defaults()["network"], overrides: %{}} end,
@@ -11,7 +11,10 @@ defmodule NervesGate.Network.Host do
   end
 
   @impl true
-  def apply_config(network, server), do: Agent.update(server, &%{&1 | network: network})
+  def apply_config(network, server), do: update(server, &%{&1 | network: network})
+
+  @impl true
+  def observations(server), do: [{Observations.table(), Observations.host("network", server)}]
 
   @impl true
   def snapshot(server) do
@@ -87,5 +90,13 @@ defmodule NervesGate.Network.Host do
 
   @doc "Replace simulated observations; use an empty map to restore automatic observations."
   def simulate(overrides, server \\ __MODULE__),
-    do: Agent.update(server, &%{&1 | overrides: overrides})
+    do: update(server, &%{&1 | overrides: overrides})
+
+  defp update(server, fun) do
+    Agent.update(server, fn state ->
+      next = fun.(state)
+      Observations.put(Observations.host("network", self()), observed(next))
+      next
+    end)
+  end
 end

@@ -1,208 +1,171 @@
 defmodule NervesGate.Device do
   @moduledoc """
-  Shared CQRS interface for LiveView, IEx/SSH and future client adapters.
+  Stateless public interface for LiveView, IEx/SSH and other client adapters.
 
-  Subscribe **before** reading `projection/1`; notifications are
-  `{:device, projection}`. `version` identifies the schema and `revision` is an
-  opaque equality token, valid only for this gateway incarnation. Notifications
-  are snapshots, not a durable event stream. Re-read after reconnecting.
+  `projection/1` is a compatibility name for an on-demand, pure selection of
+  authoritative domain observations. There is no Device process or stored read
+  model. The two domains are read independently, not as an atomic snapshot.
 
-  **Entry point:** `dispatch/3` accepts a string action ID and string-keyed parameters.
-  All eight supported actions and their routing live in `NervesGate.Device.Actions`. Both
-  success and rejection include the current projection. `:expected_revision`
-  optionally rejects stale clients. Availability is advisory, not authorization;
-  commands are revalidated and the network executor enforces its own safeguards.
+  `dispatch/3` translates the eight public string commands to domain APIs backed
+  by Jido Actions. `:expected_revision` checks only the commanded domain, inside
+  admission and again at its serialized effect boundary. Observations are not
+  configuration writes; network link changes do not invalidate a form revision.
+  Always supply a trial ID when confirming or cancelling.
 
-  There is no durable command queue or exactly-once promise. On a lost reply,
-  query the projection before retrying. Confirmation/cancellation always require
-  the explicit trial ID, so an old command cannot affect a newer trial.
+  `subscribe/1` binds PropertyTable subscriptions to the calling process. Read
+  after subscribing and treat notifications as hints to re-read, not snapshots.
+  Re-subscribe after reconnecting. Delivery is ephemeral, not a command log.
+  An unknown outcome requires reading state before retrying a write.
   """
-  use GenServer
-  alias NervesGate.Device.{Error, Workflow}
-  alias NervesGate.Network
+  alias NervesGate.Device.{Error, Selectors}
+  alias NervesGate.{Network, Remote}
 
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+  defstruct network: Network, remote: Remote
+
+  @doc "Inject domain supervisors for tests or independent gateway instances; starts no process."
+  def new(opts \\ []), do: struct!(__MODULE__, opts)
+
+  def projection(device \\ new()) do
+    Selectors.build(network_status(device.network), remote_status(device.remote))
   end
 
-  def projection(server \\ __MODULE__), do: GenServer.call(server, :projection)
-
-  @doc "Projection topic for lifecycle-managed subscribers such as LiveView.subscribe/3."
-  def topic(server \\ __MODULE__), do: GenServer.call(server, :topic)
-
-  def subscribe(server \\ __MODULE__) do
-    Phoenix.PubSub.subscribe(NervesGate.PubSub, topic(server))
+  def subscribe(device \\ new()) do
+    observe(Network, device.network)
+    observe(Remote, device.remote)
+    :ok
   end
 
   @doc "Returns `{:ok, %{result: map, projection: map}}` or `{:error, %{error: map, projection: map}}`."
   def dispatch(action, params \\ %{}, opts \\ []) do
-    server = Keyword.get(opts, :server, __MODULE__)
-    command = %{action: action, params: params}
-    access = Keyword.get(opts, :access)
-
-    GenServer.call(
-      server,
-      {:dispatch, command, Keyword.get(opts, :expected_revision), access},
-      20_000
-    )
-  end
-
-  @impl true
-  def init(opts) do
-    Network.subscribe()
-    NervesGate.Remote.subscribe()
-
-    state = %{
-      network: Keyword.get(opts, :network, Network),
-      remote: Keyword.get(opts, :remote, NervesGate.Remote),
-      remote_status: nil,
-      topic: Keyword.get(opts, :topic, "device"),
-      workflow: Workflow.new(),
-      epoch: Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false),
-      sequence: 0,
-      status: nil,
-      projection: nil
-    }
-
-    {:ok, state, {:continue, :refresh}}
-  end
-
-  @impl true
-  def handle_continue(:refresh, state), do: {:noreply, refresh(state)}
-
-  @impl true
-  def handle_call(:topic, _from, state), do: {:reply, state.topic, state}
-
-  def handle_call(:projection, _from, state) do
-    state = refresh(state)
-    {:reply, state.projection, state}
-  end
-
-  def handle_call({:dispatch, command, expected, access}, _from, state) do
-    state = refresh(state)
+    device = Keyword.get(opts, :server, new())
 
     result =
       cond do
-        expected != nil and expected != state.projection.revision ->
-          {:error, Error.from(:stale_revision)}
-
-        not is_binary(command.action) ->
+        not is_binary(action) ->
           {:error, Error.new("unknown_action", "Action IDs must be strings.")}
 
-        not json_value?(command.params) ->
-          {:error, Error.new("invalid_parameters", "Parameters must contain only JSON values.")}
+        not json_value?(params) ->
+          invalid_parameters()
 
         true ->
-          %{decision: decision} =
-            NervesGate.Device.Workflow.evaluate(
-              state.workflow,
-              state.status,
-              command,
-              state.remote_status
-            )
-
-          execute(decision, state, access)
+          execute(action, params, device, opts)
       end
 
-    state = refresh(state)
+    view = projection(device)
 
-    reply =
-      case result do
-        {:ok, value} -> {:ok, %{result: value, projection: state.projection}}
-        {:error, error} -> {:error, %{error: error, projection: state.projection}}
-      end
-
-    {:reply, reply, state}
+    case result do
+      {:ok, value} -> {:ok, %{result: value, projection: view}}
+      {:error, error} -> {:error, %{error: Error.from(error), projection: view}}
+    end
   end
 
-  @impl true
-  def handle_info(:remote_changed, state) do
-    {:noreply, refresh(state)}
+  defp execute("network.validate", %{"network" => network} = params, _, _)
+       when map_size(params) == 1 do
+    case Network.validate(network) do
+      {:ok, validated} -> {:ok, %{network: validated}}
+      error -> error
+    end
   end
 
-  def handle_info({:network, _snapshot}, state) do
-    {:noreply, refresh(state)}
+  defp execute("network.propose", %{"network" => network} = params, device, opts)
+       when map_size(params) == 1 do
+    Network.propose(network, device.network, opts[:access], expected(opts, 0)) |> network_result()
+  catch
+    :exit, _ -> {:error, :unavailable}
   end
 
-  defp execute({:result, result}, _network, _access), do: {:ok, result}
-  defp execute({:error, error}, _network, _access), do: {:error, error}
+  defp execute(action, %{"trial_id" => id} = params, device, opts)
+       when action in ["network.confirm", "network.cancel"] and is_binary(id) and
+              map_size(params) == 1 do
+    result =
+      if action == "network.confirm",
+        do: Network.confirm(id, device.network, expected(opts, 0)),
+        else: Network.cancel(id, device.network, expected(opts, 0))
 
-  defp execute({:effect, {:remote, :login_url, _}}, %{remote: remote}, _) do
-    {:ok, %{url: NervesGate.Remote.login_url(remote)}}
+    network_result(result)
+  catch
+    :exit, _ -> {:error, :outcome_unknown}
+  end
+
+  defp execute("remote.login_url", params, device, _) when params == %{} do
+    case Remote.login_url(device.remote) do
+      {:error, _} = error -> error
+      url -> {:ok, %{url: url}}
+    end
   catch
     :exit, _ -> {:error, Error.new("remote_unavailable", "Tailscale is unavailable.")}
   end
 
-  defp execute({:effect, {:remote, action, params}}, %{remote: remote}, _) do
-    case NervesGate.Remote.command(action, params, remote) do
-      :ok -> {:ok, %{accepted: true}}
-      {:error, error} -> {:error, error}
-    end
-  catch
-    :exit, _ -> {:error, Error.from(:outcome_unknown)}
-  end
-
-  defp execute({:effect, {action, value}}, %{network: network}, access) do
-    result =
-      case action do
-        :propose -> NervesGate.Network.propose(value, network, access)
-        :confirm -> NervesGate.Network.confirm(value, network)
-        :cancel -> NervesGate.Network.cancel(value, network)
+  defp execute("remote." <> operation, params, device, opts)
+       when operation in ["connect", "configure", "disconnect"] do
+    # This finite translation preserves the public wire API; Jido owns execution/routing.
+    action =
+      case operation do
+        "connect" -> :connect
+        "configure" -> :configure
+        "disconnect" -> :disconnect
       end
 
-    case result do
-      :ok -> {:ok, %{}}
-      {:ok, id} -> {:ok, %{trial_id: id}}
-      {:error, reason} -> {:error, NervesGate.Device.Error.from(reason)}
+    case Remote.command(action, params, device.remote, expected(opts, 1)) do
+      :ok -> {:ok, %{accepted: true}}
+      error -> error
     end
   catch
-    :exit, _ -> {:error, NervesGate.Device.Error.from(:outcome_unknown)}
+    :exit, _ -> {:error, :outcome_unknown}
   end
 
-  # Fail closed if a graph change ever stops producing a decision.
-  defp execute(_, _, _),
-    do: {:error, Error.new("decision_failed", "No device decision was produced.")}
+  defp execute(action, _, _, _)
+       when action in [
+              "network.validate",
+              "network.propose",
+              "network.confirm",
+              "network.cancel",
+              "remote.login_url"
+            ],
+       do: invalid_parameters()
 
-  defp refresh(state) do
-    status = network_status(state.network)
-    remote = remote_status(state.remote)
+  defp execute(_, _, _, _), do: {:error, Error.new("unknown_action", "Unknown device action.")}
 
-    if state.projection != nil and status == state.status and remote == state.remote_status do
-      state
-    else
-      %{projection: projection} = Workflow.evaluate(state.workflow, status, nil, remote)
-      sequence = state.sequence + 1
-      projection = Map.put(projection, :revision, "#{state.epoch}:#{sequence}")
-      Phoenix.PubSub.broadcast(NervesGate.PubSub, state.topic, {:device, projection})
-      %{state | status: status, remote_status: remote, projection: projection, sequence: sequence}
+  defp network_result(:ok), do: {:ok, %{}}
+  defp network_result({:ok, id}), do: {:ok, %{trial_id: id}}
+  defp network_result(error), do: error
+
+  defp expected(opts, domain) do
+    case Keyword.get(opts, :expected_revision) do
+      nil -> nil
+      value when is_binary(value) -> Enum.at(String.split(value, "|", parts: 2), domain, :invalid)
+      _ -> :invalid
     end
+  end
+
+  defp observe(module, server) do
+    module.observe(server)
+  catch
+    :exit, _ -> :ok
   end
 
   defp remote_status(remote) do
-    NervesGate.Remote.status(remote)
+    Remote.status(remote)
   catch
-    :exit, _ -> NervesGate.Remote.unavailable()
+    :exit, _ -> Remote.unavailable()
   end
 
   defp network_status(network) do
     status = Network.status(network)
-    # Adapter errors can contain exceptions, refs or PIDs. Never pass those (or
-    # raw configuration file contents in decode errors) into a portable fact.
     %{status | error: status.error && Error.from(status.error)}
   catch
     :exit, _ -> nil
   end
 
+  defp invalid_parameters,
+    do:
+      {:error,
+       Error.new("invalid_parameters", "Supply exactly the action's required JSON parameters.")}
+
   defp json_value?(value) when is_binary(value), do: String.valid?(value)
   defp json_value?(value) when is_number(value) or is_boolean(value) or is_nil(value), do: true
-
-  defp json_value?([]) do
-    true
-  end
-
-  defp json_value?([head | tail]) do
-    json_value?(head) and is_list(tail) and json_value?(tail)
-  end
+  defp json_value?([]), do: true
+  defp json_value?([head | tail]), do: json_value?(head) and is_list(tail) and json_value?(tail)
 
   defp json_value?(value) when is_map(value) and not is_struct(value),
     do:

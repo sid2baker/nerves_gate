@@ -1,6 +1,22 @@
 defmodule NervesGate.Remote.Tailscale do
   @moduledoc "Firmware adapter. The daemon owns identity and settings; never copy credentials into gateway config."
-  @behaviour NervesGate.Remote
+  @behaviour NervesGate.Remote.Adapter
+
+  @impl true
+  def observations(_) do
+    paths = [
+      ["state"],
+      ["auth", "state"],
+      ["hostname"],
+      ["dns_name"],
+      ["ipv4"],
+      ["version"],
+      ["health"],
+      ["configuration", "value"]
+    ]
+
+    Enum.map(paths, &{Tailscale.Properties, &1})
+  end
 
   @impl true
   def snapshot(_) do

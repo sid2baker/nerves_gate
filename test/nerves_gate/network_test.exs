@@ -13,7 +13,7 @@ defmodule NervesGate.NetworkTest do
     }
   }
   defmodule FailingAdapter do
-    @behaviour NervesGate.Network
+    @behaviour NervesGate.Network.Adapter
     def apply_config(config, agent) do
       Agent.get_and_update(agent, fn state ->
         {if(state.fail, do: {:error, :offline}, else: :ok),
@@ -32,7 +32,7 @@ defmodule NervesGate.NetworkTest do
       path: Path.join(dir, "nerves_gate.json"),
       adapter: {Host, host},
       poll_ms: 10,
-      trial_ms: 200
+      trial_ms: 2_000
     ]
 
     server = start_supervised!({Network, opts})
@@ -54,8 +54,20 @@ defmodule NervesGate.NetworkTest do
   end
 
   test "unconfirmed trial expires without any browser process", ctx do
-    assert {:ok, _} = Network.propose(@static, ctx.server)
-    eventually(fn -> Network.status(ctx.server).trial == nil end)
+    assert {:ok, id} = Network.propose(@static, ctx.server)
+
+    # Start the accelerated window after durable apply, not in a race with fsync.
+    :sys.replace_state(Network.runtime(ctx.server), fn state ->
+      Process.cancel_timer(state.timer)
+      timer = Process.send_after(self(), {:expire, id}, 200)
+      %{state | timer: timer, deadline: System.monotonic_time(:millisecond) + 200}
+    end)
+
+    eventually(fn ->
+      status = Network.status(ctx.server)
+      status.trial == nil and not status.recovering
+    end)
+
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
     assert {:ok, config} = Config.load(ctx.path)
     assert config == Config.defaults()
@@ -97,7 +109,7 @@ defmodule NervesGate.NetworkTest do
     assert {:error, :no_matching_trial} = Network.cancel("wrong", ctx.server)
     assert :ok = Network.cancel(id, ctx.server)
     assert {:ok, new_id} = Network.propose(@static, ctx.server)
-    send(ctx.server, {:expire, id})
+    send(Network.runtime(ctx.server), {:expire, id})
     assert Network.status(ctx.server).trial.id == new_id
     assert :ok = Network.confirm(new_id, ctx.server)
   end
@@ -139,8 +151,8 @@ defmodule NervesGate.NetworkTest do
   test "late confirmation is refused even before timer is processed", ctx do
     assert {:ok, id} = Network.propose(@static, ctx.server)
 
-    :sys.replace_state(ctx.server, fn state ->
-      put_in(state.trial.deadline, System.monotonic_time(:millisecond) - 1)
+    :sys.replace_state(Network.runtime(ctx.server), fn state ->
+      %{state | deadline: System.monotonic_time(:millisecond) - 1}
     end)
 
     assert {:error, :expired} = Network.confirm(id, ctx.server)

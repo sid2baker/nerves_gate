@@ -9,7 +9,13 @@ defmodule NervesGateWeb.LiveTest do
 
   defmodule PanelHost do
     use Phoenix.LiveView
-    def mount(_, _, socket), do: {:ok, assign(socket, panels: ["one", "two"])}
+
+    def mount(_, _, socket) do
+      socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh/1)
+      {:ok, socket |> assign(panels: ["one", "two"]) |> refresh()}
+    end
+
+    def refresh(socket), do: assign(socket, projection: NervesGate.Device.projection())
 
     def handle_event("remove", %{"id" => id}, socket),
       do: {:noreply, assign(socket, :panels, socket.assigns.panels -- [id])}
@@ -20,7 +26,7 @@ defmodule NervesGateWeb.LiveTest do
       ~H"""
       <div>
         <div :for={id <- @panels}>
-          <.live_component module={NervesGateWeb.ConnectionPanel} id={id} />
+          <.live_component module={NervesGateWeb.ConnectionPanel} id={id} projection={@projection} />
           <button phx-click="remove" phx-value-id={id}>Remove {id}</button>
         </div>
         <button phx-click="show">Show panels</button>
@@ -317,7 +323,10 @@ defmodule NervesGateWeb.LiveTest do
     assert {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id})
     eventually(fn -> not has_element?(setup, "#confirm-settings") end)
     eventually(fn -> not (render(dashboard) =~ "Network changes are not saved yet") end)
-    Phoenix.PubSub.broadcast(NervesGate.PubSub, Device.topic(), {:device, projection})
+
+    for view <- [setup, dashboard],
+        do: send(view.pid, %PropertyTable.Event{property: ["network"], value: projection})
+
     refute has_element?(setup, "#confirm-settings")
     refute render(dashboard) =~ "Network changes are not saved yet"
   end
@@ -337,56 +346,67 @@ defmodule NervesGateWeb.LiveTest do
     refute Device.projection().network.setup_completed
   end
 
-  test "LiveView manages projection subscriptions only while connected" do
-    topic = Device.topic()
+  test "connected LiveViews subscribe to actual properties and application events; death cleans both" do
+    registry = PropertyTable.Supervisor.registry_name(NervesGate.Observations.table())
 
-    for path <- ["/", "/setup"] do
+    subscriptions = fn pid ->
+      Enum.filter(Registry.lookup(registry, :subscriptions), fn {p, _} -> p == pid end)
+    end
+
+    for path <- ["/", "/setup", "/remote"] do
       assert build_conn() |> get(path) |> response(200) != ""
-      refute topic in Registry.keys(NervesGate.PubSub, self())
+      assert subscriptions.(self()) == []
       {:ok, view, _} = live(build_conn(), path)
       pid = view.pid
+      assert [_, _, _, _] = subscriptions.(pid)
 
-      assert [{^pid, [Phoenix.LiveView.PubSub | ref]}] =
-               Registry.lookup(NervesGate.PubSub, topic)
-               |> Enum.filter(fn {subscriber, _} -> subscriber == pid end)
+      for topic <- ["network:events", "remote:events"] do
+        assert [{^pid, [Phoenix.LiveView.PubSub | ref]}] =
+                 Registry.lookup(NervesGate.PubSub, topic)
+                 |> Enum.filter(fn {subscriber, _} -> subscriber == pid end)
 
-      assert is_reference(ref)
+        assert is_reference(ref)
+      end
+
       GenServer.stop(pid)
-      eventually(fn -> Registry.keys(NervesGate.PubSub, pid) == [] end)
+
+      eventually(fn ->
+        Registry.keys(NervesGate.PubSub, pid) == [] and subscriptions.(pid) == []
+      end)
     end
   end
 
-  test "components own deduplicated subscriptions and clean up without a subscribing parent" do
+  test "connection panels share their parent's observed view without extra subscriptions" do
     {:ok, view, _} = live_isolated(build_conn(), PanelHost)
-    topic = Device.topic()
     pid = view.pid
+    registry = PropertyTable.Supervisor.registry_name(NervesGate.Observations.table())
 
-    subscribers = fn ->
-      Enum.filter(Registry.lookup(NervesGate.PubSub, topic), fn {p, _} -> p == pid end)
+    subscriptions = fn ->
+      Registry.lookup(registry, :subscriptions) |> Enum.filter(fn {p, _} -> p == pid end)
     end
 
-    assert [{^pid, [Phoenix.LiveView.PubSub | _]}] = subscribers.()
+    assert [_, _, _, _] = subscriptions.()
     old = Device.projection()
     assert {:ok, _} = Device.dispatch("network.propose", %{"network" => @shared})
 
-    for id <- ["one", "two"],
-        do: eventually(fn -> has_element?(view, "##{id}", "Shared network") end)
+    for id <- ["one", "two"] do
+      eventually(fn -> has_element?(view, "##{id}", "Shared network") end)
+    end
 
-    Phoenix.PubSub.broadcast(NervesGate.PubSub, topic, {:device, old})
+    send(pid, %PropertyTable.Event{property: ["network"], value: old})
     refute has_element?(view, "#one", "Unassigned")
     refute has_element?(view, "#two", "Unassigned")
     render_click(view, "remove", %{"id" => "one"})
     refute has_element?(view, "#one")
-    assert match?([_], subscribers.())
+    assert [_, _, _, _] = subscriptions.()
     Network.Host.simulate(%{ports: [%{name: "eth0", present: false, link: false, master: nil}]})
     eventually(fn -> has_element?(view, "#two", "Not installed") end)
     render_click(view, "remove", %{"id" => "two"})
-    eventually(fn -> subscribers.() == [] end)
     view |> element("button", "Show panels") |> render_click()
-    assert match?([_], subscribers.())
+    assert [_, _, _, _] = subscriptions.()
     assert has_element?(view, "#one", "Not installed")
     GenServer.stop(pid)
-    eventually(fn -> subscribers.() == [] end)
+    eventually(fn -> subscriptions.() == [] end)
   end
 
   test "navigation marks the current page" do

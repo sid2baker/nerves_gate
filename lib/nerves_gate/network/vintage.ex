@@ -1,7 +1,10 @@
 defmodule NervesGate.Network.Vintage do
   @moduledoc "Firmware adapter. USB is never part of a port-role change. No Ethernet DHCP server or NAT."
-  @behaviour NervesGate.Network
+  @behaviour NervesGate.Network.Adapter
   alias NervesGate.{Config, Network.LAN}
+
+  @impl true
+  def observations(_), do: [{VintageNet, ["interface"]}]
 
   def configurations(%{"mode" => "shared", "equipment" => address}) do
     [
