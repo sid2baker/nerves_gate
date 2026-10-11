@@ -1,24 +1,22 @@
 defmodule NervesGateWeb.Observations do
   @moduledoc """
-  LiveView lifecycle bindings to domain properties and application facts.
-  Only connected views subscribe. PropertyTable cleans up on process death;
-  Phoenix manages application-event subscriptions. Bursts are coalesced and
+  LiveView lifecycle bindings to domain properties. Only connected views
+  subscribe; subscriptions die with the view. Bursts are coalesced and
   payloads never overwrite a newer command reply or a form draft.
   """
-  alias NervesGate.Device
   import Phoenix.Component, only: [assign: 3]
 
   def subscribe(socket, refresh) do
-    if Phoenix.LiveView.connected?(socket), do: Device.subscribe()
-
-    for topic <- ["network:events", "remote:events"] do
-      Phoenix.LiveView.subscribe(socket, topic, &__MODULE__.handle_event/2)
-    end
+    if Phoenix.LiveView.connected?(socket), do: bind()
 
     socket
     |> assign(:observation_pending, false)
     |> Phoenix.LiveView.attach_hook(:observations, :handle_info, fn message, socket ->
       case message do
+        :subscribe_observations ->
+          bind()
+          {:halt, queue(socket)}
+
         :refresh_observations ->
           {:halt, socket |> assign(:observation_pending, false) |> refresh.()}
 
@@ -37,8 +35,12 @@ defmodule NervesGateWeb.Observations do
     end)
   end
 
-  @doc false
-  def handle_event(_, socket), do: queue(socket)
+  defp bind do
+    case NervesGate.subscribe() do
+      :ok -> :ok
+      {:error, _} -> Process.send_after(self(), :subscribe_observations, 1_000)
+    end
+  end
 
   defp queue(%{assigns: %{observation_pending: true}} = socket), do: socket
 

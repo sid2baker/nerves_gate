@@ -1,6 +1,5 @@
 defmodule NervesGateWeb.RemoteLive do
   use Phoenix.LiveView
-  alias NervesGate.Device
   import NervesGateWeb.CoreComponents
 
   def mount(_, _, socket) do
@@ -10,7 +9,7 @@ defmodule NervesGateWeb.RemoteLive do
       Process.send_after(self(), :check_login, 1000)
     end
 
-    projection = Device.projection()
+    projection = NervesGate.status()
     name = hostname(projection.remote_access)
 
     {:ok,
@@ -37,7 +36,7 @@ defmodule NervesGateWeb.RemoteLive do
        )}
 
   def handle_event("save", %{"remote" => params}, socket) do
-    projection = Device.projection()
+    projection = NervesGate.status()
     online = projection.remote_access.state == "online"
 
     socket =
@@ -49,32 +48,25 @@ defmodule NervesGateWeb.RemoteLive do
          message: "The device name changed in another session. Reload before saving."
        )}
     else
-      action =
+      result =
         if online do
-          "remote.configure"
+          NervesGate.remote_configure(params["hostname"])
         else
-          "remote.connect"
+          NervesGate.remote_connect(params["hostname"])
         end
 
-      result =
-        Device.dispatch(action, Map.take(params, ["hostname"]),
-          expected_revision: projection.revision
-        )
+      socket =
+        if result == :ok do
+          assign(socket,
+            pending_name: String.downcase(params["hostname"]),
+            login_requested: not online,
+            login_url: nil
+          )
+        else
+          socket
+        end
 
-      case result do
-        {:ok, _} ->
-          socket =
-            assign(socket,
-              pending_name: String.downcase(params["hostname"]),
-              login_requested: not online,
-              login_url: nil
-            )
-
-          reply(socket, result)
-
-        _ ->
-          reply(socket, result)
-      end
+      reply(socket, result)
     end
   end
 
@@ -87,13 +79,13 @@ defmodule NervesGateWeb.RemoteLive do
   def handle_event("disconnect", _, socket) do
     reply(
       assign(socket, disconnecting: false, login_requested: false, login_url: nil),
-      Device.dispatch("remote.disconnect")
+      NervesGate.remote_disconnect()
     )
   end
 
   @doc false
   def refresh_observations(socket) do
-    refresh(socket, NervesGate.Device.projection())
+    refresh(socket, NervesGate.status())
   end
 
   def handle_info(:check_login, socket) do
@@ -101,7 +93,7 @@ defmodule NervesGateWeb.RemoteLive do
 
     socket =
       if socket.assigns.login_requested do
-        refresh(socket, Device.projection())
+        refresh(socket, NervesGate.status())
       else
         socket
       end
@@ -109,11 +101,13 @@ defmodule NervesGateWeb.RemoteLive do
     {:noreply, socket}
   end
 
-  defp reply(socket, {:ok, %{projection: projection}}),
-    do: {:noreply, refresh(assign(socket, message: nil), projection)}
+  defp reply(socket, :ok) do
+    {:noreply, refresh(assign(socket, message: nil), NervesGate.status())}
+  end
 
-  defp reply(socket, {:error, %{error: error, projection: projection}}),
-    do: {:noreply, refresh(assign(socket, message: error.message), projection)}
+  defp reply(socket, {:error, error}) do
+    {:noreply, refresh(assign(socket, message: error.message), NervesGate.status())}
+  end
 
   defp refresh(socket, projection) do
     socket
@@ -171,8 +165,8 @@ defmodule NervesGateWeb.RemoteLive do
   end
 
   defp read_login_url(socket) do
-    case Device.dispatch("remote.login_url") do
-      {:ok, %{result: %{url: url}}} -> assign(socket, login_url: url)
+    case NervesGate.remote_login_url() do
+      {:ok, url} -> assign(socket, login_url: url)
       _ -> assign(socket, login_url: nil)
     end
   end

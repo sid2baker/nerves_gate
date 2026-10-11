@@ -12,42 +12,30 @@ defmodule NervesGate.NetworkTest do
       "gateway" => nil
     }
   }
-  defmodule FailingAdapter do
-    @behaviour NervesGate.Network.Adapter
-    def apply_config(config, agent) do
-      Agent.get_and_update(agent, fn state ->
-        {if(state.fail, do: {:error, :offline}, else: :ok),
-         %{state | attempts: [config | state.attempts]}}
-      end)
-    end
+  alias NervesGate.TestNetworkAdapter, as: Adapter
 
-    def snapshot(_), do: nil
-  end
-
-  setup %{tmp_dir: dir} do
+  setup do
     host = start_supervised!({Host, name: nil})
+    adapter = start_supervised!({Adapter, host: host, owner: self()})
 
     opts = [
       name: nil,
-      path: Path.join(dir, "nerves_gate.json"),
-      adapter: {Host, host},
+      adapter: {Adapter, adapter},
       poll_ms: 10,
       trial_ms: 2_000
     ]
 
     server = start_supervised!({Network, opts})
-    %{server: server, host: host, path: opts[:path], opts: opts}
+    %{server: server, host: host, adapter: adapter, opts: opts}
   end
-
-  @moduletag :tmp_dir
 
   test "configuration only persists after explicit confirmation", ctx do
     assert {:ok, id} = Network.propose(@static, ctx.server)
-    assert {:ok, config} = Config.load(ctx.path)
+    assert {:ok, config} = Host.load(ctx.host)
     assert config == Config.defaults()
     assert Network.status(ctx.server).ready
     assert :ok = Network.confirm(id, ctx.server)
-    assert {:ok, saved} = Config.load(ctx.path)
+    assert {:ok, saved} = Host.load(ctx.host)
     assert saved["network"] == @static
     assert saved["setup_completed"]
     assert {:error, :no_matching_trial} = Network.confirm(id, ctx.server)
@@ -56,7 +44,7 @@ defmodule NervesGate.NetworkTest do
   test "unconfirmed trial expires without any browser process", ctx do
     assert {:ok, id} = Network.propose(@static, ctx.server)
 
-    # Start the accelerated window after durable apply, not in a race with fsync.
+    # Start the accelerated window after temporary application.
     :sys.replace_state(Network.runtime(ctx.server), fn state ->
       Process.cancel_timer(state.timer)
       timer = Process.send_after(self(), {:expire, id}, 200)
@@ -69,7 +57,7 @@ defmodule NervesGate.NetworkTest do
     end)
 
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
-    assert {:ok, config} = Config.load(ctx.path)
+    assert {:ok, config} = Host.load(ctx.host)
     assert config == Config.defaults()
   end
 
@@ -114,7 +102,7 @@ defmodule NervesGate.NetworkTest do
     assert :ok = Network.confirm(new_id, ctx.server)
   end
 
-  test "restart restores committed file, never the trial", ctx do
+  test "restart restores saved settings, never the trial", ctx do
     assert {:ok, _} = Network.propose(@static, ctx.server)
     stop_supervised!(Network)
     server = start_supervised!({Network, ctx.opts})
@@ -122,30 +110,13 @@ defmodule NervesGate.NetworkTest do
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
-  test "version 1 boot preserves the shared LAN without rewriting the file", ctx do
+  test "confirmed subsystem settings survive coordinator restart", ctx do
+    assert {:ok, id} = Network.propose(@static, ctx.server)
+    assert :ok = Network.confirm(id, ctx.server)
     stop_supervised!(Network)
-
-    old = %{
-      Config.defaults()
-      | "version" => 1,
-        "network" => @static["equipment"],
-        "setup_completed" => true
-    }
-
-    original = Jason.encode!(old)
-    File.write!(ctx.path, original)
     server = start_supervised!({Network, ctx.opts})
     assert Network.status(server).config["network"] == @static
     assert Host.snapshot(ctx.host).bridge.method == "static"
-    assert Enum.all?(Host.snapshot(ctx.host).ports, &(&1.master == "br0"))
-    assert File.read!(ctx.path) == original
-    assert {:ok, id} = Network.propose(@static, server)
-    assert :ok = Network.cancel(id, server)
-    assert {:ok, saved} = Config.load(ctx.path)
-    assert saved["version"] == 2
-    assert saved["network"] == @static
-    assert saved["mobile"] == old["mobile"]
-    assert saved["vpn"] == old["vpn"]
   end
 
   test "late confirmation is refused even before timer is processed", ctx do
@@ -159,32 +130,30 @@ defmodule NervesGate.NetworkTest do
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
   end
 
-  test "corrupt saved file is never silently overwritten", ctx do
+  test "unreadable saved settings prevent changes", ctx do
     stop_supervised!(Network)
-    File.write!(ctx.path, "broken")
+    Adapter.fail(ctx.adapter, :load, :invalid_saved_config)
     server = start_supervised!({Network, ctx.opts})
+    before = Adapter.calls(ctx.adapter)
     assert {:error, :invalid_saved_config} = Network.propose(@static, server)
-    assert File.read!(ctx.path) == "broken"
+    assert Adapter.calls(ctx.adapter) == before
   end
 
   test "rollback retries adapter failures and prevents further changes", ctx do
     stop_supervised!(Network)
-    agent = start_supervised!({Agent, fn -> %{fail: true, attempts: []} end})
-
-    server =
-      start_supervised!({Network, Keyword.put(ctx.opts, :adapter, {FailingAdapter, agent})})
+    Adapter.fail(ctx.adapter, :apply, :offline)
+    server = start_supervised!({Network, ctx.opts})
 
     assert Network.status(server).recovering
     assert {:error, :recovery_in_progress} = Network.propose(@static, server)
-    eventually(fn -> Agent.get(agent, &match?([_, _ | _], &1.attempts)) end)
-    Agent.update(agent, &%{&1 | fail: false})
+    eventually(fn -> Enum.count(Adapter.calls(ctx.adapter), &match?({:apply, _}, &1)) >= 3 end)
+    Adapter.fail(ctx.adapter, :apply, nil)
     eventually(fn -> not Network.status(server).recovering end)
   end
 
   test "failed persistence rolls back and never reports success", ctx do
     assert {:ok, id} = Network.propose(@static, ctx.server)
-    File.rm!(ctx.path)
-    File.mkdir!(ctx.path)
+    Adapter.fail(ctx.adapter, :save, :enospc)
     assert {:error, {:save, _}} = Network.confirm(id, ctx.server)
     assert Host.snapshot(ctx.host).bridge.method == "disabled"
     assert Network.status(ctx.server).trial == nil
@@ -193,9 +162,9 @@ defmodule NervesGate.NetworkTest do
   test "separate roles can be saved offline without claiming Internet or remote reachability",
        ctx do
     network = %{
-      "mode" => "ethernet",
-      "internet_port" => "eth0",
-      "equipment" => @static["equipment"]
+      "mode" => "ports",
+      "eth0" => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
+      "eth1" => %{"role" => "equipment", "address" => @static["equipment"]}
     }
 
     assert {:ok, id} = Network.propose(network, ctx.server)
@@ -211,13 +180,19 @@ defmodule NervesGate.NetworkTest do
 
     Host.simulate(%{ports: offline_ports}, ctx.host)
     assert :ok = Network.confirm(id, ctx.server)
-    assert {:ok, saved} = Config.load(ctx.path)
+    assert {:ok, saved} = Host.load(ctx.host)
     assert saved["network"] == network
   end
 
   test "overlapping DHCP Internet and equipment subnets block confirmation", ctx do
     equipment = %{@static["equipment"] | "static_ip" => "192.0.2.20"}
-    network = %{"mode" => "ethernet", "internet_port" => "eth0", "equipment" => equipment}
+
+    network = %{
+      "mode" => "ports",
+      "eth0" => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
+      "eth1" => %{"role" => "equipment", "address" => equipment}
+    }
+
     assert {:ok, id} = Network.propose(network, ctx.server)
     assert {:error, :not_connected} = Network.confirm(id, ctx.server)
     assert [_] = Network.conflicts(Host.snapshot(ctx.host), network)

@@ -10,21 +10,10 @@ defmodule NervesGate.Remote.Adapter do
   @callback observations(term()) :: [{atom(), [String.t()]}]
   @optional_callbacks observations: 1
 
-  def snapshot({module, context}) do
-    module.snapshot(context)
-  catch
-    _, _ -> %{}
-  end
+  def snapshot({module, context}), do: module.snapshot(context)
 
-  def execute({module, context}, operation, params) do
-    module.execute(operation, params, context)
-  catch
-    _, _ -> {:error, :failed}
-  end
+  def execute({module, context}, operation, params),
+    do: module.execute(operation, params, context)
 
-  def login_url({module, context}) do
-    module.login_url(context)
-  catch
-    _, _ -> nil
-  end
+  def login_url({module, context}), do: module.login_url(context)
 end

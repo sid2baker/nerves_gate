@@ -1,7 +1,6 @@
 import Config
 
 config :nerves_gate,
-  data_dir: "/data",
   target: config_target(),
   network_adapter: {NervesGate.Network.Vintage, nil},
   remote_adapter: {NervesGate.Remote.Tailscale, nil}
@@ -51,10 +50,11 @@ config :tailscale,
   manage_daemon: true,
   tun: :kernel
 
-# NervesGate owns LAN configuration; USB provisioning is independent of LAN trials.
+# VintageNet owns saved LAN settings. Trials use persist: false until confirmation.
+# USB provisioning is independent of LAN trials.
 # VintageNetDirect's DHCP server is confined to the point-to-point USB link.
 config :vintage_net,
-  persistence: VintageNet.Persistence.Null,
+  persistence: VintageNet.Persistence.FlatFile,
   config: if(config_target() == :ec100, do: [{"usb0", %{type: VintageNetDirect}}], else: [])
 
 # Recovery SSH is key-only. Supply a public key at firmware build time.

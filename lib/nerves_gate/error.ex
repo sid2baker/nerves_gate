@@ -1,4 +1,4 @@
-defmodule NervesGate.Device.Error do
+defmodule NervesGate.Error do
   @moduledoc false
 
   def new(code, message), do: %{code: code, message: message}
@@ -46,10 +46,6 @@ defmodule NervesGate.Device.Error do
         "outcome_unknown",
         "The command reply was lost. Read the current state before retrying."
       )
-
-  def from(:stale_revision),
-    do:
-      new("stale_revision", "Device state changed. Review the current state before trying again.")
 
   def from({:apply, _}),
     do: new("apply_failed", "Could not apply settings. Restoring saved settings.")

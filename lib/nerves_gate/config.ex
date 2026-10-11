@@ -1,64 +1,11 @@
 defmodule NervesGate.Config do
-  @moduledoc "Validated, versioned settings. Runtime status and credentials never go in this file."
+  @moduledoc "Pure network input validation and port-role helpers. Persistence belongs to VintageNet."
   import Bitwise
 
-  def path, do: Path.join(Application.fetch_env!(:nerves_gate, :data_dir), "nerves_gate.json")
+  def defaults, do: from_network(%{"mode" => "unconfigured"})
 
-  def defaults do
-    %{
-      "version" => 2,
-      "setup_completed" => false,
-      "network" => %{"mode" => "unconfigured"},
-      "mobile" => %{"enabled" => true, "apn" => "auto"},
-      "vpn" => %{"enabled" => false}
-    }
-  end
-
-  def load(path \\ path(), storage \\ NervesGate.AtomicFile) do
-    case storage.read(path) do
-      {:ok, json} ->
-        with {:ok, config} <- Jason.decode(json) do
-          validate(config)
-        end
-
-      {:error, :enoent} ->
-        {:ok, defaults()}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Preserve an installed v1 gateway's shared network. Migration is in memory;
-  # only an explicit trial/confirmation writes the new format.
-  def validate(%{"version" => 1} = config) do
-    with {:ok, address} <- validate_address(config["network"]) do
-      validate(%{
-        config
-        | "version" => 2,
-          "network" => %{"mode" => "shared", "equipment" => address}
-      })
-    end
-  end
-
-  def validate(config) when is_map(config) do
-    with true <- Enum.sort(Map.keys(config)) == Enum.sort(Map.keys(defaults())),
-         2 <- config["version"],
-         true <- is_boolean(config["setup_completed"]),
-         {:ok, network} <- validate_network(config["network"]),
-         %{"enabled" => enabled, "apn" => apn} = mobile <- config["mobile"],
-         true <- map_size(mobile) == 2 and is_boolean(enabled) and is_binary(apn),
-         true <- byte_size(apn) in 1..100 and Regex.match?(~r/\A[a-zA-Z0-9.-]+\z/, apn),
-         %{"enabled" => vpn_enabled} = vpn <- config["vpn"],
-         true <- map_size(vpn) == 1 and is_boolean(vpn_enabled) do
-      {:ok, %{config | "network" => network}}
-    else
-      {:error, reason} -> {:error, reason}
-      _ -> {:error, "Invalid or unsupported configuration (expected version 2)."}
-    end
-  end
-
-  def validate(_), do: {:error, "Configuration must be a JSON object."}
+  def from_network(network),
+    do: %{"setup_completed" => network["mode"] != "unconfigured", "network" => network}
 
   def address_defaults do
     %{"ip_method" => "dhcp", "static_ip" => nil, "subnet_mask" => nil, "gateway" => nil}
@@ -71,20 +18,6 @@ defmodule NervesGate.Config do
       when map_size(network) == 2 do
     with {:ok, address} <- validate_address(address) do
       {:ok, %{network | "equipment" => address}}
-    end
-  end
-
-  def validate_network(
-        %{"mode" => "ethernet", "internet_port" => port, "equipment" => equipment} = network
-      )
-      when map_size(network) == 3 and port in ["eth0", "eth1"] do
-    case validate_address(equipment) do
-      {:ok, %{"ip_method" => "static", "gateway" => nil} = address} ->
-        {:ok, %{network | "equipment" => address}}
-
-      _ ->
-        {:error,
-         "Choose an unused manual address in the equipment network, without a router address. Equipment addresses are not changed."}
     end
   end
 
@@ -106,9 +39,7 @@ defmodule NervesGate.Config do
      "Choose separate Internet and equipment ports, or explicitly choose one shared network."}
   end
 
-  defp validate_port(nil) do
-    {:ok, nil}
-  end
+  defp validate_port(nil), do: {:ok, nil}
 
   defp validate_port(%{"role" => role, "address" => address} = port)
        when map_size(port) == 2 and role in ["internet", "equipment"] do
@@ -123,31 +54,16 @@ defmodule NervesGate.Config do
     end
   end
 
-  defp validate_port(_) do
-    {:error, :invalid_port}
-  end
+  defp validate_port(_), do: {:error, :invalid_port}
 
-  @doc "Port assignments, including the original separate-network format."
-  def ports(%{"mode" => "ports"} = network) do
-    Map.take(network, ["eth0", "eth1"])
-  end
+  @doc "Explicit port assignments."
+  def ports(%{"mode" => "ports"} = network), do: Map.take(network, ["eth0", "eth1"])
 
-  def ports(%{"mode" => "ethernet"} = network) do
-    %{
-      network["internet_port"] => %{"role" => "internet", "address" => address_defaults()},
-      equipment_port(network) => %{"role" => "equipment", "address" => network["equipment"]}
-    }
-  end
-
-  def ports(_) do
-    %{"eth0" => nil, "eth1" => nil}
-  end
+  def ports(_), do: %{"eth0" => nil, "eth1" => nil}
 
   def role_port(network, role) do
     Enum.find_value(ports(network), fn {name, port} ->
-      if port && port["role"] == role do
-        name
-      end
+      if port && port["role"] == role, do: name
     end)
   end
 
@@ -186,16 +102,14 @@ defmodule NervesGate.Config do
 
   def validate_address(_), do: {:error, "Ethernet settings must be an object."}
 
-  defp validate_nameservers(servers) when is_list(servers) do
-    if Enum.count_until(servers, 4) <= 3 and Enum.all?(servers, &valid_nameserver?/1) do
-      :ok
-    else
-      {:error, "Enter up to three IPv4 DNS server addresses."}
-    end
-  end
+  defp validate_nameservers(servers) do
+    bounded_list =
+      match?([], servers) or match?([_], servers) or match?([_, _], servers) or
+        match?([_, _, _], servers)
 
-  defp validate_nameservers(_) do
-    {:error, "Enter up to three IPv4 DNS server addresses."}
+    if bounded_list and Enum.all?(servers, &valid_nameserver?/1),
+      do: :ok,
+      else: {:error, "Enter up to three IPv4 DNS server addresses."}
   end
 
   defp valid_nameserver?(server) do
@@ -204,9 +118,6 @@ defmodule NervesGate.Config do
       _ -> false
     end
   end
-
-  def equipment_port(%{"internet_port" => "eth0"}), do: "eth1"
-  def equipment_port(%{"internet_port" => "eth1"}), do: "eth0"
 
   @doc "Compare IPv4 subnets, including differently sized prefixes."
   def overlap?(address, prefix, other, other_prefix)
@@ -244,8 +155,10 @@ defmodule NervesGate.Config do
   end
 
   def ipv4(value) when is_binary(value) do
-    case :inet.parse_ipv4strict_address(String.to_charlist(value)) do
-      {:ok, ip} -> {:ok, ip}
+    with true <- String.valid?(value),
+         {:ok, ip} <- :inet.parse_ipv4strict_address(String.to_charlist(value)) do
+      {:ok, ip}
+    else
       _ -> {:error, :invalid_ipv4}
     end
   end
@@ -284,11 +197,4 @@ defmodule NervesGate.Config do
   defp ip_string(ip), do: ip |> :inet.ntoa() |> to_string()
   defp blank_to_nil(value) when value in [nil, ""], do: nil
   defp blank_to_nil(value), do: value
-
-  @doc "Write a validated file atomically. Never replace a working file with partial JSON."
-  def save(config, path \\ path(), storage \\ NervesGate.AtomicFile) do
-    with {:ok, normalized} <- validate(config) do
-      storage.write(path, Jason.encode!(normalized, pretty: true) <> "\n")
-    end
-  end
 end

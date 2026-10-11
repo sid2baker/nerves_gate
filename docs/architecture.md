@@ -1,11 +1,158 @@
-# Jido v3 architecture
+# Backend architecture
 
-NervesGate uses domain Jido Actions and Agents for commands and coordination,
-ordinary OTP processes for infrastructure, and existing subsystem observations for
-reads. There is one application command path, no central state/projection server,
-no event-sourcing database and no AI dependency.
+NervesGate uses Jido v3 for network trial policy, ordinary OTP for bounded I/O,
+and existing subsystem observations for reads. No central state/projection server,
+application persistence journal, connectivity retry graph or AI dependency.
 
-## Dependencies and compatibility
+## Where to start
+
+1. [`lib/nerves_gate.ex`](../lib/nerves_gate.ex): named public functions, status,
+   subscriptions and result types. LiveView and IEx use this stateless module.
+2. [`status.ex`](../lib/nerves_gate/status.ex) and
+   [`error.ex`](../lib/nerves_gate/error.ex): pure status interpretation and sanitized
+   errors. Commands return plain results; status is a separate read.
+3. [`network/actions.ex`](../lib/nerves_gate/network/actions.ex): first-USB-setup
+   auto-save policy. [`network/agent.ex`](../lib/nerves_gate/network/agent.ex)
+   declares its Jido reconciliation route; the plugin supplies fresh trial state.
+4. [`network/runtime.ex`](../lib/nerves_gate/network/runtime.ex): command admission
+   and replies, one temporary trial, independent deadline and bounded worker.
+5. [`remote.ex`](../lib/nerves_gate/remote.ex): one GenServer for asynchronous
+   Tailscale operations. No agent or additional runtime layer.
+
+## State ownership
+
+| Owner | Responsibility |
+| --- | --- |
+| VintageNet | Saved/applied Ethernet configuration, hotplug, addresses, routing and observations |
+| Tailscale | Identity, preferences, daemon state, routes and enrollment |
+| Network Agent | Decide whether first verified USB setup should await readiness, auto-save or cancel |
+| Network Runtime | Command admission/replies, RAM trial, live effect guards, deadline, serial work and rollback |
+| Remote | One bounded daemon worker and sanitized operation/error metadata |
+| PropertyTable | Existing subsystem properties plus ephemeral workflow/host-simulation observations |
+| NervesGate / Status | Named public functions and on-demand interpretation; no stored read model |
+| LiveView | Drafts, presentation, lifecycle-bound subscriptions and command submission |
+
+```text
+LiveView / IEx → NervesGate named API
+                       ├─ network → Network Runtime → worker → VintageNet
+                       │                  ↕ live trial / automatic decision
+                       │             Jido USB auto-save policy
+                       └─ remote → Remote GenServer → worker → Tailscale
+
+Subsystem properties + workflow metadata → LiveView → fresh status read
+```
+
+Pure validation calls `Config.validate_network/1` directly. Status reads Network
+and Remote independently, not as an atomic cross-domain snapshot. There are no
+optimistic revision tokens; exact trial IDs and serialized operations protect the
+workflow. LiveViews also compare saved draft bases. See [action-api.md](action-api.md).
+
+## Supervision and work ownership
+
+Application `rest_for_one` order is PubSub (Phoenix infrastructure), Registry,
+workflow PropertyTable, managed `NervesGate.Jido`, host simulators (host only),
+Network, Remote, then Endpoint. Firmware dependencies supervise VintageNet and
+Tailscale themselves.
+
+Network is a `rest_for_one` supervisor: runtime first, permanent Jido AgentServer
+second. Runtime restart kills its linked worker, reloads saved settings and applies
+them before accepting trials. An agent-only crash leaves the independent deadline
+alive and interrupts the active trial through an owner monitor. Failed restoration
+blocks new proposals and retries; unreadable saved configuration fails closed.
+
+Network commands use ordinary `GenServer.call/3` with a single 15-second timeout.
+The runtime remains responsive while its worker runs and uses `GenServer.reply/2`
+after application, saving or restoration. OTP handles late replies; there is no
+custom alias/monitor reply protocol. A caller timeout is an unknown outcome, not
+cancellation or permission to replay. Manual commands do not wait for a Jido turn.
+
+Jido's action decides only automatic USB progression. Plugin dispatch submits typed
+effects after AgentServer commits, without waiting for hardware. Every effect
+checks live runtime state again. No caller handle enters agent state. The
+postponed-signal queue is bounded to 32.
+
+Expected failures return error tuples. Unexpected worker exceptions are logged and
+reach the coordinator through task `:DOWN` messages; adapters do not catch them.
+Supervision handles coordinator failures. Only the public API translates
+`GenServer.call` exits into unavailable/unknown-outcome results, keeping exceptions
+and throws from programming errors visible.
+
+Workers are linked, bounded and killed/joined before restoration or another operation.
+VintageNet has its own asynchronous work, so the adapter retains its configuration
+and bridge-membership settlement barrier. Restoration forces a reapply through
+VintageNet's public deconfigure/configure APIs when necessary: a killed configure
+caller can leave the configuration property updated before the interface receives
+it, making an ordinary identical-config call a no-op. USB is never part of LAN
+operations.
+
+## Network policy and persistence
+
+`Network.Actions.Advance` evaluates current admission, not queued payload state:
+
+| Current trial | Decision |
+| --- | --- |
+| Applying, saving or restoring | No overlapping effect |
+| Manual, applied | Await explicit confirmation |
+| First verified USB setup, ready | Request `auto_confirm` |
+| First verified USB setup, conflicting addresses | Request `auto_cancel` |
+| First verified USB setup, not ready | Request `await`, then wait for readiness |
+
+The runtime vetoes stale IDs, expired deadlines, overlapping work, automatic effects
+on manual trials, and changed readiness/conflicts. It does not choose a different
+normal-path action when a decision has become stale. A suspended agent cannot
+prevent rollback, but cannot cause auto-save either.
+
+Readiness changes send an empty `network.reconcile` hint. Pending trials also poll
+once a second to repair missed notifications. Hints carry no snapshots, sequence
+numbers or incarnation tokens: admission always reads live state. Idle observation
+bursts do not produce Jido hints.
+
+A proposal applies with `persist: false`. Manual confirmation has a **60-second**
+window; first server-verified USB setup has a **15-second** auto-save bound.
+Confirmation explicitly calls VintageNet's persistence API for each LAN interface:
+`VintageNet.configure/3` skips identical configurations before saving and does not
+propagate save errors, so reconfiguring an already-applied trial is insufficient.
+
+Only mode and port-role labels supplement VintageNet's normalized settings. The
+form is reconstructed from those settings, not a second saved profile. There is
+no old JSON importer or compatibility format. Host simulation keeps saved settings
+in memory.
+
+**Saving interfaces is not a transaction.** A failure, interruption or power loss
+partway through confirmation may leave partially saved settings. Runtime rollback
+restores the prior applied configuration, not an atomic disk snapshot. A subsequent
+restart uses whatever VintageNet saved. This is an intentional simplification;
+there is no durable trial journal, commit marker or cross-interface crash recovery.
+Keep USB/serial recovery available. See [networking.md](networking.md).
+
+## Remote operations
+
+One GenServer admits one bounded asynchronous daemon operation. Acceptance is not
+completion. Timeout/crash stops the worker; restart observes the daemon and never
+replays a mutation. Daemon-side work may already have completed, so read status
+before retrying. Connect/rename patch hostname and `accept_dns: false`, preserving
+omitted preferences. Startup does not rewrite the profile.
+
+Status reads sanitized adapter observations directly. Login URLs are private
+queries, validated against official HTTPS login hosts, and never retained in
+server state, public status or properties. Health URLs and raw errors are redacted.
+The workflow property contains only a status-change hash, not another daemon mirror.
+
+## Notifications
+
+The UI subscribes to existing VintageNet/Tailscale properties and workflow metadata,
+coalesces bursts for 20 ms, then rereads status. No duplicate PubSub lifecycle event
+bus exists. Subscribe before reading and after reconnecting; caller death removes
+subscriptions. Panels reuse parent assigns. Missing observation sources return an
+error rather than claiming a successful subscription; connected LiveViews retry
+in one second. Domain polling rebinds subscriptions and repairs missed hints;
+notifications are best effort, not an event log.
+
+There is no Alarmist/Connectivity agent that repeatedly rereads cached status.
+Internet observations already belong to VintageNet. The application does not
+perform automatic DHCP restarts, VPN reconnects, DNS resets, failover or enrollment.
+
+## Dependencies
 
 The immutable v3 source set in `mix.exs` / `mix.lock` is:
 
@@ -15,267 +162,34 @@ The immutable v3 source set in `mix.exs` / `mix.lock` is:
 | Jido Action (`3.0.0-beta.12`) | `agentjido/jido_action@8e9b3f7b268e175091b0eb3720bab3b8633d3c24` |
 | Zoi | `mikehostetler/zoi@2fff2a23e23e7ac0b26f62f49bbc1b12f7818ac9` |
 | Jido's internal Runic engine | `mikehostetler/runic@6b1c8c85d2d560a7ff5da6c3a417254c5d2b85b6` |
-| Jido Signal / Alarmist / PropertyTable | locked `3.0.0-beta.4` / `0.4.2` / `0.3.4` |
+| Jido Signal / PropertyTable | locked `3.0.0-beta.4` / `0.3.4` |
 
-**Approved exception:** current Jido v3 requires Runic internally even to execute
-individual Actions. Its published dependency set failed Hex resolution for the
-required Runic alpha versions. These compatible source pins resolve that without
-forking the executor or introducing a second execution path. NervesGate has no
-direct Runic calls, graphs or routing; the override is an internal dependency pin,
-not an application API. Complete removal from the dependency graph is not claimed.
-
-Reconnaissance inspected the actual v3 Action, AgentServer, Plugin, Signal,
-Scheduler and sensor code, rather than the repositories' v2 `main` APIs. The
+**Approved exception:** current Jido v3 requires Runic internally even for individual
+Actions. These compatible source pins resolve its unavailable Hex alpha dependency
+set without forking the executor. NervesGate has no direct Runic API calls, graphs
+or workflows, and no AI dependencies. Complete removal from the dependency graph
+is not claimed. See the
 [release requirements](https://hex.pm/api/packages/jido/releases/3.0.0-beta.1) and
-[pinned Action executor](https://github.com/agentjido/jido_action/blob/8e9b3f7b268e175091b0eb3720bab3b8633d3c24/lib/jido_exec.ex)
-record the dependency constraint. Local tests and EC100 production compilation use
-Elixir **1.20.4 / OTP 29.1**. Upstream Runic emits compiler warnings; application
-compilation passes `--warnings-as-errors` without suppressions.
+[pinned executor](https://github.com/agentjido/jido_action/blob/8e9b3f7b268e175091b0eb3720bab3b8633d3c24/lib/jido_exec.ex).
 
-## Responsibilities and state ownership
+## Removed machinery and verification
 
-| Owner | Authoritative state / responsibility |
-| --- | --- |
-| VintageNet | Applied Ethernet configuration, interfaces, addresses, routing and runtime observations |
-| Tailscale | Daemon state, VPN identity, preferences, routes and enrollment |
-| Network trial journal | Previous/requested application settings and the durable pending/confirmed decision |
-| Network Agent | Normal-path trial policy: await manual confirmation, await readiness, auto-commit verified USB setup, or reject conflicts |
-| Network Runtime | Effect preconditions/vetoes, journal writes, independent deadline, bounded hardware worker and recovery barrier |
-| Remote Agent | Enrollment/operation admission and correlated outcomes; no identity/preferences mirror |
-| Remote Runtime | One bounded daemon worker, cached subsystem reads and sanitized operation metadata |
-| Alarmist | Derived connectivity conditions |
-| Connectivity Agent | Bounded read-only recheck policy; never automatic disruptive recovery |
-| PropertyTable | Existing subsystem properties plus ephemeral workflow/host-simulation observations |
-| Device / Selectors | Stateless wire facade and pure on-demand interpretation, not a stored read model |
-| LiveView | Drafts, presentation, lifecycle-bound subscriptions and command submission |
+The Device dispatcher/client/status envelope became named root functions and pure
+Status/Error modules. AtomicFile, TrialStore, Recovery, lifecycle Signals,
+Connectivity/Alarmist, the Remote agent stack, custom command reply protocol and
+revision protocol were removed, not renamed. Network keeps Jido for USB auto-save
+policy. `.reach.exs` enforces
+public API boundaries, pure actions/selectors and no direct Runic usage.
 
-Requested settings are in a pending trial; applied settings and observations are
-read through the adapter. A successful apply is not proof of Internet or equipment
-reachability. Agents retain workflow metadata, not copies of hardware configuration.
+Tests cover named APIs, LiveView behavior, stale IDs, USB access verification,
+conflicts, linked worker termination, suspended/crashed agents, retrying restoration,
+subsystem persistence, deliberate partial-save behavior, logged task failures,
+caller timeout/late-reply behavior and subscription recovery/cleanup. Separate integration scripts exercise isolated Linux LAN/USB
+peers and a private userspace Tailscale 1.104.1 daemon. Firmware builds do not flash
+a device; no on-device boot or physical power-loss test is implied.
 
-```text
-LiveView / IEx / future interface
-           │ Device.dispatch
-           ▼
-     Public domain API
-           │ request Signal
-           ▼
-  Jido AgentServer → Action + live Plugin admission
-           │ candidate state + typed post-commit directive
-           ▼
-    Infrastructure Runtime → bounded owned worker → adapter
-           │                                      │
-           │ meaningful facts                     ▼
-           └─────────────────────── VintageNet / Tailscale
-                                             │ existing properties
-                                             ▼
-                   PropertyTable ───────────► LiveView → pure selectors
-                        │
-                        ▼
-                     Alarmist → Connectivity input → Jido Agent
-                                                          │
-                                                  read-only recheck
-```
-
-Pure draft validation executes a Jido Action directly with `Jido.Exec.run/4` and
-does not require a running agent or a daemon. See [action-api.md](action-api.md)
-for the eight public commands, result shape and domain-specific revision checks.
-
-## Supervision and execution lifecycle
-
-Application `rest_for_one` order is PubSub, Registry, workflow PropertyTable,
-managed `NervesGate.Jido`, host simulators (host only), Network, Remote,
-Connectivity, then Endpoint. Dependencies provide their own supervised applications
-(including Alarmist and, on firmware, VintageNet/Tailscale).
-
-Each Network/Remote domain is a `rest_for_one` supervisor: runtime first, permanent
-Jido AgentServer second. Runtime restart kills its linked worker and starts a fresh
-agent after recovery. Agent-only restart leaves the runtime's authoritative safety
-state intact; active work is interrupted/reconciled through an owner monitor.
-Admission reads that state afresh, and every effect rechecks it at the serialized
-boundary. A stale agent state or duplicate fact cannot authorize unsafe work.
-
-Actions use Zoi input schemas and return complete candidate state with typed
-Directives. Native Plugin admission supplies live context; Plugin dispatch performs
-effects after AgentServer commits. I/O runs in bounded linked workers outside
-agent turns and runtime mailboxes. Private command reply aliases handle completion;
-timeout is explicitly an unknown outcome, not cancellation or permission to replay.
-The native postponed-signal queue is bounded to 32; fact loss must be reconcilable.
-Network Plugin dispatch returns after effect submission, not worker completion.
-This frees the agent to process the applied/readiness facts that determine the next
-step. The runtime retains the private command reply context until its required
-acknowledgment boundary; no caller handle enters agent state or the journal.
-
-Connectivity uses a native Plugin-owned input process and the Jido Scheduler
-plugin. Source inspection found no built-in PropertyTable sensor. Its fixed input
-process is therefore a small subscription adapter, not a parallel sensor framework.
-AgentServer runs under the managed Jido instance: the pinned beta's standalone path
-can orphan Plugin children after abrupt owner death. The supported instance-backed
-path preserves ownership; tests verify sensor, scheduler and linked probe teardown.
-
-## Network workflow policy
-
-`Network.Actions.Advance` replaces the metadata-only Observe Action. It evaluates
-fresh Plugin admission rather than trusting a queued event's phase:
-
-| Current trial | Agent decision |
-| --- | --- |
-| Applying, committing or recovering | Observe progress; issue no overlapping effect |
-| Manual, applied | Await explicit confirmation |
-| First verified USB setup, ready | Request `auto_confirm` |
-| First verified USB setup, conflicting addresses | Request `auto_cancel` |
-| First verified USB setup, not ready | Request `await` to acknowledge application; then wait for readiness |
-
-Every automatic effect is rejected on a manual trial. Runtime execution rechecks
-ID, deadline, worker exclusivity and the requested effect's current preconditions.
-If readiness changes between admission and execution, it rejects the stale decision
-rather than choosing another normal-path operation itself. Apply failures, expiry,
-agent death and interrupted persistence still trigger unconditional safety recovery.
-
-Readiness changes send a private `network.workflow.reconcile` request; while a
-trial is pending, a one-second reconciliation interval repairs missed delivery.
-Requests do not change the form revision or become public facts. Ordinary facts
-are correlated/deduplicated by runtime incarnation, trial ID and sequence.
-Reconciliation deliberately permits the same sequence but always reads fresh
-admission. Raw property changes are still coalesced before interpretation.
-
-The independent runtime cannot auto-save merely because it observes readiness:
-an agent decision is required. A suspended agent cannot prevent deadline rollback.
-There is one normal-path coordinator and a separate safety mechanism, not two
-competing workflow state machines.
-
-## Durable network trials
-
-The user confirmation window remains **60 seconds**. Only first setup through
-server-verified USB auto-saves, within its **15-second** internal bound. USB never
-joins a LAN bridge or transaction. Readiness requires the intended topology and
-manual addresses, not cable/lease/Internet availability. Observed subnet conflicts
-block confirmation. IDs, deadlines, revisions and conflicting work are rechecked.
-
-`AtomicFile` uses mode 0600, exclusive temporary creation, file sync, rename and
-directory sync. `TrialStore` keeps a versioned journal next to the settings file:
-
-- Prepare: sync previous settings → sync pending journal → allow hardware apply.
-- Confirm: sync requested settings → sync confirmed marker (**commit point**) →
-  cleanup. A crash before the marker restores previous settings.
-- Recover: pending restores previous; confirmed finishes requested. Apply that
-  decision to disk and hardware; delete the journal only after both succeed.
-- Uncertain marker writes are re-read, never blindly rolled back. Failed cleanup
-  blocks new work but does not undo a confirmed decision. Corrupt journals fail
-  closed; valid journals can recover a damaged primary config file.
-
-An independent monotonic watchdog stops and joins the current worker before
-recovery. Reboot never relies on the journal's informational wall-clock expiry.
-Recovery is idempotent and retries while admission remains blocked. VintageNet's
-configuration/settlement barrier accounts for subsystem work outliving a caller.
-Neither transient signals, agent memory nor Jido timers are safety authorities.
-See [networking.md](networking.md) for operational recovery and unchanged port rules.
-
-## Remote and connectivity policies
-
-Remote accepts one bounded asynchronous daemon operation at a time. Acceptance and
-completion are different outcomes. Crashes/timeouts stop the worker and observe the
-daemon; they never replay a mutation. Connect/rename patch hostname and
-`accept_dns: false`, preserving omitted preferences. Startup never rewrites an
-existing profile. Identity stays under `/data/tailscale_ex`.
-
-The login URL Action requests a private cached query. Its directive replies only
-to the requesting caller. No URL enters Action results, agent state, public facts
-or subscribed properties. Hostname inputs and official HTTPS login hosts are
-validated; health URLs and raw errors are redacted from public observations.
-
-Alarmist derives `InternetUnavailable` from InternetExpected, InternetOnline and
-ObservationUnavailable. Only the assigned Internet interface counts; an
-unconfigured or equipment-only gateway does not require Internet. Conditions
-outlive agent/input restarts. Subscribe before reading cached condition state.
-
-Connectivity performs at most three bounded **read-only** probes per outage per
-agent lifetime. Correlation rejects stale timers/completions. Five-second input
-reconciliation repairs lost facts/timers; replacing that input retains the remaining
-budget, while restarting the whole agent starts a new bounded budget. Cancellation
-joins the worker before another runs. There are no NIC changes, DHCP restarts,
-VPN reconnects, logouts, DNS resets or enrollment effects in this policy.
-
-## Signal and observation contract
-
-Request types are the public command names. Facts contain workflow metadata, not
-raw PropertyTable changes. `Jido.Signal` supplies envelope ID, type, source and time.
-Action schemas validate consumed payloads; these tables describe the domain data:
-
-| Facts | Payload |
-| --- | --- |
-| `network.configuration.{proposed,applied,failed}`, `network.trial.{confirmed,expired,rolled_back}`, `network.runtime.reconciled` | `trial_id`: string or nil; `phase`: `idle`, `applying`, `pending`, `confirming` or `recovering`; `sequence`: runtime-local integer |
-| `remote.connection.{requested,established,lost}`, `remote.operation.{started,completed,failed}`, `remote.enrollment.failed`, `remote.daemon.{available,unavailable}` | `operation_id`: string or nil; `phase`: `idle` or `running`; `sequence`: runtime-local integer |
-| `connectivity.{lost,restored}` | `revision`: Alarmist condition timestamp/integer |
-| `connectivity.recheck.completed` | `outage`: condition revision; `attempt`: integer 1–3 |
-
-Network/Remote sources include runtime incarnation; Connectivity source identifies
-its scope. Sequence ordering is local, never a global event order. Facts are sent
-to domain agents and public Phoenix PubSub event topics as applicable. Delivery is
-**best effort, non-durable, without exactly-once guarantees**. Subscribers re-read
-on startup/reconnect. Lost lifecycle facts cannot defeat runtime admission or
-network recovery. Private reconciliation requests are not a public event log.
-
-Firmware subscribes to existing VintageNet/Tailscale properties. The application
-table adds workflow metadata only; host adapters publish simulated observations
-there. LiveViews subscribe before reading, coalesce notifications for 20 ms and
-re-run selectors instead of applying queued snapshots. Lifecycle cleanup removes
-subscriptions; panels reuse parent assigns. Domain polling rebinds subscriptions
-and reconciles state; raw property bursts do not flood AgentServer queues.
-
-Future packet observers can use a separate bounded ingestion pipeline, normalized
-PropertyTable namespace and significant discovery Signals for a DiscoveryAgent.
-Backpressure belongs at ingestion, outside command turns; raw packets never belong
-in agent state. No packet capture or inventory implementation is included.
-
-## Migration map and removed components
-
-Baseline: `6ddc75d`. Existing UI layout, wire commands, host simulation, persisted
-config formats and exposure policy are retained.
-
-| Old module / mechanism | Replacement |
-| --- | --- |
-| `Device.Workflow` Runic graph | Domain Jido routes and Actions; **deleted** |
-| `Device.Actions` centralized catalog/router | Domain Action schemas/routes; presentation-only selector availability; **deleted** |
-| `Device.Projection` | Pure `Device.Selectors`; old module **deleted** |
-| Device GenServer and cached snapshot bus | Stateless Device facade, live domain reads and direct subscriptions |
-| Monolithic Network GenServer | Network supervisor, Agent/Actions/Plugin, safety Runtime, TrialStore and Recovery |
-| Monolithic Remote GenServer | Remote supervisor, Agent/Actions/Plugin and asynchronous Runtime |
-| Network/Remote snapshot broadcasts | PropertyTable workflow metadata and significant Jido facts |
-| Component-owned Device subscriptions | Parent LiveView observation bindings and presentational panels |
-| Direct Runic integration-test bootstrap / pristine-fact unit test | Jido bootstrap, native routing/lifecycle/effect and recovery tests |
-
-`.reach.exs` rejects the deleted modules, direct application Runic calls, web
-access to agent/runtime internals or hardware mutation, and I/O from pure Actions
-and selectors. No compatibility Runic execution path remains.
-
-## Verification and limitations
-
-- Native v3 schema/routing/admission/directive and Alarmist probes passed on the
-  pinned toolchain. Unit/LiveView coverage includes conflicts, revisions, duplicate
-  facts, process crashes, reboot recovery, partial persistence and subscription cleanup.
-  Network workflow tests additionally prove agent-owned auto-save, dropped-readiness
-  reconciliation, stale-decision vetoes and rollback with the agent suspended.
-- Final `mix deps.get` and `mix ci` passed: 164 tests, strict Credo, Dialyzer (no
-  skips), zero-clone duplication and architecture/smell checks.
-- Final isolated Linux LAN run passed all 14 checkpoints, retaining real DHCP,
-  bridge hotplug, rollback, restart, port reversal, USB and HTTP assertions.
-- Final isolated real Tailscale 1.104.1 check passed; cached reads, async writes,
-  DNS policy and route preservation remain covered.
-- Real host-browser checks passed for Network apply/cancel/restoration and
-  simulated Tailscale connect/rename. Reload confirmed restored settings and the
-  new name. Gateway, Network, trial and Tailscale pages had zero axe WCAG2 A/AA
-  violations; the mobile Tailscale page had no horizontal overflow or JS errors.
-- EC100 production firmware built and passed `fwup --verify`. Artifact inspection
-  verified the v3 dependencies, absence of AI/development tooling, recovery SSH
-  key, startup guard/Heart handshake and unchanged ARM tailscaled checksum.
-  No firmware was flashed; no on-device boot, power-loss or physical USB/cable
-  test is claimed for this rewrite.
-
-Jido v3 is beta and includes upstream compiler warnings through its internal
-Runic dependency. The independently reproduced OTP 29/MuonTrap `:epipe` race
-caused earlier LAN integration failures; a successful final run does not fix it.
-Disk fault tests cannot prove storage hardware's power-loss behavior. Jido facts
-are not durable; domain recovery and conservative reconciliation are intentional.
-The UI remains unauthenticated for trusted networks; no security expansion or
-new hardware capability is implied by this migration.
+Jido v3 is beta and its internal Runic dependency emits upstream compiler warnings.
+The independently reproduced OTP 29/MuonTrap `:epipe` command-runner race remains
+unfixed; see [networking.md](networking.md). Host tests do not prove physical cable,
+USB or storage behavior. The UI remains unauthenticated for trusted networks, with
+CSRF/same-origin safeguards unchanged. No new hardware capability is implied.

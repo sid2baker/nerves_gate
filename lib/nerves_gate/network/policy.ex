@@ -8,28 +8,10 @@ defmodule NervesGate.Network.Policy do
   def available(%{trial: trial}) when not is_nil(trial), do: {:error, :trial_in_progress}
   def available(_), do: :ok
 
-  def admit_trial(status, id, expected) do
-    with :ok <- NervesGate.Command.check_revision(expected, status), do: matching(status, id)
-  end
-
   def matching(%{trial: %{id: id}}, id), do: :ok
   def matching(_, _), do: {:error, :no_matching_trial}
 
   @doc "Readiness is configured topology, NOT Internet access, a link or a DHCP lease."
-  def ready?(observed, %{"mode" => "ethernet"} = network) when is_map(observed) do
-    internet = Enum.find(observed.ports, &(&1.name == network["internet_port"]))
-    equipment = Enum.find(observed.ports, &(&1.name == Config.equipment_port(network)))
-
-    internet != nil and equipment != nil and
-      Enum.all?(
-        [internet, equipment],
-        &(&1.present and &1.master == nil and &1.state == :configured)
-      ) and
-      internet.method == "dhcp" and equipment.method == "static" and
-      address_matches?(equipment.addresses, network["equipment"]) and
-      conflicts(observed, network) == []
-  end
-
   def ready?(
         %{bridge: bridge, ports: ports} = observed,
         %{"mode" => "shared", "equipment" => network} = settings

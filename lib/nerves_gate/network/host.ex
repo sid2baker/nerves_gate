@@ -5,13 +5,33 @@ defmodule NervesGate.Network.Host do
   alias NervesGate.{Config, Observations}
 
   def start_link(opts \\ []) do
-    Agent.start_link(fn -> %{network: Config.defaults()["network"], overrides: %{}} end,
+    Agent.start_link(
+      fn ->
+        %{network: Config.defaults()["network"], saved: Config.defaults(), overrides: %{}}
+      end,
       name: Keyword.get(opts, :name, __MODULE__)
     )
   end
 
   @impl true
+  def load(server), do: {:ok, Agent.get(server, & &1.saved)}
+
+  @impl true
+  def save(network, server),
+    do: Agent.update(server, &%{&1 | saved: Config.from_network(network)})
+
+  @doc "Reset simulated settings and observations; never touches the workstation."
+  def reset(server \\ __MODULE__) do
+    update(server, fn _ ->
+      %{network: Config.defaults()["network"], saved: Config.defaults(), overrides: %{}}
+    end)
+  end
+
+  @impl true
   def apply_config(network, server), do: update(server, &%{&1 | network: network})
+
+  @impl true
+  def restore(network, server), do: apply_config(network, server)
 
   @impl true
   def observations(server), do: [{Observations.table(), Observations.host("network", server)}]

@@ -10,7 +10,9 @@ Application.ensure_all_started(:jason)
 Application.load(:vintage_net)
 
 for {key, value} <- [
-      persistence: VintageNet.Persistence.Null,
+      persistence: VintageNet.Persistence.FlatFile,
+      persistence_dir: "/run/saved_network",
+      persistence_secret: "integration-test",
       config: [],
       tmpdir: "/run/vintage_net",
       resolvconf: "/run/resolv.conf",
@@ -45,7 +47,7 @@ defmodule NervesGate.BridgeIntegrationTest do
 
     server =
       start_supervised!(
-        {Network, path: "/run/nerves_gate.json", adapter: {Vintage, nil}, poll_ms: 100}
+        {NervesGate.Network, adapter: {NervesGate.Network.Vintage, nil}, poll_ms: 100}
       )
 
     # Fresh boot discovers the router, without USB or a saved role assignment.
@@ -90,6 +92,8 @@ defmodule NervesGate.BridgeIntegrationTest do
     wait(fn -> Network.status(server).trial == nil end)
     assert Network.status(server).config["setup_completed"]
     assert Network.status(server).config["network"] == partial
+    assert {:ok, saved} = Vintage.load(nil)
+    assert saved["network"] == partial
     assert settings_http?("setup", port)
     IO.puts("PASS first USB setup auto-saves Internet-only settings; equipment can wait")
 
@@ -152,7 +156,7 @@ defmodule NervesGate.BridgeIntegrationTest do
 
     wait(fn -> Network.ready?(Vintage.snapshot(nil), static) end)
     wait(fn -> ping?("10.45.0.3") end)
-    assert {:ok, saved} = Config.load("/run/nerves_gate.json")
+    assert {:ok, saved} = NervesGate.Network.Vintage.load(nil)
     assert saved["network"] == static
     IO.puts("PASS timed rollback and durable confirmed configuration")
 
@@ -161,15 +165,29 @@ defmodule NervesGate.BridgeIntegrationTest do
 
     stop_supervised!(Network)
 
+    # Reproduce a killed configure caller: its desired property may already be
+    # updated even though the interface still has the trial's address.
+    saved_bridge = Map.new(Vintage.configurations(static))["br0"]
+
+    PropertyTable.put(
+      VintageNet,
+      ["interface", "br0", "config"],
+      Network.LAN.normalize(saved_bridge)
+    )
+
     server =
       start_supervised!(
-        {Network, path: "/run/nerves_gate.json", adapter: {Vintage, nil}, poll_ms: 100}
+        {NervesGate.Network, adapter: {NervesGate.Network.Vintage, nil}, poll_ms: 100}
       )
 
+    assert {:ok, saved} = Vintage.load(nil)
+    assert saved["network"] == static
+    assert Network.status(server).config == saved
     wait(fn -> Network.ready?(Vintage.snapshot(nil), static) end)
     assert Network.status(server).trial == nil
     assert File.read!("/sys/class/net/br0/ifindex") == bridge_index
-    assert ping?("10.45.0.2")
+    # Forced restoration may restart STP forwarding even though br0 survives.
+    wait(fn -> ping?("10.45.0.2") end)
     IO.puts("PASS manager restart restores confirmed IP without recreating the bridge")
 
     # The same endpoint accepts both LAN peers after a topology change.
@@ -179,9 +197,12 @@ defmodule NervesGate.BridgeIntegrationTest do
     IO.puts("PASS settings page over both Ethernet ports and independent USB")
 
     separated = %{
-      "mode" => "ethernet",
-      "internet_port" => "eth0",
-      "equipment" => %{static["equipment"] | "static_ip" => "10.46.0.10"}
+      "mode" => "ports",
+      "eth0" => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
+      "eth1" => %{
+        "role" => "equipment",
+        "address" => %{static["equipment"] | "static_ip" => "10.46.0.10"}
+      }
     }
 
     cmd("ip", ~w(-n peer1 addr flush dev lan1))
@@ -219,7 +240,12 @@ defmodule NervesGate.BridgeIntegrationTest do
     assert Enum.all?(Vintage.snapshot(nil).ports, &is_nil(&1.master))
     IO.puts("PASS separate-to-shared trial and rollback, USB still accessible")
 
-    assert {:ok, trial} = Network.propose(%{separated | "internet_port" => "eth1"}, server)
+    assert {:ok, trial} =
+             Network.propose(
+               %{separated | "eth0" => separated["eth1"], "eth1" => separated["eth0"]},
+               server
+             )
+
     wait(fn -> Network.status(server).ready end)
     assert settings_http?("setup", port)
     assert :ok = Network.cancel(trial, server)
@@ -282,7 +308,7 @@ defmodule NervesGate.BridgeIntegrationTest do
     do: elem(System.cmd("ping", ["-c", "1", "-W", "1", address], stderr_to_stdout: true), 1) == 0
 
   defp wait(fun, attempts \\ 200)
-  defp wait(fun, 0), do: assert(fun.())
+  defp wait(fun, 0), do: assert(fun.(), inspect(Vintage.snapshot(nil), pretty: true))
 
   defp wait(fun, attempts) do
     if fun.(),

@@ -1,12 +1,12 @@
 defmodule NervesGateWeb.DashboardLive do
   use Phoenix.LiveView
-  alias NervesGate.{Config, Device}
+  alias NervesGate.Config
   import NervesGateWeb.CoreComponents
   import NervesGateWeb.NetworkStatus, only: [port_label: 1]
 
   def mount(_, _, socket) do
     socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
-    socket = assign(socket, projection: Device.projection())
+    socket = assign(socket, projection: NervesGate.status())
 
     if socket.assigns.live_action in [:equipment, :internet] do
       {:ok, push_navigate(socket, to: "/settings")}
@@ -17,7 +17,7 @@ defmodule NervesGateWeb.DashboardLive do
 
   @doc false
   def refresh_observations(socket) do
-    assign(socket, projection: NervesGate.Device.projection())
+    assign(socket, projection: NervesGate.status())
   end
 
   def render(assigns) do

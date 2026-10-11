@@ -32,49 +32,49 @@ Tailscale behavior.
 
 ## Backend entry point
 
-**Clients use the stateless `NervesGate.Device` facade.** Domain Jido Actions
-validate commands; supervised Network, Remote and Connectivity agents coordinate
-workflows. Pure selectors read current domain state without a central state server.
+**Start at [`lib/nerves_gate.ex`](lib/nerves_gate.ex).** `NervesGate` exposes named
+functions for LiveView, IEx/SSH and future interfaces. No dispatcher, client object
+or knowledge of Jido is needed to use the backend.
 
 ```elixir
-alias NervesGate.Device
+:ok = NervesGate.subscribe()               # subscribe before reading
+status = NervesGate.status()
 
-:ok = Device.subscribe()                 # subscribe before reading
-view = Device.projection()
-view.actions["network.propose"]          # availability and required parameters
-
-Device.dispatch("remote.configure", %{"hostname" => "my-gateway"})
+{:ok, id} = NervesGate.network_propose(settings)
+:ok = NervesGate.network_confirm(id)        # or network_cancel(id)
+:ok = NervesGate.remote_configure("my-gateway")
 ```
 
-| Action | Parameters | Effect |
-| --- | --- | --- |
-| `network.validate` | `network` | Validate a draft; no changes |
-| `network.propose` | `network` | Apply with automatic rollback |
-| `network.confirm` | `trial_id` | Keep that trial |
-| `network.cancel` | `trial_id` | Restore saved settings |
-| `remote.connect` | `hostname` | Configure the name and begin Tailscale sign-in |
-| `remote.configure` | `hostname` | Save the device name |
-| `remote.disconnect` | none | Sign out of Tailscale |
-| `remote.login_url` | none | Explicitly read the private sign-in URL |
+| Function | Result / meaning |
+| --- | --- |
+| `network_validate(settings)` | `{:ok, normalized}`; no changes |
+| `network_propose(settings, opts \\ [])` | `{:ok, trial_id}`; applied with automatic rollback |
+| `network_confirm(trial_id, opts \\ [])` | `:ok`; keep that trial |
+| `network_cancel(trial_id, opts \\ [])` | `:ok`; restore saved settings |
+| `remote_connect(hostname, opts \\ [])` | `:ok`; connection/enrollment accepted |
+| `remote_configure(hostname, opts \\ [])` | `:ok`; hostname change accepted |
+| `remote_disconnect(opts \\ [])` | `:ok`; sign-out accepted |
+| `remote_login_url(opts \\ [])` | `{:ok, url_or_nil}`; private sign-in URL |
 
-The command path is **Device → domain API → Jido AgentServer / Action → typed
-directive → infrastructure runtime**. Draft validation runs a pure Jido Action.
-Network trials have a durable decision journal and an independent safety watchdog.
-Remote operations run in bounded, owned workers. VintageNet and Tailscale remain
-authoritative for their configuration and observations. PropertyTable subscriptions
-and Alarmist conditions drive conservative, read-only connectivity rechecks.
+Failures return `{:error, %{code: code, message: message}}`. Read `NervesGate.status()`
+separately after commands. Remote acceptance is not completion; check its operation
+and error. An unknown outcome requires reading status before retrying.
 
-LiveViews own drafts and presentation. They subscribe directly to properties and
-application facts, then re-read; there is no projection server, durable event log
-or replayed command queue.
+Internally, ordinary OTP calls and deferred replies handle network commands. A small
+Jido agent decides first-USB-setup auto-save; the runtime owns the independent
+rollback timer and hardware worker. Remote is one bounded GenServer.
+VintageNet owns saved LAN settings; Tailscale owns its identity and preferences.
+There is no central state server, trial journal or connectivity retry agent.
+Saving several interfaces is not a transaction: interruption can leave partially
+saved settings. USB remains independent for recovery.
 
 Jido v3 is pinned to immutable source commits. **Approved dependency exception:**
 Jido's v3 Action engine requires Runic internally. NervesGate has no direct Runic
 calls or workflows, and introduces no AI dependencies.
 
 See the [action API](docs/action-api.md) for return values and UI mapping, and the
-[architecture and migration map](docs/architecture.md) for ownership, lifecycle,
-signal delivery and the exact dependency pins.
+[architecture](docs/architecture.md) for ownership, lifecycle,
+persistence tradeoffs and the exact dependency pins.
 
 ## Develop
 

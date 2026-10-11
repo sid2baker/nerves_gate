@@ -22,16 +22,17 @@ defmodule NervesGate.Observations do
   def subscribe_runtime(server), do: server |> GenServer.call(:observations) |> subscribe()
 
   def subscribe(sources) do
-    Enum.each(sources, fn {table, path} ->
-      # Rebinding is idempotent, including after a subsystem table restart.
-      try do
+    Enum.reduce_while(sources, :ok, fn {table, path}, :ok ->
+      registry = PropertyTable.Supervisor.registry_name(table)
+
+      if Process.whereis(registry) do
+        # Registry subscriptions allow duplicates, so rebind this exact path.
         PropertyTable.unsubscribe(table, path)
-        PropertyTable.subscribe(table, path)
-      rescue
-        ArgumentError -> :ok
+        :ok = PropertyTable.subscribe(table, path)
+        {:cont, :ok}
+      else
+        {:halt, {:error, :unavailable}}
       end
     end)
-
-    :ok
   end
 end

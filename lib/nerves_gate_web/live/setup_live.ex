@@ -1,6 +1,6 @@
 defmodule NervesGateWeb.SetupLive do
   use Phoenix.LiveView
-  alias NervesGate.{Device, Network}
+  alias NervesGate.Network
   alias NervesGateWeb.NetworkForm
   import NervesGateWeb.NetworkStatus, only: [port_label: 1]
   import NervesGateWeb.CoreComponents
@@ -8,7 +8,7 @@ defmodule NervesGateWeb.SetupLive do
   def mount(_, session, socket) do
     socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
     if connected?(socket), do: Process.send_after(self(), :tick, 1_000)
-    projection = Device.projection()
+    projection = NervesGate.status()
     peer = get_connect_info(socket, :peer_data)
 
     socket =
@@ -54,11 +54,11 @@ defmodule NervesGateWeb.SetupLive do
     do: {:noreply, assign(socket, form: draft(socket, %{"equipment_port" => ""}), dirty: true)}
 
   def handle_event("reload", _, socket) do
-    {:noreply, socket |> assign(dirty: false, message: nil) |> refresh(Device.projection())}
+    {:noreply, socket |> assign(dirty: false, message: nil) |> refresh(NervesGate.status())}
   end
 
-  def handle_event("save", %{"network" => params, "revision" => revision}, socket) do
-    projection = Device.projection()
+  def handle_event("save", %{"network" => params}, socket) do
+    projection = NervesGate.status()
     socket = assign(socket, form: draft(socket, params))
 
     if socket.assigns.base != projection.network.desired do
@@ -72,8 +72,7 @@ defmodule NervesGateWeb.SetupLive do
       case NetworkForm.to_network(socket.assigns.form.params, projection.connections.ports) do
         {:ok, network} ->
           result =
-            Device.dispatch("network.propose", %{"network" => network},
-              expected_revision: revision,
+            NervesGate.network_propose(network,
               access: socket.assigns.access
             )
 
@@ -94,19 +93,19 @@ defmodule NervesGateWeb.SetupLive do
             socket.assigns.projection.network.pending &&
               socket.assigns.projection.network.pending.network
         ),
-        Device.dispatch("network.confirm", Map.take(params, ["trial_id"]))
+        NervesGate.network_confirm(params["trial_id"])
       )
 
   def handle_event("cancel", params, socket),
     do:
       reply(
         assign(socket, own_save: false),
-        Device.dispatch("network.cancel", Map.take(params, ["trial_id"]))
+        NervesGate.network_cancel(params["trial_id"])
       )
 
   @doc false
   def refresh_observations(socket) do
-    refresh(socket, NervesGate.Device.projection())
+    refresh(socket, NervesGate.status())
   end
 
   def handle_info(:tick, socket) do
@@ -184,12 +183,18 @@ defmodule NervesGateWeb.SetupLive do
     end
   end
 
-  defp reply(socket, {:ok, %{projection: projection}}),
-    do: {:noreply, refresh(socket, projection)}
+  defp reply(socket, {:ok, _trial_id}) do
+    reply(socket, :ok)
+  end
 
-  defp reply(socket, {:error, %{error: error, projection: projection}}),
-    do:
-      {:noreply, assign(socket, projection: projection, own_save: false, message: error.message)}
+  defp reply(socket, :ok) do
+    {:noreply, refresh(socket, NervesGate.status())}
+  end
+
+  defp reply(socket, {:error, error}) do
+    {:noreply,
+     assign(socket, projection: NervesGate.status(), own_save: false, message: error.message)}
+  end
 
   def render(assigns) do
     internet =
@@ -229,7 +234,7 @@ defmodule NervesGateWeb.SetupLive do
     <%= cond do %>
       <% !@projection.network.available or @projection.network.desired == nil -> %>
         <.notice tone="warning">
-          Saved settings are unavailable. They have not been overwritten. Reconnect, or inspect /data/nerves_gate.json using recovery SSH.
+          Saved settings are unavailable. They have not been overwritten. Reconnect, or inspect VintageNet's saved settings using recovery SSH.
         </.notice>
       <% @pending != nil -> %>
         <.panel
@@ -270,7 +275,6 @@ defmodule NervesGateWeb.SetupLive do
           <.button variant="secondary" phx-click="reload">Reload saved settings</.button>
         </.notice>
         <.form for={@form} id="network-form" phx-change="change" phx-submit="save" class="ui-stack">
-          <input type="hidden" name="revision" value={@projection.revision} />
           <%= if @form.params["mode"] == "ports" do %>
             <.panel title="Internet" icon="internet">
               <p id="internet-summary">

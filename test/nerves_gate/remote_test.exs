@@ -1,6 +1,6 @@
 defmodule NervesGate.RemoteTest do
   use ExUnit.Case, async: true
-  alias NervesGate.{Device, Remote}
+  alias NervesGate.Remote
 
   defmodule Adapter do
     @behaviour NervesGate.Remote.Adapter
@@ -34,50 +34,49 @@ defmodule NervesGate.RemoteTest do
         {Remote, name: nil, adapter: {Adapter, adapter}, poll_ms: 10, timeout: 150}
       )
 
-    device = Device.new(network: nil, remote: remote)
-
-    %{adapter: adapter, remote: remote, device: device}
+    %{adapter: adapter, remote: remote, api: [network: nil, remote: remote]}
   end
 
-  test "shared commands validate input and stay responsive while login runs", ctx do
-    assert {:error, %{error: %{code: "invalid_parameters"}}} =
-             dispatch(ctx, "remote.connect", %{"hostname" => "invalid name"})
+  test "named commands validate arguments and stay responsive while login runs", ctx do
+    for invalid <- [
+          "invalid name",
+          nil,
+          <<255>>,
+          %{"hostname" => "gateway", "auth_key" => "secret"}
+        ] do
+      assert {:error, %{code: "invalid_parameters"}} = NervesGate.remote_connect(invalid, ctx.api)
 
-    assert {:error, %{error: %{code: "invalid_parameters"}}} =
-             dispatch(ctx, "remote.connect", %{"hostname" => "gateway", "auth_key" => "secret"})
+      assert {:error, %{code: "invalid_parameters"}} =
+               NervesGate.remote_configure(invalid, ctx.api)
+    end
 
     refute_receive {:remote_command, _, _, _}
-
-    assert {:ok, %{result: %{accepted: true}}} =
-             dispatch(ctx, "remote.connect", %{"hostname" => "Gateway"})
-
+    assert :ok = NervesGate.remote_connect("Gateway", ctx.api)
     assert_receive {:remote_command, worker, :connect, %{hostname: "gateway"}}
-    assert Device.projection(ctx.device).remote_access.operation == "connect"
-    assert {:error, %{error: %{code: "remote_busy"}}} = dispatch(ctx, "remote.disconnect")
-    assert {:error, %{code: "remote_busy"}} = Remote.command(:disconnect, %{}, ctx.remote)
+    assert NervesGate.status(ctx.api).remote_access.operation == "connect"
+    assert {:error, %{code: "remote_busy"}} = NervesGate.remote_disconnect(ctx.api)
     send(worker, {:finish, :ok})
     eventually(fn -> Remote.status(ctx.remote).operation == nil end)
   end
 
-  test "configure and disconnect route to their explicit adapter actions", ctx do
-    for {id, input, action, expected} <- [
-          {"remote.configure", %{"hostname" => "New-Name"}, :configure, %{hostname: "new-name"}},
-          {"remote.disconnect", %{}, :disconnect, %{}}
-        ] do
-      assert {:ok, %{result: %{accepted: true}}} = dispatch(ctx, id, input)
-      assert_receive {:remote_command, worker, ^action, ^expected}
-      send(worker, {:finish, :ok})
-      eventually(fn -> Remote.status(ctx.remote).operation == nil end)
-    end
+  test "configure and disconnect invoke their explicit adapter actions", ctx do
+    assert :ok = NervesGate.remote_configure("New-Name", ctx.api)
+    assert_receive {:remote_command, worker, :configure, %{hostname: "new-name"}}
+    send(worker, {:finish, :ok})
+    eventually(fn -> Remote.status(ctx.remote).operation == nil end)
+
+    assert :ok = NervesGate.remote_disconnect(ctx.api)
+    assert_receive {:remote_command, worker, :disconnect, %{}}
+    send(worker, {:finish, :ok})
+    eventually(fn -> Remote.status(ctx.remote).operation == nil end)
   end
 
-  test "login URL is explicit, HTTPS-only and absent from projections and broadcasts", ctx do
+  test "login URL is explicit, HTTPS-only and absent from status and broadcasts", ctx do
     url = "https://login.tailscale.com/a/private-enrollment-token"
     Agent.update(ctx.adapter, &%{&1 | url: url})
-    Device.subscribe(ctx.device)
-    projection = Device.projection(ctx.device)
-    refute Jason.encode!(projection) =~ "private-enrollment-token"
-    assert {:ok, %{result: %{url: ^url}}} = dispatch(ctx, "remote.login_url")
+    NervesGate.subscribe(ctx.api)
+    refute Jason.encode!(NervesGate.status(ctx.api)) =~ "private-enrollment-token"
+    assert {:ok, ^url} = NervesGate.remote_login_url(ctx.api)
 
     for bad <- [
           "javascript:alert(1)",
@@ -86,13 +85,13 @@ defmodule NervesGate.RemoteTest do
           "https://user@login.tailscale.com/a/secret"
         ] do
       Agent.update(ctx.adapter, &%{&1 | url: bad})
-      assert {:ok, %{result: %{url: nil}}} = dispatch(ctx, "remote.login_url")
+      assert {:ok, nil} = NervesGate.remote_login_url(ctx.api)
     end
 
     Agent.update(ctx.adapter, &put_in(&1.snapshot.state, "online"))
-    eventually(fn -> Device.projection(ctx.device).remote_access.state == "online" end)
+    eventually(fn -> NervesGate.status(ctx.api).remote_access.state == "online" end)
     assert_receive %PropertyTable.Event{}
-    changed = Device.projection(ctx.device)
+    changed = NervesGate.status(ctx.api)
     assert changed.remote_access.state == "online"
     refute changed.remote_access.verified
     assert changed.remote_access.permitted_routes == nil
@@ -100,36 +99,34 @@ defmodule NervesGate.RemoteTest do
   end
 
   test "timeouts and failures are sanitized without blocking status or future commands", ctx do
-    {:ok, _} = dispatch(ctx, "remote.connect", %{"hostname" => "gateway"})
+    :ok = NervesGate.remote_connect("gateway", ctx.api)
     assert_receive {:remote_command, worker, _, _}
     send(worker, {:finish, {:error, "secret-auth-key"}})
     eventually(fn -> Remote.status(ctx.remote).error != nil end)
     assert Remote.status(ctx.remote).error.code == "remote_failed"
-    refute Jason.encode!(Device.projection(ctx.device)) =~ "secret-auth-key"
-    {:ok, _} = dispatch(ctx, "remote.configure", %{"hostname" => "new-name"})
+    refute Jason.encode!(NervesGate.status(ctx.api)) =~ "secret-auth-key"
+    :ok = NervesGate.remote_configure("new-name", ctx.api)
     assert_receive {:remote_command, timed, _, _}
     eventually(fn -> Remote.status(ctx.remote).error != nil end)
     assert Remote.status(ctx.remote).error.code == "remote_timeout"
     refute Process.alive?(timed)
-    assert Device.projection(ctx.device).actions["remote.connect"].enabled
+    assert NervesGate.status(ctx.api).actions["remote.connect"].enabled
   end
 
   test "unavailable daemon disables actions but not unrelated network validation", ctx do
     Agent.update(ctx.adapter, &put_in(&1.snapshot.available, false))
-    refute Device.projection(ctx.device).capabilities.remote_enrollment
-
-    assert {:error, %{error: %{code: "remote_unavailable"}}} =
-             dispatch(ctx, "remote.connect", %{"hostname" => "gateway"})
-
-    assert {:ok, _} =
-             dispatch(ctx, "network.validate", %{"network" => %{"mode" => "unconfigured"}})
+    refute NervesGate.status(ctx.api).capabilities.remote_enrollment
+    assert {:error, %{code: "remote_unavailable"}} = NervesGate.remote_connect("gateway", ctx.api)
+    assert {:ok, _} = NervesGate.network_validate(%{"mode" => "unconfigured"})
 
     stop_supervised!(Remote)
-    assert Device.projection(ctx.device).remote_access.state == "unavailable"
+    assert NervesGate.status(ctx.api).remote_access.state == "unavailable"
+    assert {:error, %{code: "remote_unavailable"}} = NervesGate.remote_login_url(ctx.api)
+    assert {:error, %{code: "unavailable"}} = NervesGate.remote_configure("new-name", ctx.api)
   end
 
-  test("daemon health URLs are redacted before projections and broadcasts", ctx) do
-    Device.subscribe(ctx.device)
+  test "daemon health URLs are redacted before status and broadcasts", ctx do
+    NervesGate.subscribe(ctx.api)
 
     Agent.update(
       ctx.adapter,
@@ -139,15 +136,11 @@ defmodule NervesGate.RemoteTest do
       ])
     )
 
-    projection = Device.projection(ctx.device)
-    assert projection.remote_access.health == ["Sign in at [private URL]", "DNS warning"]
-    refute Jason.encode!(projection) =~ "private-token"
+    status = NervesGate.status(ctx.api)
+    assert status.remote_access.health == ["Sign in at [private URL]", "DNS warning"]
+    refute Jason.encode!(status) =~ "private-token"
     assert_receive %PropertyTable.Event{value: changed}
     refute Jason.encode!(changed) =~ "private-token"
-  end
-
-  defp dispatch(ctx, action, params \\ %{}) do
-    Device.dispatch(action, params, server: ctx.device)
   end
 
   defp eventually(fun, attempts \\ 60)

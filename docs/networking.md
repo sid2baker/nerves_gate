@@ -33,13 +33,12 @@ Ethernet traffic. USB is never part of these changes.
 
 ## Saving and rollback
 
-Settings are stored at `/data/nerves_gate.json` (host: `tmp/dev/nerves_gate.json`).
-The version-2 file is validated and saved using an exclusive temporary file, file
-fsync, atomic rename, directory fsync and mode 0600. It contains no credentials or
-observations. Without a valid recovery journal, corrupt or unsupported files fail
-closed and are not overwritten. Version-1 files migrate in memory to the explicit
-shared arrangement; upgrading does not silently split an installed LAN. The legacy `ethernet` format
-also remains readable; new separate-port saves use `ports`.
+VintageNet stores each LAN interface's settings using its FlatFile persistence
+backend. The application keeps only the current trial in memory; host simulation
+also keeps saved settings in memory. Unreadable saved settings fail closed.
+
+The supported modes are `unconfigured`, `ports` and `shared`. There is no legacy
+JSON settings importer, format migration or second persistence store.
 
 First setup **through verified USB** saves automatically after successful
 application. It has an internal 15-second deadline, not a user countdown. Verification
@@ -58,45 +57,33 @@ Internet/equipment/USB subnet overlaps block confirmation; later DHCP overlaps
 remain visible as warnings. Configuration readiness does not imply equipment or
 remote reachability.
 
-### Durable trial protocol
+### Temporary trials, subsystem-owned persistence
 
-The Network Jido agent chooses normal trial progression: await manual confirmation,
-wait for readiness, auto-save verified USB setup, or reject a subnet conflict.
-Its safety runtime executes those requests only after fresh checks; it never
-substitutes a different normal-path decision when an observation has changed.
-An independent watchdog and bounded hardware worker belong to that runtime, not
-the browser or a Jido timer. A versioned journal at `/data/nerves_gate.json.trial` stores the trial ID,
-previous/requested configurations, auto-save flag, phase and informational expiry.
-It contains no daemon identity or observations.
+The Network runtime admits and acknowledges commands using standard OTP calls and
+replies. The Jido agent decides first-USB-setup auto-save; the runtime rechecks each
+automatic decision and owns the independent watchdog and bounded hardware worker.
 
-1. **Propose:** durably save previous settings, then the pending journal, before
-   touching LAN interfaces. Acknowledge only after successful application.
-2. **Confirm:** recheck ID, monotonic deadline, readiness and subnet conflicts.
-   Sync requested settings, then sync a `confirmed` journal marker. **That marker
-   is the commit point.** Delete the journal afterward as cleanup.
-3. **Cancel, timeout, failed apply or interrupted pending work:** stop and join
-   the worker, then restore previous disk and hardware settings.
-4. **Restart/reboot:** read the journal before accepting commands. Pending means
-   restore previous settings; confirmed means finish the requested commit.
-   Never resume a countdown using a potentially incorrect wall clock.
+1. **Propose:** apply temporarily without changing saved settings. Acknowledge
+   after application; immediately-ready first USB setup waits for auto-save.
+2. **Confirm:** recheck the exact trial ID, monotonic deadline, readiness and
+   conflicts, then save each LAN interface through VintageNet's persistence API.
+3. **Cancel, timeout, failed apply or agent crash:** stop and join the worker,
+   then restore the prior applied configuration. USB remains untouched.
+4. **Runtime restart/reboot:** load and apply VintageNet's saved settings, not a
+   pending trial or a resumed countdown. Failed restoration retries with new
+   proposals blocked.
 
-A crash between writing requested settings and the confirmed marker still restores
-previous settings. An uncertain marker write is reconciled from the journal, not
-blindly treated as a rollback. Failed cleanup after a confirmed decision blocks
-new proposals but does not undo that decision. Recovery keeps its journal until
-both disk and hardware restoration succeed; it attempts hardware restoration even
-if persistence is temporarily unwritable. Repeated recovery is idempotent.
+**There is no multi-interface transaction.** Interrupted or failed confirmation
+can leave some interfaces saved and others unchanged. Runtime rollback does not
+undo those disk writes; the next restart uses the settings VintageNet has. This
+is an accepted tradeoff, not a promise of all-or-nothing power-loss recovery.
+There is no trial journal, commit marker or custom application file-writing layer.
+Keep USB/serial recovery available.
 
-An agent crash interrupts active trial work and triggers recovery. A runtime crash
-kills its linked worker and restarts the agent only after startup recovery.
-Unsuccessful recovery remains visible and is retried with new proposals blocked.
-A valid journal can recover even a damaged primary settings file; a corrupt
-journal fails closed. Do not delete a journal simply to clear a UI error.
-
-VintageNet still owns interface state, hotplug, cleanup and asynchronous retries.
-An admitted VintageNet operation can outlive its caller, so the adapter retains
-its bounded configuration/settlement barrier. No signal-delivery or agent-memory
-guarantee is required for rollback. USB is outside the journal's LAN operations.
+VintageNet owns interface state, hotplug, cleanup and asynchronous retries. An
+admitted operation can outlive its caller, so the adapter retains a bounded
+configuration/bridge-membership settlement barrier. Rollback does not depend on
+the browser, Jido timer or successful notification delivery.
 
 ## Tailscale
 
@@ -107,9 +94,9 @@ are under **Device name and connection**. Disconnecting interrupts a browser usi
 that VPN. USB and LAN remain available. These operations do not use Ethernet's
 rollback timer.
 
-Remote's Jido agent admits one operation at a time; its supervised runtime owns a
-bounded, linked daemon worker. Acceptance does not mean completion. Agent/runtime
-crashes or timeouts stop the worker and report uncertainty; startup only observes
+Remote is one GenServer admitting one bounded, linked daemon worker at a time.
+Acceptance does not mean completion. Crashes or timeouts stop the worker;
+startup only observes
 the daemon, never replays a connect/rename/logout. Daemon-side work may still have
 completed, so read status before retrying.
 
@@ -137,20 +124,17 @@ are explicit reads and the UI accepts only HTTPS links to official Tailscale log
 hosts. The UI does not advertise equipment subnets, enable forwarding, grant
 tailnet permissions, configure Serve/Funnel or verify equipment reachability.
 
-## Observations and connectivity policy
+## Observations
 
 LiveViews subscribe to existing VintageNet/Tailscale properties and application
-workflow metadata, not a central snapshot server. Significant workflow facts are
-best-effort Jido Signals; periodic reconciliation repairs missed observations.
-Private login URLs are excluded from these subscriptions.
+workflow metadata, then reread status. There is no central snapshot server or
+second PubSub lifecycle feed. Private login URLs are excluded. Pending network
+trials reconcile current readiness periodically if a notification was missed.
 
-Alarmist derives Internet unavailability from the selected Internet role,
-observed connectivity and observation-source availability. Unconfigured or
-explicitly equipment-only networking does not require Internet. Connectivity's
-Jido agent performs at most three bounded **read-only** rechecks per outage per
-agent lifetime. Restarting its input preserves the remaining budget; restarting
-the whole agent starts a new bounded budget. There is no automatic reconfiguration,
-DHCP restart, VPN reconnect, enrollment, failover or DNS reset.
+Internet status comes from the assigned interface's VintageNet observations.
+Unconfigured or equipment-only networking does not require Internet. There is no
+separate connectivity retry agent, automatic reconfiguration, DHCP restart, VPN
+reconnect, enrollment, failover or DNS reset.
 
 ## Local recovery and HTTP exposure
 
@@ -183,7 +167,7 @@ command finishes. This was reproduced independently of networking (55 of 2,000
 `printf` commands) and during isolated network integration runs. VintageNet
 retries interface failures; a failed network trial is rejected and recovery is
 attempted, not reported as saved. A crashed interface can also delay recovery.
-The final Jido integration run passed all 14 checkpoints, but that does not
-eliminate this upstream command-runner race. The repository does not monkey-patch
+A passing integration run does not eliminate this upstream command-runner race.
+The repository does not monkey-patch
 MuonTrap or suppress the failure. See [architecture](architecture.md) for the
 remaining dependency and verification limitations.

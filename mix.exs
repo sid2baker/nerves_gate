@@ -71,7 +71,6 @@ defmodule NervesGate.MixProject do
        github: "mikehostetler/runic",
        ref: "6b1c8c85d2d560a7ff5da6c3a417254c5d2b85b6",
        override: true},
-      {:alarmist, "~> 0.4.2"},
       {:property_table, "~> 0.3.4"},
       {:lazy_html, ">= 0.1.0", only: :test},
       # tailscale_ex owns its daemon; host simulation must never start the workstation VPN.

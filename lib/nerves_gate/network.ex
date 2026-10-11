@@ -1,11 +1,9 @@
 defmodule NervesGate.Network do
   @moduledoc """
-  Public network commands and domain supervision. Jido coordinates commands;
-  the independent runtime owns the journal, hardware worker and safety timer.
-  Restart order ensures runtime recovery precedes a fresh agent.
+  LAN supervision and internal API. Clients call `NervesGate.network_*`.
+  The runtime owns commands, workers and rollback; Jido decides USB auto-save.
   """
   use Supervisor
-  alias NervesGate.Command
   alias NervesGate.Network.{Agent, Policy, Runtime}
 
   def start_link(opts \\ []) do
@@ -14,7 +12,7 @@ defmodule NervesGate.Network do
 
   @impl true
   def init(opts) do
-    id = Command.id()
+    id = inspect(self())
 
     children = [
       {Runtime, Keyword.put(opts, :id, id)},
@@ -26,8 +24,7 @@ defmodule NervesGate.Network do
            register: false,
            name: Runtime.agent_via(id),
            restart: :permanent,
-           max_postponed_signals: 32,
-           directive_timeout: 25_000
+           max_postponed_signals: 32
          ]},
         id: :agent
       )
@@ -37,48 +34,28 @@ defmodule NervesGate.Network do
   end
 
   def status(server \\ __MODULE__), do: Runtime.status(runtime(server))
+  defdelegate validate(network), to: NervesGate.Config, as: :validate_network
 
-  def validate(network, _server \\ __MODULE__) do
-    with {:ok, %{outcome: result}} <-
-           Jido.Exec.run(
-             NervesGate.Network.Actions.Validate,
-             %{network: network},
-             %{agent_state: %{outcome: nil}},
-             timeout: 5000
-           ) do
-      result
-    end
-  end
+  def propose(network, server \\ __MODULE__, access \\ nil),
+    do: GenServer.call(runtime(server), {:propose, network, access}, 15_000)
 
-  def propose(network, server \\ __MODULE__, access \\ nil, expected_revision \\ nil) do
-    Command.call(agent(server), "network.propose", %{network: network, id: Command.id()}, %{
-      access: access,
-      expected_revision: expected_revision
-    })
-  end
+  def confirm(id, server \\ __MODULE__),
+    do: GenServer.call(runtime(server), {:confirm, id}, 15_000)
 
-  def confirm(id, server \\ __MODULE__, expected_revision \\ nil),
-    do:
-      Command.call(agent(server), "network.confirm", %{id: id}, %{
-        expected_revision: expected_revision
-      })
+  def cancel(id, server \\ __MODULE__),
+    do: GenServer.call(runtime(server), {:cancel, id}, 15_000)
 
-  def cancel(id, server \\ __MODULE__, expected_revision \\ nil),
-    do:
-      Command.call(agent(server), "network.cancel", %{id: id}, %{
-        expected_revision: expected_revision
-      })
-
-  @doc "Subscribe before reading; properties are owned by the caller's process lifecycle."
-  def observe(server \\ __MODULE__) do
-    NervesGate.Observations.subscribe_runtime(runtime(server))
-  end
+  @doc "Subscribe before reading; subscriptions belong to the caller."
+  def observe(server \\ __MODULE__),
+    do: NervesGate.Observations.subscribe_runtime(runtime(server))
 
   defdelegate ready?(observed, network), to: Policy
   defdelegate conflicts(observed, network), to: Policy
 
   @doc false
-  def runtime(server), do: Command.child(server, NervesGate.Network.Runtime)
+  def runtime(server), do: GenServer.whereis(Runtime.via(instance_id(server)))
   @doc false
-  def agent(server), do: Command.child(server, :agent)
+  def agent(server), do: GenServer.whereis(Runtime.agent_via(instance_id(server)))
+
+  defp instance_id(server), do: inspect(GenServer.whereis(server))
 end

@@ -97,21 +97,26 @@ defmodule NervesGate.LANTest do
 
   test "either port can provide Internet without a route or DHCP server on equipment" do
     for internet <- ["eth0", "eth1"] do
+      equipment_port = if internet == "eth0", do: "eth1", else: "eth0"
+
       network = %{
-        "mode" => "ethernet",
-        "internet_port" => internet,
-        "equipment" => %{
-          "ip_method" => "static",
-          "static_ip" => "10.0.1.2",
-          "subnet_mask" => "255.255.255.0",
-          "gateway" => nil
+        "mode" => "ports",
+        internet => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
+        equipment_port => %{
+          "role" => "equipment",
+          "address" => %{
+            "ip_method" => "static",
+            "static_ip" => "10.0.1.2",
+            "subnet_mask" => "255.255.255.0",
+            "gateway" => nil
+          }
         }
       }
 
       configs = Map.new(Vintage.configurations(network))
       assert configs[internet].ipv4 == %{method: :dhcp}
       assert configs["br0"].vintage_net_bridge.interfaces == []
-      equipment = configs[NervesGate.Config.equipment_port(network)]
+      equipment = configs[equipment_port]
       assert equipment.ipv4.method == :static
       refute Map.has_key?(equipment.ipv4, :gateway)
       refute Map.has_key?(equipment, :dhcpd)

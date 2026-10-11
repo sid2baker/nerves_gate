@@ -20,6 +20,12 @@ defmodule NervesGate.Remote.Tailscale do
 
   @impl true
   def snapshot(_) do
+    if :ets.whereis(Tailscale.Properties) == :undefined,
+      do: NervesGate.Remote.Policy.unavailable(),
+      else: daemon_snapshot()
+  end
+
+  defp daemon_snapshot do
     config = Tailscale.get_configuration()
     state = Tailscale.get(["state"], :unavailable)
 
@@ -50,7 +56,9 @@ defmodule NervesGate.Remote.Tailscale do
   def execute(:disconnect, _, _), do: Tailscale.logout()
 
   @impl true
-  def login_url(_), do: Tailscale.get(["auth", "url"])
+  def login_url(_) do
+    if :ets.whereis(Tailscale.Properties) != :undefined, do: Tailscale.get(["auth", "url"])
+  end
 
   defp ip(nil), do: nil
   defp ip(value), do: value |> :inet.ntoa() |> to_string()

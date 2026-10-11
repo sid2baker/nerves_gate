@@ -2,8 +2,8 @@ defmodule NervesGate.SimpleSetupTest do
   use ExUnit.Case, async: true
   alias NervesGate.{Config, Network}
   alias NervesGate.Network.{Access, Discovery, Host, Vintage}
+  alias NervesGate.TestNetworkAdapter, as: Adapter
   alias NervesGateWeb.NetworkForm
-  @moduletag :tmp_dir
   @usb %{present: true, link: true, addresses: [%{address: "10.13.0.1", prefix_length: 30}]}
   @access %{local: "10.13.0.1", peer: {10, 13, 0, 2}}
   @empty %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
@@ -18,36 +18,20 @@ defmodule NervesGate.SimpleSetupTest do
     }
   }
 
-  defmodule SaveFailure do
-    @behaviour NervesGate.Network.Adapter
-    def apply_config(network, {host, path}) do
-      Host.apply_config(network, host)
-
-      if network["mode"] == "ports" do
-        File.rm!(path)
-        File.mkdir!(path)
-      end
-
-      :ok
-    end
-
-    def snapshot({host, _}), do: Host.snapshot(host)
-  end
-
-  setup %{tmp_dir: dir} do
+  setup do
     host = start_supervised!({Host, name: nil})
     Host.simulate(%{usb: @usb}, host)
+    adapter = start_supervised!({Adapter, host: host, owner: self()})
 
     opts = [
       name: nil,
-      path: Path.join(dir, "config.json"),
-      adapter: {Host, host},
+      adapter: {Adapter, adapter},
       poll_ms: 10,
       trial_ms: 2_000
     ]
 
     server = start_supervised!({Network, opts})
-    %{host: host, server: server, opts: opts, path: opts[:path]}
+    %{host: host, server: server, opts: opts, adapter: adapter}
   end
 
   test "partial and offline configurations are valid without inventing equipment addresses" do
@@ -127,7 +111,7 @@ defmodule NervesGate.SimpleSetupTest do
   test "first USB setup saves directly; later USB edits still expire and restore", ctx do
     assert {:ok, _} = Network.propose(@wan, ctx.server, @access)
     assert Network.status(ctx.server).trial == nil
-    assert {:ok, saved} = Config.load(ctx.path)
+    assert {:ok, saved} = Host.load(ctx.host)
     assert saved["setup_completed"]
     assert saved["network"] == @wan
     :sys.replace_state(Network.runtime(ctx.server), &%{&1 | trial_ms: 200})
@@ -140,7 +124,7 @@ defmodule NervesGate.SimpleSetupTest do
     end)
 
     assert Host.snapshot(ctx.host).ports |> hd() |> Map.get(:method) == "dhcp"
-    assert {:ok, ^saved} = Config.load(ctx.path)
+    assert {:ok, ^saved} = Host.load(ctx.host)
   end
 
   test "USB-only and equipment-only setup can finish offline", ctx do
@@ -212,23 +196,21 @@ defmodule NervesGate.SimpleSetupTest do
   end
 
   test "failed automatic persistence never reports success", ctx do
-    stop_supervised!(Network)
-    opts = Keyword.put(ctx.opts, :adapter, {SaveFailure, {ctx.host, ctx.path}})
-    server = start_supervised!({Network, opts})
-    assert {:error, {:save, _}} = Network.propose(@empty, server, @access)
-    assert Network.status(server).trial == nil
-    refute Network.status(server).config["setup_completed"]
+    Adapter.fail(ctx.adapter, :save, :enospc)
+    assert {:error, {:save, _}} = Network.propose(@empty, ctx.server, @access)
+    assert Network.status(ctx.server).trial == nil
+    refute Network.status(ctx.server).config["setup_completed"]
     assert hd(Host.snapshot(ctx.host).ports).method == "dhcp"
   end
 
-  test "forms round-trip legacy settings and never silently reuse a port" do
-    legacy = %{
-      "mode" => "ethernet",
-      "internet_port" => "eth1",
-      "equipment" => @equipment["address"]
+  test "forms round-trip port settings and never silently reuse a port" do
+    settings = %{
+      "mode" => "ports",
+      "eth1" => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
+      "eth0" => %{"role" => "equipment", "address" => @equipment["address"]}
     }
 
-    draft = NetworkForm.from_settings(legacy)
+    draft = NetworkForm.from_settings(settings)
     assert {:ok, network} = NetworkForm.to_network(draft, [])
     assert network["eth0"] == @equipment
     assert network["eth1"] == @wan["eth0"]

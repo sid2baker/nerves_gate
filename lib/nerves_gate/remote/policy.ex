@@ -1,7 +1,6 @@
 defmodule NervesGate.Remote.Policy do
   @moduledoc "Pure command admission, public observation filtering and daemon outcome interpretation."
-  alias NervesGate.Device.Error
-  alias NervesGate.Remote.{Effect, Plugin}
+  alias NervesGate.Error
 
   def unavailable do
     %{
@@ -40,7 +39,7 @@ defmodule NervesGate.Remote.Policy do
     end
   end
 
-  def validate(operation, params) when operation in [:disconnect, :login_url] and params == %{},
+  def validate(:disconnect, params) when params == %{},
     do: {:ok, %{}}
 
   def validate(_, _), do: {:error, Error.new("invalid_parameters", "Invalid Tailscale command.")}
@@ -54,20 +53,6 @@ defmodule NervesGate.Remote.Policy do
     do:
       {:error,
        Error.new("remote_unavailable", "Tailscale is starting or unavailable. Try again shortly.")}
-
-  def request(operation, params, id, context) do
-    state = context.agent_state
-    observed = context.plugin_inputs[Plugin].runtime
-
-    with :ok <- NervesGate.Command.check_revision(Map.get(context, :expected_revision), observed),
-         :ok <- available(observed),
-         {:ok, validated} <- validate(operation, params) do
-      {:ok, %{state | phase: :running, operation_id: id, outcome: :pending},
-       [%Effect{operation: operation, id: id, params: validated}]}
-    else
-      error -> {:ok, %{state | outcome: error}}
-    end
-  end
 
   def sanitize(observed) do
     defaults = unavailable()

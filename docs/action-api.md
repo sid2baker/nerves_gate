@@ -1,152 +1,132 @@
-# Device action API
+# NervesGate public API
 
-[`NervesGate.Device`](../lib/nerves_gate/device.ex) is the stateless public boundary
-for LiveView, IEx/SSH and future interfaces. It translates eight stable string
-commands into domain APIs backed by Jido v3 Actions. It starts no process and
-stores no projection or command history.
+Start with [`lib/nerves_gate.ex`](../lib/nerves_gate.ex). It contains the named,
+documented, typed functions used by LiveView and IEx/SSH. There is no public
+string dispatcher, client struct, facade process or cached status server.
+Jido and the domain runtimes are implementation details.
 
-## Read, decide, dispatch
+## Read, act, read again
 
 ```elixir
-alias NervesGate.{Config, Device}
-
-:ok = Device.subscribe()                 # bind before the initial read
-view = Device.projection()
+:ok = NervesGate.subscribe()
+status = NervesGate.status()
 
 settings = %{
   "mode" => "ports",
-  "eth0" => %{"role" => "internet", "address" => Config.address_defaults()},
+  "eth0" => %{"role" => "internet", "address" => %{"ip_method" => "dhcp"}},
   "eth1" => nil
 }
 
-Device.dispatch("network.validate", %{"network" => settings})
-{:ok, %{result: %{trial_id: id}}} =
-  Device.dispatch("network.propose", %{"network" => settings},
-    expected_revision: view.revision)
+{:ok, settings} = NervesGate.network_validate(settings)
+{:ok, id} = NervesGate.network_propose(settings)
 
-# Check connectivity before keeping the trial. Or call network.cancel.
-Device.dispatch("network.confirm", %{"trial_id" => id})
+# Inspect connectivity before keeping the trial. Or call network_cancel(id).
+:ok = NervesGate.network_confirm(id)
+status = NervesGate.status()
 ```
 
-`dispatch(action_id, params \\ %{}, opts \\ [])` accepts known string action IDs
-and exactly their required string-keyed JSON parameters. Process identifiers,
-references, structs and invalid UTF-8 are not accepted. Results remain:
+Commands return their result, not a status envelope:
 
-```elixir
-{:ok, %{result: result, projection: view}}
-{:error, %{error: %{code: code, message: message}, projection: view}}
-```
+| Function | Success |
+| --- | --- |
+| `network_validate(settings)` | `{:ok, normalized_settings}`; pure, no running gateway required |
+| `network_propose(settings, opts)` | `{:ok, trial_id}` after temporary application |
+| `network_confirm(trial_id, opts)` | `:ok` after VintageNet saves the interface settings |
+| `network_cancel(trial_id, opts)` | `:ok` after restoration |
+| `remote_connect(hostname, opts)` | `:ok` after accepting connection/enrollment |
+| `remote_configure(hostname, opts)` | `:ok` after accepting a hostname change |
+| `remote_disconnect(opts)` | `:ok` after accepting sign-out |
+| `remote_login_url(opts)` | `{:ok, url_or_nil}`; private query |
+| `status(opts)` | A current status map |
+| `subscribe(opts)` | `:ok`; subscriptions belong to the caller |
 
-| Command | Parameters | Result / meaning |
-| --- | --- | --- |
-| `network.validate` | `network` | `%{network: normalized}`; pure validation, no running agent required |
-| `network.propose` | `network` | `%{trial_id: id}` after durable preparation and successful apply |
-| `network.confirm` | `trial_id` | `%{}` after the confirmed decision is durable |
-| `network.cancel` | `trial_id` | `%{}` after successful restoration |
-| `remote.connect` | `hostname` | `%{accepted: true}`; begin connection/enrollment |
-| `remote.configure` | `hostname` | `%{accepted: true}`; request a name change |
-| `remote.disconnect` | none | `%{accepted: true}`; request sign-out |
-| `remote.login_url` | none | `%{url: url_or_nil}`; explicit private query |
+All `opts` arguments are optional keyword lists. Settings retain their validated
+string-keyed configuration format; hostname and trial ID are direct string
+arguments, not JSON command envelopes. Failures return
+`{:error, %{code: code, message: message}}`; raw adapter errors are not public data.
 
-Console proposals require confirmation. Only trusted server code can supply the
-`:access` context used to verify first setup through USB. Never derive this option
-from request parameters or forwarded headers. All subsequent changes require
-confirmation, including those made through USB. For immediate-ready first USB
-setup, the proposal reply waits for durable auto-save. If application is still
-settling, the agent acknowledges the pending trial and later commits when ready,
-without browser intervention. Conflicts and persistence failures are not reported
-as successful auto-saves. The runtime independently enforces the 15-second bound.
+## Timing and safety
 
-Remote acceptance is **not completion**. Observe `view.remote_access.operation`
-and `.error`. One bounded asynchronous operation can run at a time. Private
-login URLs are delivered directly to the requester, never placed in agent state,
-PropertyTable, public facts or projections. Do not log or share them.
+Console proposals require confirmation. Only trusted server code may supply the
+`:access` option to verify first setup through USB. Never derive it from request
+parameters or forwarded headers. All subsequent changes require confirmation,
+including those through USB.
 
-## Execution and outcomes
+Immediately-ready first USB setup waits for auto-save before returning.
+If application is still settling, the agent acknowledges the pending trial and
+later commits when ready. Conflicts and persistence failures are not successful
+auto-saves. The runtime independently enforces the 15-second USB bound and the
+60-second manual confirmation window. Confirmation saves interfaces individually;
+interrupted or failed persistence can leave a partial save. There is no durable
+trial journal or multi-interface transaction. See [networking](networking.md).
 
-1. Device validates the wire shape and translates to a public domain operation.
-2. A Jido AgentServer routes a request Signal to its schema-validated Action.
-   Plugin admission reads current domain safety state; the Action makes a pure
-   decision and returns candidate agent state plus typed effect directives.
-3. After agent commit, the Plugin dispatches directives to an infrastructure
-   runtime. It rechecks revisions and safety at the serialized effect boundary.
-4. The runtime owns bounded, linked workers. Network directives return after
-   submission so the agent can coordinate subsequent applied/readiness facts.
-   The private caller acknowledgment still waits for the relevant durable/apply/
-   restore boundary; Remote replies after accepting its worker.
-5. Significant outcomes become Jido Signals. Device returns an on-demand view,
-   not a cached snapshot. Draft validation uses `Jido.Exec.run/4` directly.
+Remote acceptance is **not completion**. Observe `status.remote_access.operation`
+and `.error`. One bounded asynchronous operation runs at a time. Enrollment URLs
+are delivered only by `remote_login_url/1`, never placed in status, server state
+or subscribed properties. Do not log or broadcast them.
 
-Errors have stable string codes and actionable messages; raw adapter exceptions
-are not public data. Invalid input, stale revisions/IDs, conflicting work,
-configuration readiness and recovery failures remain distinct. On timeout,
-agent death or `outcome_unknown`, **read current state before deciding whether to
-retry**. A caller timeout does not cancel an admitted Jido command. Network's
-independent watchdog/journal restores unconfirmed work; daemon-side writes may
-finish after their caller dies. Uncertain client commands are not automatically
-replayed. Network recovery may retry restoration; there is no exactly-once
-acknowledgment or durable command queue.
+Network commands use one standard OTP call with a 15-second timeout and deferred
+hardware-completion replies. Manual commands do not wait for the policy agent.
+On `outcome_unknown`, **read status before deciding whether to retry**. Caller
+timeout does not cancel an admitted command. Network recovery remains independent
+of the caller; a daemon mutation may complete after its caller dies. Uncertain
+commands are not automatically replayed. There is no exactly-once acknowledgment
+or durable command queue.
 
-## Read shape and revisions
+## Status and stale requests
 
-`Device.projection/0` retains its compatibility name and JSON-encodable v2 shape.
-It combines two independently read domains; it is **not an atomic cross-domain
-snapshot**. [`Device.Selectors`](../lib/nerves_gate/device/selectors.ex) is pure.
+`NervesGate.status/1` reads Network and Remote independently; it is **not an atomic
+cross-domain snapshot**. [`NervesGate.Status`](../lib/nerves_gate/status.ex) builds
+the JSON-encodable v2 map without a process or cache:
 
-- `version`, `revision`, `system`: shape version, opaque concurrency token, firmware.
-- `network`: requested/saved settings, pending trial, observed interfaces,
-  readiness, recovery and structured errors.
-- `connections`: roles, cable/address/Internet observations and subnet conflicts.
+- `version`, `system`: shape version and firmware.
+- `network`: saved settings, pending trial, observed interfaces, readiness,
+  recovery and structured errors.
+- `connections`: port roles, cable/address/Internet observations and conflicts.
 - `remote_access`: sanitized Tailscale observations, routes, operation and error.
-- `capabilities`, `actions`: supported features and presentation-only availability,
-  labels and required parameters; never authorization or execution policy.
+- `capabilities`, `actions`: presentation-only availability, labels and reasons.
+  Existing dotted action labels such as `"network.propose"` remain metadata;
+  call `NervesGate.network_propose/2`, not a string dispatcher.
 
 Equipment reachability remains unverified. Permitted Tailscale routes are unknown
 (`nil`), not assumed empty. Advertised routes do not prove approval.
 
-An optional `expected_revision` checks **only the commanded domain**, both at
-admission and at the effect boundary. A Network trial changes its token; ordinary
-link/lease updates do not invalidate a form draft. Remote observations and
-operations change the Remote token. Changes in the other domain do not reject
-an otherwise current command. Runtime restart changes that domain's incarnation.
-Treat tokens as opaque; confirm/cancel always require the exact current trial ID.
-LiveViews also compare the draft's saved base to prevent overwriting another
-session's configuration.
+Confirm/cancel require the exact current trial ID. Only one trial and one remote
+operation can run at a time. LiveViews compare drafts with their saved base before
+submitting, but there is no cross-interface revision-token protocol. Network and
+Remote commands remain independent.
 
-## Subscriptions and UI mapping
+## Subscriptions
 
-`Device.subscribe/0` binds the caller directly to domain workflow metadata and
-adapter PropertyTable sources. Notifications are `%PropertyTable.Event{}` or the
-subsystem's translated notification tuples, **not `{:device, snapshot}`**. Treat
-all payloads as hints: re-read current state rather than overwriting a newer
-command reply with a queued observation. Subscribe before reading and re-subscribe
-after reconnecting or replacing an entire domain instance. Registries remove
-subscriptions on caller death.
+`NervesGate.subscribe/1` binds the caller to domain workflow metadata and existing
+adapter observations. Notifications are `%PropertyTable.Event{}` or subsystem
+notification tuples, not complete snapshots. Re-read status rather than applying
+queued payloads. Subscribe before reading and after reconnecting or replacing an
+entire domain instance. Subscriptions are removed on caller death. Unavailable
+sources return an error; retry rather than assuming the subscription succeeded.
 
-`NervesGateWeb.Observations` binds connected LiveViews to these properties and to
-`network:events` / `remote:events` with lifecycle-managed
-`Phoenix.LiveView.subscribe/3` ([PR #4441](https://github.com/phoenixframework/phoenix_live_view/pull/4441)).
-It coalesces bursts for 20 ms before re-reading. Connection panels receive parent
-assigns; they do not add subscriptions. Neither AgentServer handles nor Jido
-implementation details enter the view layer. Alarmist subscriptions belong to the
-Connectivity input lifecycle; these pages have no separate alarm display.
+`NervesGateWeb.Observations` handles those notifications for connected LiveViews.
+There are no duplicate PubSub lifecycle broadcasts. It retries failed subscriptions
+after one second and coalesces notification bursts for 20 ms before re-reading. Panels share parent assigns; they add no subscriptions. Draft
+editing, disclosures and countdowns stay in the UI; backend safety does not.
 
-| Page / control | Device command |
-| --- | --- |
-| Network: Finish setup / Apply changes | `network.propose` |
-| Network: Keep changes | `network.confirm` |
-| Network: Restore previous settings | `network.cancel` |
-| Tailscale: Connect Tailscale | `remote.connect` |
-| Tailscale: Save device name | `remote.configure` |
-| Tailscale: confirm disconnect | `remote.disconnect` |
-| Tailscale: retrieve sign-in link | `remote.login_url` |
+## Independent test instances
 
-Draft edits, disclosures and countdowns remain local UI events. The backend always
-validates again. Tests can inject independent domain supervisors with
-`Device.new(network: network, remote: remote)` and pass that value as `server:`;
-this constructs a facade, not a competing state process.
+Pass domain server references directly; no client object or `server:` wrapper:
 
-The unauthenticated UI remains restricted by its trusted-network deployment
-assumption, CSRF and same-origin controls. Future interfaces must add their own
-authentication and authorization before forwarding commands. Availability and
-revision tokens are not access control.
+```elixir
+opts = [network: network_supervisor, remote: remote_server]
+:ok = NervesGate.subscribe(opts)
+{:ok, id} = NervesGate.network_propose(settings, opts)
+:ok = NervesGate.network_cancel(id, opts)
+status = NervesGate.status(opts)
+```
+
+The former `NervesGate.Device` module, `dispatch/3`, `projection/1` and result/status
+envelopes were removed. See [`api_test.exs`](../test/nerves_gate/api_test.exs) for
+public API examples and safety regressions, and [architecture](architecture.md)
+for internal execution and recovery.
+
+The current trusted-network deployment assumption, unauthenticated HTTP exposure,
+CSRF and same-origin controls are unchanged. Future interfaces must establish
+access control before invoking actions; availability is not authorization.

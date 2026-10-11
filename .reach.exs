@@ -1,10 +1,16 @@
 [
   source: [
     forbidden_modules: [
-      "NervesGate.Device.Workflow",
-      "NervesGate.Device.Actions",
-      "NervesGate.Device.Projection",
-      "NervesGate.SystemState"
+      "NervesGate.Device",
+      "NervesGate.Device.*",
+      "NervesGate.SystemState",
+      "NervesGate.AtomicFile",
+      "NervesGate.Network.TrialStore",
+      "NervesGate.Network.Recovery",
+      "NervesGate.Connectivity",
+      "NervesGate.Connectivity.*",
+      "NervesGate.Remote.Agent",
+      "NervesGate.Remote.Runtime"
     ]
   ],
   calls: [
@@ -16,34 +22,29 @@
        [
          "Jido.*",
          "NervesGate.Network.Runtime.*",
-         "NervesGate.Remote.Runtime.*",
          "NervesGate.Network.Agent.*",
-         "NervesGate.Remote.Agent.*",
-         "NervesGate.Connectivity.Agent.*",
+         "NervesGate.Network.status",
+         "NervesGate.Network.validate",
          "NervesGate.Network.propose",
          "NervesGate.Network.confirm",
          "NervesGate.Network.cancel",
          "NervesGate.Remote.command",
-         "NervesGate.Config.save",
+         "NervesGate.Remote.status",
+         "NervesGate.Remote.login_url",
          "VintageNet.configure",
+         "VintageNet.Persistence.*",
          "Tailscale.*"
        ]},
-      {[
-         "NervesGate.Network.Actions.*",
-         "NervesGate.Remote.Actions.*",
-         "NervesGate.Connectivity.Actions.*",
-         "NervesGate.Device.Selectors"
-       ],
+      {["NervesGate.Network.Actions.*", "NervesGate.Status"],
        [
          "GenServer.call",
          "System.cmd",
          "File.write*",
-         "NervesGate.Config.save",
          "NervesGate.Network.Runtime.*",
-         "NervesGate.Remote.Runtime.*",
          "NervesGate.Network.Adapter.*",
          "NervesGate.Remote.Adapter.*",
          "VintageNet.configure",
+         "VintageNet.Persistence.*",
          "Tailscale.*"
        ]}
     ]

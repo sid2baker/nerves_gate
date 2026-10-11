@@ -2,9 +2,8 @@ defmodule NervesGateWeb.LiveTest do
   use ExUnit.Case, async: false
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
-  alias NervesGate.{Device, Network}
+  alias NervesGate.Network
   @endpoint NervesGateWeb.Endpoint
-  @moduletag :tmp_dir
   @shared %{"mode" => "shared", "equipment" => NervesGate.Config.address_defaults()}
 
   defmodule PanelHost do
@@ -15,7 +14,7 @@ defmodule NervesGateWeb.LiveTest do
       {:ok, socket |> assign(panels: ["one", "two"]) |> refresh()}
     end
 
-    def refresh(socket), do: assign(socket, projection: NervesGate.Device.projection())
+    def refresh(socket), do: assign(socket, projection: NervesGate.status())
 
     def handle_event("remove", %{"id" => id}, socket),
       do: {:noreply, assign(socket, :panels, socket.assigns.panels -- [id])}
@@ -35,26 +34,42 @@ defmodule NervesGateWeb.LiveTest do
     end
   end
 
-  setup %{tmp_dir: dir} do
+  setup do
     Supervisor.terminate_child(NervesGate.Supervisor, Network)
-    Network.Host.simulate(%{})
-    start_supervised!({Network, path: Path.join(dir, "nerves_gate.json"), poll_ms: 10})
+    Network.Host.reset()
+    start_supervised!({Network, poll_ms: 10})
 
     on_exit(fn ->
-      Network.Host.simulate(%{})
+      Network.Host.reset()
       Supervisor.restart_child(NervesGate.Supervisor, Network)
     end)
 
     :ok
   end
 
+  test "connected views retry failed subscriptions after a domain becomes available" do
+    stop_supervised!(Network)
+    {:ok, view, _} = live(build_conn(), "/")
+    start_supervised!({Network, poll_ms: 10})
+    registry = PropertyTable.Supervisor.registry_name(NervesGate.Observations.table())
+
+    eventually(
+      fn ->
+        Enum.count(Registry.lookup(registry, :subscriptions), fn {pid, _} -> pid == view.pid end) ==
+          4
+      end,
+      200
+    )
+
+    assert Process.alive?(view.pid)
+  end
+
   test "saved offline settings do not label a detected cable as the Internet port" do
     offline = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
 
-    {:ok, %{result: %{trial_id: id}}} =
-      Device.dispatch("network.propose", %{"network" => offline})
+    {:ok, id} = NervesGate.network_propose(offline)
 
-    {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id})
+    :ok = NervesGate.network_confirm(id)
 
     Network.Host.simulate(%{
       ports: [
@@ -70,7 +85,7 @@ defmodule NervesGateWeb.LiveTest do
       ]
     })
 
-    eventually(fn -> Device.projection().connections.suggested_internet_port == "eth0" end)
+    eventually(fn -> NervesGate.status().connections.suggested_internet_port == "eth0" end)
     {:ok, view, _} = live(build_conn(), "/")
     refute has_element?(view, "#connection-internet", "Port 1")
     assert has_element?(view, "#connection-internet", "Choose an Internet connection")
@@ -147,8 +162,7 @@ defmodule NervesGateWeb.LiveTest do
     {:ok, view, _} = live(conn, "/setup")
 
     render_submit(view, "save", %{
-      "network" => %{"usb" => "true", "auto_save" => "true"},
-      "revision" => Device.projection().revision
+      "network" => %{"usb" => "true", "auto_save" => "true"}
     })
 
     assert has_element?(view, "#confirm-settings")
@@ -239,7 +253,7 @@ defmodule NervesGateWeb.LiveTest do
       end)
 
     Network.Host.simulate(%{ports: ports})
-    eventually(fn -> Device.projection().connections.suggested_internet_port == nil end)
+    eventually(fn -> NervesGate.status().connections.suggested_internet_port == nil end)
     {:ok, view, _} = live(build_conn(), "/setup")
     assert view |> form("#network-form") |> render_submit() =~ "More than one network"
     refute Network.status().trial
@@ -254,15 +268,13 @@ defmodule NervesGateWeb.LiveTest do
     view |> element("button", "Change Internet connection") |> render_click()
     view |> form("#network-form", network: %{internet_port: "eth1"}) |> render_change()
 
-    {:ok, %{result: %{trial_id: id}}} =
-      Device.dispatch("network.propose", %{"network" => @shared})
+    {:ok, id} = NervesGate.network_propose(@shared)
 
-    assert {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id})
+    assert :ok = NervesGate.network_confirm(id)
     eventually(fn -> has_element?(view, "#apply-settings[disabled]") end)
 
     render_submit(view, "save", %{
-      "network" => %{"internet_port" => "eth1"},
-      "revision" => Device.projection().revision
+      "network" => %{"internet_port" => "eth1"}
     })
 
     refute Network.status().trial
@@ -273,8 +285,7 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   test "trial survives browser reconnection and can be cancelled" do
-    {:ok, %{result: %{trial_id: id}}} =
-      Device.dispatch("network.propose", %{"network" => @shared})
+    {:ok, id} = NervesGate.network_propose(@shared)
 
     {:ok, view, _} = live(build_conn(), "/settings")
     assert has_element?(view, "#confirm-settings")
@@ -315,12 +326,12 @@ defmodule NervesGateWeb.LiveTest do
     {:ok, setup, _} = live(build_conn(), "/setup")
     {:ok, dashboard, _} = live(build_conn(), "/")
 
-    {:ok, %{result: %{trial_id: id}, projection: projection}} =
-      Device.dispatch("network.propose", %{"network" => @shared})
+    {:ok, id} = NervesGate.network_propose(@shared)
+    projection = NervesGate.status()
 
     eventually(fn -> has_element?(setup, "#confirm-settings:not([disabled])") end)
     eventually(fn -> render(dashboard) =~ "Network changes are not saved yet" end)
-    assert {:ok, _} = Device.dispatch("network.confirm", %{"trial_id" => id})
+    assert :ok = NervesGate.network_confirm(id)
     eventually(fn -> not has_element?(setup, "#confirm-settings") end)
     eventually(fn -> not (render(dashboard) =~ "Network changes are not saved yet") end)
 
@@ -332,21 +343,19 @@ defmodule NervesGateWeb.LiveTest do
   end
 
   test "an old browser click cannot confirm a newer client's trial" do
-    {:ok, %{result: %{trial_id: old}}} =
-      Device.dispatch("network.propose", %{"network" => @shared})
+    {:ok, old} = NervesGate.network_propose(@shared)
 
     {:ok, view, _} = live(build_conn(), "/setup")
-    assert {:ok, _} = Device.dispatch("network.cancel", %{"trial_id" => old})
+    assert :ok = NervesGate.network_cancel(old)
 
-    {:ok, %{result: %{trial_id: current}}} =
-      Device.dispatch("network.propose", %{"network" => @shared})
+    {:ok, current} = NervesGate.network_propose(@shared)
 
     assert render_click(view, "confirm", %{"trial_id" => old}) =~ "This trial has ended"
-    assert Device.projection().network.pending.id == current
-    refute Device.projection().network.setup_completed
+    assert NervesGate.status().network.pending.id == current
+    refute NervesGate.status().network.setup_completed
   end
 
-  test "connected LiveViews subscribe to actual properties and application events; death cleans both" do
+  test "connected LiveViews use only property subscriptions and death cleans them up" do
     registry = PropertyTable.Supervisor.registry_name(NervesGate.Observations.table())
 
     subscriptions = fn pid ->
@@ -361,11 +370,9 @@ defmodule NervesGateWeb.LiveTest do
       assert [_, _, _, _] = subscriptions.(pid)
 
       for topic <- ["network:events", "remote:events"] do
-        assert [{^pid, [Phoenix.LiveView.PubSub | ref]}] =
+        assert [] ==
                  Registry.lookup(NervesGate.PubSub, topic)
                  |> Enum.filter(fn {subscriber, _} -> subscriber == pid end)
-
-        assert is_reference(ref)
       end
 
       GenServer.stop(pid)
@@ -386,8 +393,8 @@ defmodule NervesGateWeb.LiveTest do
     end
 
     assert [_, _, _, _] = subscriptions.()
-    old = Device.projection()
-    assert {:ok, _} = Device.dispatch("network.propose", %{"network" => @shared})
+    old = NervesGate.status()
+    assert {:ok, _} = NervesGate.network_propose(@shared)
 
     for id <- ["one", "two"] do
       eventually(fn -> has_element?(view, "##{id}", "Shared network") end)
@@ -433,7 +440,7 @@ defmodule NervesGateWeb.LiveTest do
     })
 
     eventually(fn ->
-      Network.Access.usb?(Device.projection().network.observed, %{
+      Network.Access.usb?(NervesGate.status().network.observed, %{
         local: "10.13.0.1",
         peer: {10, 13, 0, 2}
       })

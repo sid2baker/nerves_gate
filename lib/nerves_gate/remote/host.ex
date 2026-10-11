@@ -42,7 +42,7 @@ defmodule NervesGate.Remote.Host do
     do: update(server, &%{&1 | hostname: name})
 
   def execute(:disconnect, _, server),
-    do: update(server, &Map.merge(defaults(), %{hostname: &1.hostname()}))
+    do: update(server, &Map.merge(defaults(), %{hostname: &1.hostname}))
 
   @impl true
   def login_url(_), do: nil

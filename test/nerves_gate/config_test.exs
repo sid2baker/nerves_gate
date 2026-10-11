@@ -10,20 +10,10 @@ defmodule NervesGate.ConfigTest do
   }
 
   test "new gateways leave Ethernet unassigned" do
-    assert {:ok, config} = Config.validate(Config.defaults())
-    assert config["version"] == 2
-    assert config["network"] == %{"mode" => "unconfigured"}
-    assert {:ok, ^config} = Config.load("/nonexistent/nerves_gate.json")
-  end
-
-  test "version 1 migration preserves existing shared network and other settings" do
-    old = %{Config.defaults() | "version" => 1, "network" => @static, "setup_completed" => true}
-    assert {:ok, migrated} = Config.validate(old)
-    assert migrated["network"] == %{"mode" => "shared", "equipment" => @static}
-    assert migrated["setup_completed"]
-    assert migrated["mobile"] == old["mobile"]
-    assert migrated["vpn"] == old["vpn"]
-    assert {:error, _} = Config.validate(Map.put(old, "secret", "no"))
+    assert Config.defaults() == %{
+             "setup_completed" => false,
+             "network" => %{"mode" => "unconfigured"}
+           }
   end
 
   test "static address accepts optional gateway and masks are contiguous" do
@@ -63,20 +53,28 @@ defmodule NervesGate.ConfigTest do
 
   test "separate roles require explicit port and manual equipment address without default route" do
     network = %{
-      "mode" => "ethernet",
-      "internet_port" => "eth0",
-      "equipment" => %{@static | "gateway" => nil}
+      "mode" => "ports",
+      "eth0" => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
+      "eth1" => %{"role" => "equipment", "address" => %{@static | "gateway" => nil}}
     }
 
     assert {:ok, ^network} = Config.validate_network(network)
-    assert {:ok, _} = Config.validate_network(%{network | "internet_port" => "eth1"})
+
+    assert {:ok, _} =
+             Config.validate_network(%{
+               network
+               | "eth0" => network["eth1"],
+                 "eth1" => network["eth0"]
+             })
 
     for invalid <- [
           @static,
           %{},
-          %{network | "internet_port" => "usb0"},
-          %{network | "equipment" => @static},
-          %{network | "equipment" => Config.address_defaults()},
+          Map.put(network, "usb0", network["eth0"]),
+          put_in(network, ["eth1", "address"], @static),
+          put_in(network, ["eth1", "address"], Config.address_defaults()),
+          put_in(network, ["eth1", "address", "nameservers"], ["1.1.1.1"]),
+          %{network | "eth1" => network["eth0"]},
           Map.put(network, "nat", true),
           %{network | "mode" => "mobile"}
         ] do
@@ -90,30 +88,15 @@ defmodule NervesGate.ConfigTest do
     refute Config.overlap?("bad", 24, "10.1.9.1", 24)
   end
 
-  test "reject unsupported version, unknown data and credentials" do
-    for config <- [
-          nil,
-          [],
-          %{},
-          %{Config.defaults() | "version" => 99},
-          Map.put(Config.defaults(), "status", %{}),
-          put_in(Config.defaults(), ["mobile", "pin"], "1234")
-        ] do
-      assert {:error, _} = Config.validate(config)
+  test "reject malformed text, improper DNS lists, unknown data and credentials" do
+    for network <- [nil, [], %{}, Map.put(Config.defaults()["network"], "password", "secret")] do
+      assert {:error, _} = Config.validate_network(network)
     end
-  end
 
-  @tag :tmp_dir
-  test "atomic private file preserves confirmed config on invalid write", %{tmp_dir: dir} do
-    path = Path.join(dir, "nerves_gate.json")
-    config = %{Config.defaults() | "network" => %{"mode" => "shared", "equipment" => @static}}
-    assert :ok = Config.save(config, path)
-    assert {:ok, ^config} = Config.load(path)
-    assert Bitwise.band(File.stat!(path).mode, 0o777) == 0o600
-    assert {:error, _} = Config.save(%{"version" => 99}, path)
-    assert {:ok, ^config} = Config.load(path)
-    assert File.ls!(dir) == ["nerves_gate.json"]
-    File.write!(path, "broken JSON")
-    assert {:error, _} = Config.load(path)
+    assert {:error, _} = Config.validate_address(%{@static | "static_ip" => <<255>>})
+
+    for dns <- [["1.1.1.1" | :invalid], ["1.1.1.1", "8.8.8.8", "9.9.9.9", "8.8.4.4"], [<<255>>]] do
+      assert {:error, _} = Config.validate_address(Map.put(@static, "nameservers", dns))
+    end
   end
 end

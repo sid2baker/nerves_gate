@@ -1,20 +1,13 @@
 defmodule NervesGate.ObservationsTest do
   use ExUnit.Case, async: true
   alias NervesGate.{Config, Network, Observations, Remote}
-  @moduletag :tmp_dir
 
-  setup %{tmp_dir: dir} do
+  setup do
     host = start_supervised!({Network.Host, name: nil})
     remote_host = start_supervised!({Remote.Host, name: nil})
 
     network =
-      start_supervised!(
-        {Network,
-         name: nil,
-         path: Path.join(dir, "config.json"),
-         adapter: {Network.Host, host},
-         poll_ms: 60_000}
-      )
+      start_supervised!({Network, name: nil, adapter: {Network.Host, host}, poll_ms: 60_000})
 
     remote =
       start_supervised!({Remote, name: nil, adapter: {Remote.Host, remote_host}, poll_ms: 60_000})
@@ -33,15 +26,13 @@ defmodule NervesGate.ObservationsTest do
     :ok = Remote.Host.simulate(%{state: "online", hostname: "observable"}, ctx.remote_host)
     assert_receive %PropertyTable.Event{property: ["host", "remote", _]}, 1_000
 
-    eventually(fn ->
-      :sys.get_state(Remote.runtime(ctx.remote)).snapshot.hostname == "observable"
-    end)
+    assert Remote.status(ctx.remote).hostname == "observable"
+    refute Map.has_key?(:sys.get_state(ctx.remote), :snapshot)
   end
 
   test "raw interface bursts do not become Jido facts or consume command queue capacity", ctx do
     runtime = Network.runtime(ctx.network)
     agent = Network.agent(ctx.network)
-    sequence = :sys.get_state(runtime).sequence
     :sys.suspend(agent)
 
     try do
@@ -52,7 +43,8 @@ defmodule NervesGate.ObservationsTest do
 
       # Reads flush the runtime mailbox, independent of a blocked agent.
       Network.status(ctx.network)
-      assert :sys.get_state(runtime).sequence == sequence
+      Process.sleep(40)
+      assert Process.info(agent, :message_queue_len) == {:message_queue_len, 0}
     after
       :sys.resume(agent)
     end

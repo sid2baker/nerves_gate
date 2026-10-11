@@ -73,7 +73,7 @@ defmodule NervesGate.FirmwareBuildTest do
   test "EC100 boot configures only USB provisioning, leaving the LAN to the network manager" do
     config = Config.Reader.read!(@target_config, target: :ec100)
     assert config[:nerves_gate][:target] == :ec100
-    assert config[:vintage_net][:persistence] == VintageNet.Persistence.Null
+    assert config[:vintage_net][:persistence] == VintageNet.Persistence.FlatFile
     assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
   end
 

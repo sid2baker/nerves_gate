@@ -33,7 +33,7 @@ defmodule NervesGateWeb.NetworkStatus do
       <p :if={@projection.connections.mode == "shared"} class="ui-help">
         Both ports are joined into one shared network.
       </p>
-      <p :if={@projection.connections.mode in ["ethernet", "ports"]} class="ui-help">
+      <p :if={@projection.connections.mode == "ports"} class="ui-help">
         Separate networks. Equipment is not given Internet access.
       </p>
       <p :if={@projection.connections.mode == "unconfigured"} class="ui-help">

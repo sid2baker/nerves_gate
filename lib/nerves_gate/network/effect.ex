@@ -5,10 +5,8 @@ defmodule NervesGate.Network.Effect do
   @schema Zoi.struct(
             __MODULE__,
             %{
-              operation:
-                Zoi.enum([:propose, :confirm, :cancel, :auto_confirm, :auto_cancel, :await]),
-              id: Zoi.string(),
-              network: Zoi.any() |> Zoi.default(nil)
+              operation: Zoi.enum([:auto_confirm, :auto_cancel, :await]),
+              id: Zoi.string()
             },
             coerce: true
           )

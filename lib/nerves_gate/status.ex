@@ -1,13 +1,12 @@
-defmodule NervesGate.Device.Selectors do
-  @moduledoc "Pure, reusable UI selections. No process, cache, persistence or command execution."
+defmodule NervesGate.Status do
+  @moduledoc "Pure status builder behind `NervesGate.status/1`. No process, cache or command execution."
   alias NervesGate.{Config, Network, Remote}
-  alias NervesGate.Device.Error
+  alias NervesGate.Error
   alias NervesGate.Observations.Network, as: NetworkObservation
 
   def build(status, remote) do
     %{
       version: 2,
-      revision: "#{revision(status)}|#{revision(remote)}",
       system: %{firmware: NervesGate.version(), target: to_string(NervesGate.target())},
       network: network(status),
       connections: connections(status),
@@ -22,10 +21,7 @@ defmodule NervesGate.Device.Selectors do
     }
   end
 
-  defp revision(nil), do: "unavailable"
-  defp revision(status), do: Map.get(status, :revision, "unavailable")
-
-  # Presentation metadata only. Admission belongs to Jido Actions and runtimes.
+  # Presentation metadata only. Admission belongs to the domain servers.
   defp actions(status, remote) do
     trial = if status && status.trial, do: :ok, else: {:error, :no_matching_trial}
     confirm = if trial == :ok and not status.ready, do: {:error, :not_connected}, else: trial

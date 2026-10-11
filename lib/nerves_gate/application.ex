@@ -22,7 +22,6 @@ defmodule NervesGate.Application do
         [
           NervesGate.Network,
           NervesGate.Remote,
-          NervesGate.Connectivity,
           NervesGateWeb.Endpoint
         ]
 

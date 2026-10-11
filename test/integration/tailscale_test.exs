@@ -11,7 +11,7 @@ ExUnit.start(autorun: false)
 
 defmodule NervesGate.TailscaleIntegration do
   use ExUnit.Case, async: false
-  alias NervesGate.{Device, Remote}
+  alias NervesGate.Remote
   @moduletag timeout: 30_000
 
   setup_all do
@@ -51,7 +51,7 @@ defmodule NervesGate.TailscaleIntegration do
   end
 
   test "real daemon status, async rename, DNS preference and existing routes are preserved" do
-    projection = Device.projection()
+    projection = NervesGate.status()
     assert projection.remote_access.available
     assert projection.remote_access.state == "offline"
     refute projection.remote_access.verified
@@ -65,11 +65,10 @@ defmodule NervesGate.TailscaleIntegration do
         advertise_routes: ["192.168.80.0/24"]
       })
 
-    assert {:ok, %{result: %{accepted: true}}} =
-             Device.dispatch("remote.configure", %{"hostname" => "gateway-compatibility-check"})
+    assert :ok = NervesGate.remote_configure("gateway-compatibility-check")
 
-    eventually(fn -> Device.projection().remote_access.operation == nil end)
-    remote = Device.projection().remote_access
+    eventually(fn -> NervesGate.status().remote_access.operation == nil end)
+    remote = NervesGate.status().remote_access
     assert remote.error == nil
     assert remote.hostname == "gateway-compatibility-check"
     assert remote.advertised_routes == ["192.168.80.0/24"]

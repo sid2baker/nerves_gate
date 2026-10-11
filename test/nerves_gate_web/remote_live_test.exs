@@ -2,7 +2,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
   use ExUnit.Case, async: false
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
-  alias NervesGate.{Device, Remote}
+  alias NervesGate.Remote
   @endpoint NervesGateWeb.Endpoint
 
   defmodule Adapter do
@@ -42,7 +42,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
     Supervisor.terminate_child(NervesGate.Supervisor, Remote)
     adapter = start_supervised!({Agent, fn -> %{snapshot: Remote.Host.defaults(), url: nil} end})
     start_supervised!({Remote, adapter: {Adapter, adapter}, poll_ms: 10})
-    Device.projection()
+    NervesGate.status()
     on_exit(fn -> Supervisor.restart_child(NervesGate.Supervisor, Remote) end)
     %{adapter: adapter}
   end
@@ -61,7 +61,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
              "#tailscale-login-link[href='https://login.tailscale.com/a/private-token'][rel='noopener noreferrer'][referrerpolicy=no-referrer]"
            )
 
-    refute Jason.encode!(Device.projection()) =~ "private-token"
+    refute Jason.encode!(NervesGate.status()) =~ "private-token"
     Agent.update(ctx.adapter, &put_in(&1.snapshot.auth_state, "needs_approval"))
     eventually(fn -> render(view) =~ "Waiting for approval" end)
     refute has_element?(view, "#tailscale-login-link")
@@ -99,7 +99,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
     {:ok, view, _} = live(build_conn(), "/remote")
     view |> form("#tailscale-form", remote: %{hostname: "my-draft"}) |> render_change()
     Agent.update(ctx.adapter, &put_in(&1.snapshot.hostname, "someone-else"))
-    eventually(fn -> Device.projection().remote_access.hostname == "someone-else" end)
+    eventually(fn -> NervesGate.status().remote_access.hostname == "someone-else" end)
     assert has_element?(view, "#remote_hostname[value=my-draft]")
     assert view |> form("#tailscale-form") |> render_submit() =~ "changed in another session"
     assert Agent.get(ctx.adapter, & &1.snapshot.hostname) == "someone-else"
