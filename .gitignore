@@ -13,9 +13,10 @@
 # Temporary files, for example, from tests.
 /tmp/
 
-# Local credentials and asset tooling.
+# Local credentials, upload scripts and asset tooling.
 .env
 .env.*
+/upload.sh
 /assets/node_modules/
 
 # Local Nerves system build artifacts and device backups.
