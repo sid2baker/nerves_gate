@@ -2,6 +2,8 @@ import Config
 
 config :nerves_gate,
   target: config_target(),
+  # Set only after identifying and qualifying the modem; see docs/networking.md.
+  cellular: nil,
   network_adapter: {NervesGate.Network.Vintage, nil},
   remote_adapter: {NervesGate.Remote.Tailscale, nil},
   equipment_adapter: {NervesGate.Equipment.Linux, nil},
@@ -20,9 +22,9 @@ config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {0, 0, 0, 0}, port: 4000
 
 config :logger, backends: [RingLogger]
 
-config :nerves, :erlinit,
-  update_clock: true,
-  pre_run_exec: "/usr/sbin/nerves-gate-routing"
+config :logger, RingLogger, persist_path: "/data/ring_logger.log", persist_seconds: 5
+
+config :nerves, :erlinit, update_clock: true
 
 # Sends the Heart init handshake required by HEART_INIT_TIMEOUT in vm.args.
 # Validate firmware only after OTP applications start; internet is not required.
@@ -77,6 +79,7 @@ config :tailscale,
 # USB provisioning is independent of LAN trials.
 # VintageNetDirect's DHCP server is confined to the point-to-point USB link.
 config :vintage_net,
+  route_metric_fun: {NervesGate.Network.RouteMetric, :compute_metric, 2},
   persistence: VintageNet.Persistence.FlatFile,
   config: if(config_target() == :ec100, do: [{"usb0", %{type: VintageNetDirect}}], else: [])
 

@@ -27,16 +27,43 @@ defmodule NervesGate.FirmwareBuildTest do
     end)
   end
 
-  test "firmware prepares default-deny IPv4 forwarding before OTP starts" do
+  test "firmware enables RingLogger persistence without changing host logging" do
     for target <- [:ec100, :x86_64] do
       config = Config.Reader.read!(@target_config, target: target)
-      assert config[:nerves][:erlinit][:pre_run_exec] == "/usr/sbin/nerves-gate-routing"
+      assert config[:logger][RingLogger][:persist_path] == "/data/ring_logger.log"
+      assert config[:logger][RingLogger][:persist_seconds] == 5
+      refute Keyword.has_key?(config[:nerves_gate], :logger)
     end
 
-    script = Path.expand("../../rootfs_overlay/common/usr/sbin/nerves-gate-routing", __DIR__)
-    assert Bitwise.band(File.stat!(script).mode, 0o111) != 0
-    # Syntax only: never execute the firmware routing setup on the host.
-    assert {"", 0} = System.cmd("sh", ["-n", script], stderr_to_stdout: true)
+    refute Application.get_env(:logger, RingLogger, [])[:persist_path]
+  end
+
+  test "routing setup has no boot script and is inert on the host" do
+    for target <- [:ec100, :x86_64] do
+      config = Config.Reader.read!(@target_config, target: target)
+      refute Keyword.has_key?(config[:nerves][:erlinit], :pre_run_exec)
+    end
+
+    refute File.exists?(
+             Path.expand("../../rootfs_overlay/common/usr/sbin/nerves-gate-routing", __DIR__)
+           )
+
+    assert NervesGate.Network.Vintage.prepare_routing() == :ok
+  end
+
+  test "HTTP startup does not depend on cellular support or a boot marker" do
+    runtime = Path.expand("../../config/runtime.exs", __DIR__)
+
+    for target <- [:host, :ec100, :x86_64] do
+      config = Config.Reader.read!(runtime, target: target)
+      refute Keyword.has_key?(config[:nerves_gate][NervesGateWeb.Endpoint], :server)
+    end
+
+    config = Config.Reader.read!(@target_config, target: :ec100)
+    assert config[:nerves_gate][:cellular] == nil
+
+    assert config[:vintage_net][:route_metric_fun] ==
+             {NervesGate.Network.RouteMetric, :compute_metric, 2}
   end
 
   test "target builds default to the source commit timestamp" do

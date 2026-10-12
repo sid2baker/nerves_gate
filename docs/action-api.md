@@ -41,6 +41,13 @@ settings = %{
 status = NervesGate.status()
 ```
 
+To select cellular-only, omit the Ethernet Internet role and add
+`"internet" => %{"mode" => "cellular", "apn" => "operator.apn"}`. For Ethernet-preferred
+backup keep that role and use `"mode" => "backup"` inside the Internet object.
+Omitting `internet` preserves Ethernet-only behaviour. Shared Ethernet supports backup,
+not cellular-only. Proposals require a qualified firmware modem profile; validation is
+pure and does not claim driver availability. Host support is explicitly simulated.
+
 Commands return their result, not a status envelope:
 
 | Function | Success |
@@ -126,12 +133,15 @@ there is no automatic retry, and results/settings are not persisted. See
 
 `NervesGate.status/1` reads each domain independently; it is **not an atomic
 cross-domain snapshot**. [`NervesGate.Status`](../lib/nerves_gate/status.ex) builds
-the JSON-encodable v4 map without a process or cache:
+the JSON-encodable v5 map without a process or cache:
 
 - `version`, `system`: shape version and firmware.
 - `network`: saved settings, pending trial, observed interfaces, readiness,
   recovery and structured errors.
-- `connections`: port roles, cable/address/Internet observations and conflicts.
+- `connections`: port roles, cellular observations and subnet conflicts. `internet`
+  includes `mode`, `selected` (preferred usable interface or nil), per-uplink
+  `ethernet`/`cellular` connection states and overall `health`. `backup` is `active`
+  while using 4G backup; otherwise it describes cellular connectivity/disablement.
 - `remote_access`: sanitized Tailscale observations, routes, operation and error.
 - `sharing`: confirmed equipment `subnet`, `enabled` (`true`, `false`, or `nil` for
   unknown), and `other_routes` left untouched by the on/off control.

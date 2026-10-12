@@ -12,7 +12,7 @@ Navigation is **Overview · Equipment · Remote access · Settings**.
 | Bus workspace | `/equipment/buses` | Bounded CAN/RS485 captures and one-shot Modbus register reads |
 | Remote access | `/remote` | Gateway Tailscale addresses and equipment subnet sharing on/off |
 | Settings | `/settings` | Configuration entry points, button/LED controls and device information |
-| Network settings | `/settings/network` | First-time setup and later Ethernet configuration |
+| Network settings | `/settings/network` | Ethernet/cellular source, optional 4G backup, APN and equipment configuration |
 | Tailscale settings | `/settings/tailscale` | Enrollment, private sign-in, hostname and disconnect |
 | Bus settings | `/settings/buses` | CAN listen-only bitrate and RS485 diagnostic opt-in |
 

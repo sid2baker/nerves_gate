@@ -91,6 +91,45 @@ defmodule NervesGateWeb.LiveTest do
     assert has_element?(view, "#connection-internet", "Choose an Internet connection")
   end
 
+  test "cellular source and APN use the existing confirmation flow and update a second browser" do
+    {:ok, view, _} = live(build_conn(), "/settings/network")
+    {:ok, other, _} = live(build_conn(), "/settings/network")
+    assert has_element?(view, "label", "Ethernet with 4G backup")
+    view |> form("#network-form", network: %{internet_mode: "cellular"}) |> render_change()
+    assert has_element?(view, "#network_cellular_apn")
+    refute has_element?(view, "#internet-summary")
+
+    html =
+      view
+      |> form("#network-form", network: %{cellular_apn: "internet.example"})
+      |> render_submit()
+
+    assert html =~ "Keep these changes?"
+    assert Network.status().trial.network["eth0"] == nil
+    assert Network.status().trial.network["internet"]["mode"] == "cellular"
+    eventually(fn -> has_element?(other, "#confirm-settings") end)
+    result = other |> element("#confirm-settings") |> render_click()
+    assert {:ok, overview, _} = follow_redirect(result, build_conn(), "/")
+    assert has_element?(overview, "#connection-internet", "4G modem")
+    assert Network.status().config["network"]["internet"]["apn"] == "internet.example"
+  end
+
+  test "unsupported firmware explains cellular setup and rejects forged submissions" do
+    Network.Host.simulate(%{cellular_supported: false, cellular: nil})
+    {:ok, view, _} = live(build_conn(), "/settings/network")
+    view |> form("#network-form", network: %{internet_mode: "cellular"}) |> render_change()
+    assert has_element?(view, "#apply-settings[disabled]")
+    assert render(view) =~ "no qualified cellular setup"
+
+    html =
+      render_submit(view, "save", %{
+        "network" => %{"internet_mode" => "cellular", "cellular_apn" => "internet.example"}
+      })
+
+    assert html =~ "Cellular setup needs a qualified modem driver"
+    assert Network.status().trial == nil
+  end
+
   test "one screen detects the connected port and equipment is optional" do
     {:ok, view, html} = live(build_conn(), "/settings/network")
     assert html =~ "First setup"

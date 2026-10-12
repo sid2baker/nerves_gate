@@ -96,10 +96,10 @@ defmodule NervesGate.Recovery.EC100 do
 
     defp quiesce do
       # Supervisor termination leaves writers stopped but keeps Indicators and
-      # its worker alive. There are no application databases or file loggers;
-      # RingLogger stays in memory for diagnostics.
+      # its worker alive. Stop logger_backends too, so RingLogger cannot write
+      # its periodic snapshot after the data partition is unmounted.
       children = [NervesGate.Buses, NervesGate.Equipment, NervesGate.Remote, NervesGate.Network]
-      apps = [:nerves_ssh, :ssh, :tailscale, :vintage_net, :nerves_time]
+      apps = [:nerves_ssh, :ssh, :tailscale, :vintage_net, :nerves_time, :logger_backends]
 
       with :ok <- stop_all(children, &Supervisor.terminate_child(NervesGate.Supervisor, &1)),
            :ok <- stop_all(apps, &stop_application/1),

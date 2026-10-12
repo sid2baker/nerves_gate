@@ -4,6 +4,8 @@ defmodule NervesGate.Application do
 
   @impl true
   def start(_type, _args) do
+    NervesGate.Network.Vintage.prepare_routing()
+
     simulator =
       if NervesGate.target() == :host do
         [

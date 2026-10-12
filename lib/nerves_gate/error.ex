@@ -6,6 +6,13 @@ defmodule NervesGate.Error do
   def from(%{code: code, message: message}) when is_binary(code) and is_binary(message),
     do: new(code, message)
 
+  def from(:cellular_unsupported),
+    do:
+      new(
+        "cellular_unsupported",
+        "Cellular setup needs a qualified modem driver and dedicated interface in this firmware."
+      )
+
   def from(:invalid_saved_config),
     do:
       new("invalid_saved_config", "Saved settings could not be read. Use recovery SSH or serial.")
@@ -30,7 +37,7 @@ defmodule NervesGate.Error do
     do:
       new(
         "conflicting_networks",
-        "Network addresses overlap. Previous settings have been restored. Choose different Internet, equipment and USB subnets."
+        "Network addresses overlap. Previous settings have been restored. Choose different Ethernet, cellular, equipment and USB subnets."
       )
 
   def from(:expired),

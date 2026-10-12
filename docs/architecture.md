@@ -30,7 +30,7 @@ Domain conditions → SASL alarm_handler → Alarmist debounce/severity → LED 
 
 | Owner | Responsibility |
 | --- | --- |
-| VintageNet | Saved/applied Ethernet settings, hotplug, addresses, routes and observations |
+| VintageNet | Saved/applied Ethernet and qualified modem settings, hotplug, addresses, route selection and observations |
 | Tailscale | Identity, preferences, daemon state, routes and enrollment |
 | Network | Command admission/replies, RAM trial, USB auto-save, deadline, serial LAN work and rollback |
 | Remote | One bounded daemon worker and sanitized operation/error metadata |
@@ -99,7 +99,9 @@ Alarmist 0.4.x handles the standard SASL alarm events. Named domain instances re
 | `{NervesGate.Alarms, NervesGate.Indicators, :recovery_failed}` | Physical recovery fails or its outcome is unknown | No automatic retry/clear |
 | `{NervesGate.Alarms, NervesGate.Equipment, :equipment_discovery_unavailable}` | Passive neighbor discovery fails, crashes or times out after obtaining a confirmed scope | A passive observation succeeds (including empty results), or equipment configuration is removed |
 | `{NervesGate.Alarms, NervesGate.Remote, :remote_unavailable}` | Daemon becomes unavailable after a connect request or an active authentication/connection observation | Daemon is available again |
-| `{NervesGate.Alarms, NervesGate.Network, :internet_unavailable}` | Configured uplink reports `:lan` or `:disconnected` | Uplink reports `:internet`, or its configured requirement is removed |
+| `{NervesGate.Alarms, NervesGate.Network, :internet_unavailable}` | All permitted uplinks are known `:lan` or `:disconnected` | A permitted uplink reports `:internet`, or the requirement is removed |
+| `{NervesGate.Alarms, NervesGate.Network, :internet_backup}` | Preferred usable connection is cellular backup | Backup is no longer selected |
+| `{NervesGate.Alarms, NervesGate.Network, :cellular_unavailable}` | Configured modem reports `:lan` or `:disconnected` | Cellular reports `:internet`, or is disabled |
 | `{NervesGate.Alarms, NervesGate.Remote, :remote_offline}` | Authenticated, enabled Tailscale reports offline | Reports online, awaits enrollment/approval, or is deliberately stopped |
 | `{NervesGate.Alarms, NervesGate.Remote, :remote_health}` | Enabled Tailscale reports health warnings | Health warnings clear, or remote access is deliberately stopped |
 | `{NervesGate.Alarms, NervesGate.Buses, :bus_port_unavailable}` | A known enabled CAN/RS485 port is missing | Missing enabled ports return, or their enablement is removed |
@@ -118,8 +120,11 @@ rules/timers across producer restarts. `get_alarms()` excludes raw debug inputs;
 use `get_alarms(level: :debug)` for diagnostics. LEDs use Alarmist severity and
 managed connectivity warnings, not a second debounce/history implementation.
 
-VintageNet per-interface connection observations select the configured Internet port
-or shared bridge, not the global best connection or USB. Tailscale state and health
+VintageNet per-interface connection observations cover the configured Ethernet
+port/bridge and permitted modem, never the global best connection or USB. Selection
+matches VintageNet's Internet-first, Ethernet-preferred metrics; only a pure metric
+callback handles shared bridges and dedicated `cellN` names. Network's existing
+trial worker owns configuration; no new modem/failover coordinator is added. Tailscale state and health
 remain separate facts. Running does not prove Internet or control-server access.
 Unknown observations preserve faults and never qualify USER1 for solid illumination.
 
@@ -144,7 +149,8 @@ current normal patterns; it no longer restores an old raw brightness snapshot.
 Neither alarms nor settings form a durable recovery journal. Alarmist's unknown
 state must not be interpreted as healthy for command admission. There are no automatic
 remedies, DHCP restarts, VPN reconnects,
-DNS resets, failover or enrollment.
+DNS resets or enrollment. Explicit cellular backup is VintageNet routing, not an
+Alarmist remedy. Hardware identity, drivers and power/reset still need qualification.
 
 ## Other domains stay simple
 

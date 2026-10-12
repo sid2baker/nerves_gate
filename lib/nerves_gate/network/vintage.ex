@@ -2,7 +2,28 @@ defmodule NervesGate.Network.Vintage do
   @moduledoc "Firmware adapter. USB is never part of a port-role change. No Ethernet DHCP server or NAT."
   @behaviour NervesGate.Network.Adapter
   import Bitwise
-  alias NervesGate.{Config, Network.LAN}
+  alias NervesGate.Config
+  alias NervesGate.Network.{Cellular, LAN}
+
+  # One-time firmware setup; Tailscale owns its forwarding/NAT rules. This must
+  # never run against the workstation or prevent local/USB web access on failure.
+  if Mix.target() == :host do
+    def prepare_routing, do: :ok
+  else
+    require Logger
+
+    def prepare_routing do
+      :ok = File.write("/proc/sys/net/ipv4/ip_forward", "0\n")
+
+      {_, 0} =
+        System.cmd("iptables", ["-w", "5", "-P", "FORWARD", "DROP"], stderr_to_stdout: true)
+
+      :ok = File.write("/proc/sys/net/ipv4/ip_forward", "1\n")
+    rescue
+      _exception in [MatchError, ErlangError] ->
+        Logger.warning("IPv4 subnet forwarding setup failed; local web access remains available.")
+    end
+  end
 
   @impl true
   def observations(_), do: [{VintageNet, ["interface"]}]
@@ -19,20 +40,34 @@ defmodule NervesGate.Network.Vintage do
     # configure/3 skips identical configurations and logs persistence failures.
     # Save explicitly so confirming a temporary configuration really persists it
     # and reports errors. These are VintageNet's files, not an application journal.
-    Enum.reduce_while(configurations(network), :ok, fn {name, config}, :ok ->
-      case VintageNet.Persistence.call(:save, [name, LAN.normalize(config)]) do
-        :ok -> {:cont, :ok}
-        error -> {:halt, error}
-      end
-    end)
+    with {:ok, configs} <- all_configurations(network) do
+      Enum.reduce_while(configs, :ok, &save_interface/2)
+    end
+  end
+
+  defp save_interface({name, config}, :ok) do
+    case VintageNet.Persistence.call(:save, [name, config.type.normalize(config)]) do
+      :ok -> {:cont, :ok}
+      error -> {:halt, error}
+    end
   end
 
   def configurations(network) do
     roles = Config.ports(network)
 
     Enum.map(configs(network), fn
-      {"br0", config} -> {"br0", Map.put(config, :nerves_gate_mode, network["mode"])}
-      {name, config} -> {name, Map.put(config, :nerves_gate_role, get_in(roles, [name, "role"]))}
+      {"br0", config} ->
+        config = Map.put(config, :nerves_gate_mode, network["mode"])
+
+        config =
+          if network["internet"],
+            do: Map.put(config, :nerves_gate_internet, network["internet"]),
+            else: config
+
+        {"br0", config}
+
+      {name, config} ->
+        {name, Map.put(config, :nerves_gate_role, get_in(roles, [name, "role"]))}
     end)
   end
 
@@ -58,6 +93,8 @@ defmodule NervesGate.Network.Vintage do
           nil
       end
 
+    internet = get_in(configs, ["br0", :nerves_gate_internet])
+    network = if network && internet, do: Map.put(network, "internet", internet), else: network
     Config.validate_network(network)
   end
 
@@ -159,8 +196,17 @@ defmodule NervesGate.Network.Vintage do
   def restore(network, _), do: apply_network(network, true)
 
   defp apply_network(network, force) do
-    configs = configurations(network)
+    with {:ok, configs} <- all_configurations(network) do
+      apply_interfaces(network, configs, force)
+    end
+  end
 
+  defp all_configurations(network) do
+    with {:ok, cellular} <- Cellular.configurations(network),
+         do: {:ok, configurations(network) ++ cellular}
+  end
+
+  defp apply_interfaces(network, configs, force) do
     desired_members =
       if network["mode"] == "shared" do
         ["eth0", "eth1"]
@@ -192,7 +238,14 @@ defmodule NervesGate.Network.Vintage do
     end)
   end
 
-  defp configure(name, config, deadline, force \\ false) do
+  defp configure(name, config, deadline, force \\ false)
+
+  # Modem registration can take minutes. Accept the standard technology's
+  # configuration without making carrier registration a LAN trial prerequisite.
+  defp configure(name, config, _deadline, _force) when name not in ["eth0", "eth1", "br0"],
+    do: VintageNet.configure(name, config, persist: false)
+
+  defp configure(name, config, deadline, force) do
     with :ok <- settled(name, deadline, true),
          :ok <- reset_if_needed(name, config, deadline, force),
          :ok <- VintageNet.configure(name, config, persist: false) do
@@ -252,8 +305,21 @@ defmodule NervesGate.Network.Vintage do
       simulated: false,
       bridge: interface("br0"),
       ports: Enum.map(["eth0", "eth1"], &interface/1),
-      usb: interface("usb0")
+      usb: interface("usb0"),
+      cellular_supported: NervesGate.Network.Cellular.profile() != nil,
+      cellular: cellular_interface()
     }
+  end
+
+  defp cellular_interface do
+    if profile = Cellular.profile() do
+      config = get(profile.interface, "config") || %{}
+      options = config[:vintage_net_qmi] || config[:vintage_net_mobile] || %{}
+      provider = List.first(options[:service_providers] || []) || %{}
+
+      interface(profile.interface)
+      |> Map.merge(%{configured: config[:type] == profile.config.type, apn: provider[:apn]})
+    end
   end
 
   defp interface(name) do

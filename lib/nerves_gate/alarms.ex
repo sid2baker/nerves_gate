@@ -73,7 +73,12 @@ defmodule NervesGate.Alarms do
   end
 
   defp message(:network_restore_failed), do: "Saved network settings could not be restored."
-  defp message(:internet_unavailable), do: "The Internet uplink has no Internet connectivity."
+
+  defp message(:internet_unavailable),
+    do: "No configured Internet uplink has Internet connectivity."
+
+  defp message(:internet_backup), do: "Internet access is using the 4G backup."
+  defp message(:cellular_unavailable), do: "The configured cellular connection is unavailable."
   defp message(:led_restore_failed), do: "Status LED control is unavailable."
   defp message(:recovery_failed), do: "Physical recovery failed or its outcome is unknown."
 

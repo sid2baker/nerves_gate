@@ -30,6 +30,20 @@ defmodule NervesGateWeb.NetworkStatus do
           <code :for={ip <- Map.get(port, :addresses, [])} class="ui-port-address">{ip.address}/{ip.prefix_length}</code>
         </div>
       </div>
+      <div class="ui-port" data-internet-uplinks>
+        <strong>Internet</strong>
+        <p>Ethernet: {connection_label(@projection.connections.internet.ethernet)}</p>
+        <p>4G: {connection_label(@projection.connections.internet.cellular)}</p>
+        <p :if={@projection.connections.internet.selected}>
+          Preferred usable connection: {uplink_label(@projection.connections.internet.selected)}
+        </p>
+        <.notice :if={@projection.connections.internet.backup == "active"} tone="warning">
+          Using 4G backup.
+        </.notice>
+        <p :if={!@projection.capabilities.mobile} class="ui-help">
+          Cellular hardware support is not configured in this firmware.
+        </p>
+      </div>
       <p :if={@projection.connections.mode == "shared"} class="ui-help">
         Both ports are joined into one shared network.
       </p>
@@ -50,6 +64,16 @@ defmodule NervesGateWeb.NetworkStatus do
     </.panel>
     """
   end
+
+  defp connection_label(:internet), do: "Internet available"
+  defp connection_label(:lan), do: "Connected, no verified Internet"
+  defp connection_label(:disconnected), do: "Disconnected"
+  defp connection_label(:disabled), do: "Not enabled"
+  defp connection_label(_), do: "Unknown"
+
+  defp uplink_label("br0"), do: "Shared Ethernet"
+  defp uplink_label(name) when name in ["eth0", "eth1"], do: port_label(name)
+  defp uplink_label(_), do: "4G modem"
 
   def equipment_interface(%{connections: %{mode: "shared"}, network: %{observed: observed}}),
     do: observed && observed.bridge

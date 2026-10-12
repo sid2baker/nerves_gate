@@ -1,6 +1,6 @@
 defmodule NervesGate.Network do
   @moduledoc """
-  Ethernet configuration with protected trials and rollback.
+  Ethernet and Internet uplink configuration with protected trials and rollback.
 
   ## Commands
 
@@ -82,7 +82,9 @@ defmodule NervesGate.Network do
 
     Alarms.register(Keyword.get(opts, :name, __MODULE__), [
       :network_restore_failed,
-      :internet_unavailable
+      :internet_unavailable,
+      :internet_backup,
+      :cellular_unavailable
     ])
 
     adapter = Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :network_adapter))
@@ -162,6 +164,7 @@ defmodule NervesGate.Network do
   defp propose(state, input, access, from) do
     with :ok <- Policy.available(public(state)),
          {:ok, network} <- Config.validate_network(input),
+         :ok <- Policy.supported(state.observed, network),
          :ok <- lan_change(state) do
       auto = not state.config["setup_completed"] and Access.usb?(state.observed, access)
       timeout = if auto, do: 15_000, else: state.trial_ms
@@ -459,6 +462,15 @@ defmodule NervesGate.Network do
 
     Alarms.report(:network_restore_failed, state.name, match?({:restore, _}, state.error))
     Alarms.report(:internet_unavailable, state.name, internet_fault(state))
+    internet = Observations.Network.internet(public(state))
+
+    backup =
+      if internet.mode == "backup" and internet.connection == :unknown,
+        do: nil,
+        else: internet.backup
+
+    Alarms.report(:internet_backup, state.name, backup)
+    Alarms.report(:cellular_unavailable, state.name, cellular_fault(internet.cellular))
 
     state
   end
@@ -471,6 +483,10 @@ defmodule NervesGate.Network do
       _ -> nil
     end
   end
+
+  defp cellular_fault(connection) when connection in [:internet, :disabled], do: false
+  defp cellular_fault(connection) when connection in [:lan, :disconnected], do: true
+  defp cellular_fault(_), do: nil
 
   defp load(adapter, timeout) do
     case bounded(fn -> Adapter.load(adapter) end, timeout) do

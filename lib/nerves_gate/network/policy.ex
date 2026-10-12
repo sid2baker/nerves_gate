@@ -18,6 +18,19 @@ defmodule NervesGate.Network.Policy do
   def matching(%{trial: %{id: id}}, id), do: :ok
   def matching(_, _), do: {:error, :no_matching_trial}
 
+  def supported(observed, network) do
+    if Config.cellular?(network) and
+         not (observed && Map.get(observed, :cellular_supported, false)),
+       do: {:error, :cellular_unsupported},
+       else: :ok
+  end
+
+  defp cellular_ready?(observed, network) do
+    not Config.cellular?(network) or
+      (match?(%{cellular: %{configured: true}}, observed) and
+         observed.cellular.apn == Config.internet(network)["apn"])
+  end
+
   @doc "Readiness is configured topology, NOT Internet access, a link or a DHCP lease."
   def ready?(
         %{bridge: bridge, ports: ports} = observed,
@@ -26,19 +39,21 @@ defmodule NervesGate.Network.Policy do
     bridge.present and bridge.state == :configured and bridge.method == network["ip_method"] and
       Enum.all?(ports, &(not &1.present or &1.master == "br0")) and
       (network["ip_method"] == "dhcp" or address_matches?(bridge.addresses, network)) and
-      conflicts(observed, settings) == []
+      cellular_ready?(observed, settings) and conflicts(observed, settings) == []
   end
 
   def ready?(%{ports: ports} = observed, %{"mode" => "ports"} = network) do
     Enum.all?(Config.ports(network), fn {name, setting} ->
       port_ready?(Enum.find(ports, &(&1.name == name)), setting)
-    end) and conflicts(observed, network) == []
+    end) and cellular_ready?(observed, network) and conflicts(observed, network) == []
   end
 
   def ready?(_, _), do: false
 
   def conflicts(%{ports: ports, bridge: bridge} = observed, network) do
     networks = if network["mode"] == "shared", do: [bridge], else: ports
+    cellular = if Config.cellular?(network), do: List.wrap(Map.get(observed, :cellular)), else: []
+    networks = networks ++ cellular
     usb = Map.get(observed, :usb, %{addresses: []})
 
     pairs =
@@ -53,7 +68,7 @@ defmodule NervesGate.Network.Policy do
     if pairs == [],
       do: [],
       else: [
-        "Network addresses overlap. Use different Internet, equipment and USB subnets before continuing."
+        "Network addresses overlap. Use different Ethernet, cellular, equipment and USB subnets before continuing."
       ]
   end
 

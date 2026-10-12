@@ -216,7 +216,7 @@ defmodule NervesGateWeb.NetworkLive do
     <.page_header
       eyebrow="Settings"
       title="Network"
-      description="Choose how the Ethernet ports are used. USB stays independent for recovery."
+      description="Choose your Internet source and equipment port. USB stays independent for recovery."
     />
     <.settings_nav current={:network} />
     <p :if={@initial} class="ui-help">
@@ -270,8 +270,45 @@ defmodule NervesGateWeb.NetworkLive do
           <.button variant="secondary" phx-click="reload">Reload saved settings</.button>
         </.notice>
         <.form for={@form} id="network-form" phx-change="change" phx-submit="save" class="ui-stack">
+          <.panel title="Internet source" icon="internet">
+            <.choice_group field={@form[:internet_mode]} label="Connect using">
+              <:option value="ethernet" title="Ethernet" description="Use a LAN port for Internet." />
+              <:option
+                value="cellular"
+                title="4G modem"
+                description="Use cellular only; keep equipment separate."
+              />
+              <:option
+                value="backup"
+                title="Ethernet with 4G backup"
+                description="Prefer Ethernet; use 4G when Ethernet has no Internet."
+              />
+            </.choice_group>
+            <.notice :if={!@projection.capabilities.mobile}>
+              This firmware has no qualified cellular setup. Identify the modem and configure its driver and dedicated interface before enabling 4G.
+            </.notice>
+            <div :if={@form.params["internet_mode"] in ["cellular", "backup"]}>
+              <.field
+                field={@form[:cellular_apn]}
+                label="Cellular APN"
+                help="Use the APN supplied by your mobile operator."
+                required
+                autocomplete="off"
+              />
+              <p class="ui-help">
+                SIM must already be unlocked. PIN and account-password setup are not supported yet.
+              </p>
+              <p :if={@form.params["internet_mode"] == "backup"} class="ui-help">
+                4G stays connected on standby. Connectivity checks can use mobile data. Existing connections may briefly interrupt during a switch.
+              </p>
+            </div>
+          </.panel>
           <%= if @form.params["mode"] == "ports" do %>
-            <.panel title="Internet" icon="internet">
+            <.panel
+              :if={@form.params["internet_mode"] != "cellular"}
+              title="Ethernet Internet"
+              icon="internet"
+            >
               <p id="internet-summary">
                 <strong>{if @internet, do: port_label(@internet) <> " · "}{@internet_status}</strong>
               </p>
@@ -381,7 +418,10 @@ defmodule NervesGateWeb.NetworkLive do
             <.button
               id="apply-settings"
               type="submit"
-              disabled={@stale or !@projection.actions["network.propose"].enabled}
+              disabled={
+                @stale or !@projection.actions["network.propose"].enabled or
+                  (@form.params["internet_mode"] != "ethernet" and !@projection.capabilities.mobile)
+              }
               phx-disable-with="Applying…"
             >{if @initial, do: "Finish setup", else: "Apply changes"}</.button>
             <.button :if={@initial} href="/" variant="quiet">Do this later</.button>

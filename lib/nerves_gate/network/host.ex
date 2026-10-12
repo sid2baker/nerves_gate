@@ -64,7 +64,14 @@ defmodule NervesGate.Network.Host do
         simulated: true,
         bridge: interface("br0", bridge_address, nil, shared),
         ports: ports,
-        usb: interface("usb0", nil, nil, false)
+        usb: interface("usb0", nil, nil, false),
+        cellular_supported: true,
+        cellular:
+          interface("wwan0", nil, nil, false)
+          |> Map.merge(%{
+            configured: Config.cellular?(network),
+            apn: Config.internet(network)["apn"]
+          })
       },
       overrides
     )

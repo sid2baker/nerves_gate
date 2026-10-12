@@ -10,7 +10,7 @@ Open `http://<gateway-address>:4000` through LAN, USB or Tailscale.
 - **Overview** — equipment, remote access and Internet status at a glance.
 - **Equipment** — neighbor observations, bounded ARP scan, device labels, and CAN/RS485 diagnostics.
 - **Remote access** — gateway addresses and one on/off control for equipment subnet sharing.
-- **Settings** — Ethernet, Tailscale, CAN/RS485 setup, and safe button/LED controls.
+- **Settings** — Ethernet or 4G Internet, optional 4G backup, Tailscale, CAN/RS485, and safe button/LED controls.
 
 A new gateway tries DHCP on both Ethernet ports independently. It suggests the
 only plausible Internet port; it never joins networks or silently reassigns saved
@@ -36,7 +36,10 @@ See [LEDs and button](docs/indicators.md).
 CAN/RS485 workspaces offer bounded receive-only captures and explicitly authorized
 Modbus register reads, with no scans, writes or retries. Physical CAN still needs
 qualification; RS485 is limited to the BSP-qualified 9600 8N1 profile.
-Cellular, failover, remote bus bridges and web firmware upload are not implemented.
+Cellular configuration and Ethernet-preferred backup are prepared, using VintageNet
+routing. **The EC100 modem still needs identification, a matching driver and BSP
+qualification; default firmware rejects cellular setup.** See [cellular preparation](docs/networking.md#internet-source-and-cellular-preparation).
+Remote bus bridges and web firmware upload are not implemented.
 There is no Ethernet DHCP server or Internet sharing. Tailscale owns VPN subnet NAT;
 firmware enables IPv4 forwarding behind a default-deny policy.
 See the [UI structure and next stages](docs/ui.md).
@@ -90,7 +93,7 @@ saved settings. USB remains independent for recovery.
 Each domain reports conditions through Alarmist. Restore/recovery faults are immediate
 errors; Internet loss, Tailscale availability/health, equipment discovery and enabled
 bus-port loss become warnings after two continuous seconds. Intentional disabled
-states are not faults. VintageNet observes the Internet-facing interface; Tailscale
+states are not faults. VintageNet observes the permitted Internet-facing interfaces; Tailscale
 Running is not an Internet-availability signal.
 Use `Alarmist.info()` or `Alarmist.subscribe_all()`. Alarms never control trials or
 trigger automatic remedies. There is no agent/AI dependency stack.
@@ -110,7 +113,7 @@ mix ci                    # compile, format, tests, Credo, Dialyzer, duplication
 mix phx.server            # http://localhost:4000
 ```
 
-Host mode simulates Ethernet, Tailscale, buses, button, LEDs and recovery. It never modifies the
+Host mode simulates Ethernet, cellular uplinks, Tailscale, buses, button, LEDs and recovery. It never modifies the
 workstation's network, starts its VPN daemon or opens hardware controls. In IEx,
 `NervesGate.Network.Host.simulate/1` changes simulated observations, and
 `NervesGate.Indicators.Host.button(1)` / `.button(0)` simulate a press/release.

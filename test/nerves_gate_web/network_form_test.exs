@@ -12,6 +12,30 @@ defmodule NervesGateWeb.NetworkFormTest do
       addresses: [%{address: ip, prefix_length: prefix}]
     }
 
+  test "cellular ignores stale Internet port fields and backup requires a chosen Ethernet" do
+    params =
+      Map.merge(fresh(), %{
+        "internet_mode" => "cellular",
+        "cellular_apn" => "internet.example",
+        "internet_port" => "eth0"
+      })
+
+    assert {:ok, network} = NetworkForm.to_network(params, [])
+    assert network["eth0"] == nil
+    assert network["internet"] == %{"mode" => "cellular", "apn" => "internet.example"}
+    restored = NetworkForm.from_settings(network)
+    assert restored["internet_mode"] == "cellular"
+    assert restored["cellular_apn"] == "internet.example"
+    assert {:ok, backup} = NetworkForm.to_network(%{params | "internet_mode" => "backup"}, [])
+    assert backup["eth0"]["role"] == "internet"
+
+    assert {:error, _} =
+             NetworkForm.to_network(
+               %{params | "internet_mode" => "backup", "internet_port" => ""},
+               []
+             )
+  end
+
   test "manual defaults use the selected interface lease, prefix, router and DNS" do
     wan =
       port("eth1", "10.8.4.20", 20)

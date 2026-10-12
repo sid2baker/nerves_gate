@@ -23,7 +23,9 @@ USER2 uses Alarmist severity, including alarms from dependencies. No alarms mean
 *no known alarms*, not proof that every subsystem is healthy.
 
 VintageNet's per-interface `connection` reports Internet availability on the
-configured uplink (`br0` in shared mode), never USB or the global best connection.
+permitted uplinks (Ethernet/`br0` and optionally the modem), never USB or the global
+best connection. Working 4G backup still counts as Internet: USER1 can stay solid;
+USER2 warns about backup use or unavailable cellular redundancy.
 Before port assignment, a unique observed Internet candidate may indicate online,
 but there is no configured uplink requirement to alarm. `:lan` is not Internet;
 missing observations are unknown. Tailscale `Running`/`:online` is a separate

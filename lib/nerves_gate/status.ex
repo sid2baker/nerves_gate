@@ -13,15 +13,17 @@ defmodule NervesGate.Status do
         indicators \\ Indicators.unavailable(),
         buses \\ Buses.unavailable()
       ) do
+    cellular = cellular_supported?(status)
+
     %{
-      version: 4,
+      version: 5,
       system: %{firmware: NervesGate.version(), target: to_string(NervesGate.target())},
       network: network(status),
       connections: connections(status),
       capabilities: %{
         ethernet: true,
-        mobile: false,
-        failover: false,
+        mobile: cellular,
+        failover: cellular,
         remote_enrollment: remote.available
       },
       remote_access: remote,
@@ -32,6 +34,11 @@ defmodule NervesGate.Status do
       actions: actions(status, remote, equipment, indicators, buses)
     }
   end
+
+  defp cellular_supported?(%{observed: observed}) when is_map(observed),
+    do: Map.get(observed, :cellular_supported, false)
+
+  defp cellular_supported?(_), do: false
 
   # Presentation metadata only. Admission belongs to the domain servers.
   defp actions(status, remote, equipment, indicators, buses) do
@@ -165,18 +172,28 @@ defmodule NervesGate.Status do
     settings = NetworkObservation.settings(status)
     ports = if observed, do: observed.ports, else: []
     internet = NetworkObservation.internet_interface(settings, observed)
+    uplinks = NetworkObservation.internet(status)
 
     %{
       mode: settings && settings["mode"],
       suggested_internet_port: Network.Discovery.internet_port(ports),
       ports: Enum.map(ports, &Map.put(&1, :role, port_role(settings, &1.name))),
-      internet: %{
-        link: internet != nil and internet.link,
-        addressed: internet != nil and Map.get(internet, :addresses, []) != [],
-        health: if(NetworkObservation.internet(status).online, do: "online", else: "unverified"),
-        backup: "unavailable"
-      },
+      cellular: observed && Map.get(observed, :cellular),
+      internet: internet_connection(internet, uplinks),
       problems: if(settings, do: Network.Policy.conflicts(observed, settings), else: [])
+    }
+  end
+
+  defp internet_connection(internet, uplinks) do
+    %{
+      mode: uplinks.mode,
+      selected: uplinks.selected,
+      ethernet: uplinks.ethernet,
+      cellular: uplinks.cellular,
+      link: internet != nil and internet.link,
+      addressed: internet != nil and Map.get(internet, :addresses, []) != [],
+      health: if(uplinks.online, do: "online", else: "unverified"),
+      backup: if(uplinks.backup, do: "active", else: to_string(uplinks.cellular))
     }
   end
 

@@ -95,6 +95,10 @@ defmodule NervesGateWeb.DashboardLive do
   defp internet_status(%{connections: %{internet: %{link: true}}}), do: "Waiting for address"
   defp internet_status(_), do: "Not connected"
 
+  defp internet_detail(%{connections: %{internet: %{backup: "active"}}}, _),
+    do: "4G backup in use"
+
+  defp internet_detail(%{connections: %{internet: %{mode: "cellular"}}}, _), do: "4G modem"
   defp internet_detail(%{connections: %{mode: "shared"}}, _), do: "Shared Ethernet network"
 
   defp internet_detail(projection, settings) do

@@ -4,9 +4,12 @@ defmodule NervesGateWeb.NetworkForm do
 
   def from_settings(network) do
     fresh = network && network["mode"] == "unconfigured"
+    internet = Config.internet(network)
 
     %{
       "mode" => if(network && network["mode"] == "shared", do: "shared", else: "ports"),
+      "internet_mode" => internet["mode"],
+      "cellular_apn" => internet["apn"] || "",
       "internet_port" => if(fresh, do: "auto", else: Config.role_port(network, "internet") || ""),
       "equipment_port" => Config.role_port(network, "equipment") || ""
     }
@@ -15,20 +18,20 @@ defmodule NervesGateWeb.NetworkForm do
     |> put_address("shared", network && network["equipment"])
   end
 
+  def internet_port(%{"internet_mode" => "cellular"}, _), do: nil
   def internet_port(%{"internet_port" => "auto"}, ports), do: Discovery.internet_port(ports)
   def internet_port(params, _), do: blank(params["internet_port"])
 
   def to_network(%{"mode" => "shared"} = params, _ports) do
-    Config.validate_network(%{"mode" => "shared", "equipment" => address(params, "shared")})
+    validate(%{"mode" => "shared", "equipment" => address(params, "shared")}, params)
   end
 
   def to_network(%{"mode" => "ports"} = params, ports) do
     internet = internet_port(params, ports)
     equipment = blank(params["equipment_port"])
-    candidates = Enum.count(ports, &(&1.link and Map.get(&1, :addresses, []) != []))
 
     cond do
-      params["internet_port"] == "auto" and is_nil(internet) and candidates > 1 ->
+      ambiguous_internet?(params, ports, internet) ->
         {:error,
          "More than one network is connected. Choose an Internet port, or choose Not now."}
 
@@ -43,11 +46,30 @@ defmodule NervesGateWeb.NetworkForm do
         network = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
         network = assign_port(network, internet, "internet", address(params, "internet"))
         network = assign_port(network, equipment, "equipment", address(params, "equipment"))
-        Config.validate_network(network)
+        validate(network, params)
     end
   end
 
   def to_network(_, _), do: {:error, "Choose separate ports or one shared network."}
+
+  defp ambiguous_internet?(params, ports, internet) do
+    candidates = Enum.count(ports, &(&1.link and Map.get(&1, :addresses, []) != []))
+
+    params["internet_mode"] != "cellular" and params["internet_port"] == "auto" and
+      is_nil(internet) and candidates > 1
+  end
+
+  defp validate(network, params) do
+    internet = %{
+      "mode" => params["internet_mode"] || "ethernet",
+      "apn" => String.trim(params["cellular_apn"] || "")
+    }
+
+    network =
+      if internet["mode"] == "ethernet", do: network, else: Map.put(network, "internet", internet)
+
+    Config.validate_network(network)
+  end
 
   defp same_port?(internet, equipment), do: internet != nil and internet == equipment
 
