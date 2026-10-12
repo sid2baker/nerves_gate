@@ -17,8 +17,8 @@ Each domain documents its commands, queries and completion semantics in its modu
 
 Each has `observe/1` and accepts an optional server reference. Direct domain calls
 use ordinary OTP exit behavior; `NervesGate` handles process-call failures and
-normalizes errors for clients. Use `NervesGate.equipment_scan/1`, `equipment_share/3`
-and `equipment_unshare/2` so cross-domain operations retain Network's safety guard.
+normalizes errors for clients. Use `NervesGate.equipment_scan/1`, `equipment_share/1`
+and `equipment_unshare/1` so cross-domain operations retain Network's safety guard.
 The worker entry points they call are internal and marked `@doc false`.
 
 ## Read, act, read again
@@ -55,8 +55,8 @@ Commands return their result, not a status envelope:
 | `remote_login_url(opts)` | `{:ok, url_or_nil}`; private query |
 | `equipment_scan(opts)` | `:ok` after a bounded ARP scan |
 | `equipment_label(id, label, opts)` | `:ok` after saving a scope-local label |
-| `equipment_share(site_id, unique_confirmed, opts)` | `:ok` after 4via6 advertisement readback |
-| `equipment_unshare(route, opts)` | `:ok` after exact route withdrawal readback |
+| `equipment_share(opts)` | `:ok` after confirmed equipment IPv4 subnet advertisement readback |
+| `equipment_unshare(opts)` | `:ok` after that equipment subnet's withdrawal readback |
 | `identify(opts)` | `:ok` once the five-second run-LED identification starts; observe completion/restoration |
 | `button_mode(mode, opts)` | `:ok`; `"disabled"` or `"identify"`, until indicators-service restart |
 | `bus_configure(port, params, opts)` | `:ok`; accepted live CAN configuration, or RS485 opt-in changed |
@@ -127,14 +127,15 @@ there is no automatic retry, and results/settings are not persisted. See
 
 `NervesGate.status/1` reads each domain independently; it is **not an atomic
 cross-domain snapshot**. [`NervesGate.Status`](../lib/nerves_gate/status.ex) builds
-the JSON-encodable v2 map without a process or cache:
+the JSON-encodable v3 map without a process or cache:
 
 - `version`, `system`: shape version and firmware.
 - `network`: saved settings, pending trial, observed interfaces, readiness,
   recovery and structured errors.
 - `connections`: port roles, cable/address/Internet observations and conflicts.
 - `remote_access`: sanitized Tailscale observations, routes, operation and error.
-- `sharing`: eligible equipment scope, displayed routes and uncertain mutations.
+- `sharing`: confirmed equipment `subnet`, `enabled` (`true`, `false`, or `nil` for
+  unknown), and `other_routes` left untouched by the on/off control.
 - `equipment`: scoped neighbor observations, labels and scan status.
 - `indicators`: simulated/available flags, button mode and last press, LED identification,
   restoration-pending state and errors.
@@ -151,9 +152,17 @@ Confirm/cancel require the exact current trial ID. Only one trial and one remote
 operation can run at a time. LiveViews compare drafts with their saved base before
 submitting, but there is no cross-interface revision-token protocol. Network and
 Remote connection commands remain independent. Equipment route changes hold the LAN
-worker, and advertised or uncertain 4via6 routes block new LAN proposals. Sharing
+worker, and any advertised or uncertain routes block new LAN proposals. Sharing
 never changes Tailscale running intent. No route result proves approval, isolation,
 reachability or termination of existing sessions.
+
+Sharing commands take only optional server options; callers do not supply a route,
+site ID or confirmation flag. Enable requires the confirmed equipment link/address;
+disable requires only the confirmed subnet and an available daemon. Disabling an
+already-absent advertisement is safe. Other routes are never removed by this control.
+Version 3 replaces v2's sharing scope/routes/uncertain projection; detailed uncertainty
+remains in `remote_access.sharing`. There are no compatibility wrappers for the old
+site-ID/route-argument commands.
 
 ## Subscriptions
 

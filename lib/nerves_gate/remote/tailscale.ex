@@ -68,7 +68,7 @@ defmodule NervesGate.Remote.Tailscale do
     with :ok <- Tailscale.update_configuration(%{}),
          config when is_map(config) <- Tailscale.get_configuration(),
          {:ok, routes} <-
-           NervesGate.Remote.Routes.change(operation, params, config.advertise_routes),
+           NervesGate.Remote.Sharing.change(operation, params, config.advertise_routes),
          :ok <- write_routes(operation, routes),
          %{advertise_routes: ^routes} <- Tailscale.get_configuration() do
       {:ok, routes}

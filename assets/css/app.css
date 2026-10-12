@@ -96,8 +96,6 @@ code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; fo
 .ui-notice--good { background: var(--ui-accent-soft); border-color: #d5e9e1; }
 .ui-check { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.6; }
 .ui-check input[type="checkbox"] { flex: none; width: 18px; height: 18px; margin-top: 3px; accent-color: var(--ui-accent); }
-.ui-route { border-top: 1px solid var(--ui-line); padding-top: 16px; }
-.ui-route code { overflow-wrap: anywhere; }
 .ui-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .ui-field label, .ui-choice-group legend { display: block; font-size: 14px; font-weight: 600; line-height: 1.5; margin-bottom: 8px; }
 .ui-field input, .ui-field select { width: 100%; min-width: 0; height: 44px; padding: 10px 12px; border: 1px solid #bccbd0; border-radius: 7px; background: white; color: var(--ui-ink); font-variant-numeric: tabular-nums; }

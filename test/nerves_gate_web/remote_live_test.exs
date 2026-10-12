@@ -43,7 +43,9 @@ defmodule NervesGateWeb.RemoteLiveTest do
 
     def execute(operation, params, agent)
         when operation in [:sharing_enable, :sharing_disable, :sharing_sync] do
-      {:ok, routes} = Remote.Routes.change(operation, params, snapshot(agent).advertised_routes)
+      {:ok, routes} =
+        Remote.Sharing.change(operation, params, snapshot(agent).advertised_routes)
+
       Agent.update(agent, &put_in(&1.snapshot.advertised_routes, routes))
       {:ok, routes}
     end
@@ -163,8 +165,10 @@ defmodule NervesGateWeb.RemoteLiveTest do
     eventually(fn -> not has_element?(view, "#tailscale-login-link") end)
   end
 
-  test "remote access distinguishes advertisements from connectivity and leaves unrelated routes alone",
-       ctx do
+  test(
+    "remote access shows a simple sharing control without exposing unrelated route controls",
+    ctx
+  ) do
     Agent.update(ctx.adapter, fn state ->
       %{
         state
@@ -181,32 +185,63 @@ defmodule NervesGateWeb.RemoteLiveTest do
     {:ok, view, html} = live(build_conn(), "/remote")
     assert has_element?(view, "h1", "Remote access")
     assert has_element?(view, "#gateway-remote-access", "100.64.1.2")
-    assert has_element?(view, "#equipment-remote-access", "192.168.1.0/24")
-    assert has_element?(view, "#equipment-remote-access", "does not prove approval")
+    assert has_element?(view, "#equipment-remote-access", "Configure a dedicated equipment port")
+    assert has_element?(view, "#equipment-remote-access", "Other subnet routes")
     assert has_element?(view, "a[href='/settings/tailscale']", "Manage Tailscale")
-    assert has_element?(view, "#equipment-sharing-form")
-    assert has_element?(view, "#enable-equipment-sharing[disabled]")
-    refute has_element?(view, "button[phx-click=disable-sharing]")
-    refute has_element?(view, "button", "Disconnect")
+    assert has_element?(view, "#equipment-sharing-toggle[disabled]", "Turn sharing on")
+    assert has_element?(view, "#equipment-sharing-state", "Off")
+    refute has_element?(view, "#equipment-sharing-form")
+    refute has_element?(view, "input[name='sharing[site]']")
+    refute has_element?(view, "button[phx-value-route]")
+    refute has_element?(view, "#calculated-via6")
     refute html =~ "private-token"
-    refute html =~ "Sharing is off"
-    refute html =~ "Local forwarding boundary"
-    assert html =~ "does not install a firewall"
-    assert html =~ "not proof that existing sessions have ended"
-
-    Agent.update(ctx.adapter, &put_in(&1.snapshot.advertised_routes, []))
-
-    eventually(fn ->
-      has_element?(view, "#equipment-remote-access", "no advertised subnet routes")
-    end)
-
+    refute html =~ "4via6"
+    refute html =~ "192.168.1.0/24"
     Agent.update(ctx.adapter, &put_in(&1.snapshot.available, false))
-    eventually(fn -> has_element?(view, "#equipment-remote-access", "cannot be determined") end)
+    eventually(fn -> has_element?(view, "#equipment-sharing-state", "Unknown") end)
+    assert has_element?(view, "#equipment-sharing-toggle[disabled]")
     refute has_element?(view, "#gateway-remote-access", "100.64.1.2")
   end
 
-  test "sharing is explicit, drafts survive observations and withdrawal leaves other routes intact",
-       ctx do
+  test(
+    "one click shares only the confirmed IPv4 subnet and turning it off preserves other routes",
+    ctx
+  ) do
+    configure_equipment()
+    Agent.update(ctx.adapter, &put_in(&1.snapshot.advertised_routes, ["fd00::/64"]))
+    {:ok, view, _} = live(build_conn(), "/remote")
+    assert has_element?(view, "#equipment-remote-access", "192.168.50.0/24")
+    assert has_element?(view, "#equipment-sharing-toggle:not([disabled])", "Turn sharing on")
+    assert Remote.status().advertised_routes == ["fd00::/64"]
+    render_click(view, "enable-sharing", %{"route" => "0.0.0.0/0"})
+    eventually(fn -> has_element?(view, "#equipment-sharing-state", "On") end)
+    assert Remote.status().advertised_routes == ["192.168.50.0/24", "fd00::/64"]
+    assert render(view) =~ "On means advertised, not verified reachable"
+    assert render(view) =~ "Overlapping networks are not supported"
+    refute NervesGate.status().actions["network.propose"].enabled
+    view |> element("#equipment-sharing-toggle") |> render_click()
+    eventually(fn -> has_element?(view, "#equipment-sharing-state", "Off") end)
+    assert Remote.status().advertised_routes == ["fd00::/64"]
+    assert NervesGate.status().sharing.other_routes == ["fd00::/64"]
+  end
+
+  test "unknown sharing is not shown as off and can be explicitly withdrawn" do
+    configure_equipment()
+
+    :sys.replace_state(Remote, fn state ->
+      %{state | sharing: %{ready: true, uncertain: ["192.168.50.0/24"]}}
+    end)
+
+    {:ok, view, _} = live(build_conn(), "/remote")
+    assert has_element?(view, "#equipment-sharing-state", "Unknown")
+    assert has_element?(view, "#equipment-sharing-toggle:not([disabled])", "Turn sharing off")
+    view |> element("#equipment-sharing-toggle") |> render_click()
+    eventually(fn -> has_element?(view, "#equipment-sharing-state", "Off") end)
+    assert Remote.status().sharing.uncertain == []
+    assert Remote.status().advertised_routes == []
+  end
+
+  defp configure_equipment do
     settings = %{
       "mode" => "ports",
       "eth1" => nil,
@@ -223,27 +258,6 @@ defmodule NervesGateWeb.RemoteLiveTest do
 
     {:ok, id} = NervesGate.network_propose(settings)
     :ok = NervesGate.network_confirm(id)
-    Agent.update(ctx.adapter, &put_in(&1.snapshot.advertised_routes, ["fd00::/64"]))
-    {:ok, view, _} = live(build_conn(), "/remote")
-    assert has_element?(view, "#enable-equipment-sharing:not([disabled])")
-
-    view
-    |> form("#equipment-sharing-form", sharing: %{site: "7", address: "192.168.50.10"})
-    |> render_change()
-
-    assert has_element?(view, "#calculated-via6[value='fd7a:115c:a1e0:b1a:0:7:c0a8:320a']")
-    assert view |> form("#equipment-sharing-form") |> render_submit() =~ "Updating sharing"
-    eventually(fn -> render(view) =~ "Confirm that the site ID is unique" end)
-    Agent.update(ctx.adapter, &put_in(&1.snapshot.health, ["Observation updated elsewhere"]))
-    eventually(fn -> render(view) =~ "Observation updated elsewhere" end)
-    assert has_element?(view, "#sharing_site[value='7']")
-    view |> form("#equipment-sharing-form", sharing: %{confirmed: "true"}) |> render_submit()
-    eventually(fn -> has_element?(view, "button[phx-click=disable-sharing]") end)
-    assert render(view) =~ "does not prove approval"
-    view |> element("button[phx-click=disable-sharing]") |> render_click()
-    eventually(fn -> not has_element?(view, "button[phx-click=disable-sharing]") end)
-    assert Remote.status().advertised_routes == ["fd00::/64"]
-    assert NervesGate.status().sharing.routes == ["fd00::/64"]
   end
 
   defp eventually(fun, attempts \\ 60)

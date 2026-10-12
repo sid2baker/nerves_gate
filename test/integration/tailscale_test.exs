@@ -85,7 +85,7 @@ defmodule NervesGate.TailscaleIntegration do
     )
   end
 
-  test "real 4via6 route merge, readback and exact withdrawal preserve other preferences" do
+  test "real IPv4 route merge, readback and withdrawal preserve other preferences" do
     other = ["192.168.80.0/24", "fd00::/64"]
     :ok = Tailscale.update_configuration(%{advertise_routes: other, accept_routes: true})
     {:ok, ^other} = Remote.sharing(:sharing_sync, %{})
@@ -100,7 +100,7 @@ defmodule NervesGate.TailscaleIntegration do
         "subnet_mask" => "255.255.255.0"
       })
 
-    route = NervesGate.Remote.Sharing.route(scope, 7)
+    route = scope.cidr
     assert {:ok, routes} = Remote.sharing(:sharing_enable, %{route: route, scope: scope})
     assert routes == Enum.sort(other ++ [route])
     assert Remote.status().advertised_routes == routes
@@ -108,7 +108,7 @@ defmodule NervesGate.TailscaleIntegration do
     assert Map.delete(Tailscale.get_configuration(), :advertise_routes) ==
              Map.delete(before, :advertise_routes)
 
-    assert {:ok, ^other} = Remote.sharing(:sharing_disable, %{route: route})
+    assert {:ok, ^other} = Remote.sharing(:sharing_disable, %{route: route, scope: scope})
     assert Tailscale.get_configuration() == before
     assert preferences() == before_prefs
   end

@@ -121,41 +121,14 @@ defmodule NervesGate.Error do
     do:
       new(
         "sharing_unknown",
-        "Route state is not yet known. A timed-out change may still complete. Withdraw the affected route and wait for verified readback before changing LAN roles."
+        "Sharing state is unknown. Turn sharing off and wait for confirmation before changing LAN settings."
       )
 
   def from(:sharing_active),
-    do: new("sharing_active", "Withdraw advertised 4via6 routes before changing LAN settings.")
-
-  def from(:sharing_confirmation),
     do:
       new(
-        "sharing_confirmation",
-        "Confirm that the site ID is unique in your tailnet and that you are authorized to share this equipment."
-      )
-
-  def from(:sharing_site_id),
-    do:
-      new(
-        "sharing_site_id",
-        "Use a site ID from 0 to 65535 assigned uniquely within your tailnet."
-      )
-
-  def from(:sharing_version),
-    do: new("sharing_version", "Safe 4via6 sharing requires Tailscale 1.102.3 or newer.")
-
-  def from(:sharing_route),
-    do:
-      new(
-        "sharing_route",
-        "Select an exact advertised or uncertain equipment route. Other routes are not changed."
-      )
-
-  def from(:sharing_stale),
-    do:
-      new(
-        "sharing_stale",
-        "An advertised 4via6 route does not match the active dedicated equipment subnet. Withdraw stale routes before adding another."
+        "sharing_active",
+        "Turn equipment sharing off before changing LAN settings. Remove any other subnet advertisements in Tailscale as well."
       )
 
   def from(:bus_unsupported),

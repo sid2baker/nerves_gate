@@ -14,7 +14,7 @@ defmodule NervesGate.Status do
         buses \\ Buses.unavailable()
       ) do
     %{
-      version: 2,
+      version: 3,
       system: %{firmware: NervesGate.version(), target: to_string(NervesGate.target())},
       network: network(status),
       connections: connections(status),
@@ -53,11 +53,10 @@ defmodule NervesGate.Status do
       "equipment.share" =>
         action(
           "Share equipment",
-          ["site_id", "unique_confirmed"],
+          [],
           sharing_available(status, remote)
         ),
-      "equipment.unshare" =>
-        action("Withdraw route", ["route"], unshare_available(status, remote)),
+      "equipment.unshare" => action("Turn sharing off", [], unshare_available(status, remote)),
       "bus.configure" =>
         action("Configure bus", ["port", "enabled"], Buses.Policy.available(buses)),
       "bus.capture" => action("Capture bus", ["port"], Buses.Policy.available(buses)),
@@ -83,16 +82,21 @@ defmodule NervesGate.Status do
   defp identify_available(_), do: {:error, :led_unavailable}
 
   defp sharing(status, remote) do
-    scope =
+    subnet =
       case Sharing.scope(status) do
-        {:ok, scope} -> scope
+        {:ok, scope} -> scope.cidr
         _ -> nil
       end
 
+    enabled =
+      if remote.available and Sharing.known(remote) == :ok and is_list(remote.advertised_routes) do
+        subnet != nil and subnet in remote.advertised_routes
+      end
+
     %{
-      scope: scope,
-      uncertain: remote.sharing.uncertain,
-      routes: Enum.uniq((remote.advertised_routes || []) ++ remote.sharing.uncertain)
+      subnet: subnet,
+      enabled: enabled,
+      other_routes: Enum.reject(remote.advertised_routes || [], &(&1 == subnet))
     }
   end
 
@@ -103,12 +107,14 @@ defmodule NervesGate.Status do
 
   defp sharing_available(status, remote) do
     with :ok <- Network.Policy.available(status),
-         {:ok, _} <- Sharing.enable(status, remote, 0, true),
+         {:ok, _} <- Sharing.enable(status, remote),
          do: :ok
   end
 
   defp unshare_available(status, remote) do
-    with :ok <- Network.Policy.available(status), do: Remote.Policy.available(remote)
+    with :ok <- Network.Policy.available(status),
+         {:ok, _} <- Sharing.disable(status, remote),
+         do: :ok
   end
 
   defp equipment(status, equipment) do

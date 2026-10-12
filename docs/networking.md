@@ -27,8 +27,8 @@ Suggestions avoid known other-port/USB subnets but cannot guarantee an unused
 address or discover equipment's static subnet. Check before saving; reserve a DHCP
 address before reusing it manually. Existing drafts are preserved.
 
-This does not change equipment addresses, run an Ethernet DHCP server, configure
-NAT or enable equipment subnet forwarding. Joining/splitting ports interrupts
+Port configuration does not change equipment addresses, run an Ethernet DHCP
+server or enable Internet sharing. VPN subnet access is a separate opt-in below. Joining/splitting ports interrupts
 Ethernet traffic. USB is never part of these changes.
 
 ## Saving and rollback
@@ -91,7 +91,7 @@ an Alarmist fault; successful restoration clears it. The alarm does not drive re
 In **Settings → Tailscale**, enter a device name, select **Connect Tailscale**, then
 follow the private sign-in link. Return to see connection or machine-approval
 status. No auth key is needed. **Remote access** shows gateway addresses and
-advertised routes and explicit 4via6 equipment sharing; rename and disconnect remain
+an on/off control for the equipment IPv4 subnet; rename and disconnect remain
 in Settings. Disconnect uses `Tailscale.down/0`, preserving enrollment and preferences.
 Reconnect uses `up/0` for an enrolled profile, or login when enrollment is needed.
 Disconnecting may interrupt a browser using that VPN. USB and LAN remain available. These operations do not use Ethernet's
@@ -130,29 +130,61 @@ equipment reachability.
 
 ### Equipment sharing
 
-Sharing is explicit and uses **4via6**, never an ordinary overlapping IPv4 route.
-It requires a confirmed, active dedicated equipment port, Tailscale 1.102.3 or newer,
-and confirmation that the operator assigned a tailnet-unique site ID (0–65535).
-Shared LAN and USB are not eligible. Clients must support IPv6; approve the route,
-restrict access in tailnet policy and test the intended service separately.
+Turn **Share equipment network** on to advertise the confirmed dedicated equipment
+IPv4 subnet, for example `192.168.50.0/24`. Use equipment's normal addresses, such as
+`192.168.50.10`. There are no site IDs, alternate addresses or route-entry fields.
+Enable requires the confirmed address, link and topology. Shared LAN and USB are
+not eligible. Approve the route in Tailscale, restrict access in tailnet policy and
+test the intended service separately. Linux clients must enable accepting subnet
+routes (`tailscale set --accept-routes`); other supported clients normally accept them.
+This is routed access, not an Ethernet bridge or broadcast-discovery service.
 
-Enable merges one route into the current advertisement list; withdrawal removes
-exactly the displayed route. Other preferences, Serve settings and enrollment are
-preserved. These actions never bring a stopped VPN up or stop a running one.
-Withdrawal works without an equipment link or an online account, provided LocalAPI
-is available. Do not edit route preferences concurrently through another LocalAPI
-client: read/merge/write is serialized within this application, not across clients.
+**Overlapping networks are unsupported.** Equipment subnets must not overlap other
+sites, the client's LAN or another VPN's routes. The gateway checks its observed
+local conflicts but cannot inspect every client's routing table. Use distinct
+subnets or disconnect the conflicting VPN; there is no translation workaround.
 
-Route operations hold the existing LAN worker. LAN proposals are blocked while
-4via6 routes are advertised or an outcome is unknown; independent rollback and USB
-recovery remain available. A timed-out mutation may still complete. Explicitly
-withdraw its uncertain route and wait for readback; an empty cached route list
-alone does not clear uncertainty. Restart reads preferences without replaying writes.
+On merges that one subnet into the current advertisement list; Off removes only
+that subnet, even if the link or VPN is offline. Other routes, preferences, Serve
+settings and enrollment are preserved. These actions never change running intent.
+Do not edit route preferences concurrently through another LocalAPI client:
+read/merge/write is serialized within this application, not across clients.
 
-**No custom firewall or traffic barrier is installed.** Tailscale handles 4via6 in
-userspace using the gateway’s routing table, not an interface-pinned kernel FORWARD
-rule. Route withdrawal and `down/0` readback are not proof that existing sessions
-have ended. The UI reports advertisements, not isolation, approval or reachability.
+Route operations hold the existing LAN worker. Any advertised route (including
+external advertisements) or unknown outcome blocks LAN proposals; we do not guess
+which external routes depend on the LAN. Independent rollback and USB recovery
+remain available. A timed-out mutation may still complete: explicitly turn sharing
+off and wait for readback. An empty cached route list does not clear uncertainty.
+Restart reads preferences without replaying writes.
+
+On firmware, `/usr/sbin/nerves-gate-routing` runs before OTP. It sets the IPv4
+FORWARD policy to DROP before enabling `net.ipv4.ip_forward`, preventing unrestricted
+Ethernet/USB forwarding. Tailscale's native netfilter rules and default subnet SNAT
+provide VPN forwarding; no per-route firewall manager or custom NAT is added.
+Missing firewall support leaves forwarding disabled and logs a warning without
+blocking local recovery. Host mode never runs this setup. The script does not
+change INPUT/OUTPUT policy or enable IPv6 forwarding.
+
+Tailscale uses the gateway's routing table, not an equipment-interface pin. Removing
+an advertisement or disconnecting is not proof that existing sessions have ended.
+The UI reports advertisements, not isolation, approval or reachability. Authenticated
+end-to-end routing, NAT and real-device behavior still require target qualification.
+
+#### Existing external or legacy routes
+
+Old 4via6 advertisements are not converted or deleted automatically. They remain
+external Tailscale preferences and may still provide access. The equipment switch
+only controls the current IPv4 subnet; other advertisements must be removed before
+LAN changes. Inspect them under **Settings → Tailscale → Connection details**.
+From recovery IEx, remove only the exact unwanted route, preserving the others:
+
+```elixir
+routes = Tailscale.get_configuration().advertise_routes
+# Replace this string with the exact old route you intend to withdraw.
+Tailscale.update_configuration(%{advertise_routes: List.delete(routes, "old-route/CIDR")})
+```
+
+Do not reset all daemon preferences or delete routes belonging to other services.
 
 ## Observations
 

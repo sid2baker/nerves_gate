@@ -157,22 +157,16 @@ defmodule NervesGate do
     invoke(fn -> Equipment.label(id, label, equipment(opts)) end) |> result()
   end
 
-  @doc "Share the confirmed dedicated equipment subnet using a tailnet-unique 4via6 site ID."
-  def equipment_share(site_id, unique_confirmed, opts \\ []) do
-    invoke(fn ->
-      Network.sharing(
-        :sharing_enable,
-        %{site: site_id, confirmed: unique_confirmed},
-        network(opts)
-      )
-    end)
-    |> result()
+  @doc "Advertise the confirmed dedicated equipment IPv4 subnet. Returns after local readback."
+  @spec equipment_share(keyword()) :: command_result()
+  def equipment_share(opts \\ []) do
+    invoke(fn -> Network.sharing(:sharing_enable, %{}, network(opts)) end) |> result()
   end
 
-  @doc "Withdraw exactly one displayed 4via6 route, preserving all other Tailscale preferences."
-  def equipment_unshare(route, opts \\ []) do
-    invoke(fn -> Network.sharing(:sharing_disable, %{route: route}, network(opts)) end)
-    |> result()
+  @doc "Withdraw the confirmed equipment subnet, preserving other routes and Tailscale preferences."
+  @spec equipment_unshare(keyword()) :: command_result()
+  def equipment_unshare(opts \\ []) do
+    invoke(fn -> Network.sharing(:sharing_disable, %{}, network(opts)) end) |> result()
   end
 
   def target do

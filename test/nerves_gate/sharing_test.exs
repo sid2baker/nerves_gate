@@ -16,7 +16,7 @@ defmodule NervesGate.SharingTest do
       }
     }
   }
-  @route "fd7a:115c:a1e0:b1a:0:7:c0a8:3200/120"
+  @route "192.168.50.0/24"
 
   defmodule Adapter do
     @behaviour Remote.Adapter
@@ -84,43 +84,29 @@ defmodule NervesGate.SharingTest do
     refute_receive {:route_operation, _, _, _}
   end
 
-  test "4via6 encodes site and subnet exactly, never an ordinary IPv4 route", ctx do
-    {:ok, scope} = Sharing.scope(Network.status(ctx.network))
-    assert Sharing.route(scope, 7) == @route
-    assert Sharing.address("192.168.50.10", 7) == "fd7a:115c:a1e0:b1a:0:7:c0a8:320a"
-    assert {:ok, %{site: 7, cidr: "192.168.50.0/24"}} = Sharing.decode(@route)
-    assert Sharing.route(scope, 65_535) =~ ":ffff:"
+  test("sharing uses the confirmed IPv4 subnet without site IDs or address translation", ctx) do
+    status = Network.status(ctx.network)
+    {:ok, scope} = Sharing.scope(status)
+    assert scope.cidr == @route
 
-    for site <- [-1, 65_536, "7x", nil, %{}, <<255>>],
-        do: assert({:error, _} = Sharing.site_id(site))
+    assert {:ok, %{scope: ^scope, route: @route}} =
+             Sharing.enable(status, Remote.status(ctx.remote))
 
-    for route <- [
-          "0.0.0.0/0",
-          "192.168.50.0/24",
-          "fd7a:115c:a1e0:b1a:0:7:c0a8:3201/120",
-          nil,
-          <<255>>
-        ],
-        do: assert({:error, _} = Sharing.decode(route))
+    assert NervesGate.status(ctx.api).sharing == %{
+             subnet: @route,
+             enabled: false,
+             other_routes: []
+           }
 
-    assert Sharing.via6?("fd7a:115c:a1e0:b1a::/64")
-    assert Sharing.via6?("::/0")
-    refute Sharing.via6?("fd00::/64")
-    assert {:error, :sharing_version} = Sharing.supported(%{version: "1.102.2"})
-    assert :ok = Sharing.supported(%{version: "1.104.1-t01234"})
+    assert NervesGate.status(ctx.api).actions["equipment.share"].required == []
+    assert NervesGate.status(ctx.api).actions["equipment.unshare"].required == []
+    refute function_exported?(NervesGate, :equipment_share, 3)
+    refute function_exported?(NervesGate, :equipment_unshare, 2)
   end
 
-  test "explicit confirmation, dedicated confirmed scope and safe daemon version are mandatory",
-       ctx do
-    assert {:error, %{code: "sharing_confirmation"}} =
-             NervesGate.equipment_share(7, false, ctx.api)
-
-    assert {:error, %{code: "sharing_site_id"}} = NervesGate.equipment_share("bad", true, ctx.api)
-    Remote.Host.simulate(%{simulated: false, version: "1.102.2"}, ctx.remote_host)
-    assert {:error, %{code: "sharing_version"}} = NervesGate.equipment_share(7, true, ctx.api)
-    Remote.Host.simulate(%{}, ctx.remote_host)
+  test("only a confirmed active dedicated equipment subnet can be shared", ctx) do
     {:ok, id} = Network.propose(@network, ctx.network)
-    assert {:error, %{code: "trial_in_progress"}} = NervesGate.equipment_share(7, true, ctx.api)
+    assert {:error, %{code: "trial_in_progress"}} = NervesGate.equipment_share(ctx.api)
     :ok = Network.cancel(id, ctx.network)
     status = Network.status(ctx.network)
 
@@ -133,6 +119,16 @@ defmodule NervesGate.SharingTest do
     assert {:error, :sharing_dedicated_only} = Sharing.scope(shared)
     assert {:error, _} = Subnet.build("usb0", @network["eth1"]["address"])
     refute_receive {:route_operation, _, _, _}
+
+    task =
+      Task.async(fn ->
+        Network.sharing(:sharing_enable, %{route: "0.0.0.0/0"}, ctx.network)
+      end)
+
+    assert_receive {:route_operation, worker, :sharing_enable, %{route: @route, scope: scope}}
+    assert scope.cidr == @route
+    send(worker, :finish)
+    assert :ok = Task.await(task)
   end
 
   test "route writes hold the LAN worker and preserve unrelated advertisements and preferences",
@@ -144,7 +140,7 @@ defmodule NervesGate.SharingTest do
       ctx.remote_host
     )
 
-    task = Task.async(fn -> NervesGate.equipment_share(7, true, ctx.api) end)
+    task = Task.async(fn -> NervesGate.equipment_share(ctx.api) end)
     assert_receive {:route_operation, worker, :sharing_enable, %{route: @route}}
     assert Network.status(ctx.network).phase == :sharing
 
@@ -152,21 +148,25 @@ defmodule NervesGate.SharingTest do
              NervesGate.network_propose(@network, ctx.api)
 
     assert {:error, %{code: "operation_in_progress"}} =
-             NervesGate.equipment_share(8, true, ctx.api)
+             NervesGate.equipment_share(ctx.api)
 
     assert {:error, %{code: "remote_busy"}} = NervesGate.remote_disconnect(ctx.api)
     send(worker, :finish)
     assert :ok = Task.await(task)
     assert Remote.status(ctx.remote).advertised_routes == Enum.sort(other ++ [@route])
     assert Remote.Host.snapshot(ctx.remote_host).serve == [:unchanged]
-    assert NervesGate.status(ctx.api).sharing.routes == Enum.sort(other ++ [@route])
+    assert NervesGate.status(ctx.api).sharing.enabled
+    assert NervesGate.status(ctx.api).sharing.other_routes == other
     assert Remote.status(ctx.remote).state == "offline"
     assert {:error, %{code: "sharing_active"}} = NervesGate.network_propose(@network, ctx.api)
     refute NervesGate.status(ctx.api).actions["network.propose"].enabled
     refute NervesGate.status(ctx.api).remote_access.verified
-    assert :ok = withdraw(ctx, @route)
+    assert :ok = withdraw(ctx)
     assert Remote.status(ctx.remote).advertised_routes == other
-    assert NervesGate.status(ctx.api).sharing.routes == other
+    refute NervesGate.status(ctx.api).sharing.enabled
+    assert NervesGate.status(ctx.api).sharing.other_routes == other
+    assert {:error, %{code: "sharing_active"}} = NervesGate.network_propose(@network, ctx.api)
+    Remote.Host.simulate(%{advertised_routes: []}, ctx.remote_host)
     assert {:ok, id} = NervesGate.network_propose(@network, ctx.api)
     assert :ok = NervesGate.network_cancel(id, ctx.api)
   end
@@ -174,65 +174,66 @@ defmodule NervesGate.SharingTest do
   test "sharing does not stop a running VPN", ctx do
     :ok = Remote.Host.execute(:connect, %{hostname: "running-gateway"}, ctx.remote_host)
     before = Remote.status(ctx.remote)
-    task = Task.async(fn -> NervesGate.equipment_share(7, true, ctx.api) end)
+    task = Task.async(fn -> NervesGate.equipment_share(ctx.api) end)
     assert_receive {:route_operation, worker, :sharing_enable, _}
     send(worker, :finish)
     assert :ok = Task.await(task)
-    assert :ok = withdraw(ctx, @route)
+    assert :ok = withdraw(ctx)
     assert Remote.status(ctx.remote) == before
   end
 
   test "unknown mutation is not cleared by empty observations or unrelated successful commands",
        ctx do
-    task = Task.async(fn -> NervesGate.equipment_share(7, true, ctx.api) end)
+    task = Task.async(fn -> NervesGate.equipment_share(ctx.api) end)
     assert_receive {:route_operation, worker, :sharing_enable, params}
     assert {:error, %{code: "sharing_unknown"}} = Task.await(task)
     refute Process.alive?(worker)
     assert Remote.status(ctx.remote).advertised_routes == []
     assert Remote.status(ctx.remote).sharing.uncertain == [@route]
-    assert NervesGate.status(ctx.api).sharing.uncertain == [@route]
+    assert NervesGate.status(ctx.api).sharing.enabled == nil
     assert {:error, %{code: "sharing_unknown"}} = NervesGate.network_propose(@network, ctx.api)
     :ok = NervesGate.remote_configure("still-unknown", ctx.api)
     assert_receive {:route_operation, rename, :configure, _}
     send(rename, :finish)
     eventually(fn -> Remote.status(ctx.remote).operation == nil end)
-    assert {:error, %{code: "sharing_unknown"}} = NervesGate.equipment_share(8, true, ctx.api)
+    assert {:error, %{code: "sharing_unknown"}} = NervesGate.equipment_share(ctx.api)
     # Model a Controller write accepted before timeout but committed afterward.
     {:ok, _} = Remote.Host.execute(:sharing_enable, params, ctx.remote_host)
-    assert :ok = withdraw(ctx, @route)
+    assert :ok = withdraw(ctx)
     assert Remote.status(ctx.remote).sharing.uncertain == []
     assert Remote.status(ctx.remote).advertised_routes == []
   end
 
-  test "withdrawal needs neither a ready link nor an online account; only the selected route is removed",
-       ctx do
-    other = String.replace(@route, ":0:7:", ":0:8:")
+  test("turning sharing off needs neither a ready link nor an online account", ctx) do
+    other = "10.70.0.0/16"
     Remote.Host.simulate(%{advertised_routes: [@route, other]}, ctx.remote_host)
     [first, second] = Network.Host.snapshot(ctx.host).ports
     Network.Host.simulate(%{ports: [first, %{second | link: false}]}, ctx.host)
-    assert {:error, %{code: "equipment_not_ready"}} = NervesGate.equipment_share(7, true, ctx.api)
-    # Withdrawal changes only advertisements, even with no link or running VPN.
-    assert :ok = withdraw(ctx, @route)
+    assert NervesGate.status(ctx.api).sharing.enabled
+    assert {:error, %{code: "equipment_not_ready"}} = NervesGate.equipment_share(ctx.api)
+    assert :ok = withdraw(ctx)
     assert Remote.status(ctx.remote).advertised_routes == [other]
-    assert :ok = withdraw(ctx, other)
-    assert {:error, %{code: "sharing_route"}} = NervesGate.equipment_unshare("0.0.0.0/0", ctx.api)
-    assert Remote.status(ctx.remote).advertised_routes == []
+    refute NervesGate.status(ctx.api).sharing.enabled
+    assert :ok = withdraw(ctx)
+    assert Remote.status(ctx.remote).advertised_routes == [other]
   end
 
-  test "external stale routes block role changes and additional advertisements", ctx do
-    stale = "fd7a:115c:a1e0:b1a:0:7:c0a8:6300/120"
-    Remote.Host.simulate(%{advertised_routes: [stale]}, ctx.remote_host)
+  test(
+    "external routes including legacy advertisements are left alone and block LAN changes",
+    ctx
+  ) do
+    legacy = "fd7a:115c:a1e0:b1a:0:7:c0a8:3200/120"
+    Remote.Host.simulate(%{advertised_routes: [legacy]}, ctx.remote_host)
     assert {:error, %{code: "sharing_active"}} = NervesGate.network_propose(@network, ctx.api)
-    task = Task.async(fn -> NervesGate.equipment_share(7, true, ctx.api) end)
-    assert {:error, _} = Task.await(task)
-    refute_receive {:route_operation, _, :sharing_enable, _}
-    assert NervesGate.status(ctx.api).sharing.routes == [stale]
-    assert :ok = withdraw(ctx, stale)
+    assert :ok = withdraw(ctx)
+    assert Remote.status(ctx.remote).advertised_routes == [legacy]
+    assert NervesGate.status(ctx.api).sharing.other_routes == [legacy]
+    assert {:error, %{code: "sharing_active"}} = NervesGate.network_propose(@network, ctx.api)
   end
 
   test "runtime restart does not replay a mutation and its surviving daemon worker cannot change the LAN",
        ctx do
-    task = Task.async(fn -> NervesGate.equipment_share(7, true, ctx.api) end)
+    task = Task.async(fn -> NervesGate.equipment_share(ctx.api) end)
     assert_receive {:route_operation, remote_worker, :sharing_enable, _}
     old = Process.whereis(ctx.network)
     Process.exit(old, :kill)
@@ -245,12 +246,12 @@ defmodule NervesGate.SharingTest do
     assert Network.status(ctx.network).config["network"] == @network
     assert {:error, %{code: "sharing_active"}} = NervesGate.network_propose(@network, ctx.api)
     refute_receive {:route_operation, _, :sharing_enable, _}
-    assert :ok = withdraw(ctx, @route)
+    assert :ok = withdraw(ctx)
   end
 
-  defp withdraw(ctx, route) do
-    task = Task.async(fn -> NervesGate.equipment_unshare(route, ctx.api) end)
-    assert_receive {:route_operation, worker, :sharing_disable, %{route: ^route}}
+  defp withdraw(ctx) do
+    task = Task.async(fn -> NervesGate.equipment_unshare(ctx.api) end)
+    assert_receive {:route_operation, worker, :sharing_disable, %{route: @route}}
     send(worker, :finish)
     Task.await(task)
   end

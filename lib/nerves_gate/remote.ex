@@ -136,29 +136,16 @@ defmodule NervesGate.Remote do
     end
   end
 
-  defp sharing_allowed(:sharing_enable, %{route: route, scope: scope}, remote) do
+  defp sharing_allowed(:sharing_enable, params, remote) do
     with :ok <- Sharing.known(remote),
-         :ok <- Sharing.supported(remote),
-         true <- Sharing.matches?(route, scope),
-         {:ok, _} <-
-           NervesGate.Remote.Routes.change(
-             :sharing_enable,
-             %{route: route, scope: scope},
-             remote.advertised_routes
-           ) do
+         {:ok, _} <- Sharing.change(:sharing_enable, params, remote.advertised_routes) do
       :ok
-    else
-      false -> {:error, :sharing_route}
-      error -> error
     end
   end
 
-  defp sharing_allowed(:sharing_disable, %{route: route}, remote) do
-    with {:ok, _} <- Sharing.decode(route),
-         true <- route in ((remote.advertised_routes || []) ++ remote.sharing.uncertain) do
+  defp sharing_allowed(:sharing_disable, params, remote) do
+    with {:ok, _} <- Sharing.change(:sharing_disable, params, remote.advertised_routes) do
       :ok
-    else
-      _ -> {:error, :sharing_route}
     end
   end
 

@@ -17,7 +17,10 @@ config :nerves_gate,
 config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {0, 0, 0, 0}, port: 4000]
 
 config :logger, backends: [RingLogger]
-config :nerves, :erlinit, update_clock: true
+
+config :nerves, :erlinit,
+  update_clock: true,
+  pre_run_exec: "/usr/sbin/nerves-gate-routing"
 
 # Sends the Heart init handshake required by HEART_INIT_TIMEOUT in vm.args.
 # Validate firmware only after OTP applications start; internet is not required.

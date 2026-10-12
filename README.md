@@ -9,7 +9,7 @@ Open `http://<gateway-address>:4000` through LAN, USB or Tailscale.
 
 - **Overview** — equipment, remote access and Internet status at a glance.
 - **Equipment** — neighbor observations, bounded ARP scan, device labels, and CAN/RS485 diagnostics.
-- **Remote access** — gateway addresses and explicit 4via6 equipment route sharing.
+- **Remote access** — gateway addresses and one on/off control for equipment subnet sharing.
 - **Settings** — Ethernet, Tailscale, CAN/RS485 setup, and safe button/LED controls.
 
 A new gateway tries DHCP on both Ethernet ports independently. It suggests the
@@ -25,16 +25,17 @@ independent for recovery. Technical details are collapsed until needed.
 settings. Use trusted networks and restrict access with your Tailscale policy;
 do not expose it to the public Internet. CSRF and same-origin checks remain enabled.
 
-Tailscale connects **the gateway itself** and optionally advertises a dedicated equipment
-subnet using 4via6. Route approval and permissions belong to your tailnet; reachability
-and traffic isolation are not verified. Settings can identify the gateway with a
+Tailscale connects **the gateway itself** and can share the confirmed dedicated equipment
+IPv4 subnet. Use equipment's normal addresses; overlapping networks are unsupported.
+Route approval and permissions belong to your tailnet; reachability is not verified. Settings can identify the gateway with a
 five-second run-LED blink, and optionally bind the button to identify until restart.
 There is no reset gesture; the second LED remains unsupported until mapped.
 CAN/RS485 workspaces offer bounded receive-only captures and explicitly authorized
 Modbus register reads, with no scans, writes or retries. Physical CAN still needs
 qualification; RS485 is limited to the BSP-qualified 9600 8N1 profile.
 Cellular, failover, remote bus bridges and web firmware upload are not implemented.
-This software does not start an Ethernet DHCP server or configure NAT.
+There is no Ethernet DHCP server or Internet sharing. Tailscale owns VPN subnet NAT;
+firmware enables IPv4 forwarding behind a default-deny policy.
 See the [UI structure and next stages](docs/ui.md).
 
 See [networking and recovery](docs/networking.md) for addressing, rollback and
@@ -65,6 +66,8 @@ status = NervesGate.status()
 | `remote_configure(hostname, opts \\ [])` | `:ok`; hostname change accepted |
 | `remote_disconnect(opts \\ [])` | `:ok`; disconnect accepted; enrollment kept |
 | `remote_login_url(opts \\ [])` | `{:ok, url_or_nil}`; private sign-in URL |
+| `equipment_share(opts \\ [])` | `:ok`; confirmed equipment subnet advertisement read back |
+| `equipment_unshare(opts \\ [])` | `:ok`; equipment subnet withdrawal read back |
 | `bus_configure(port, params, opts \\ [])` | `:ok`; apply live CAN settings or RS485 opt-in |
 | `bus_capture(port, opts \\ [])` | `:ok`; bounded receive-only capture accepted |
 | `modbus_read(port, params, opts \\ [])` | `:ok`; one authorized register read accepted |
@@ -120,6 +123,7 @@ These bootstrap isolated runtimes and are deliberately separate from `mix test`:
 ```sh
 scripts/test_bridge.sh
 scripts/test_equipment.sh
+scripts/test_routing.sh
 MIX_TARGET=host mix run --no-start test/integration/buses_test.exs --pty
 MIX_TARGET=host mix run --no-start test/integration/tailscale_test.exs /absolute/path/to/tailscaled
 ```
@@ -133,6 +137,10 @@ The Tailscale check uses a private userspace daemon, temporary identity storage
 and a private socket. It does not enroll an account, attach to the workstation
 daemon or change kernel routes. It checks cached status, configuration writes and
 preservation of omitted preferences against daemon 1.104.1.
+
+The routing check uses a private namespace and `iptables` to verify firmware's
+default-deny IPv4 forwarding, local recovery access, and fail-closed setup. It does
+not test Tailscale's rules/NAT or authenticated end-to-end equipment access.
 
 The equipment check uses a private namespace for ARP/vcan. The bus check requires
 `socat` and tests only disposable serial PTYs: fragmented Modbus replies, CRC/errors,

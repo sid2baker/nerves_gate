@@ -68,7 +68,7 @@ defmodule NervesGateWeb.BusesLiveTest do
     assert render_submit(view, "modbus-read", %{"modbus" => %{params | "function" => "6"}}) =~
              "Authorize one read"
 
-    assert [_] = NervesGate.Buses.Host.calls(ctx.host())
+    assert [_] = NervesGate.Buses.Host.calls(ctx.host)
   end
 
   test "loss of the domain disables actions and stale clicks do not crash the page" do

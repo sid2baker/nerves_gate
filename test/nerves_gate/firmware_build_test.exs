@@ -27,6 +27,18 @@ defmodule NervesGate.FirmwareBuildTest do
     end)
   end
 
+  test "firmware prepares default-deny IPv4 forwarding before OTP starts" do
+    for target <- [:ec100, :x86_64] do
+      config = Config.Reader.read!(@target_config, target: target)
+      assert config[:nerves][:erlinit][:pre_run_exec] == "/usr/sbin/nerves-gate-routing"
+    end
+
+    script = Path.expand("../../rootfs_overlay/common/usr/sbin/nerves-gate-routing", __DIR__)
+    assert Bitwise.band(File.stat!(script).mode, 0o111) != 0
+    # Syntax only: never execute the firmware routing setup on the host.
+    assert {"", 0} = System.cmd("sh", ["-n", script], stderr_to_stdout: true)
+  end
+
   test "target builds default to the source commit timestamp" do
     {timestamp, 0} = System.cmd("git", ["log", "-1", "--format=%ct"])
 

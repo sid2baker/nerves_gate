@@ -71,6 +71,48 @@ defmodule NervesGate.NetworkWorkflowTest do
     refute Enum.any?(Adapter.calls(ctx.adapter), &match?({:save, _}, &1))
   end
 
+  test "display expiry cannot expire a live manual trial", ctx do
+    {:ok, id} = Network.propose(@network, ctx.server)
+
+    :sys.replace_state(ctx.server, fn state ->
+      %{state | trial: %{state.trial | expires_at: 0}}
+    end)
+
+    send(ctx.server, :poll)
+    send(ctx.server, :observations_changed)
+    assert %{trial: %{id: ^id}} = Network.status(ctx.server)
+    assert Host.load(ctx.host) == {:ok, Config.defaults()}
+    assert :ok = Network.confirm(id, ctx.server)
+    assert Host.load(ctx.host) == {:ok, Config.from_network(@network)}
+  end
+
+  test "reconciliation expires a ready USB trial before saving despite its future display expiry",
+       ctx do
+    Host.simulate(%{usb: @usb, ports: Host.snapshot(ctx.host).ports}, ctx.host)
+    {:ok, _} = Network.propose(@network, ctx.server, @access)
+
+    # Make it ready and overdue before the server can process another poll.
+    :sys.replace_state(ctx.server, fn state ->
+      Agent.update(ctx.host, &%{&1 | overrides: %{usb: @usb}})
+
+      %{
+        state
+        | deadline: System.monotonic_time(:millisecond) - 1,
+          trial: %{state.trial | expires_at: System.system_time(:millisecond) + 60_000}
+      }
+    end)
+
+    send(ctx.server, :observations_changed)
+
+    eventually(fn ->
+      status = Network.status(ctx.server)
+      status.trial == nil and not status.recovering
+    end)
+
+    assert Host.load(ctx.host) == {:ok, Config.defaults()}
+    refute Enum.any?(Adapter.calls(ctx.adapter), &match?({:save, _}, &1))
+  end
+
   defp eventually(fun, attempts \\ 150)
   defp eventually(fun, 0), do: assert(fun.())
 

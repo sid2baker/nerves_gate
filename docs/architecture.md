@@ -134,11 +134,13 @@ DNS resets, failover or enrollment.
 - **Remote:** one asynchronous operation at a time; acceptance is not completion.
   Restart observes the daemon and never replays mutations. Disconnect uses `down`,
   not logout. Enrollment URLs are private reads, never status or property data.
-- **Sharing:** holds the existing LAN worker while Remote changes exactly one 4via6
-  route and verifies readback. Advertised or uncertain routes block LAN changes.
-  A read-only Controller barrier handles earlier accepted daemon work; no custom
-  firewall, forwarding state or lifecycle coordinator exists. Readback does not
-  prove tailnet approval, reachability or traffic termination.
+- **Sharing:** holds the existing LAN worker while Remote adds/removes the confirmed
+  equipment IPv4 subnet and verifies readback. No site IDs or address translation.
+  Other advertisements are preserved; any advertised or uncertain routes block LAN
+  changes. A read-only Controller barrier handles earlier accepted daemon work.
+  A small firmware boot script sets default-deny IPv4 forwarding before OTP starts;
+  Tailscale owns its allow/NAT rules. No routing manager or lifecycle coordinator.
+  Readback does not prove tailnet approval, reachability or traffic termination.
 - **Equipment:** passive rtnetlink observations; an explicit ARP scan is owned by
   Network and bounded to five seconds and at most /24. Inventory/labels are capped
   at 256 entries. Scope changes clear observations, not labels. USB is ineligible.

@@ -22,7 +22,7 @@ defmodule NervesGate.Network do
   use GenServer
   alias NervesGate.{Alarms, Config, Observations, Remote}
   alias NervesGate.Network.{Access, Adapter, Policy}
-  alias NervesGate.Remote.Sharing, as: Routes
+  alias NervesGate.Remote.Sharing
 
   @doc false
   def start_link(opts \\ []),
@@ -197,7 +197,7 @@ defmodule NervesGate.Network do
 
   defp execute(:confirm, from, state) do
     cond do
-      now() >= state.deadline -> {:pending, expire(state, from)}
+      expired?(state) -> {:pending, expire(state, from)}
       not ready?(state) -> {{:error, :not_connected}, state}
       true -> {:pending, save(state, from)}
     end
@@ -205,7 +205,7 @@ defmodule NervesGate.Network do
 
   defp auto_save(%{trial: %{auto_save: true}, worker: nil} = state) do
     cond do
-      now() >= state.deadline ->
+      expired?(state) ->
         expire(state, nil)
 
       ready?(state) ->
@@ -271,7 +271,7 @@ defmodule NervesGate.Network do
 
     state =
       cond do
-        state.trial != nil and now() >= state.deadline -> expire(state, nil)
+        expired?(state) -> expire(state, nil)
         state.recovering and state.worker == nil -> restore(state, state.error, nil, :ok)
         true -> state |> auto_save() |> reconcile_sharing()
       end
@@ -307,7 +307,7 @@ defmodule NervesGate.Network do
     state = refresh(state)
 
     cond do
-      now() >= state.deadline -> expire(state, nil)
+      expired?(state) -> expire(state, nil)
       state.trial.auto_save -> auto_save(state)
       true -> finish_proposal(state)
     end
@@ -427,6 +427,10 @@ defmodule NervesGate.Network do
     }
   end
 
+  # Recovery uses the monotonic deadline; trial.expires_at is only for display.
+  defp expired?(%{trial: nil}), do: false
+  defp expired?(state), do: now() >= state.deadline
+
   defp ready?(%{trial: nil}), do: false
   defp ready?(state), do: Policy.ready?(state.observed, state.trial.network)
   defp conflicted?(state), do: Policy.conflicts(state.observed, state.trial.network) != []
@@ -476,18 +480,17 @@ defmodule NervesGate.Network do
     end
   end
 
-  defp lan_change(state), do: remote_snapshot(state.remote) |> Routes.lan_change()
+  defp lan_change(state), do: remote_snapshot(state.remote) |> Sharing.lan_change()
 
-  defp sharing_params(:sharing_enable, %{site: site, confirmed: confirmed}, state),
-    do: Routes.enable(public(state), remote_snapshot(state.remote), site, confirmed)
-
-  defp sharing_params(:sharing_disable, %{route: route}, _) do
-    with {:ok, _} <- Routes.decode(route) do
-      {:ok, %{route: route}}
-    end
+  defp sharing_params(:sharing_enable, _, state) do
+    Sharing.enable(public(state), remote_snapshot(state.remote))
   end
 
-  defp sharing_params(_, _, _), do: {:error, :sharing_route}
+  defp sharing_params(:sharing_disable, _, state) do
+    Sharing.disable(public(state), remote_snapshot(state.remote))
+  end
+
+  defp sharing_params(_, _, _), do: {:error, :sharing_unknown}
 
   defp share(state, operation, params, from) do
     work(state, :sharing, from, fn -> Remote.sharing(operation, params, state.remote) end)

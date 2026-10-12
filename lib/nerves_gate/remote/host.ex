@@ -49,7 +49,11 @@ defmodule NervesGate.Remote.Host do
   def execute(operation, params, server)
       when operation in [:sharing_enable, :sharing_disable, :sharing_sync] do
     with {:ok, routes} <-
-           NervesGate.Remote.Routes.change(operation, params, snapshot(server).advertised_routes),
+           NervesGate.Remote.Sharing.change(
+             operation,
+             params,
+             snapshot(server).advertised_routes
+           ),
          :ok <- update(server, &%{&1 | advertised_routes: routes}) do
       {:ok, routes}
     end

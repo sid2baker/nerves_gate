@@ -10,7 +10,7 @@ Navigation is **Overview · Equipment · Remote access · Settings**.
 | Overview | `/` | Current equipment, remote and Internet connection summaries |
 | Equipment | `/equipment` | Scoped neighbor observations, bounded ARP scan, local labels and gateway addresses |
 | Bus workspace | `/equipment/buses` | Bounded CAN/RS485 captures and one-shot Modbus register reads |
-| Remote access | `/remote` | Gateway Tailscale addresses, opt-in 4via6 equipment sharing and exact withdrawal |
+| Remote access | `/remote` | Gateway Tailscale addresses and equipment subnet sharing on/off |
 | Settings | `/settings` | Configuration entry points, button/LED controls and device information |
 | Network settings | `/settings/network` | First-time setup and later Ethernet configuration |
 | Tailscale settings | `/settings/tailscale` | Enrollment, private sign-in, hostname and disconnect |
@@ -43,16 +43,18 @@ mutations, bus traffic or physical I/O are started by visiting a page.
 
 ## Equipment sharing
 
-Remote access can advertise the confirmed dedicated equipment subnet using 4via6.
-The operator supplies a tailnet-unique site ID and explicitly confirms authorization.
-Observed devices and an optional IPv4 calculator supply copyable IPv6 destinations;
-discovery is not required. There is no ordinary IPv4 fallback. Approval/access policy
-and actual reachability are separate facts.
+Remote access shows the confirmed dedicated equipment IPv4 subnet and one on/off
+control. There are no site IDs, address calculators or arbitrary route controls.
+Use equipment's normal IPv4 addresses; discovery is optional. Overlaps with other
+sites, the client's LAN or another VPN are unsupported. Broadcast discovery is not
+bridged. Route approval/access policy and reachability remain separate checks.
 
-Withdraw removes only the selected 4via6 route, including an uncertain write, without
-changing enrollment or running intent. LAN proposals remain blocked until routes are
-withdrawn and known. No firewall or traffic-isolation status is claimed; see
-[networking.md](networking.md#equipment-sharing) for the limits.
+Off removes only that equipment subnet, including an uncertain write, without
+changing other advertisements, enrollment or running intent. Unknown is not shown
+as Off; the operator can explicitly turn sharing off to verify withdrawal. Any
+remaining external advertisements must be removed in Tailscale before LAN changes.
+The UI reports advertisement state, not proof that existing sessions have ended;
+see [networking.md](networking.md#equipment-sharing) for the limits.
 
 ## Button and LED
 
