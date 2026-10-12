@@ -56,21 +56,7 @@ defmodule NervesGate.MixProject do
       # PR #4441: lifecycle-managed LiveView/LiveComponent PubSub subscriptions.
       {:phoenix_live_view, github: "phoenixframework/phoenix_live_view", branch: "main"},
       {:phoenix_pubsub, "~> 2.4"},
-      # Jido v3: immutable upstream-compatible source set (main is still v2).
-      {:jido, github: "agentjido/jido", ref: "90763478104f1edbf0afcfcf9444621c3f9755e8"},
-      {:jido_action,
-       github: "agentjido/jido_action",
-       ref: "8e9b3f7b268e175091b0eb3720bab3b8633d3c24",
-       override: true},
-      {:zoi,
-       github: "mikehostetler/zoi",
-       ref: "2fff2a23e23e7ac0b26f62f49bbc1b12f7818ac9",
-       override: true},
-      # Approved exception: Jido's internal engine only; never an application API.
-      {:runic,
-       github: "mikehostetler/runic",
-       ref: "6b1c8c85d2d560a7ff5da6c3a417254c5d2b85b6",
-       override: true},
+      {:alarmist, "~> 0.4.2"},
       {:property_table, "~> 0.3.4"},
       {:circuits_uart, "~> 1.6"},
       {:input_event, "~> 1.4"},

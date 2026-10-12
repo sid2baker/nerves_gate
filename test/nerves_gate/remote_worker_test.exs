@@ -45,7 +45,7 @@ defmodule NervesGate.RemoteWorkerTest do
 
   test "restart kills the worker and observes without replaying a mutation", ctx do
     sources = GenServer.call(ctx.name, :observations)
-    assert :ok = Remote.command(:connect, %{"hostname" => "gateway"}, ctx.name)
+    assert :ok = Remote.connect("gateway", ctx.name)
     assert_receive {:executing, worker, :connect, _}
     monitor = Process.monitor(worker)
     Process.exit(ctx.remote, :kill)
@@ -55,14 +55,14 @@ defmodule NervesGate.RemoteWorkerTest do
     assert Remote.status(ctx.name).operation == nil
     assert GenServer.call(ctx.name, :observations) == sources
     refute_receive {:executing, _, _, _}, 50
-    assert :ok = Remote.command(:configure, %{"hostname" => "explicit-retry"}, ctx.name)
+    assert :ok = Remote.configure("explicit-retry", ctx.name)
   end
 
   test "concurrent enrollment requests admit at most one daemon worker", ctx do
     results =
       1..6
       |> Enum.map(fn _ ->
-        Task.async(fn -> Remote.command(:connect, %{"hostname" => "gateway"}, ctx.name) end)
+        Task.async(fn -> Remote.connect("gateway", ctx.name) end)
       end)
       |> Enum.map(&Task.await/1)
 
@@ -74,12 +74,12 @@ defmodule NervesGate.RemoteWorkerTest do
   end
 
   test "stale completion and timeout references cannot finish a later operation", ctx do
-    assert :ok = Remote.command(:connect, %{"hostname" => "gateway"}, ctx.name)
+    assert :ok = Remote.connect("gateway", ctx.name)
     assert_receive {:executing, worker, :connect, _}
     {task, _} = :sys.get_state(ctx.remote).worker
     send(worker, {:finish, :ok})
     eventually(fn -> Remote.status(ctx.name).operation == nil end)
-    assert :ok = Remote.command(:disconnect, %{}, ctx.name)
+    assert :ok = Remote.disconnect(ctx.name)
     assert_receive {:executing, next, :disconnect, _}
     send(ctx.remote, {task.ref, :ok})
     send(ctx.remote, {:timeout, task.ref})
@@ -92,7 +92,7 @@ defmodule NervesGate.RemoteWorkerTest do
     url = "https://login.tailscale.com/a/private-worker-token"
     Agent.update(ctx.control, &%{&1 | url: url})
     assert Remote.login_url(ctx.name) == url
-    assert :ok = Remote.command(:connect, %{"hostname" => "gateway"}, ctx.name)
+    assert :ok = Remote.connect("gateway", ctx.name)
     assert_receive {:executing, worker, :connect, _}
     send(worker, {:finish, {:ok, url}})
     eventually(fn -> Remote.status(ctx.name).operation == nil end)
@@ -118,13 +118,13 @@ defmodule NervesGate.RemoteWorkerTest do
 
   @tag :capture_log
   test "adapter crashes and killed workers are reported by their monitors", ctx do
-    assert :ok = Remote.command(:connect, %{"hostname" => "gateway"}, ctx.name)
+    assert :ok = Remote.connect("gateway", ctx.name)
     assert_receive {:executing, worker, :connect, _}
     send(worker, :crash)
     eventually(fn -> Remote.status(ctx.name).operation == nil end)
     assert Remote.status(ctx.name).error.code == "remote_outcome_unknown"
     refute inspect(Remote.status(ctx.name)) =~ "injected_failure"
-    assert :ok = Remote.command(:disconnect, %{}, ctx.name)
+    assert :ok = Remote.disconnect(ctx.name)
     assert_receive {:executing, worker, :disconnect, _}
     Process.exit(worker, :kill)
     eventually(fn -> Remote.status(ctx.name).operation == nil end)

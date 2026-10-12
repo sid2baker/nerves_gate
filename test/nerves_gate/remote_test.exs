@@ -37,6 +37,15 @@ defmodule NervesGate.RemoteTest do
     %{adapter: adapter, remote: remote, api: [network: nil, remote: remote]}
   end
 
+  test "domain queries and subscriptions do not start daemon operations", ctx do
+    assert :ok = Remote.observe(ctx.remote)
+    assert %{operation: nil, state: "offline"} = Remote.status(ctx.remote)
+    assert Remote.login_url(ctx.remote) == nil
+    assert {:error, %{code: "invalid_parameters"}} = Remote.connect("invalid name", ctx.remote)
+    refute function_exported?(Remote, :command, 3)
+    refute_receive {:remote_command, _, _, _}
+  end
+
   test "named commands validate arguments and stay responsive while login runs", ctx do
     for invalid <- [
           "invalid name",

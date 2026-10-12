@@ -1,4 +1,4 @@
-defmodule NervesGate.NetworkAgentTest do
+defmodule NervesGate.NetworkWorkerTest do
   use ExUnit.Case, async: true
   alias NervesGate.{Config, Network}
   alias NervesGate.Network.Host
@@ -18,29 +18,36 @@ defmodule NervesGate.NetworkAgentTest do
     host = start_supervised!({Host, name: nil})
     adapter = start_supervised!({Adapter, host: host, owner: self()})
 
-    server =
-      start_supervised!(
-        {Network,
-         name: nil, adapter: {Adapter, adapter}, trial_ms: 1_000, poll_ms: 10, effect_ms: 300}
-      )
+    start_supervised!(
+      {Network,
+       name: __MODULE__, adapter: {Adapter, adapter}, trial_ms: 1_000, poll_ms: 10, effect_ms: 300}
+    )
 
-    %{server: server, host: host, adapter: adapter}
+    on_exit(fn -> NervesGate.Alarms.report(:network_restore_failed, __MODULE__, false) end)
+    %{server: __MODULE__, host: host, adapter: adapter}
   end
 
-  test "validation is pure and Jido evaluates reconciliation independently of commands", ctx do
+  test "validation is pure and commands use one domain worker", ctx do
     before = Adapter.calls(ctx.adapter)
     assert {:ok, @network} = Network.validate(@network)
     assert {:error, _} = Network.validate(%{"mode" => "wifi"})
     assert Adapter.calls(ctx.adapter) == before
-    agent = Network.agent(ctx.server)
-    :ok = Jido.AgentServer.await_ready(agent)
-    signal = Jido.Signal.new!("network.reconcile", %{}, source: "/test")
-    assert {:ok, _} = Jido.AgentServer.call(agent, signal)
+    assert Map.get(Network.child_spec([]), :type, :worker) == :worker
     assert {:ok, id} = Network.propose(@network, ctx.server)
     assert :ok = Network.cancel(id, ctx.server)
   end
 
-  test "deferred replies leave the runtime responsive and serialize admission", ctx do
+  test "a transient observation failure clears on recovery without hardware writes", ctx do
+    before = Adapter.calls(ctx.adapter)
+    Adapter.fail(ctx.adapter, :snapshot, :unavailable)
+    assert %{observed: nil, error: {:discovery, :unavailable}} = Network.status(ctx.server)
+    Adapter.fail(ctx.adapter, :snapshot, nil)
+    assert Network.status(ctx.server).observed != nil
+    assert Network.status(ctx.server).error == nil
+    assert Adapter.calls(ctx.adapter) == before
+  end
+
+  test "deferred replies leave the server responsive and serialize admission", ctx do
     {caller, worker, _} = blocked_proposal(ctx)
     assert Network.status(ctx.server).phase == :apply
     assert {:error, :trial_in_progress} = Network.propose(@network, ctx.server)
@@ -49,24 +56,14 @@ defmodule NervesGate.NetworkAgentTest do
     assert :ok = Network.cancel(id, ctx.server)
   end
 
-  test "agent crash rolls back without restarting the safety runtime", ctx do
+  test "server restart restores saved subsystem settings before accepting commands", ctx do
     {:ok, _} = Network.propose(@network, ctx.server)
-    runtime = Network.runtime(ctx.server)
-    agent = Network.agent(ctx.server)
-    Process.exit(agent, :kill)
-    eventually(fn -> Network.agent(ctx.server) not in [nil, agent] and restored?(ctx) end)
-    assert Network.runtime(ctx.server) == runtime
+    old = Process.whereis(ctx.server)
+    Process.exit(old, :kill)
+    eventually(fn -> Process.whereis(ctx.server) not in [nil, old] and restored?(ctx) end)
     assert Host.load(ctx.host) == {:ok, Config.defaults()}
-    assert {:ok, _} = Network.propose(@network, ctx.server)
-  end
-
-  test "runtime crash restores subsystem settings and restarts its dependent agent", ctx do
-    {:ok, _} = Network.propose(@network, ctx.server)
-    runtime = Network.runtime(ctx.server)
-    agent = Network.agent(ctx.server)
-    Process.exit(runtime, :kill)
-    eventually(fn -> Network.runtime(ctx.server) not in [nil, runtime] end)
-    eventually(fn -> Network.agent(ctx.server) not in [nil, agent] and restored?(ctx) end)
+    assert {:ok, id} = Network.propose(@network, ctx.server)
+    assert :ok = Network.cancel(id, ctx.server)
   end
 
   test "watchdog joins a blocked apply before restoring; no orphan can apply later", ctx do
@@ -78,46 +75,31 @@ defmodule NervesGate.NetworkAgentTest do
     assert restored?(ctx)
   end
 
-  test "runtime death kills its in-flight hardware worker", ctx do
+  test "server death kills its in-flight hardware worker", ctx do
     Adapter.hold(ctx.adapter, :apply, @network)
     caller = Task.async(fn -> NervesGate.network_propose(@network, network: ctx.server) end)
     assert_receive {:blocked, :apply, worker}, 1_000
     ref = Process.monitor(worker)
-    runtime = Network.runtime(ctx.server)
-    Process.exit(runtime, :kill)
+    old = Process.whereis(ctx.server)
+    Process.exit(old, :kill)
     assert_receive {:DOWN, ^ref, :process, ^worker, _}, 1_000
     assert {:error, %{code: "outcome_unknown"}} = Task.await(caller)
-    eventually(fn -> Network.runtime(ctx.server) not in [nil, runtime] and restored?(ctx) end)
+    eventually(fn -> Process.whereis(ctx.server) not in [nil, old] and restored?(ctx) end)
   end
 
-  test "trial deadline interrupts blocked apply even with its agent suspended", ctx do
-    runtime = Network.runtime(ctx.server)
-    :sys.replace_state(runtime, &%{&1 | effect_ms: 5_000})
+  test "trial deadline interrupts blocked apply independently of the worker timeout", ctx do
+    :sys.replace_state(ctx.server, &%{&1 | effect_ms: 5_000})
     {caller, worker, ref} = blocked_proposal(ctx)
-    agent = Network.agent(ctx.server)
-    :sys.suspend(agent)
 
-    try do
-      :sys.replace_state(runtime, fn state ->
-        Process.cancel_timer(state.timer)
-        timer = Process.send_after(self(), {:expire, state.trial.id}, 25)
-        %{state | timer: timer, deadline: System.monotonic_time(:millisecond) + 25}
-      end)
+    :sys.replace_state(ctx.server, fn state ->
+      Process.cancel_timer(state.timer)
+      timer = Process.send_after(self(), {:expire, state.trial.id}, 25)
+      %{state | timer: timer, deadline: System.monotonic_time(:millisecond) + 25}
+    end)
 
-      assert {:error, :expired} = Task.await(caller)
-      assert_receive {:DOWN, ^ref, :process, ^worker, _}
-      assert restored?(ctx)
-    after
-      :sys.resume(agent)
-    end
-  end
-
-  test "agent failure during an effect cannot leave its hardware worker alive", ctx do
-    {caller, worker, ref} = blocked_proposal(ctx)
-    Process.exit(Network.agent(ctx.server), :kill)
-    assert {:error, :agent_restarted} = Task.await(caller)
-    assert_receive {:DOWN, ^ref, :process, ^worker, _}, 1_000
-    eventually(fn -> restored?(ctx) end)
+    assert {:error, :expired} = Task.await(caller)
+    assert_receive {:DOWN, ^ref, :process, ^worker, _}
+    assert restored?(ctx)
   end
 
   test "bounded save failure restores only after joining the save worker", ctx do
@@ -148,7 +130,7 @@ defmodule NervesGate.NetworkAgentTest do
 
   test "worker exceptions are logged and DOWN triggers restoration", ctx do
     Adapter.crash(ctx.adapter, :apply, @network)
-    runtime = Network.runtime(ctx.server)
+    server = Process.whereis(ctx.server)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
@@ -157,7 +139,7 @@ defmodule NervesGate.NetworkAgentTest do
       end)
 
     assert log =~ "injected apply failure"
-    assert Network.runtime(ctx.server) == runtime
+    assert Process.whereis(ctx.server) == server
     assert restored?(ctx)
   end
 
@@ -179,26 +161,13 @@ defmodule NervesGate.NetworkAgentTest do
 
   test "a caller timeout leaves the trial protected and OTP drops the late reply", ctx do
     Adapter.hold(ctx.adapter, :apply, @network)
-    runtime = Network.runtime(ctx.server)
-    assert {:timeout, _} = catch_exit(GenServer.call(runtime, {:propose, @network, nil}, 20))
+    assert {:timeout, _} = catch_exit(GenServer.call(ctx.server, {:propose, @network, nil}, 20))
     assert_receive {:blocked, :apply, worker}
     assert Process.alive?(worker)
     send(worker, :continue)
     eventually(fn -> Network.status(ctx.server).phase == :pending end)
     refute_receive {_ref, _result}, 30
     assert :ok = Network.cancel(Network.status(ctx.server).trial.id, ctx.server)
-  end
-
-  test "manual commands do not wait for a Jido turn", ctx do
-    agent = Network.agent(ctx.server)
-    :sys.suspend(agent)
-
-    try do
-      assert {:ok, id} = Network.propose(@network, ctx.server)
-      assert :ok = Network.cancel(id, ctx.server)
-    after
-      :sys.resume(agent)
-    end
   end
 
   defp blocked_proposal(ctx) do
@@ -221,12 +190,11 @@ defmodule NervesGate.NetworkAgentTest do
   defp eventually(fun, 0), do: assert(fun.())
 
   defp eventually(fun, attempts) do
-    if fun.(),
-      do: :ok,
-      else:
-        (
-          Process.sleep(10)
-          eventually(fun, attempts - 1)
-        )
+    if fun.() do
+      :ok
+    else
+      Process.sleep(10)
+      eventually(fun, attempts - 1)
+    end
   end
 end

@@ -6,7 +6,7 @@ ExUnit.start()
 Application.ensure_all_started(:logger)
 Application.ensure_all_started(:phoenix_pubsub)
 Application.ensure_all_started(:jason)
-{:ok, _} = Application.ensure_all_started(:jido)
+{:ok, _} = Application.ensure_all_started(:alarmist)
 Application.load(:vintage_net)
 
 for {key, value} <- [
@@ -32,9 +32,7 @@ defmodule NervesGate.BridgeIntegrationTest do
 
   test "real bridge: absent port, hotplug, both directions, DHCP, static and rollback" do
     start_supervised!({Phoenix.PubSub, name: NervesGate.PubSub})
-    start_supervised!({Registry, keys: :unique, name: NervesGate.Registry})
     start_supervised!({PropertyTable, name: NervesGate.Properties})
-    start_supervised!({Jido, name: NervesGate.Jido})
     # LAN isolation test: explicit in-memory empty route authority, never a host VPN.
     start_supervised!(NervesGate.Remote.Host)
 
@@ -150,7 +148,7 @@ defmodule NervesGate.BridgeIntegrationTest do
     IO.puts("PASS live DHCP-to-static reconfiguration")
 
     # Accelerate timeout only; application uses 60 seconds in production.
-    :sys.replace_state(Network.runtime(server), &%{&1 | trial_ms: 1_000})
+    :sys.replace_state(GenServer.whereis(server), &%{&1 | trial_ms: 1_000})
 
     assert {:ok, _} =
              Network.propose(put_in(static, ["equipment", "static_ip"], "10.45.0.20"), server)
@@ -213,7 +211,7 @@ defmodule NervesGate.BridgeIntegrationTest do
 
     cmd("ip", ~w(-n peer1 addr flush dev lan1))
     cmd("ip", ~w(-n peer1 addr add 10.46.0.3/24 dev lan1))
-    :sys.replace_state(Network.runtime(server), &%{&1 | trial_ms: 60_000})
+    :sys.replace_state(GenServer.whereis(server), &%{&1 | trial_ms: 60_000})
     assert {:ok, trial} = Network.propose(separated, server)
     wait(fn -> Network.status(server).ready end)
     assert :ok = Network.confirm(trial, server)
@@ -261,7 +259,7 @@ defmodule NervesGate.BridgeIntegrationTest do
   end
 
   defp start_web do
-    for app <- [:bandit, :phoenix_live_view, :jido] do
+    for app <- [:bandit, :phoenix_live_view] do
       {:ok, _} = Application.ensure_all_started(app)
     end
 

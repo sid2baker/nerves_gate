@@ -22,7 +22,7 @@ defmodule NervesGate.ObservationsTest do
     ports = Network.Host.snapshot(ctx.host).ports |> Enum.map(&%{&1 | connection: :internet})
     :ok = Network.Host.simulate(%{ports: ports}, ctx.host)
     assert_receive %PropertyTable.Event{property: ["host", "network", _]}, 1_000
-    eventually(fn -> :sys.get_state(Network.runtime(ctx.network)).observed.ports == ports end)
+    eventually(fn -> :sys.get_state(ctx.network).observed.ports == ports end)
     :ok = Remote.Host.simulate(%{state: "online", hostname: "observable"}, ctx.remote_host)
     assert_receive %PropertyTable.Event{property: ["host", "remote", _]}, 1_000
 
@@ -30,24 +30,14 @@ defmodule NervesGate.ObservationsTest do
     refute Map.has_key?(:sys.get_state(ctx.remote), :snapshot)
   end
 
-  test "raw interface bursts do not become Jido facts or consume command queue capacity", ctx do
-    runtime = Network.runtime(ctx.network)
-    agent = Network.agent(ctx.network)
-    :sys.suspend(agent)
-
-    try do
-      for n <- 1..100 do
-        Network.Host.simulate(%{simulated: rem(n, 2) == 0}, ctx.host)
-        send(runtime, {VintageNet, ["interface", "eth0", "state"], nil, :configured, %{}})
-      end
-
-      # Reads flush the runtime mailbox, independent of a blocked agent.
-      Network.status(ctx.network)
-      Process.sleep(40)
-      assert Process.info(agent, :message_queue_len) == {:message_queue_len, 0}
-    after
-      :sys.resume(agent)
+  test "raw interface bursts are coalesced and do not prevent commands", ctx do
+    for n <- 1..100 do
+      Network.Host.simulate(%{simulated: rem(n, 2) == 0}, ctx.host)
+      send(ctx.network, {VintageNet, ["interface", "eth0", "state"], nil, :configured, %{}})
     end
+
+    eventually(fn -> :sys.get_state(ctx.network).observation_timer == nil end)
+    assert Network.status(ctx.network).phase == :idle
 
     settings = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
     assert {:ok, id} = Network.propose(settings, ctx.network)

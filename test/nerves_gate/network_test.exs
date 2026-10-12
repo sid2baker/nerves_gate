@@ -45,7 +45,7 @@ defmodule NervesGate.NetworkTest do
     assert {:ok, id} = Network.propose(@static, ctx.server)
 
     # Start the accelerated window after temporary application.
-    :sys.replace_state(Network.runtime(ctx.server), fn state ->
+    :sys.replace_state(ctx.server, fn state ->
       Process.cancel_timer(state.timer)
       timer = Process.send_after(self(), {:expire, id}, 200)
       %{state | timer: timer, deadline: System.monotonic_time(:millisecond) + 200}
@@ -97,7 +97,7 @@ defmodule NervesGate.NetworkTest do
     assert {:error, :no_matching_trial} = Network.cancel("wrong", ctx.server)
     assert :ok = Network.cancel(id, ctx.server)
     assert {:ok, new_id} = Network.propose(@static, ctx.server)
-    send(Network.runtime(ctx.server), {:expire, id})
+    send(ctx.server, {:expire, id})
     assert Network.status(ctx.server).trial.id == new_id
     assert :ok = Network.confirm(new_id, ctx.server)
   end
@@ -122,7 +122,7 @@ defmodule NervesGate.NetworkTest do
   test "late confirmation is refused even before timer is processed", ctx do
     assert {:ok, id} = Network.propose(@static, ctx.server)
 
-    :sys.replace_state(Network.runtime(ctx.server), fn state ->
+    :sys.replace_state(ctx.server, fn state ->
       %{state | deadline: System.monotonic_time(:millisecond) - 1}
     end)
 

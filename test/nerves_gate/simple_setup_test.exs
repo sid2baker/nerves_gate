@@ -114,7 +114,7 @@ defmodule NervesGate.SimpleSetupTest do
     assert {:ok, saved} = Host.load(ctx.host)
     assert saved["setup_completed"]
     assert saved["network"] == @wan
-    :sys.replace_state(Network.runtime(ctx.server), &%{&1 | trial_ms: 200})
+    :sys.replace_state(ctx.server, &%{&1 | trial_ms: 200})
     assert {:ok, _} = Network.propose(@empty, ctx.server, @access)
     refute Network.status(ctx.server).trial.auto_save
 
@@ -169,11 +169,11 @@ defmodule NervesGate.SimpleSetupTest do
     Host.simulate(%{usb: @usb, ports: Host.snapshot(ctx.host).ports}, ctx.host)
     assert {:ok, _} = Network.propose(@empty, ctx.server, @access)
 
-    :sys.replace_state(Network.runtime(ctx.server), fn state ->
+    :sys.replace_state(ctx.server, fn state ->
       %{state | deadline: System.monotonic_time(:millisecond) - 1}
     end)
 
-    send(Network.runtime(ctx.server), :poll)
+    send(ctx.server, :poll)
 
     eventually(fn ->
       status = Network.status(ctx.server)

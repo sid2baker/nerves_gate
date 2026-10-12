@@ -55,8 +55,9 @@ defmodule NervesGate.SharingTest do
 
     host = start_supervised!({Network.Host, name: nil})
     Network.Host.save(@network, host)
-    opts = [name: nil, adapter: {Network.Host, host}, remote: remote, poll_ms: 10]
-    network = start_supervised!({Network, opts})
+    opts = [name: __MODULE__, adapter: {Network.Host, host}, remote: remote, poll_ms: 10]
+    start_supervised!({Network, opts})
+    network = __MODULE__
     [first, second] = Network.Host.snapshot(host).ports
     Network.Host.simulate(%{ports: [first, %{second | link: true}]}, host)
 
@@ -233,10 +234,10 @@ defmodule NervesGate.SharingTest do
        ctx do
     task = Task.async(fn -> NervesGate.equipment_share(7, true, ctx.api) end)
     assert_receive {:route_operation, remote_worker, :sharing_enable, _}
-    old = Network.runtime(ctx.network)
+    old = Process.whereis(ctx.network)
     Process.exit(old, :kill)
     assert {:error, %{code: "outcome_unknown"}} = Task.await(task)
-    eventually(fn -> Network.runtime(ctx.network) not in [nil, old] end)
+    eventually(fn -> Process.whereis(ctx.network) not in [nil, old] end)
     assert Network.status(ctx.network).config["network"] == @network
     assert {:error, %{code: "sharing_unknown"}} = NervesGate.network_propose(@network, ctx.api)
     send(remote_worker, :finish)

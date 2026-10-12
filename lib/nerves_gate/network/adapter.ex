@@ -2,7 +2,7 @@ defmodule NervesGate.Network.Adapter do
   @moduledoc """
   Infrastructure boundary. Implementations may configure only LAN interfaces;
   USB provisioning must remain independent. Host implementations never touch
-  workstation interfaces. Calls run outside Jido command evaluation.
+  workstation interfaces. Hardware writes run in the network server's bounded worker.
   """
   @callback load(term()) :: {:ok, map()} | {:error, term()}
   @callback save(map(), term()) :: :ok | {:error, term()}

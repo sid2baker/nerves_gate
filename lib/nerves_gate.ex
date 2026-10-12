@@ -1,6 +1,6 @@
 defmodule NervesGate do
   @moduledoc """
-  Public API for the gateway. Start here; callers do not need Jido or runtime APIs.
+  Public commands and status queries for the gateway. No client process is needed.
 
   ## Network
 
@@ -80,16 +80,17 @@ defmodule NervesGate do
   @doc "Request Tailscale connection/enrollment under this hostname. Returns acceptance."
   @spec remote_connect(String.t(), keyword()) :: command_result()
   def remote_connect(hostname, opts \\ []),
-    do: remote_command(:connect, %{"hostname" => hostname}, opts)
+    do: invoke(fn -> Remote.connect(hostname, remote(opts)) end) |> result()
 
   @doc "Request a Tailscale hostname change without replacing other daemon preferences."
   @spec remote_configure(String.t(), keyword()) :: command_result()
   def remote_configure(hostname, opts \\ []),
-    do: remote_command(:configure, %{"hostname" => hostname}, opts)
+    do: invoke(fn -> Remote.configure(hostname, remote(opts)) end) |> result()
 
   @doc "Request Tailscale down without signing out. May interrupt callers using that VPN."
   @spec remote_disconnect(keyword()) :: command_result()
-  def remote_disconnect(opts \\ []), do: remote_command(:disconnect, %{}, opts)
+  def remote_disconnect(opts \\ []),
+    do: invoke(fn -> Remote.disconnect(remote(opts)) end) |> result()
 
   @doc "Read the private HTTPS enrollment URL, or nil. Do not log or broadcast it."
   @spec remote_login_url(keyword()) :: result(String.t() | nil)
@@ -179,10 +180,6 @@ defmodule NervesGate do
   end
 
   def version, do: Application.spec(:nerves_gate, :vsn) |> to_string()
-
-  defp remote_command(operation, params, opts) do
-    invoke(fn -> Remote.command(operation, params, remote(opts)) end) |> result()
-  end
 
   defp network(opts), do: Keyword.get(opts, :network, Network)
   defp remote(opts), do: Keyword.get(opts, :remote, Remote)

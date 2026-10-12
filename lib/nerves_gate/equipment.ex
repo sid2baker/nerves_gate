@@ -1,18 +1,46 @@
 defmodule NervesGate.Equipment do
-  @moduledoc "Bounded Ethernet observations and labels. Network.Runtime owns active-scan exclusivity."
-  use GenServer
-  alias NervesGate.Equipment.{Labels, Linux, Subnet}
-  alias NervesGate.{Error, Network, Observations}
+  @moduledoc """
+  Equipment observations and local labels for the confirmed equipment subnet.
 
+  ## Commands
+
+  `label/3` saves a label and returns `:ok` after persistence, or `{:error, reason}`.
+  Use `NervesGate.equipment_scan/1` for an active scan: Network reserves its LAN
+  worker so scanning cannot overlap network reconfiguration.
+
+  ## Queries and notifications
+
+  `status/1` returns the scope, entries, scan progress and errors. Entries and
+  labels are capped at 256 each; observations are not proof of reachability.
+  `observe/1` subscribes the caller to inventory changes; reread status afterward.
+  The optional server argument defaults to this module.
+
+  Passive discovery failures for a confirmed scope set
+  `:equipment_discovery_unavailable`. A successful observation (even an empty
+  inventory) or removing the equipment configuration clears it. Scan results,
+  label commands and temporarily unknown network state do not clear that fault.
+  """
+  use GenServer
+  alias NervesGate.{Alarms, Error, Network, Observations}
+  alias NervesGate.Equipment.{Labels, Linux, Subnet}
+
+  @doc false
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
-  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
-  def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
+  @doc "Save a label for an ID from status entries. At most 64 characters; empty text removes it."
+  @spec label(String.t(), String.t(), GenServer.server()) :: :ok | {:error, term()}
   def label(id, value, server \\ __MODULE__), do: GenServer.call(server, {:label, id, value})
 
-  # Runs in the LAN runtime's bounded worker, not a second scan task. Monitoring
-  # the worker clears the UI even if the runtime restarts or kills a timed-out scan.
+  @doc "Read scoped entries, last scan, operation and errors. Does not initiate a scan."
+  @spec status(GenServer.server()) :: map()
+  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+
+  @doc "Subscribe the caller to inventory-change hints; read status to obtain current entries."
+  @spec observe(GenServer.server()) :: :ok | {:error, :unavailable}
+  def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
+
+  # Runs in Network's bounded worker. Monitoring clears progress when that worker dies.
   @doc false
   def scan(scope, server) do
     with {:ok, ref, {module, context}} <- GenServer.call(server, {:begin_scan, scope}) do
@@ -21,6 +49,7 @@ defmodule NervesGate.Equipment do
     end
   end
 
+  @doc false
   def unavailable,
     do: %{
       available: false,
@@ -47,6 +76,8 @@ defmodule NervesGate.Equipment do
       end
 
     state = %{
+      name: Keyword.get(opts, :name, __MODULE__),
+      discovery_fault: nil,
       adapter: adapter,
       network: Keyword.get(opts, :network, Network),
       scope: nil,
@@ -121,26 +152,37 @@ defmodule NervesGate.Equipment do
     {:noreply, poll(state)}
   end
 
+  def handle_info({:observing, pid, scope}, %{worker: %{task: %{pid: pid}}} = state) do
+    state = %{state | worker: %{state.worker | observing: true}} |> set_scope(scope)
+    {:noreply, state}
+  end
+
   def handle_info({ref, {scope, result}}, %{worker: %{task: %{ref: ref}, timer: timer}} = state) do
     Process.demonitor(ref, [:flush])
     Process.cancel_timer(timer)
-    state = %{state | worker: nil} |> set_scope(scope) |> apply_entries(result)
+
+    fault =
+      case {scope, result} do
+        {nil, {:error, :equipment_unconfigured}} -> false
+        {nil, _} -> state.discovery_fault
+        {_, {:ok, _}} -> false
+        {_, {:error, _}} -> true
+      end
+
+    state =
+      %{state | worker: nil, discovery_fault: fault} |> set_scope(scope) |> apply_entries(result)
+
     {:noreply, publish(state)}
   end
 
   def handle_info({:DOWN, ref, :process, _, _}, %{scan: ref} = state),
     do: {:noreply, publish(%{state | scan: nil, error: :scan_interrupted})}
 
-  def handle_info(
-        {:DOWN, ref, :process, _, _},
-        %{worker: %{task: %{ref: ref}, timer: timer}} = state
-      ) do
-    Process.cancel_timer(timer)
-    {:noreply, publish(%{state | worker: nil, error: :equipment_unavailable})}
-  end
+  def handle_info({:DOWN, ref, :process, _, _}, %{worker: %{task: %{ref: ref}}} = state),
+    do: {:noreply, state |> poll_failed() |> publish()}
 
   def handle_info({:poll_timeout, ref}, %{worker: %{task: %{ref: ref}}} = state),
-    do: {:noreply, publish(%{stop_poll(state) | error: :equipment_unavailable})}
+    do: {:noreply, state |> poll_failed() |> publish()}
 
   def handle_info(_, state), do: {:noreply, state}
 
@@ -149,20 +191,31 @@ defmodule NervesGate.Equipment do
 
   defp poll(%{worker: nil, scan: nil} = state) do
     {module, context} = state.adapter
+    owner = self()
 
     task =
       Task.async(fn ->
         case Subnet.from_status(Network.status(state.network)) do
-          {:ok, scope} -> {scope, module.neighbors(scope, context)}
-          {:error, reason} -> {nil, {:error, reason}}
+          {:ok, scope} ->
+            send(owner, {:observing, self(), scope})
+            {scope, module.neighbors(scope, context)}
+
+          {:error, reason} ->
+            {nil, {:error, reason}}
         end
       end)
 
     timer = Process.send_after(self(), {:poll_timeout, task.ref}, state.effect_ms)
-    %{state | worker: %{task: task, timer: timer}}
+    %{state | worker: %{task: task, timer: timer, observing: false}}
   end
 
   defp poll(state), do: state
+
+  defp poll_failed(state) do
+    fault = if state.worker.observing, do: true, else: state.discovery_fault
+    %{stop_poll(state) | error: :equipment_unavailable, discovery_fault: fault}
+  end
+
   defp stop_poll(%{worker: nil} = state), do: state
 
   defp stop_poll(%{worker: worker} = state) do
@@ -246,6 +299,7 @@ defmodule NervesGate.Equipment do
   defp sources, do: [{Observations.table(), Observations.workflow("equipment", inspect(self()))}]
 
   defp publish(state) do
+    Alarms.report(:equipment_discovery_unavailable, state.name, state.discovery_fault)
     Observations.put(Observations.workflow("equipment", inspect(self())), public(state))
     state
   end

@@ -1,21 +1,52 @@
 defmodule NervesGate.Indicators do
-  @moduledoc "One bounded identify blink and an opt-in, non-destructive button. Mode resets on restart."
+  @moduledoc """
+  Gateway identification using the run LED and optional button behavior.
+
+  ## Commands
+
+  `identify/1` starts a five-second blink and returns `:ok` immediately; the
+  previous raw LED value is restored afterward. `button_mode/2` changes the
+  in-memory button setting. Both return `{:error, reason}` when rejected.
+  Button mode resets to disabled on restart.
+
+  ## Queries and notifications
+
+  `status/1` returns button availability/mode and LED identification/restoration
+  state. `observe/1` subscribes the caller to changes; read status afterward.
+  The optional server argument defaults to this module.
+
+  Failed LED restoration sets `:led_restore_failed`. While restoration is pending,
+  another identify is rejected. Startup cannot clear the alarm: the old LED value
+  is not persisted. A successful restoration clears it.
+  """
   use GenServer
-  alias NervesGate.{Error, Observations}
+  alias NervesGate.{Alarms, Error, Observations}
 
   @blink_ms 500
   @identify_ms 5_000
   @poll_ms 5_000
 
+  @doc false
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
+  @doc "Start identification, rejecting overlap or pending restoration. Read status for completion."
+  @spec identify(GenServer.server()) :: :ok | {:error, term()}
   def identify(server \\ __MODULE__), do: GenServer.call(server, :identify)
+
+  @doc "Set button behavior to `disabled` or `identify` until restart. Returns after changing it."
+  @spec button_mode(String.t(), GenServer.server()) :: :ok | {:error, term()}
   def button_mode(mode, server \\ __MODULE__), do: GenServer.call(server, {:button_mode, mode})
 
+  @doc "Read button state and LED identifying, restore_pending and error fields. Does not write hardware."
+  @spec status(GenServer.server()) :: map()
   def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+
+  @doc "Subscribe the caller to button/LED state changes; reread status for the latest values."
+  @spec observe(GenServer.server()) :: :ok | {:error, :unavailable}
   def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
 
+  @doc false
   def unavailable do
     %{
       available: false,
@@ -30,6 +61,7 @@ defmodule NervesGate.Indicators do
     Process.flag(:trap_exit, true)
 
     state = %{
+      name: Keyword.get(opts, :name, __MODULE__),
       adapter:
         Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :indicators_adapter)),
       button: nil,
@@ -152,6 +184,8 @@ defmodule NervesGate.Indicators do
   defp restore_led(%{blink: nil, restore: value} = state) when not is_nil(value) do
     case write_led(state, value) do
       :ok ->
+        Alarms.report(:led_restore_failed, state.name, false)
+
         %{
           state
           | restore: nil,
@@ -159,6 +193,7 @@ defmodule NervesGate.Indicators do
         }
 
       {:error, _} ->
+        Alarms.report(:led_restore_failed, state.name, true)
         %{state | led_available: false, error: :led_restore_failed}
     end
   end

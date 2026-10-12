@@ -20,9 +20,7 @@ defmodule NervesGate.Application do
     children =
       [
         {Phoenix.PubSub, [name: NervesGate.PubSub]},
-        {Registry, keys: :unique, name: NervesGate.Registry},
-        {PropertyTable, name: NervesGate.Properties},
-        {Jido, name: NervesGate.Jido}
+        {PropertyTable, name: NervesGate.Properties}
       ] ++
         simulator ++
         [

@@ -59,17 +59,17 @@ remote reachability.
 
 ### Temporary trials, subsystem-owned persistence
 
-The Network runtime admits and acknowledges commands using standard OTP calls and
-replies. The Jido agent decides first-USB-setup auto-save; the runtime rechecks each
-automatic decision and owns the independent watchdog and bounded hardware worker.
+One Network GenServer admits and acknowledges commands using standard OTP calls and
+replies. It checks first-USB-setup auto-save directly against current observations
+and owns the independent watchdog and bounded hardware worker.
 
 1. **Propose:** apply temporarily without changing saved settings. Acknowledge
    after application; immediately-ready first USB setup waits for auto-save.
 2. **Confirm:** recheck the exact trial ID, monotonic deadline, readiness and
    conflicts, then save each LAN interface through VintageNet's persistence API.
-3. **Cancel, timeout, failed apply or agent crash:** stop and join the worker,
+3. **Cancel, timeout or failed apply:** stop and join the worker,
    then restore the prior applied configuration. USB remains untouched.
-4. **Runtime restart/reboot:** load and apply VintageNet's saved settings, not a
+4. **Server restart/reboot:** load and apply VintageNet's saved settings, not a
    pending trial or a resumed countdown. Failed restoration retries with new
    proposals blocked.
 
@@ -83,7 +83,8 @@ Keep USB/serial recovery available.
 VintageNet owns interface state, hotplug, cleanup and asynchronous retries. An
 admitted operation can outlive its caller, so the adapter retains a bounded
 configuration/bridge-membership settlement barrier. Rollback does not depend on
-the browser, Jido timer or successful notification delivery.
+the browser, Alarmist or successful notification delivery. Failed restoration raises
+an Alarmist fault; successful restoration clears it. The alarm does not drive recovery.
 
 ## Tailscale
 

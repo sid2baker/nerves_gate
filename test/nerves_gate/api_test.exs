@@ -209,7 +209,7 @@ defmodule NervesGate.APITest do
     {:ok, id} = NervesGate.network_propose(@static, ctx.api)
 
     :sys.replace_state(
-      Network.runtime(ctx.network),
+      ctx.network,
       &%{&1 | deadline: System.monotonic_time(:millisecond) - 1}
     )
 
@@ -259,7 +259,7 @@ defmodule NervesGate.APITest do
     assert {:ok, id} = Task.await(task)
     refute Process.alive?(task.pid)
 
-    :sys.replace_state(Network.runtime(ctx.network), fn state ->
+    :sys.replace_state(ctx.network, fn state ->
       Process.cancel_timer(state.timer)
       timer = Process.send_after(self(), {:expire, id}, 200)
       %{state | timer: timer, deadline: System.monotonic_time(:millisecond) + 200}

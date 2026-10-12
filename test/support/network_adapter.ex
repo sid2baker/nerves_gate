@@ -40,7 +40,11 @@ defmodule NervesGate.TestNetworkAdapter do
   def restore(network, server), do: apply_config(network, server)
 
   @impl true
-  def snapshot(server), do: Host.snapshot(Agent.get(server, & &1.host))
+  def snapshot(server) do
+    state = Agent.get(server, & &1)
+    if state.failures[:snapshot], do: nil, else: Host.snapshot(state.host)
+  end
+
   @impl true
   def observations(server), do: Host.observations(Agent.get(server, & &1.host))
 

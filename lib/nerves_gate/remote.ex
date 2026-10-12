@@ -1,28 +1,72 @@
 defmodule NervesGate.Remote do
   @moduledoc """
-  One bounded Tailscale operation at a time. The daemon owns preferences and
-  identity; this process only tracks the current request and its public result.
-  Restart observes the daemon, never replays a mutation.
+  Tailscale connection and device-name control.
+
+  ## Commands
+
+  `connect/2`, `configure/2` and `disconnect/1` return `:ok` when accepted,
+  or `{:error, reason}`. Only one daemon operation runs at a time. Acceptance
+  does not mean completion: read `status/1` for `:operation` and `:error`.
+
+  ## Queries and notifications
+
+  `status/1` returns sanitized daemon observations. `login_url/1` is a private
+  query; its result never enters status or notifications. Subscribe with
+  `observe/1` before reading, then reread when properties change.
+
+  The optional server argument defaults to this module. The daemon retains
+  identity and preferences across process restarts; commands are not replayed.
+
+  `:remote_unavailable` reports daemon loss after a connect request or an active
+  authentication/connection observation. An available daemon clears it, including
+  while offline or awaiting approval. Stopped/unconfigured connections do not
+  require a daemon for this alarm. Unknown startup observations preserve an old
+  report; no connection intent is persisted here.
   """
   use GenServer
-  alias NervesGate.Observations
+  alias NervesGate.{Alarms, Observations}
   alias NervesGate.Remote.{Adapter, Policy, Sharing}
 
+  @doc false
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
+  @doc "Request connection or enrollment. Hostnames are 1–63 letters, numbers or hyphens."
+  @spec connect(String.t(), GenServer.server()) :: :ok | {:error, term()}
+  def connect(hostname, server \\ __MODULE__),
+    do: command(:connect, %{"hostname" => hostname}, server)
+
+  @doc "Request a hostname change without changing connection intent; preserves omitted preferences."
+  @spec configure(String.t(), GenServer.server()) :: :ok | {:error, term()}
+  def configure(hostname, server \\ __MODULE__),
+    do: command(:configure, %{"hostname" => hostname}, server)
+
+  @doc "Request Tailscale down without logging out. May disconnect a caller using the VPN."
+  @spec disconnect(GenServer.server()) :: :ok | {:error, term()}
+  def disconnect(server \\ __MODULE__), do: command(:disconnect, %{}, server)
+
+  @doc "Read daemon observations and the current operation/error. Never returns an enrollment URL."
+  @spec status(GenServer.server()) :: map()
   def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+
+  @doc "Read the validated HTTPS enrollment URL, or nil. Do not log or broadcast it."
+  @spec login_url(GenServer.server()) :: String.t() | nil
   def login_url(server \\ __MODULE__), do: GenServer.call(server, :login_url)
 
-  def command(operation, params, server \\ __MODULE__),
-    do: GenServer.call(server, {:command, operation, params})
+  @doc "Subscribe the caller to property-change hints; read status afterward and on each notification."
+  @spec observe(GenServer.server()) :: :ok | {:error, :unavailable}
+  def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
 
+  # Route mutations must hold Network's LAN worker. Called by Network, not clients.
+  @doc false
   def sharing(operation, params, server \\ __MODULE__),
     do: GenServer.call(server, {:sharing, operation, params}, 45_000)
 
-  def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
+  @doc false
   defdelegate unavailable(), to: Policy
-  defdelegate validate(operation, params), to: Policy
+
+  defp command(operation, params, server),
+    do: GenServer.call(server, {:command, operation, params})
 
   @impl true
   def init(opts) do
@@ -31,6 +75,8 @@ defmodule NervesGate.Remote do
     adapter = Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :remote_adapter))
 
     state = %{
+      name: Keyword.get(opts, :name, __MODULE__),
+      enabled: nil,
       sharing: Map.get(Adapter.snapshot(adapter), :sharing, Policy.unavailable().sharing),
       waiting: nil,
       route: nil,
@@ -184,8 +230,32 @@ defmodule NervesGate.Remote do
   end
 
   defp publish(state) do
-    Observations.put(path(state), :erlang.phash2(snapshot(state)))
-    state
+    observed = snapshot(state)
+
+    enabled =
+      cond do
+        state.operation == "connect" ->
+          true
+
+        observed.available and
+            observed.auth_state in ["authenticated", "authenticating", "needs_approval"] ->
+          true
+
+        observed.available and observed.auth_state in ["stopped", "needs_login"] ->
+          false
+
+        true ->
+          state.enabled
+      end
+
+    Alarms.report(
+      :remote_unavailable,
+      state.name,
+      if(observed.available, do: false, else: enabled)
+    )
+
+    Observations.put(path(state), :erlang.phash2(observed))
+    %{state | enabled: enabled}
   end
 
   defp sources(state),

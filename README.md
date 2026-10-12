@@ -1,7 +1,7 @@
 # Nerves Gate
 
-An Ethernet gateway with a small, local web UI, built with Nerves 2, Jido v3 and
-Phoenix LiveView. EC100 is the primary target; x86_64 support is in progress.
+An Ethernet gateway with a small, local web UI, built with Nerves 2, ordinary OTP,
+Alarmist and Phoenix LiveView. EC100 is the primary target; x86_64 support is in progress.
 
 ## Use it
 
@@ -43,8 +43,8 @@ Tailscale behavior.
 ## Backend entry point
 
 **Start at [`lib/nerves_gate.ex`](lib/nerves_gate.ex).** `NervesGate` exposes named
-functions for LiveView, IEx/SSH and future interfaces. No dispatcher, client object
-or knowledge of Jido is needed to use the backend.
+commands and status queries for LiveView, IEx/SSH and future interfaces. No dispatcher,
+client object or command/query framework is needed.
 
 ```elixir
 :ok = NervesGate.subscribe()               # subscribe before reading
@@ -75,21 +75,22 @@ Failures return `{:error, %{code: code, message: message}}`. Read `NervesGate.st
 separately after commands. Remote acceptance is not completion; check its operation
 and error. An unknown outcome requires reading status before retrying.
 
-Internally, ordinary OTP calls and deferred replies handle network commands. A small
-Jido agent decides first-USB-setup auto-save; the runtime owns the independent
-rollback timer and hardware worker. Remote is one bounded GenServer.
+Internally, one Network GenServer owns commands, USB auto-save, the independent
+rollback timer and a bounded hardware worker. Remote is another bounded GenServer.
 VintageNet owns saved LAN settings; Tailscale owns its identity and preferences.
 There is no central state server, trial journal or connectivity retry agent.
 Saving several interfaces is not a transaction: interruption can leave partially
 saved settings. USB remains independent for recovery.
 
-Jido v3 is pinned to immutable source commits. **Approved dependency exception:**
-Jido's v3 Action engine requires Runic internally. NervesGate has no direct Runic
-calls or workflows, and introduces no AI dependencies.
+Each domain reports faults through Alarmist: failed network/LED restoration,
+unavailable equipment discovery, daemon loss while remote access is enabled, and
+missing enabled bus ports. Normal offline/disabled states are not faults.
+Use `Alarmist.info()` or subscribe to `{NervesGate.Alarms, :_, :_}`. Alarms never
+control trials or trigger automatic remedies. There is no agent/AI dependency stack.
 
 See the [action API](docs/action-api.md) for return values and UI mapping, and the
 [architecture](docs/architecture.md) for ownership, lifecycle,
-persistence tradeoffs and the exact dependency pins.
+persistence tradeoffs and fault reporting.
 
 ## Develop
 

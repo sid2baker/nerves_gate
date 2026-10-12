@@ -22,35 +22,19 @@ defmodule NervesGate.EquipmentTest do
     source: "simulated"
   }
 
-  defmodule ScanAdapter do
-    @behaviour Equipment.Adapter
-    @impl true
-    def neighbors(scope, ctx), do: Host.neighbors(scope, ctx.host)
-    @impl true
-    def load_labels(ctx), do: Host.load_labels(ctx.host)
-    @impl true
-    def save_labels(labels, ctx), do: Host.save_labels(labels, ctx.host)
-    @impl true
-    def scan(scope, ctx) do
-      send(ctx.owner, {:scanning, self(), scope})
-
-      receive do
-        :continue -> Host.scan(scope, ctx.host)
-        {:return, result} -> result
-      end
-    end
-  end
+  alias NervesGate.TestEquipmentAdapter, as: ScanAdapter
 
   setup do
     host = start_supervised!({Network.Host, name: nil})
     :ok = Network.Host.save(@network, host)
     adapter = start_supervised!({TestNetworkAdapter, host: host, owner: self()})
 
-    network =
-      start_supervised!(
-        {Network,
-         name: nil, adapter: {TestNetworkAdapter, adapter}, poll_ms: 20, effect_ms: 1_000}
-      )
+    start_supervised!(
+      {Network,
+       name: __MODULE__, adapter: {TestNetworkAdapter, adapter}, poll_ms: 20, effect_ms: 1_000}
+    )
+
+    network = __MODULE__
 
     equipment_host = start_supervised!({Host, name: nil})
     Host.simulate([@entry], equipment_host)
@@ -220,11 +204,11 @@ defmodule NervesGate.EquipmentTest do
     task = Task.async(fn -> NervesGate.equipment_scan(ctx.api) end)
     assert_receive {:scanning, worker, _}
     monitor = Process.monitor(worker)
-    Process.exit(Network.runtime(ctx.network), :kill)
+    Process.exit(Process.whereis(ctx.network), :kill)
     assert_receive {:DOWN, ^monitor, :process, ^worker, _}
     assert {:error, %{code: "outcome_unknown"}} = Task.await(task)
     eventually(fn -> Equipment.status(ctx.equipment).operation == nil end)
-    eventually(fn -> Network.runtime(ctx.network) != nil end)
+    eventually(fn -> Process.whereis(ctx.network) != nil end)
     assert Network.status(ctx.network).config == Config.from_network(@network)
   end
 

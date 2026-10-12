@@ -16,7 +16,7 @@ defmodule NervesGate.BusesTest do
     host = start_supervised!({Host, name: nil})
     server = start_supervised!({Buses, name: nil, adapter: {Host, host}})
     api = [buses: server, network: nil, remote: nil, equipment: nil, indicators: nil]
-    assert Enum.count_until(NervesGate.Buses.status(server).ports(), 4 + 1) == 4
+    assert Enum.count_until(Buses.status(server).ports, 4 + 1) == 4
     %{server: server, host: host, api: api}
   end
 
@@ -142,7 +142,7 @@ defmodule NervesGate.BusesTest do
     send(ctx.server, {task.ref, {:ok, %{hex: "STALE"}}})
     send(ctx.server, {:timeout, task.ref})
     assert Buses.status(ctx.server).result == nil
-    assert Enum.count_until(NervesGate.Buses.Host.calls(ctx.host()), 2 + 1) == 2
+    assert Enum.count_until(Host.calls(ctx.host), 2 + 1) == 2
   end
 
   test "a crashed worker releases admission and a later operation can succeed", ctx do

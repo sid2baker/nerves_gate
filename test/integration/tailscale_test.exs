@@ -38,12 +38,10 @@ defmodule NervesGate.TailscaleIntegration do
     end)
 
     {:ok, _} = Application.ensure_all_started(:tailscale)
-    {:ok, _} = Application.ensure_all_started(:jido)
+    {:ok, _} = Application.ensure_all_started(:alarmist)
     {:ok, _} = Application.ensure_all_started(:phoenix_pubsub)
     start_supervised!({Phoenix.PubSub, name: NervesGate.PubSub})
-    start_supervised!({Registry, keys: :unique, name: NervesGate.Registry})
     start_supervised!({PropertyTable, name: NervesGate.Properties})
-    start_supervised!({Jido, name: NervesGate.Jido})
     start_supervised!({Remote, adapter: {Remote.Tailscale, nil}, poll_ms: 10})
     :ok = Tailscale.Monitor.ready(Tailscale.Monitor, 10_000)
     eventually(fn -> Tailscale.get_configuration() != nil end)

@@ -3,7 +3,23 @@
 Start with [`lib/nerves_gate.ex`](../lib/nerves_gate.ex). It contains the named,
 documented, typed functions used by LiveView and IEx/SSH. There is no public
 string dispatcher, client struct, facade process or cached status server.
-Jido and the domain runtimes are implementation details.
+Commands and queries stay separate without a CQRS framework or stored read model.
+
+## Domain APIs
+
+Each domain documents its commands, queries and completion semantics in its module:
+
+- [`Network`](../lib/nerves_gate/network.ex): validate, propose, confirm, cancel and status.
+- [`Equipment`](../lib/nerves_gate/equipment.ex): labels and inventory status.
+- [`Remote`](../lib/nerves_gate/remote.ex): connect, configure, disconnect, login URL and status.
+- [`Buses`](../lib/nerves_gate/buses.ex): configure, capture, Modbus read and status.
+- [`Indicators`](../lib/nerves_gate/indicators.ex): identify, button mode and status.
+
+Each has `observe/1` and accepts an optional server reference. Direct domain calls
+use ordinary OTP exit behavior; `NervesGate` handles process-call failures and
+normalizes errors for clients. Use `NervesGate.equipment_scan/1`, `equipment_share/3`
+and `equipment_unshare/2` so cross-domain operations retain Network's safety guard.
+The worker entry points they call are internal and marked `@doc false`.
 
 ## Read, act, read again
 
@@ -62,9 +78,9 @@ parameters or forwarded headers. All subsequent changes require confirmation,
 including those through USB.
 
 Immediately-ready first USB setup waits for auto-save before returning.
-If application is still settling, the agent acknowledges the pending trial and
-later commits when ready. Conflicts and persistence failures are not successful
-auto-saves. The runtime independently enforces the 15-second USB bound and the
+If application is still settling, Network acknowledges the pending trial and
+later saves when ready. Conflicts and persistence failures are not successful
+auto-saves. Network independently enforces the 15-second USB bound and the
 60-second manual confirmation window. Confirmation saves interfaces individually;
 interrupted or failed persistence can leave a partial save. There is no durable
 trial journal or multi-interface transaction. See [networking](networking.md).
@@ -75,7 +91,7 @@ are delivered only by `remote_login_url/1`, never placed in status, server state
 or subscribed properties. Do not log or broadcast them.
 
 Network commands use one standard OTP call with a 15-second timeout and deferred
-hardware-completion replies. Manual commands do not wait for the policy agent.
+hardware-completion replies. No agent or alarm handler participates in admission.
 On `outcome_unknown`, **read status before deciding whether to retry**. Caller
 timeout does not cancel an admitted command. Network recovery remains independent
 of the caller; a daemon mutation may complete after its caller dies. Uncertain
@@ -159,7 +175,7 @@ Pass domain server references (`:network`, `:remote`, `:equipment`, `:indicators
 directly; no client object or `server:` wrapper:
 
 ```elixir
-opts = [network: network_supervisor, remote: remote_server]
+opts = [network: network_server, remote: remote_server]
 :ok = NervesGate.subscribe(opts)
 {:ok, id} = NervesGate.network_propose(settings, opts)
 :ok = NervesGate.network_cancel(id, opts)
