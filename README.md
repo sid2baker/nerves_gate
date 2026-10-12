@@ -28,8 +28,11 @@ do not expose it to the public Internet. CSRF and same-origin checks remain enab
 Tailscale connects **the gateway itself** and can share the confirmed dedicated equipment
 IPv4 subnet. Use equipment's normal addresses; overlapping networks are unsupported.
 Route approval and permissions belong to your tailnet; reachability is not verified. Settings can identify the gateway with a
-five-second run-LED blink, and optionally bind the button to identify until restart.
-There is no reset gesture; the second LED remains unsupported until mapped.
+five-second blink. RUN shows application state, USER1 Internet + Tailscale health, and USER2 alarms.
+The physical button identifies on a short release and requests reboot after 5 seconds.
+The 30-second factory-reset gesture erases EC100 application data and reboots;
+physical qualification is pending. Host recovery is simulation only.
+See [LEDs and button](docs/indicators.md).
 CAN/RS485 workspaces offer bounded receive-only captures and explicitly authorized
 Modbus register reads, with no scans, writes or retries. Physical CAN still needs
 qualification; RS485 is limited to the BSP-qualified 9600 8N1 profile.
@@ -72,7 +75,6 @@ status = NervesGate.status()
 | `bus_capture(port, opts \\ [])` | `:ok`; bounded receive-only capture accepted |
 | `modbus_read(port, params, opts \\ [])` | `:ok`; one authorized register read accepted |
 | `identify(opts \\ [])` | `:ok`; five-second LED identification started |
-| `button_mode("disabled" or "identify", opts \\ [])` | `:ok`; lasts until service restart |
 
 Failures return `{:error, %{code: code, message: message}}`. Read `NervesGate.status()`
 separately after commands. Remote acceptance is not completion; check its operation
@@ -85,11 +87,13 @@ There is no central state server, trial journal or connectivity retry agent.
 Saving several interfaces is not a transaction: interruption can leave partially
 saved settings. USB remains independent for recovery.
 
-Each domain reports faults through Alarmist: failed network/LED restoration,
-unavailable equipment discovery, daemon loss while remote access is enabled, and
-missing enabled bus ports. Normal offline/disabled states are not faults.
-Use `Alarmist.info()` or subscribe to `{NervesGate.Alarms, :_, :_}`. Alarms never
-control trials or trigger automatic remedies. There is no agent/AI dependency stack.
+Each domain reports conditions through Alarmist. Restore/recovery faults are immediate
+errors; Internet loss, Tailscale availability/health, equipment discovery and enabled
+bus-port loss become warnings after two continuous seconds. Intentional disabled
+states are not faults. VintageNet observes the Internet-facing interface; Tailscale
+Running is not an Internet-availability signal.
+Use `Alarmist.info()` or `Alarmist.subscribe_all()`. Alarms never control trials or
+trigger automatic remedies. There is no agent/AI dependency stack.
 
 See the [action API](docs/action-api.md) for return values and UI mapping, and the
 [architecture](docs/architecture.md) for ownership, lifecycle,
@@ -106,10 +110,11 @@ mix ci                    # compile, format, tests, Credo, Dialyzer, duplication
 mix phx.server            # http://localhost:4000
 ```
 
-Host mode simulates Ethernet, Tailscale, buses, button and LED. It never modifies the
+Host mode simulates Ethernet, Tailscale, buses, button, LEDs and recovery. It never modifies the
 workstation's network, starts its VPN daemon or opens hardware controls. In IEx,
 `NervesGate.Network.Host.simulate/1` changes simulated observations, and
 `NervesGate.Indicators.Host.button(1)` / `.button(0)` simulate a press/release.
+Release once to arm after startup; simulated reboot/reset only records the request.
 Host HTTP listens on loopback only.
 
 All browser assets are local and checked in. Rebuild CSS with

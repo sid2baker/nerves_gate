@@ -79,6 +79,12 @@ defmodule NervesGate.Network do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
+
+    Alarms.register(Keyword.get(opts, :name, __MODULE__), [
+      :network_restore_failed,
+      :internet_unavailable
+    ])
+
     adapter = Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :network_adapter))
     effect_ms = Keyword.get(opts, :effect_ms, 10_000)
     {config, error} = load(adapter, effect_ms)
@@ -452,8 +458,18 @@ defmodule NervesGate.Network do
     )
 
     Alarms.report(:network_restore_failed, state.name, match?({:restore, _}, state.error))
+    Alarms.report(:internet_unavailable, state.name, internet_fault(state))
 
     state
+  end
+
+  defp internet_fault(state) do
+    case Observations.Network.internet(public(state)) do
+      %{expected: false} when not is_nil(state.config) -> false
+      %{connection: :internet} -> false
+      %{expected: true, connection: connection} when connection in [:lan, :disconnected] -> true
+      _ -> nil
+    end
   end
 
   defp load(adapter, timeout) do

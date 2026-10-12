@@ -14,7 +14,8 @@ defmodule NervesGate.Observations.Network do
 
     %{
       expected: expected?(network),
-      online: online?(interface)
+      online: online?(interface),
+      connection: connection(interface)
     }
   end
 
@@ -35,10 +36,14 @@ defmodule NervesGate.Observations.Network do
   defp expected?(%{"mode" => "shared"}), do: true
   defp expected?(network), do: Config.role_port(network, "internet") != nil
 
+  defp connection(nil), do: :unknown
+  defp connection(%{present: false}), do: :disconnected
+  defp connection(interface), do: Map.get(interface, :connection) || :unknown
+
   defp online?(nil), do: false
 
   defp online?(interface),
     do:
-      interface.link and Map.get(interface, :addresses, []) != [] and
+      interface.present and interface.link and Map.get(interface, :addresses, []) != [] and
         Map.get(interface, :connection) == :internet
 end

@@ -15,6 +15,7 @@ defmodule NervesGate.MixProject do
       releases: [
         nerves_gate: [
           include_erts: &Nerves.erts/0,
+          applications: if(Mix.target() == :ec100, do: [nerves_runtime: :transient], else: []),
           steps: [&Nerves.init_release/1, :assemble]
         ]
       ],

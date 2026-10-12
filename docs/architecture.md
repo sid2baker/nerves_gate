@@ -25,7 +25,7 @@ LiveView / IEx → NervesGate named commands → domain GenServer → bounded wo
              → NervesGate.status         → domain reads → pure Status projection
 
 Subsystem properties + workflow metadata → subscription hints → fresh status read
-Domain faults → SASL alarm_handler → Alarmist queries/subscriptions
+Domain conditions → SASL alarm_handler → Alarmist debounce/severity → LED policy/subscribers
 ```
 
 | Owner | Responsibility |
@@ -35,10 +35,10 @@ Domain faults → SASL alarm_handler → Alarmist queries/subscriptions
 | Network | Command admission/replies, RAM trial, USB auto-save, deadline, serial LAN work and rollback |
 | Remote | One bounded daemon worker and sanitized operation/error metadata |
 | Equipment | Bounded neighbor observations, scoped labels and monitoring the Network-owned active scan |
-| Indicators | Bounded identification, LED restoration and optional button handling |
+| Indicators | Three status LEDs, bounded identification and fixed release-only button gestures |
 | Buses | One bounded diagnostic worker and ephemeral opt-in/results |
 | PropertyTable | Subsystem properties and ephemeral workflow/host-simulation observations |
-| Alarmist | Current fault reports and subscriptions; never command admission or recovery ownership |
+| Alarmist | Fault timing/severity and subscriptions; never command admission or recovery ownership |
 | LiveView | Drafts, presentation, subscriptions and command submission |
 
 ## Supervision and work ownership
@@ -95,18 +95,35 @@ Alarmist 0.4.x handles the standard SASL alarm events. Named domain instances re
 | Alarm ID | Set | Clear |
 | --- | --- | --- |
 | `{NervesGate.Alarms, NervesGate.Network, :network_restore_failed}` | Restoring saved LAN settings fails | Restoration succeeds, including successful startup |
-| `{NervesGate.Alarms, NervesGate.Indicators, :led_restore_failed}` | Restoring the previous LED value fails | A restoration succeeds |
+| `{NervesGate.Alarms, NervesGate.Indicators, :led_restore_failed}` | A status LED cannot be controlled | Reconciliation applies current patterns successfully |
+| `{NervesGate.Alarms, NervesGate.Indicators, :recovery_failed}` | Physical recovery fails or its outcome is unknown | No automatic retry/clear |
 | `{NervesGate.Alarms, NervesGate.Equipment, :equipment_discovery_unavailable}` | Passive neighbor discovery fails, crashes or times out after obtaining a confirmed scope | A passive observation succeeds (including empty results), or equipment configuration is removed |
-| `{NervesGate.Alarms, NervesGate.Remote, :remote_unavailable}` | Daemon becomes unavailable after a connect request or an active authentication/connection observation | Daemon is available again; being offline or awaiting approval is not a fault |
+| `{NervesGate.Alarms, NervesGate.Remote, :remote_unavailable}` | Daemon becomes unavailable after a connect request or an active authentication/connection observation | Daemon is available again |
+| `{NervesGate.Alarms, NervesGate.Network, :internet_unavailable}` | Configured uplink reports `:lan` or `:disconnected` | Uplink reports `:internet`, or its configured requirement is removed |
+| `{NervesGate.Alarms, NervesGate.Remote, :remote_offline}` | Authenticated, enabled Tailscale reports offline | Reports online, awaits enrollment/approval, or is deliberately stopped |
+| `{NervesGate.Alarms, NervesGate.Remote, :remote_health}` | Enabled Tailscale reports health warnings | Health warnings clear, or remote access is deliberately stopped |
 | `{NervesGate.Alarms, NervesGate.Buses, :bus_port_unavailable}` | A known enabled CAN/RS485 port is missing | Missing enabled ports return, or their enablement is removed |
 
 ```elixir
-Alarmist.subscribe({NervesGate.Alarms, :_, :_})
+Alarmist.subscribe_all()
 Alarmist.get_alarms()
 Alarmist.info()
 ```
 
-Reports have fixed descriptions, stable server-name identities, and no settings or
+Restore/recovery faults have immediate `:error` severity. Other IDs above are raw
+`:debug` conditions. `{NervesGate.Alarms.Warning, server_name, fault}` is their
+managed `:warning` alarm: `debounce(condition, 2_000)`. It clears immediately when
+the condition clears. Each domain registers once on startup, retaining existing
+rules/timers across producer restarts. `get_alarms()` excludes raw debug inputs;
+use `get_alarms(level: :debug)` for diagnostics. LEDs use Alarmist severity and
+managed connectivity warnings, not a second debounce/history implementation.
+
+VintageNet per-interface connection observations select the configured Internet port
+or shared bridge, not the global best connection or USB. Tailscale state and health
+remain separate facts. Running does not prove Internet or control-server access.
+Unknown observations preserve faults and never qualify USER1 for solid illumination.
+
+Raw reports have fixed descriptions, stable server-name identities, and no settings or
 private URLs. Unnamed test instances do not publish global alarms. Reporting is
 fire-and-forget and cannot block recovery when the alarm handler is unavailable or
 stalled. Each domain reports through its existing observation/completion paths;
@@ -122,11 +139,11 @@ intent at startup, or unknown CAN enablement preserve the last report rather tha
 assert recovery. Removing a configuration/opt-in clears the corresponding requirement;
 it does not claim that the hardware was repaired.
 
-Alarms are last-known reports, not proof of readiness. In particular, LED startup
-cannot clear a previous restoration failure because its old raw value was volatile.
+Alarms are last-known reports, not proof of readiness. LED startup reconciles the
+current normal patterns; it no longer restores an old raw brightness snapshot.
 Neither alarms nor settings form a durable recovery journal. Alarmist's unknown
-state must not be interpreted as healthy for command admission. There are no managed
-boolean rules until needed, and no automatic remedies, DHCP restarts, VPN reconnects,
+state must not be interpreted as healthy for command admission. There are no automatic
+remedies, DHCP restarts, VPN reconnects,
 DNS resets, failover or enrollment.
 
 ## Other domains stay simple
@@ -144,9 +161,14 @@ DNS resets, failover or enrollment.
 - **Equipment:** passive rtnetlink observations; an explicit ARP scan is owned by
   Network and bounded to five seconds and at most /24. Inventory/labels are capped
   at 256 entries. Scope changes clear observations, not labels. USB is ineligible.
-- **Indicators:** five-second identify deadline, exact raw-value restoration, overlap
-  rejection, and a disabled-by-default button. No reset gesture. Abrupt process/VM
-  loss can lose the prior LED value; graceful shutdown attempts restoration.
+- **Indicators:** pure LED/button policy in the existing process, cached outputs,
+  Network/Remote/Alarmist subscriptions plus five-second reconciliation, and monotonic blink/
+  gesture timing. Identify lasts five seconds and resumes current patterns. One
+  bounded worker calls a small recovery adapter; no recovery GenServer or retries.
+  Graceful shutdown turns owned LEDs off; abrupt VM loss can leave them latched.
+  EC100 reset stops writers, normally unmounts data, then uses standard Nerves reset.
+  A Nerves initialization hook checks rw ext4 before data services start; no extra
+  long-running process. See [indicators](indicators.md).
 - **Buses:** one 6.5-second bounded worker, listen-only CAN, passive serial capture
   or explicitly authorized Modbus functions 3/4. No automatic traffic, writes,
   retries, replay or persisted intent. See [buses.md](buses.md).

@@ -29,11 +29,25 @@ defmodule NervesGate.AlarmsTest do
   }
 
   setup do
+    for {_, name, fault} <- [
+          @network_alarm,
+          @led_alarm,
+          @equipment_alarm,
+          @remote_alarm,
+          @buses_alarm
+        ] do
+      Alarms.register(name, [fault])
+    end
+
     on_exit(fn ->
       Alarms.report(:network_restore_failed, @network_name, false)
       Alarms.report(:led_restore_failed, @led_name, false)
       Alarms.report(:equipment_discovery_unavailable, @equipment_name, false)
       Alarms.report(:remote_unavailable, @remote_name, false)
+      Alarms.report(:remote_health, @remote_name, false)
+      Alarms.report(:remote_offline, @remote_name, false)
+      Alarms.report(:internet_unavailable, @network_name, false)
+      Alarms.report(:recovery_failed, @led_name, false)
       Alarms.report(:bus_port_unavailable, @buses_name, false)
       # Drain the asynchronous reports before another test reuses these names.
       :gen_event.which_handlers(:alarm_handler)
@@ -49,7 +63,7 @@ defmodule NervesGate.AlarmsTest do
     :ok = Alarmist.subscribe(@network_alarm)
     opts = [name: @network_name, adapter: {Adapter, adapter}, poll_ms: 20]
     start_supervised!({Network, opts})
-    assert_receive %Alarmist.Event{id: @network_alarm, state: :set}, 1_000
+    assert_receive %Alarmist.Event{id: @network_alarm, state: :set, level: :error}, 1_000
     assert Network.status(@network_name).recovering
 
     assert {@network_alarm, "Saved network settings could not be restored."} in Alarmist.get_alarms()
@@ -108,34 +122,35 @@ defmodule NervesGate.AlarmsTest do
     eventually(fn -> Alarmist.alarm_state(@network_alarm) == :clear end)
   end
 
-  test "LED restoration failure clears only after a successful restoration" do
+  test "LED control failure clears only after current patterns can be applied" do
     host = start_supervised!({Indicators.Host, name: nil})
-
-    start_supervised!(
-      {Indicators,
-       name: @led_name, adapter: {Indicators.Host, host}, blink_ms: 10, identify_ms: 40}
-    )
-
+    Indicators.Host.simulate(%{write_error: [:run]}, host)
     :ok = Alarmist.subscribe(@led_alarm)
-    :ok = Indicators.identify(@led_name)
-    Indicators.Host.simulate(%{write_error: true}, host)
+    start_supervised!({Indicators, name: @led_name, adapter: {Indicators.Host, host}})
     assert_receive %Alarmist.Event{id: @led_alarm, state: :set}, 1_000
     assert Indicators.status(@led_name).led.restore_pending
-    assert {:error, :operation_in_progress} = Indicators.identify(@led_name)
-    Indicators.Host.simulate(%{write_error: false}, host)
-    send(@led_name, :poll)
+    assert {:error, :led_unavailable} = Indicators.identify(@led_name)
+    Indicators.Host.simulate(%{write_error: []}, host)
+    send(@led_name, :refresh)
     assert_receive %Alarmist.Event{id: @led_alarm, state: :clear}, 1_000
     refute Indicators.status(@led_name).led.restore_pending
-    assert Indicators.Host.snapshot(host).value == 0
+    assert Indicators.Host.snapshot(host).values.run == 1
   end
 
-  test "LED startup does not claim that a previous failed restoration succeeded" do
+  test "LED startup reconciles status and alarm events refresh the policy immediately" do
     Alarms.report(:led_restore_failed, @led_name, true)
     :gen_event.which_handlers(:alarm_handler)
     host = start_supervised!({Indicators.Host, name: nil})
-    start_supervised!({Indicators, name: @led_name, adapter: {Indicators.Host, host}})
+
+    start_supervised!(
+      {Indicators, name: @led_name, adapter: {Indicators.Host, host}, poll_ms: 60_000}
+    )
+
     assert Indicators.status(@led_name).led.available
-    assert Alarmist.alarm_state(@led_alarm) == :set
+    eventually(fn -> Alarmist.alarm_state(@led_alarm) == :clear end)
+    Alarms.report(:network_restore_failed, @network_name, true)
+    eventually(fn -> Indicators.status(@led_name).led.patterns.user2 == "fast" end)
+    Alarms.report(:network_restore_failed, @network_name, false)
   end
 
   test "a stalled alarm handler cannot delay a network deadline or rollback" do
@@ -390,6 +405,71 @@ defmodule NervesGate.AlarmsTest do
 
     for alarm <- [@equipment_alarm, @remote_alarm, @buses_alarm],
         do: assert(Alarmist.alarm_state(alarm) == :set)
+  end
+
+  test "all availability faults use Alarmist debounce, deduplication and factual clearing" do
+    faults = [
+      {@network_name, :internet_unavailable},
+      {@equipment_name, :equipment_discovery_unavailable},
+      {@remote_name, :remote_unavailable},
+      {@remote_name, :remote_health},
+      {@remote_name, :remote_offline},
+      {@buses_name, :bus_port_unavailable}
+    ]
+
+    for {name, fault} <- faults do
+      Alarms.register(name, [fault])
+      Alarmist.subscribe({Alarms.Warning, name, fault})
+      Alarms.report(fault, name, true)
+    end
+
+    :gen_event.which_handlers(:alarm_handler)
+    refute_receive %Alarmist.Event{state: :set}, 50
+
+    for {name, fault} <- faults do
+      assert Alarmist.alarm_state({Alarms, name, fault}) == :set
+      refute {Alarms, name, fault} in Alarmist.get_alarm_ids()
+      Alarms.report(fault, name, false)
+    end
+
+    :gen_event.which_handlers(:alarm_handler)
+    refute_receive %Alarmist.Event{state: :set}, 2_100
+
+    for {name, fault} <- faults, do: Alarms.report(fault, name, true)
+    refute_receive %Alarmist.Event{state: :set}, 1_000
+
+    # Registration after a producer restart must not restart the debounce clock.
+    for {name, fault} <- faults, do: Alarms.register(name, [fault])
+
+    for {name, fault} <- faults do
+      id = {Alarms.Warning, name, fault}
+      assert_receive %Alarmist.Event{id: ^id, state: :set, level: :warning}, 1_200
+      Alarms.report(fault, name, nil)
+      Alarms.report(fault, name, true)
+    end
+
+    refute_receive %Alarmist.Event{state: :set}, 30
+    assert Alarms.indication(@network_name, @remote_name).connection
+
+    for {name, fault} <- faults do
+      id = {Alarms.Warning, name, fault}
+      Alarms.report(fault, name, false)
+      assert_receive %Alarmist.Event{id: ^id, state: :clear}, 500
+    end
+
+    refute Alarms.indication(@network_name, @remote_name).connection
+  end
+
+  test "a physical recovery failure is immediate and drives LEDs through Alarmist" do
+    host = start_supervised!({Indicators.Host, name: nil})
+    start_supervised!({Indicators, name: @led_name, adapter: {Indicators.Host, host}})
+    id = {Alarms, @led_name, :recovery_failed}
+    Alarmist.subscribe(id)
+    Alarms.report(:recovery_failed, @led_name, true)
+    assert_receive %Alarmist.Event{id: ^id, state: :set, level: :error}, 500
+    eventually(fn -> Indicators.status(@led_name).led.patterns.user2 == "fast" end)
+    Alarms.report(:recovery_failed, @led_name, nil)
+    assert Alarmist.alarm_state(id) == :set
   end
 
   defp start_equipment(opts \\ []) do

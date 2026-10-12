@@ -101,15 +101,10 @@ defmodule NervesGate do
     end
   end
 
-  @doc "Blink the mapped run LED for five seconds, then restore its previous raw value."
+  @doc "Identify with all three LEDs for five seconds, then resume current status patterns."
   @spec identify(keyword()) :: command_result()
   def identify(opts \\ []),
     do: invoke(fn -> Indicators.identify(indicators(opts)) end) |> result()
-
-  @doc "Set the button to disabled or identify until the indicators service restarts. No reset action."
-  @spec button_mode(String.t(), keyword()) :: command_result()
-  def button_mode(mode, opts \\ []),
-    do: invoke(fn -> Indicators.button_mode(mode, indicators(opts)) end) |> result()
 
   @doc "Configure an allowlisted bus port. CAN applies to the kernel; RS485 opt-in resets on restart."
   def bus_configure(port, params, opts \\ []),

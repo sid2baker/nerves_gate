@@ -186,20 +186,65 @@ defmodule NervesGate.Error do
       )
 
   def from(:led_unavailable),
-    do: new("led_unavailable", "The run LED is unavailable or controlled by a kernel trigger.")
+    do: new("led_unavailable", "A status LED is unavailable or controlled by a kernel trigger.")
 
   def from(:led_restore_failed),
     do:
       new(
         "led_restore_failed",
-        "Could not restore the previous LED value. Identify is blocked; restoration will be retried."
+        "Could not apply the status LEDs. Identify is blocked; LED control will be retried."
       )
 
-  def from(:button_mode),
+  def from(:firmware_update_pending),
     do:
       new(
-        "invalid_parameters",
-        "Choose disabled or identify for the button. No reset action is supported."
+        "firmware_update_pending",
+        "An SSH firmware upload was admitted. Reboot before recovery."
+      )
+
+  def from(:data_partition_unavailable),
+    do:
+      new(
+        "data_partition_unavailable",
+        "The EC100 data partition is not mounted read-write as ext4."
+      )
+
+  def from(:data_quiesce_failed),
+    do:
+      new(
+        "data_quiesce_failed",
+        "Could not stop data writers. Reset was aborted; services stay stopped."
+      )
+
+  def from(:data_unmount_failed),
+    do:
+      new(
+        "data_unmount_failed",
+        "Could not unmount all data mounts. Reset was aborted; services stay stopped."
+      )
+
+  def from(:factory_reset_incomplete),
+    do:
+      new(
+        "factory_reset_incomplete",
+        "Factory reset did not complete. Services remain stopped; no retry was sent."
+      )
+
+  def from(:recovery_unavailable),
+    do: new("recovery_unavailable", "Recovery is unavailable on this target.")
+
+  def from(:recovery_already_requested),
+    do:
+      new(
+        "recovery_already_requested",
+        "Recovery was already requested. No second attempt was sent."
+      )
+
+  def from(:recovery_outcome_unknown),
+    do:
+      new(
+        "recovery_outcome_unknown",
+        "Recovery did not complete in time or its result was lost. No retry was sent."
       )
 
   def from(:button_unavailable),

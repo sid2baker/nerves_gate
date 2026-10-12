@@ -58,8 +58,6 @@ defmodule NervesGate.APITest do
           modbus_read: 3,
           identify: 0,
           identify: 1,
-          button_mode: 1,
-          button_mode: 2,
           status: 0,
           status: 1,
           subscribe: 0,
@@ -74,7 +72,7 @@ defmodule NervesGate.APITest do
 
   test "one JSON-encodable status exposes observations and action reasons", ctx do
     status = NervesGate.status(ctx.api)
-    assert status.version == 3
+    assert status.version == 4
     assert status.connections.mode == "unconfigured"
     refute status.remote_access.verified
     assert status.remote_access.state == "unavailable"
@@ -87,8 +85,8 @@ defmodule NervesGate.APITest do
     refute status.actions["network.confirm"].enabled
     assert status.actions["network.confirm"].reason.code == "no_matching_trial"
     assert status.actions["network.confirm"].required == ["trial_id"]
-    assert map_size(status.actions) == 17
-    assert Jason.decode!(Jason.encode!(status))["version"] == 3
+    assert map_size(status.actions) == 16
+    assert Jason.decode!(Jason.encode!(status))["version"] == 4
     refute Map.has_key?(status, :revision)
     assert NervesGate.status(ctx.api) == status
     refute_receive {:device, _}, 30

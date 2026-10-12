@@ -60,6 +60,7 @@ defmodule NervesGate.ObservationsTest do
     sources = Remote.Tailscale.observations(nil)
     assert {Tailscale.Properties, ["auth", "state"]} in sources
     assert {Tailscale.Properties, ["configuration", "value"]} in sources
+    assert {Tailscale.Properties, ["health"]} in sources
     refute {Tailscale.Properties, ["auth"]} in sources
     refute {Tailscale.Properties, ["auth", "url"]} in sources
   end
@@ -107,6 +108,34 @@ defmodule NervesGate.ObservationsTest do
 
     assert %{expected: true, online: true} =
              Observations.Network.internet(%{status | trial: %{network: wan}})
+  end
+
+  test "shared mode uses br0 connectivity, never its member ports or USB", ctx do
+    status = Network.status(ctx.network)
+    shared = %{"mode" => "shared", "equipment" => Config.address_defaults()}
+    observed = status.observed
+
+    bridge = %{
+      observed.bridge
+      | link: true,
+        addresses: [%{address: "192.0.2.10", prefix_length: 24}]
+    }
+
+    ports = Enum.map(observed.ports, &%{&1 | connection: :internet})
+
+    for connection <- [:internet, :lan, :disconnected, nil] do
+      status = %{
+        status
+        | trial: %{network: shared},
+          observed: %{observed | bridge: %{bridge | connection: connection}, ports: ports}
+      }
+
+      assert %{expected: true} = internet = Observations.Network.internet(status)
+      assert internet.online == (connection == :internet)
+      assert internet.connection == (connection || :unknown)
+    end
+
+    assert %{online: false, connection: :unknown} = Observations.Network.internet(nil)
   end
 
   defp eventually(fun, remaining \\ 100)

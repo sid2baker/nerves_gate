@@ -56,25 +56,18 @@ remaining external advertisements must be removed in Tailscale before LAN change
 The UI reports advertisement state, not proof that existing sessions have ended;
 see [networking.md](networking.md#equipment-sharing) for the limits.
 
-## Button and LED
+## Button and LEDs
 
-Settings offers **Identify gateway**: blink the mapped EC100 run LED for five seconds
-and restore its previous raw value. It does not assign on/off meaning to uncalibrated
-polarity. Kernel-triggered LEDs are left untouched. The second programmable LED is
-explicitly unsupported until its mapping is verified.
+Settings explains RUN/application, USER1/Internet + Tailscale health and USER2/Alarmist severity patterns, fixed
+release-only gestures, and the most recent recovery error. **Identify gateway**
+blinks for five seconds and resumes current status. Kernel-triggered LEDs are left
+untouched. Button-mode selectors have been removed; there is no web recovery action.
+Host mode simulates LEDs, button and recovery without opening hardware or erasing files.
 
-The user button is discovered by `gpio-keys` name and `KEY_PROG1` capability, never a
-fixed input number. Its only modes are **Disabled** (default) and **Identify on press**.
-Mode is intentionally not persisted: any indicators-service restart disables it.
-Presses are edge-detected and rate-limited; releases and repeat/held events cannot
-extend an active blink. The last accepted press is shown even when disabled.
-There are no reset gestures, network changes, automatic health/sharing modes or
-custom assignments. Host mode simulates both controls without opening hardware.
-
-If LED restoration fails, new identify requests are blocked while restoration retries
-every five seconds. Graceful shutdown attempts restoration; abrupt VM termination,
-power loss, external writers and broken hardware cannot guarantee it. These are
-software-tested controls, not a claim of physical LED polarity or on-device validation.
+See [LED meanings, exact button thresholds and recovery limits](indicators.md).
+EC100 reboot and factory reset use standard Nerves APIs. Reset removes all saved
+application data; physical qualification is pending. Startup/input loss requires
+a release before gestures arm.
 
 ## Bus observation and diagnostics
 

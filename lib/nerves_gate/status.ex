@@ -14,7 +14,7 @@ defmodule NervesGate.Status do
         buses \\ Buses.unavailable()
       ) do
     %{
-      version: 3,
+      version: 4,
       system: %{firmware: NervesGate.version(), target: to_string(NervesGate.target())},
       network: network(status),
       connections: connections(status),
@@ -66,15 +66,12 @@ defmodule NervesGate.Status do
           ["port", "unit", "function", "address", "count", "authorized"],
           Buses.Policy.available(buses)
         ),
-      "identify" => action("Identify gateway", [], identify_available(indicators)),
-      "button_mode" =>
-        action(
-          "Set button behavior",
-          ["mode"],
-          if(indicators.button.available, do: :ok, else: {:error, :button_unavailable})
-        )
+      "identify" => action("Identify gateway", [], identify_available(indicators))
     }
   end
+
+  defp identify_available(%{recovery: %{action: action}}) when not is_nil(action),
+    do: {:error, :operation_in_progress}
 
   defp identify_available(%{led: %{identifying: true}}), do: {:error, :operation_in_progress}
   defp identify_available(%{led: %{restore_pending: true}}), do: {:error, :led_restore_failed}

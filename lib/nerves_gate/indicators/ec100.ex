@@ -1,23 +1,27 @@
 defmodule NervesGate.Indicators.EC100 do
-  @moduledoc "EC100 run LED and gpio-keys button only. No direct GPIO access."
+  @moduledoc "EC100 RUN/USER1/USER2 LEDs (1 = on) and gpio-keys. Never changes kernel triggers."
   import Bitwise
 
-  @led "/sys/class/leds/ec100:run"
+  @leds %{run: "ec100:run", user1: "ec100:user1", user2: "ec100:user2"}
 
-  def read_led(root \\ @led) do
-    with :ok <- manual(root),
-         {:ok, "1"} <- read(root, "max_brightness"),
-         {:ok, value} when value in ["0", "1"] <- read(root, "brightness") do
+  def read_led(led, root) do
+    path = Path.join(root, Map.fetch!(@leds, led))
+
+    with :ok <- manual(path),
+         {:ok, "1"} <- read(path, "max_brightness"),
+         {:ok, value} when value in ["0", "1"] <- read(path, "brightness") do
       {:ok, String.to_integer(value)}
     else
       _ -> {:error, :led_unavailable}
     end
   end
 
-  def write_led(value, root \\ @led) when value in [0, 1] do
-    with {:ok, _} <- read_led(root),
-         :ok <- File.write(Path.join(root, "brightness"), Integer.to_string(value)),
-         {:ok, ^value} <- read_led(root) do
+  def write_led(led, value, root) when value in [0, 1] do
+    path = Path.join([root, Map.fetch!(@leds, led), "brightness"])
+
+    with {:ok, _} <- read_led(led, root),
+         :ok <- File.write(path, Integer.to_string(value)),
+         {:ok, ^value} <- read_led(led, root) do
       :ok
     else
       _ -> {:error, :led_unavailable}
@@ -67,7 +71,6 @@ defmodule NervesGate.Indicators.EC100 do
     end
   end
 
-  # Never take over a kernel-triggered LED or change its trigger.
   defp manual(root) do
     case read(root, "trigger") do
       {:ok, triggers} -> if "[none]" in String.split(triggers), do: :ok, else: :error

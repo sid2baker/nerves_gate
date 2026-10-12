@@ -69,6 +69,7 @@ defmodule NervesGate.Buses do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
+    Alarms.register(Keyword.get(opts, :name, __MODULE__), [:bus_port_unavailable])
 
     state = %{
       adapter: Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :buses_adapter)),

@@ -6,9 +6,11 @@ config :nerves_gate,
   remote_adapter: {NervesGate.Remote.Tailscale, nil},
   equipment_adapter: {NervesGate.Equipment.Linux, nil},
   buses_adapter: if(config_target() == :ec100, do: {NervesGate.Buses.EC100, nil}, else: nil),
+  recovery_adapter:
+    if(config_target() == :ec100, do: {NervesGate.Recovery.EC100, nil}, else: nil),
   indicators_adapter:
     if(config_target() == :ec100,
-      do: {NervesGate.Indicators.EC100, "/sys/class/leds/ec100:run"},
+      do: {NervesGate.Indicators.EC100, "/sys/class/leds"},
       else: nil
     )
 
@@ -25,6 +27,17 @@ config :nerves, :erlinit,
 # Sends the Heart init handshake required by HEART_INIT_TIMEOUT in vm.args.
 # Validate firmware only after OTP applications start; internet is not required.
 config :nerves_runtime, startup_guard_enabled: true
+
+# Nerves 2 ordering is explicit: the data check must precede Tailscale,
+# VintageNet, SSH, time persistence, and application services.
+config :nerves, application_sort: [init: [:nerves_runtime]]
+
+if config_target() == :ec100 do
+  config :nerves_runtime, init_module: NervesGate.Recovery.DataInit
+
+  config :ssh_subsystem_fwup,
+    precheck_callback: {NervesGate.Recovery.EC100, :firmware_precheck, []}
+end
 
 # Nerves 2 requires an explicit source timestamp. Keep rebuilds deterministic;
 # source-archive builds without Git can supply SOURCE_DATE_EPOCH instead.

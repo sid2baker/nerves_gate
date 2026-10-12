@@ -1,25 +1,44 @@
 defmodule NervesGate.Indicators.Host do
-  @moduledoc "In-memory button/LED preview. Never opens workstation input or sysfs devices."
+  @moduledoc "In-memory LEDs, button and recovery preview. Never opens workstation devices."
   use Agent
 
   def start_link(opts \\ []) do
     Agent.start_link(
-      fn -> %{value: 0, receiver: nil, read_error: false, write_error: false, writes: []} end,
+      fn ->
+        %{
+          values: %{run: 0, user1: 0, user2: 0},
+          receiver: nil,
+          read_error: [],
+          write_error: [],
+          writes: [],
+          recoveries: [],
+          recovery_result: :ok
+        }
+      end,
       name: Keyword.get(opts, :name, __MODULE__)
     )
   end
 
-  def read_led(server) do
+  def read_led(led, server) do
     Agent.get(server, fn state ->
-      if state.read_error, do: {:error, :led_unavailable}, else: {:ok, state.value}
+      if led in state.read_error,
+        do: {:error, :led_unavailable},
+        else: {:ok, Map.fetch!(state.values, led)}
     end)
   end
 
-  def write_led(value, server) when value in [0, 1] do
+  def write_led(led, value, server) when value in [0, 1] do
     Agent.get_and_update(server, fn state ->
-      if state.write_error,
-        do: {{:error, :led_unavailable}, state},
-        else: {:ok, %{state | value: value, writes: Enum.take([value | state.writes], 32)}}
+      if led in state.write_error do
+        {{:error, :led_unavailable}, state}
+      else
+        {:ok,
+         %{
+           state
+           | values: Map.put(state.values, led, value),
+             writes: Enum.take([{led, value} | state.writes], 64)
+         }}
+      end
     end)
   end
 
@@ -28,7 +47,7 @@ defmodule NervesGate.Indicators.Host do
     {:ok, nil, "simulated:KEY_PROG1"}
   end
 
-  @doc "Send a simulated key value: 1 press, 0 release, 2 repeat."
+  @doc "Send a simulated key value: 1 press, 0 release, 2 repeat. Release once to arm after startup."
   def button(value, server \\ __MODULE__) when value in [0, 1, 2] do
     receiver = Agent.get(server, & &1.receiver)
 

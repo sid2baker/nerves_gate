@@ -13,7 +13,7 @@ Each domain documents its commands, queries and completion semantics in its modu
 - [`Equipment`](../lib/nerves_gate/equipment.ex): labels and inventory status.
 - [`Remote`](../lib/nerves_gate/remote.ex): connect, configure, disconnect, login URL and status.
 - [`Buses`](../lib/nerves_gate/buses.ex): configure, capture, Modbus read and status.
-- [`Indicators`](../lib/nerves_gate/indicators.ex): identify, button mode and status.
+- [`Indicators`](../lib/nerves_gate/indicators.ex): identify, fixed physical gestures and status.
 
 Each has `observe/1` and accepts an optional server reference. Direct domain calls
 use ordinary OTP exit behavior; `NervesGate` handles process-call failures and
@@ -57,8 +57,7 @@ Commands return their result, not a status envelope:
 | `equipment_label(id, label, opts)` | `:ok` after saving a scope-local label |
 | `equipment_share(opts)` | `:ok` after confirmed equipment IPv4 subnet advertisement readback |
 | `equipment_unshare(opts)` | `:ok` after that equipment subnet's withdrawal readback |
-| `identify(opts)` | `:ok` once the five-second run-LED identification starts; observe completion/restoration |
-| `button_mode(mode, opts)` | `:ok`; `"disabled"` or `"identify"`, until indicators-service restart |
+| `identify(opts)` | `:ok` once five-second identification starts; afterward current LED patterns resume |
 | `bus_configure(port, params, opts)` | `:ok`; accepted live CAN configuration, or RS485 opt-in changed |
 | `bus_capture(port, opts)` | `:ok`; receive-only capture accepted |
 | `modbus_read(port, params, opts)` | `:ok`; one authorized RTU read accepted |
@@ -98,10 +97,10 @@ of the caller; a daemon mutation may complete after its caller dies. Uncertain
 commands are not automatically replayed. There is no exactly-once acknowledgment
 or durable command queue.
 
-Identify preserves the previous raw LED value. Overlapping requests cannot extend it.
-Only the mapped EC100 run LED is supported; active kernel triggers are not replaced.
-Button mode defaults to disabled and is never persisted. No reset action exists.
-See [button and LED safety limits](ui.md#button-and-led).
+Identify temporarily overrides all three status channels. Overlapping requests cannot
+extend it; current normal patterns resume afterward. Kernel triggers are not replaced.
+Button actions are fixed and release-only; no public/web reboot or reset command exists.
+See [button thresholds and recovery limits](indicators.md).
 
 ## Bus parameters
 
@@ -127,7 +126,7 @@ there is no automatic retry, and results/settings are not persisted. See
 
 `NervesGate.status/1` reads each domain independently; it is **not an atomic
 cross-domain snapshot**. [`NervesGate.Status`](../lib/nerves_gate/status.ex) builds
-the JSON-encodable v3 map without a process or cache:
+the JSON-encodable v4 map without a process or cache:
 
 - `version`, `system`: shape version and firmware.
 - `network`: saved settings, pending trial, observed interfaces, readiness,
@@ -137,8 +136,9 @@ the JSON-encodable v3 map without a process or cache:
 - `sharing`: confirmed equipment `subnet`, `enabled` (`true`, `false`, or `nil` for
   unknown), and `other_routes` left untouched by the on/off control.
 - `equipment`: scoped neighbor observations, labels and scan status.
-- `indicators`: simulated/available flags, button mode and last press, LED identification,
-  restoration-pending state and errors.
+- `indicators`: simulated/available flags; button availability, armed state, hold feedback
+  and last press; LED channel availability, current patterns, identification and retry
+  state; recovery action, status and last error.
 - `buses`: supported/simulated flags, detected ports and observed/configured state,
   one active operation, last bounded result and errors (idle observations refresh every five seconds).
 - `capabilities`, `actions`: presentation-only availability, labels and reasons.
@@ -162,7 +162,8 @@ disable requires only the confirmed subnet and an available daemon. Disabling an
 already-absent advertisement is safe. Other routes are never removed by this control.
 Version 3 replaces v2's sharing scope/routes/uncertain projection; detailed uncertainty
 remains in `remote_access.sharing`. There are no compatibility wrappers for the old
-site-ID/route-argument commands.
+site-ID/route-argument commands. Version 4 removes `button_mode` and adds three-channel
+LED patterns and physical recovery status. There is no compatibility button-mode API.
 
 ## Subscriptions
 

@@ -64,6 +64,7 @@ defmodule NervesGate.Equipment do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
+    Alarms.register(Keyword.get(opts, :name, __MODULE__), [:equipment_discovery_unavailable])
 
     {module, context} =
       adapter =

@@ -72,6 +72,12 @@ defmodule NervesGate.Remote do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
+    Alarms.register(Keyword.get(opts, :name, __MODULE__), [
+      :remote_unavailable,
+      :remote_offline,
+      :remote_health
+    ])
+
     adapter = Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :remote_adapter))
 
     state = %{
@@ -172,6 +178,9 @@ defmodule NervesGate.Remote do
     {:noreply, publish(state)}
   end
 
+  def handle_info(%PropertyTable.Event{}, state),
+    do: {:noreply, publish(state)}
+
   def handle_info(_, state), do: {:noreply, state}
 
   @impl true
@@ -241,9 +250,28 @@ defmodule NervesGate.Remote do
       if(observed.available, do: false, else: enabled)
     )
 
+    Alarms.report(:remote_health, state.name, remote_health(observed, enabled))
+    Alarms.report(:remote_offline, state.name, remote_offline(observed, enabled))
+
     Observations.put(path(state), :erlang.phash2(observed))
     %{state | enabled: enabled}
   end
+
+  defp remote_health(_, false), do: false
+  defp remote_health(%{available: true, health: health}, true), do: health != []
+  defp remote_health(_, _), do: nil
+
+  defp remote_offline(_, false), do: false
+
+  defp remote_offline(%{available: true, auth_state: "authenticated", state: state}, true)
+       when state in ["online", "offline"],
+       do: state == "offline"
+
+  defp remote_offline(%{available: true, auth_state: auth}, true)
+       when auth in ["authenticating", "needs_approval"],
+       do: false
+
+  defp remote_offline(_, _), do: nil
 
   defp sources(state),
     do: [{Observations.table(), path(state)} | Observations.sources(state.adapter)]
