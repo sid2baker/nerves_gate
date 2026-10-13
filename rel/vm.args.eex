@@ -1,7 +1,9 @@
 ## Customize flags given to the VM: https://www.erlang.org/doc/apps/erts/erl_cmd.html
 
 ## The application starts distribution with the assigned Tailscale IPv4 address.
-## OTP creates/reuses $HOME/.erlang.cookie. Dev builds override it in the application.
+## Production uses OTP's persistent cookie. Development must supply its public
+## cookie before distribution starts, without reading/writing a persistent cookie.
+<%= if Mix.env() == :dev, do: "-setcookie mycookie" %>
 -kernel inet_dist_listen_min 9100 inet_dist_listen_max 9100
 
 ## Number of dirty schedulers doing IO work (file, sockets, and others)

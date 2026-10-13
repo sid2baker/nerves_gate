@@ -4,6 +4,11 @@ if List.first(System.argv()) in ["dev.ec100", "dev.qemu"] do
   Mix.target(:host)
 end
 
+if List.first(System.argv()) == "test.qemu" do
+  Mix.env(:test)
+  Mix.target(:host)
+end
+
 defmodule NervesGate.MixProject do
   use Mix.Project
 
@@ -58,9 +63,10 @@ defmodule NervesGate.MixProject do
         test: :host,
         ci: :host,
         "dev.ec100": :host,
-        "dev.qemu": :host
+        "dev.qemu": :host,
+        "test.qemu": :host
       ],
-      preferred_envs: [ci: :test, "dev.ec100": :dev, "dev.qemu": :dev]
+      preferred_envs: [ci: :test, "dev.ec100": :dev, "dev.qemu": :dev, "test.qemu": :test]
     ]
   end
 
@@ -121,8 +127,9 @@ defmodule NervesGate.MixProject do
 
     args = ~w(
       -m 1024 -display none -monitor none -serial file:_build/qemu/console.log
+      -qmp unix:_build/qemu/qmp.sock,server=on,wait=off
       -drive file=_build/qemu/gateway.img,format=raw,if=virtio
-      -netdev user,id=wan -device virtio-net-pci,netdev=wan
+      -netdev user,id=wan -device virtio-net-pci,netdev=wan,id=wan-nic
       -netdev user,id=equipment,net=10.0.3.0/24 -device virtio-net-pci,netdev=equipment
       -netdev tap,id=management,ifname=ng-qemu,script=no,downscript=no
       -device virtio-net-pci,netdev=management
@@ -134,6 +141,50 @@ defmodule NervesGate.MixProject do
       {_, status} = MuonTrap.cmd(executable, args, into: IO.stream(), stderr_to_stdout: true)
       System.stop(status)
     end)
+  end
+
+  defp test_qemu([]) do
+    # Build current source, never silently test yesterday's firmware.
+    {_, build_status} =
+      System.cmd("mix", ["firmware", "--overwrite"],
+        env: [
+          {"MIX_TARGET", "x86_64"},
+          {"MIX_ENV", "dev"},
+          {"NERVES_GATE_DEVICE_NODE", nil},
+          {"NERVES_GATE_BACKEND_NODE", nil}
+        ],
+        into: IO.stream(),
+        stderr_to_stdout: true
+      )
+
+    if build_status != 0, do: Mix.raise("QEMU firmware build failed")
+
+    {_, status} =
+      System.cmd(
+        "unshare",
+        [
+          "--user",
+          "--map-root-user",
+          "--net",
+          "mix",
+          "do",
+          "compile",
+          "+",
+          "run",
+          "--no-start",
+          "test/integration/qemu_test.exs"
+        ],
+        env: [
+          {"MIX_TARGET", "host"},
+          {"MIX_ENV", "test"},
+          {"NERVES_GATE_BACKEND_NODE", nil},
+          {"NERVES_GATE_HOST_NETNS", File.read_link!("/proc/self/ns/net")}
+        ],
+        into: IO.stream(),
+        stderr_to_stdout: true
+      )
+
+    if status != 0, do: Mix.raise("QEMU regression failed (exit #{status})")
   end
 
   defp dev_ui(backend) do
@@ -160,6 +211,7 @@ defmodule NervesGate.MixProject do
   defp aliases() do
     [
       test: ["test --no-start"],
+      "test.qemu": [&test_qemu/1],
       "dev.ec100": [&dev_ec100/1, "phx.server"],
       "dev.qemu": [&dev_qemu/1, "phx.server"],
       ci: [

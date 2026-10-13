@@ -171,6 +171,22 @@ defmodule NervesGate.FirmwareBuildTest do
     end
   end
 
+  test "development firmware supplies its cookie before OTP reads persistent state" do
+    previous = Mix.env()
+
+    try do
+      for env <- [:dev, :prod] do
+        Mix.env(env)
+        args = EEx.eval_file(Path.expand("../../rel/vm.args.eex", __DIR__))
+        flags = args |> String.split("\n") |> Enum.reject(&String.starts_with?(&1, "#"))
+        assert "-setcookie mycookie" in flags == (env == :dev)
+        if env == :prod, do: refute(Enum.any?(flags, &String.starts_with?(&1, "-setcookie")))
+      end
+    after
+      Mix.env(previous)
+    end
+  end
+
   test "development commands configure the host before starting Phoenix" do
     aliases = NervesGate.MixProject.project()[:aliases]
     cli = NervesGate.MixProject.cli()

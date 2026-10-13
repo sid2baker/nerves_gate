@@ -147,6 +147,51 @@ A/B update and recovery behavior have not been qualified in QEMU.
 There is no runtime host simulator: host startup requires a device backend.
 Hardware fakes are compiled only for tests.
 
+## Automated QEMU regression
+
+```sh
+mix test.qemu
+```
+
+Requires Linux with unprivileged user/network namespaces enabled, `unshare`,
+`ip`, QEMU, fwup, and the locally built x86 system and verified x86 tailscaled
+binary described above. The command rebuilds development firmware from current
+source, then runs ordinary ExUnit in a fresh network namespace. It does not start
+Phoenix on the workstation or use the development VM's image, TAP or QMP socket.
+No sudo is needed. A missing system artifact must be built with the command above.
+
+`test/support/qemu.ex` holds the test-only VM and QMP controls:
+`start/0`, `disconnect_wan/1`, `reconnect_wan/1`, `reboot/1`, public API calls and
+bounded status waits. `test/integration/qemu_test.exs` contains ordinary ExUnit
+scenarios, each starting with a fresh disk:
+
+- Cable loss and recovery under the x86 image's default Ethernet DHCP setup.
+- Three consecutive disconnect/reconnect cycles.
+- Invalid configuration rejected, with settings and management access preserved.
+- Confirmed configuration survives a QMP hard reset and regains an address.
+
+Boot has a 100-second deadline; baseline and recovery waits have 30-second
+deadlines; each test has a 240-second timeout. This namespace has no upstream
+Internet: **these are Ethernet/persistence tests, not Internet-availability tests**.
+
+QMP stays reachable independently of guest networking. The management NIC is
+never faulted. `try/after` restores the link, and ExUnit-owned MuonTrap processes
+terminate the VM and EPMD even on test failure or timeout. The disposable disk is
+removed after the test; the network namespace disappears with its processes.
+Serial output, QEMU output, QMP messages, status snapshots and phase timestamps
+remain in the printed `_build/qemu-tests/<run>/` directory for CI artifacts.
+A failed scenario exits nonzero. No EC100 fault path exists.
+
+The persistence scenario covers two failures found in real QEMU runs: the old
+1.5-second shared interface-settling deadline was too short, and a hard reset
+could truncate OTP's freshly generated cookie file. Interface changes now have
+an 8-second budget inside the existing 10-second worker limit. Development
+firmware supplies its public cookie in VM arguments before OTP reads persistent
+state; production cookie handling is unchanged. Tests do not retry failed writes.
+
+`mix dev.qemu` also exposes `_build/qemu/qmp.sock` for manual QMP control; its WAN
+device is named `wan-nic`. Automated tests never connect to that socket.
+
 ## Checks
 
 ```sh

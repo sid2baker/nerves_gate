@@ -215,7 +215,9 @@ defmodule NervesGate.Network.Vintage do
       end
 
     current_members = get_in(get("br0", "config") || %{}, [:vintage_net_bridge, :interfaces])
-    deadline = System.monotonic_time(:millisecond) + 1500
+    # Shared by bridge preparation and all ports; stay below the worker's 10s
+    # effect timeout while allowing slower hardware/emulation to settle.
+    deadline = System.monotonic_time(:millisecond) + 8_000
 
     preparation =
       if current_members != desired_members do
