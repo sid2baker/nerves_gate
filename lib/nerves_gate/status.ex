@@ -17,7 +17,14 @@ defmodule NervesGate.Status do
 
     %{
       version: 5,
-      system: %{firmware: NervesGate.version(), target: to_string(NervesGate.target())},
+      system: %{
+        firmware: NervesGate.version(),
+        target: to_string(NervesGate.target()),
+        node: Node.self(),
+        elixir: System.version(),
+        otp: System.otp_release()
+      },
+      backend: %{available: true, error: nil},
       network: network(status),
       connections: connections(status),
       capabilities: %{
@@ -32,6 +39,22 @@ defmodule NervesGate.Status do
       indicators: indicators,
       buses: buses,
       actions: actions(status, remote, equipment, indicators, buses)
+    }
+  end
+
+  @doc "An empty view, not a cached or simulated device snapshot."
+  def disconnected do
+    error = Error.new("backend_disconnected", "The device is disconnected or not responding.")
+    status = build(nil, Remote.unavailable())
+
+    %{
+      status
+      | system: %{firmware: "—", target: "—", node: :nonode@nohost, elixir: "—", otp: "—"},
+        backend: %{available: false, error: error},
+        actions:
+          Map.new(status.actions, fn {name, action} ->
+            {name, %{action | enabled: false, reason: error}}
+          end)
     }
   end
 

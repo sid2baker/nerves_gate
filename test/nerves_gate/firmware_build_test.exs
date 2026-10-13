@@ -16,7 +16,7 @@ defmodule NervesGate.FirmwareBuildTest do
 
   test "target builds use SOURCE_DATE_EPOCH when supplied" do
     with_env([{"SOURCE_DATE_EPOCH", "1700000000"}], fn ->
-      config = Config.Reader.read!(@target_config, target: :ec100)
+      config = Config.Reader.read!(@target_config, target: :ec100, env: :prod)
       assert config[:nerves][:source_date_epoch] == "1700000000"
       assert config[:nerves][:firmware][:rootfs_type] == {:squashfs, ["-no-xattrs", "-quiet"]}
       assert config[:tailscale][:daemon_path] == "/usr/sbin/tailscaled"
@@ -29,7 +29,7 @@ defmodule NervesGate.FirmwareBuildTest do
 
   test "firmware enables RingLogger persistence without changing host logging" do
     for target <- [:ec100, :x86_64] do
-      config = Config.Reader.read!(@target_config, target: target)
+      config = Config.Reader.read!(@target_config, target: target, env: :prod)
       assert config[:logger][RingLogger][:persist_path] == "/data/ring_logger.log"
       assert config[:logger][RingLogger][:persist_seconds] == 5
       refute Keyword.has_key?(config[:nerves_gate], :logger)
@@ -40,7 +40,7 @@ defmodule NervesGate.FirmwareBuildTest do
 
   test "routing setup has no boot script and is inert on the host" do
     for target <- [:ec100, :x86_64] do
-      config = Config.Reader.read!(@target_config, target: target)
+      config = Config.Reader.read!(@target_config, target: target, env: :prod)
       refute Keyword.has_key?(config[:nerves][:erlinit], :pre_run_exec)
     end
 
@@ -55,11 +55,11 @@ defmodule NervesGate.FirmwareBuildTest do
     runtime = Path.expand("../../config/runtime.exs", __DIR__)
 
     for target <- [:host, :ec100, :x86_64] do
-      config = Config.Reader.read!(runtime, target: target)
+      config = Config.Reader.read!(runtime, target: target, env: :prod)
       refute Keyword.has_key?(config[:nerves_gate][NervesGateWeb.Endpoint], :server)
     end
 
-    config = Config.Reader.read!(@target_config, target: :ec100)
+    config = Config.Reader.read!(@target_config, target: :ec100, env: :prod)
     assert config[:nerves_gate][:cellular] == nil
 
     assert config[:vintage_net][:route_metric_fun] ==
@@ -70,7 +70,7 @@ defmodule NervesGate.FirmwareBuildTest do
     {timestamp, 0} = System.cmd("git", ["log", "-1", "--format=%ct"])
 
     with_env([{"SOURCE_DATE_EPOCH", nil}], fn ->
-      config = Config.Reader.read!(@target_config, target: :ec100)
+      config = Config.Reader.read!(@target_config, target: :ec100, env: :prod)
       assert config[:nerves][:source_date_epoch] == String.trim(timestamp)
     end)
   end
@@ -79,7 +79,7 @@ defmodule NervesGate.FirmwareBuildTest do
     for value <- ["", "tomorrow", "-1", "123oops"] do
       with_env([{"SOURCE_DATE_EPOCH", value}], fn ->
         assert_raise RuntimeError, ~r"SOURCE_DATE_EPOCH must be", fn ->
-          Config.Reader.read!(@target_config, target: :ec100)
+          Config.Reader.read!(@target_config, target: :ec100, env: :prod)
         end
       end)
     end
@@ -104,14 +104,14 @@ defmodule NervesGate.FirmwareBuildTest do
     assert "-heart -env HEART_BEAT_TIMEOUT 30" in vm_args
 
     for target <- [:ec100, :x86_64] do
-      config = Config.Reader.read!(@target_config, target: target)
+      config = Config.Reader.read!(@target_config, target: target, env: :prod)
       assert config[:nerves_runtime][:startup_guard_enabled] == true
     end
   end
 
   test "firmware serves HTTP on every IPv4 interface while host development stays loopback-only" do
     for target <- [:ec100, :x86_64] do
-      config = Config.Reader.read!(@target_config, target: target)
+      config = Config.Reader.read!(@target_config, target: target, env: :prod)
       assert config[:nerves_gate][NervesGateWeb.Endpoint][:http] == [ip: {0, 0, 0, 0}, port: 4000]
       refute Keyword.has_key?(config[:nerves_gate], :management_interface)
     end
@@ -123,21 +123,86 @@ defmodule NervesGate.FirmwareBuildTest do
   end
 
   test "EC100 boot configures only USB provisioning, leaving the LAN to the network manager" do
-    config = Config.Reader.read!(@target_config, target: :ec100)
+    config = Config.Reader.read!(@target_config, target: :ec100, env: :prod)
     assert config[:nerves_gate][:target] == :ec100
     assert config[:vintage_net][:persistence] == VintageNet.Persistence.FlatFile
     assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
   end
 
   test "x86 firmware does not assume a USB gadget exists" do
-    config = Config.Reader.read!(@target_config, target: :x86_64)
+    config = Config.Reader.read!(@target_config, target: :x86_64, env: :prod)
     assert config[:nerves_gate][:target] == :x86_64
     assert config[:vintage_net][:config] == []
   end
 
+  test "QEMU development has a default node without changing EC100 or production" do
+    with_env([{"NERVES_GATE_DEVICE_NODE", nil}], fn ->
+      dev = Config.Reader.read!(@target_config, target: :x86_64, env: :dev)
+      assert dev[:nerves_gate][:development_node] == :"nerves_gate@192.168.77.2"
+      ec100 = Config.Reader.read!(@target_config, target: :ec100, env: :dev)
+      refute ec100[:nerves_gate][:development_node]
+      prod = Config.Reader.read!(@target_config, target: :x86_64, env: :prod)
+      refute prod[:nerves_gate][:development_node]
+    end)
+  end
+
+  test "explicit distribution identity and the third QEMU NIC are development-only" do
+    with_env([{"NERVES_GATE_DEVICE_NODE", "nerves_gate@192.168.77.2"}], fn ->
+      dev = Config.Reader.read!(@target_config, target: :x86_64, env: :dev)
+      assert dev[:nerves_gate][:development_node] == :"nerves_gate@192.168.77.2"
+      assert [{"eth2", management}] = dev[:vintage_net][:config]
+      assert management.ipv4 == %{method: :static, address: "192.168.77.2", prefix_length: 24}
+
+      for target <- [:ec100, :x86_64] do
+        prod = Config.Reader.read!(@target_config, target: target, env: :prod)
+        refute prod[:nerves_gate][:development_node]
+        refute prod[:nerves_gate][:backend_node]
+        refute prod[:nerves_gate][NervesGateWeb.Endpoint][:code_reloader]
+      end
+    end)
+  end
+
+  test "the public distribution cookie is restricted to development builds" do
+    config_file = Path.expand("../../config/config.exs", __DIR__)
+
+    for {env, cookie} <- [dev: :mycookie, test: nil, prod: nil] do
+      config = Config.Reader.read!(config_file, target: :host, env: env)
+      assert config[:nerves_gate][:distribution_cookie] == cookie
+    end
+  end
+
+  test "development commands configure the host before starting Phoenix" do
+    aliases = NervesGate.MixProject.project()[:aliases]
+    cli = NervesGate.MixProject.cli()
+
+    for command <- [:"dev.ec100", :"dev.qemu"] do
+      assert [setup, "phx.server"] = aliases[command]
+      assert is_function(setup, 1)
+      assert cli[:preferred_targets][command] == :host
+      assert cli[:preferred_envs][command] == :dev
+    end
+  end
+
+  test "development tooling is restricted to host dev and loopback" do
+    deps = NervesGate.MixProject.project()[:deps]
+
+    for name <- [:tidewave, :phoenix_live_reload] do
+      {^name, _, opts} = List.keyfind(deps, name, 0)
+      assert opts[:only] == :dev
+      assert opts[:targets] == :host
+    end
+
+    dev =
+      Config.Reader.read!(Path.expand("../../config/dev.exs", __DIR__), env: :dev, target: :host)
+
+    assert dev[:nerves_gate][:ec100_node] == :"nerves_gate@100.88.166.70"
+    assert dev[:nerves_gate][NervesGateWeb.Endpoint][:code_reloader]
+    assert dev[:nerves_gate][NervesGateWeb.Endpoint][:http][:ip] == {127, 0, 0, 1}
+  end
+
   test "firmware overlays include shared console setup and only the selected target binaries" do
     for target <- [:ec100, :x86_64] do
-      config = Config.Reader.read!(@target_config, target: target)
+      config = Config.Reader.read!(@target_config, target: target, env: :prod)
       assert [common, binaries] = config[:nerves][:firmware][:rootfs_overlay]
       assert common == Path.expand("../../rootfs_overlay/common", __DIR__)
       assert binaries == Path.expand("../../rootfs_overlay/#{target}", __DIR__)
@@ -167,6 +232,7 @@ defmodule NervesGate.FirmwareBuildTest do
 
         assert ec100[:targets] == :ec100
         assert x86[:targets] == :x86_64
+        assert x86[:path] == "test/support/nerves_system_x86_64"
         assert {:tailscale, tailscale} = List.keyfind(project[:deps], :tailscale, 0)
         assert tailscale[:runtime] == (target != :host)
       end

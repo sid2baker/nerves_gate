@@ -1,3 +1,9 @@
+# These commands always run the local development UI, even after firmware builds.
+if List.first(System.argv()) in ["dev.ec100", "dev.qemu"] do
+  Mix.env(:dev)
+  Mix.target(:host)
+end
+
 defmodule NervesGate.MixProject do
   use Mix.Project
 
@@ -10,7 +16,13 @@ defmodule NervesGate.MixProject do
       elixir: "~> 1.20",
       archives: [nerves_bootstrap: "~> 1.17"],
       start_permanent: Mix.env() == :prod,
-      elixirc_paths: if(Mix.env() == :test, do: ["lib", "test/support"], else: ["lib"]),
+      listeners: [Phoenix.CodeReloader],
+      elixirc_paths:
+        if Mix.env() == :test do
+          ["lib" | Path.wildcard("test/support/*.ex")]
+        else
+          ["lib"]
+        end,
       deps: deps(),
       releases: [
         nerves_gate: [
@@ -19,9 +31,9 @@ defmodule NervesGate.MixProject do
           steps: [&Nerves.init_release/1, :assemble]
         ]
       ],
-      # Standalone integration scripts bootstrap their own isolated runtimes.
-      test_load_filters: [~r{^test/(?!integration/).*_test\.exs$}],
-      test_ignore_filters: [&String.starts_with?(&1, "test/integration/")],
+      # Integration scripts and the standalone BSP have their own runtimes.
+      test_load_filters: [~r{^test/(nerves_gate|nerves_gate_web)/.*_test\.exs$}],
+      test_ignore_filters: [~r{^test/(integration|support)/}],
       dialyzer: [
         plt_add_apps: [
           :ex_unit,
@@ -39,8 +51,18 @@ defmodule NervesGate.MixProject do
     [extra_applications: [:logger, :crypto], mod: {NervesGate.Application, []}]
   end
 
-  def cli,
-    do: [preferred_targets: [run: :host, test: :host, ci: :host], preferred_envs: [ci: :test]]
+  def cli do
+    [
+      preferred_targets: [
+        run: :host,
+        test: :host,
+        ci: :host,
+        "dev.ec100": :host,
+        "dev.qemu": :host
+      ],
+      preferred_envs: [ci: :test, "dev.ec100": :dev, "dev.qemu": :dev]
+    ]
+  end
 
   defp deps do
     [
@@ -54,6 +76,8 @@ defmodule NervesGate.MixProject do
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
       {:phoenix, "~> 1.8"},
+      {:phoenix_live_reload, "~> 1.5", only: :dev, targets: :host},
+      {:tidewave, "~> 0.9", only: :dev, targets: :host},
       # PR #4441: lifecycle-managed LiveView/LiveComponent PubSub subscriptions.
       {:phoenix_live_view, github: "phoenixframework/phoenix_live_view", branch: "main"},
       {:phoenix_pubsub, "~> 2.4"},
@@ -80,12 +104,64 @@ defmodule NervesGate.MixProject do
        path: "/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100",
        runtime: false,
        targets: :ec100},
-      {:nerves_system_x86_64, path: "systems/x86_64", runtime: false, targets: :x86_64}
+      {:nerves_system_x86_64,
+       path: "test/support/nerves_system_x86_64", runtime: false, targets: :x86_64}
     ]
+  end
+
+  defp dev_ec100([]), do: dev_ui(Application.fetch_env!(:nerves_gate, :ec100_node))
+
+  defp dev_qemu([]) do
+    unless File.regular?("_build/qemu/gateway.img"),
+      do:
+        Mix.raise("Prepare _build/qemu/gateway.img and the ng-qemu TAP; see docs/development.md")
+
+    executable =
+      System.find_executable("qemu-system-x86_64") || Mix.raise("QEMU is not installed")
+
+    args = ~w(
+      -m 1024 -display none -monitor none -serial file:_build/qemu/console.log
+      -drive file=_build/qemu/gateway.img,format=raw,if=virtio
+      -netdev user,id=wan -device virtio-net-pci,netdev=wan
+      -netdev user,id=equipment,net=10.0.3.0/24 -device virtio-net-pci,netdev=equipment
+      -netdev tap,id=management,ifname=ng-qemu,script=no,downscript=no
+      -device virtio-net-pci,netdev=management
+    )
+
+    dev_ui(:"nerves_gate@192.168.77.2")
+
+    Task.start_link(fn ->
+      {_, status} = MuonTrap.cmd(executable, args, into: IO.stream(), stderr_to_stdout: true)
+      System.stop(status)
+    end)
+  end
+
+  defp dev_ui(backend) do
+    backend = to_string(backend)
+    [_, address] = String.split(backend, "@", parts: 2)
+    {:ok, socket} = :gen_udp.open(0, [:inet])
+
+    ip =
+      try do
+        :ok = :gen_udp.connect(socket, String.to_charlist(address), 9)
+        {:ok, {ip, _}} = :inet.sockname(socket)
+        ip
+      after
+        :gen_udp.close(socket)
+      end
+
+    System.put_env("NERVES_GATE_BACKEND_NODE", backend)
+    Mix.Task.rerun("loadconfig")
+    Mix.Task.rerun("compile", ["--force"])
+    {_, 0} = System.cmd("epmd", ["-daemon"])
+    {:ok, _} = Node.start(:"nerves_gate_ui@#{:inet.ntoa(ip)}", name_domain: :longnames)
   end
 
   defp aliases() do
     [
+      test: ["test --no-start"],
+      "dev.ec100": [&dev_ec100/1, "phx.server"],
+      "dev.qemu": [&dev_qemu/1, "phx.server"],
       ci: [
         "compile --warnings-as-errors",
         "format --check-formatted",

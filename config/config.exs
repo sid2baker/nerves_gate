@@ -2,6 +2,9 @@ import Config
 
 Application.start(:nerves_bootstrap)
 
+# Public cookie for trusted development networks only. Production keeps OTP's cookie.
+config :nerves_gate, distribution_cookie: if(config_env() == :dev, do: :mycookie)
+
 config :phoenix, :json_library, Jason
 config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret"]
 
@@ -16,6 +19,7 @@ config :nerves_gate, NervesGateWeb.Endpoint,
 
 if Mix.target() == :host do
   import_config "host.exs"
+  if config_env() == :dev, do: import_config("dev.exs")
 else
   import_config "target.exs"
 end

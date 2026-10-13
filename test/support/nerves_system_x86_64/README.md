@@ -1,5 +1,10 @@
 # Generic x86_64 System
 
+> This checkout is NervesGate's EC100-aligned QEMU test system, not an unmodified
+> upstream release. Read [GATEWAY.md](GATEWAY.md) for its local configuration,
+> build instructions, deliberate platform differences and validation status.
+> The upstream reference documentation follows.
+
 [![Hex version](https://img.shields.io/hexpm/v/nerves_system_x86_64.svg "Hex version")](https://hex.pm/packages/nerves_system_x86_64)
 [![CI](https://github.com/nerves-project/nerves_system_x86_64/actions/workflows/ci.yml/badge.svg)](https://github.com/nerves-project/nerves_system_x86_64/actions/workflows/ci.yml)
 [![REUSE status](https://api.reuse.software/badge/github.com/nerves-project/nerves_system_x86_64)](https://api.reuse.software/info/github.com/nerves-project/nerves_system_x86_64)

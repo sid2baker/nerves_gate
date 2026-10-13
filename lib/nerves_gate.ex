@@ -164,6 +164,9 @@ defmodule NervesGate do
     invoke(fn -> Network.sharing(:sharing_disable, %{}, network(opts)) end) |> result()
   end
 
+  @doc "Read the private distribution cookie. Never include it in status, notifications or logs."
+  def distribution_cookie, do: {:ok, Node.get_cookie()}
+
   def target do
     Application.fetch_env!(:nerves_gate, :target)
   end

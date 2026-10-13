@@ -8,7 +8,7 @@ defmodule NervesGateWeb.NetworkLive do
   def mount(_, session, socket) do
     socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
     if connected?(socket), do: Process.send_after(self(), :tick, 1_000)
-    projection = NervesGate.status()
+    projection = NervesGateWeb.Backend.status()
     peer = get_connect_info(socket, :peer_data)
 
     socket =
@@ -52,11 +52,12 @@ defmodule NervesGateWeb.NetworkLive do
     do: {:noreply, assign(socket, form: draft(socket, %{"equipment_port" => ""}), dirty: true)}
 
   def handle_event("reload", _, socket) do
-    {:noreply, socket |> assign(dirty: false, message: nil) |> refresh(NervesGate.status())}
+    {:noreply,
+     socket |> assign(dirty: false, message: nil) |> refresh(NervesGateWeb.Backend.status())}
   end
 
   def handle_event("save", %{"network" => params}, socket) do
-    projection = NervesGate.status()
+    projection = NervesGateWeb.Backend.status()
     socket = assign(socket, form: draft(socket, params))
 
     if socket.assigns.base != projection.network.desired do
@@ -70,9 +71,7 @@ defmodule NervesGateWeb.NetworkLive do
       case NetworkForm.to_network(socket.assigns.form.params, projection.connections.ports) do
         {:ok, network} ->
           result =
-            NervesGate.network_propose(network,
-              access: socket.assigns.access
-            )
+            NervesGateWeb.Backend.network_propose(network, access: socket.assigns.access)
 
           reply(assign(socket, own_save: true, saving_network: network), result)
 
@@ -91,19 +90,19 @@ defmodule NervesGateWeb.NetworkLive do
             socket.assigns.projection.network.pending &&
               socket.assigns.projection.network.pending.network
         ),
-        NervesGate.network_confirm(params["trial_id"])
+        NervesGateWeb.Backend.network_confirm(params["trial_id"])
       )
 
   def handle_event("cancel", params, socket),
     do:
       reply(
         assign(socket, own_save: false),
-        NervesGate.network_cancel(params["trial_id"])
+        NervesGateWeb.Backend.network_cancel(params["trial_id"])
       )
 
   @doc false
   def refresh_observations(socket) do
-    refresh(socket, NervesGate.status())
+    refresh(socket, NervesGateWeb.Backend.status())
   end
 
   def handle_info(:tick, socket) do
@@ -186,12 +185,16 @@ defmodule NervesGateWeb.NetworkLive do
   end
 
   defp reply(socket, :ok) do
-    {:noreply, refresh(socket, NervesGate.status())}
+    {:noreply, refresh(socket, NervesGateWeb.Backend.status())}
   end
 
   defp reply(socket, {:error, error}) do
     {:noreply,
-     assign(socket, projection: NervesGate.status(), own_save: false, message: error.message)}
+     assign(socket,
+       projection: NervesGateWeb.Backend.status(),
+       own_save: false,
+       message: error.message
+     )}
   end
 
   def render(assigns) do

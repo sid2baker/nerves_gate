@@ -16,6 +16,18 @@ config :nerves_gate,
       else: nil
     )
 
+# Optional development distribution without Tailscale enrollment. Production
+# keeps its existing automatic Tailscale identity and native persistent cookie.
+if config_env() == :dev do
+  node =
+    System.get_env("NERVES_GATE_DEVICE_NODE") ||
+      if(config_target() == :x86_64, do: "nerves_gate@192.168.77.2")
+
+  if node do
+    config :nerves_gate, development_node: String.to_atom(node)
+  end
+end
+
 # Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
 # The UI is unauthenticated; use only on trusted networks.
 config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {0, 0, 0, 0}, port: 4000]
@@ -82,6 +94,19 @@ config :vintage_net,
   route_metric_fun: {NervesGate.Network.RouteMetric, :compute_metric, 2},
   persistence: VintageNet.Persistence.FlatFile,
   config: if(config_target() == :ec100, do: [{"usb0", %{type: VintageNetDirect}}], else: [])
+
+# A separate management NIC for QEMU development. The gateway only manages
+# equipment/Internet ports eth0 and eth1, so trials cannot remove this address.
+if config_target() == :x86_64 and config_env() == :dev do
+  config :vintage_net,
+    config: [
+      {"eth2",
+       %{
+         type: VintageNetEthernet,
+         ipv4: %{method: :static, address: "192.168.77.2", prefix_length: 24}
+       }}
+    ]
+end
 
 # Recovery SSH is key-only. Supply a public key at firmware build time.
 config :nerves_ssh,

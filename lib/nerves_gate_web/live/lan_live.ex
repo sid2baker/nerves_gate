@@ -27,7 +27,7 @@ defmodule NervesGateWeb.LanLive do
 
   # Recheck scope on every command: another session may have reassigned this port.
   def handle_event(event, params, socket) do
-    projection = NervesGate.status()
+    projection = NervesGateWeb.Backend.status()
     socket = assign(socket, :projection, projection)
     scope = projection.equipment.scope
 
@@ -57,7 +57,7 @@ defmodule NervesGateWeb.LanLive do
     {:noreply,
      socket
      |> assign(scanning: true, message: nil)
-     |> start_async(:scan, fn -> NervesGate.equipment_scan() end)}
+     |> start_async(:scan, fn -> NervesGateWeb.Backend.equipment_scan() end)}
   end
 
   defp port_event("edit-label", %{"id" => id}, socket) do
@@ -82,7 +82,7 @@ defmodule NervesGateWeb.LanLive do
     do: {:noreply, assign(socket, editing: nil, label_form: nil)}
 
   defp port_event("save-label", %{"equipment" => %{"label" => label}}, socket) do
-    case NervesGate.equipment_label(socket.assigns.editing, label) do
+    case NervesGateWeb.Backend.equipment_label(socket.assigns.editing, label) do
       :ok ->
         {:noreply, socket |> assign(editing: nil, label_form: nil) |> result(:ok, "Label saved.")}
 
@@ -92,10 +92,10 @@ defmodule NervesGateWeb.LanLive do
   end
 
   defp port_event("enable-sharing", _, socket),
-    do: change_sharing(socket, &NervesGate.equipment_share/0)
+    do: change_sharing(socket, &NervesGateWeb.Backend.equipment_share/0)
 
   defp port_event("disable-sharing", _, socket),
-    do: change_sharing(socket, &NervesGate.equipment_unshare/0)
+    do: change_sharing(socket, &NervesGateWeb.Backend.equipment_unshare/0)
 
   defp port_event(_, _, socket), do: {:noreply, socket}
 
@@ -141,7 +141,7 @@ defmodule NervesGateWeb.LanLive do
         {:error, error} -> %{tone: "warning", text: error.message}
       end
 
-    assign(socket, projection: NervesGate.status(), message: message)
+    assign(socket, projection: NervesGateWeb.Backend.status(), message: message)
   end
 
   defp equipment_port?(projection, name),

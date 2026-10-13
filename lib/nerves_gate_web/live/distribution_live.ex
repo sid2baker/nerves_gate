@@ -1,13 +1,27 @@
 defmodule NervesGateWeb.DistributionLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  alias NervesGateWeb.DistributionPanel
+  alias NervesGateWeb.{DistributionPanel, Observations}
 
-  on_mount({NervesGateWeb.Observations, :status})
+  def mount(_, _, socket) do
+    {:ok, socket |> Observations.subscribe(&refresh/1) |> refresh()}
+  end
+
+  defp refresh(socket) do
+    projection = NervesGateWeb.Backend.status()
+
+    cookie =
+      if projection.backend.available do
+        case NervesGateWeb.Backend.distribution_cookie() do
+          {:ok, cookie} -> cookie
+          {:error, _} -> nil
+        end
+      end
+
+    assign(socket, projection: projection, cookie: cookie)
+  end
 
   def render(assigns) do
-    assigns = assign(assigns, node: Node.self(), cookie: Node.get_cookie())
-
     ~H"""
     <.link navigate="/" class="ui-text-link">Back to Overview</.link>
     <.page_header
@@ -15,10 +29,10 @@ defmodule NervesGateWeb.DistributionLive do
       description="Connect directly to this gateway’s runtime."
     />
     <DistributionPanel.connection
-      node={@node}
+      node={@projection.system.node}
       cookie={@cookie}
-      elixir={System.version()}
-      otp={System.otp_release()}
+      elixir={@projection.system.elixir}
+      otp={@projection.system.otp}
     />
     """
   end

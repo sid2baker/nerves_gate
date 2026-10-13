@@ -5,8 +5,8 @@ defmodule NervesGateWeb.DeviceLive do
   on_mount({NervesGateWeb.Observations, :status})
 
   def handle_event("identify", _, socket) do
-    result = NervesGate.identify()
-    socket = socket |> clear_flash() |> assign(:projection, NervesGate.status())
+    result = NervesGateWeb.Backend.identify()
+    socket = socket |> clear_flash() |> assign(:projection, NervesGateWeb.Backend.status())
 
     case result do
       :ok -> {:noreply, socket}
@@ -25,7 +25,7 @@ defmodule NervesGateWeb.DeviceLive do
       <.setting_row label="Firmware">{@projection.system.firmware}</.setting_row>
       <.setting_row label="Target">{@projection.system.target}</.setting_row>
       <.setting_row label="Runtime">
-        Elixir {System.version()} · OTP {System.otp_release()}
+        Elixir {@projection.system.elixir} · OTP {@projection.system.otp}
       </.setting_row>
       <.notice :if={@projection.indicators.simulated}>
         Preview mode · simulated button, LEDs and recovery. Workstation hardware is never used.

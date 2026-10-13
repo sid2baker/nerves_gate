@@ -57,7 +57,10 @@ defmodule NervesGate.UplinksTest do
     modem = %InterfaceInfo{interface_type: :mobile, status: :internet}
 
     config =
-      Elixir.Config.Reader.read!(Path.expand("../../config/target.exs", __DIR__), target: :ec100)
+      Elixir.Config.Reader.read!(Path.expand("../../config/target.exs", __DIR__),
+        target: :ec100,
+        env: :prod
+      )
 
     {module, function, arity} = config[:vintage_net][:route_metric_fun]
     metric = Function.capture(module, function, arity)

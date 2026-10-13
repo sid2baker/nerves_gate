@@ -1,11 +1,10 @@
 import Config
 
-# Host development never configures the workstation's network.
+# Host runs only Phoenix; the backend node is selected before compilation.
+backend_node = System.get_env("NERVES_GATE_BACKEND_NODE")
+
 config :nerves_gate,
   target: :host,
-  network_adapter: {NervesGate.Network.Host, NervesGate.Network.Host},
-  remote_adapter: {NervesGate.Remote.Host, NervesGate.Remote.Host},
-  equipment_adapter: {NervesGate.Equipment.Host, NervesGate.Equipment.Host},
-  indicators_adapter: {NervesGate.Indicators.Host, NervesGate.Indicators.Host},
-  recovery_adapter: {NervesGate.Recovery.Host, NervesGate.Indicators.Host},
-  buses_adapter: {NervesGate.Buses.Host, NervesGate.Buses.Host}
+  backend_node: if(backend_node, do: String.to_atom(backend_node))
+
+if config_env() == :test, do: import_config("test.exs")

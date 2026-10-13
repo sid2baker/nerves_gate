@@ -108,8 +108,8 @@ exercise actual routing, carrier registration or modem power.
 ## Saving and rollback
 
 VintageNet stores each LAN interface's settings using its FlatFile persistence
-backend. The application keeps only the current trial in memory; host simulation
-also keeps saved settings in memory. Unreadable saved settings fail closed.
+backend. The application keeps only the current trial in memory; test fakes
+also keep saved settings in memory. Unreadable saved settings fail closed.
 
 The Ethernet modes remain `unconfigured`, `ports` and `shared`. An optional
 `internet` object selects `ethernet`, `cellular`, or `backup`; cellular modes also
@@ -288,7 +288,9 @@ in the general `NervesGate.status()` projection or observation broadcasts.
 
 OTP creates/reuses `$HOME/.erlang.cookie` (normally `/root/.erlang.cookie`, on the
 persistent data partition). It survives reboot and in-place firmware updates; factory
-reset erases it. No cookie is baked into firmware. To give several nodes the same
+reset erases it. Production does not bake in a cookie. `MIX_ENV=dev` builds instead
+use the public `:mycookie` without changing that file; use only trusted development
+networks. To give several production nodes the same
 cookie, provision that standard file with identical contents and owner-only permissions,
 then reboot. Changing a running node's cookie with `Node.set_cookie/1` alone does not
 persist it or disconnect existing peers. Matching cookies do not discover nodes;
@@ -340,7 +342,7 @@ restoration; x86 does not assume a USB gadget exists.
 Keep a local recovery path when changing Ethernet or updating firmware. SSH is
 key-only, with build-time `NERVES_GATE_SSH_KEYS`; the HTTP listener's policy does not
 change SSH exposure. USB, serial and real cable/hotplug behavior require hardware
-verification, not only host simulation.
+verification, not only tests with hardware fakes.
 
 ## Logs across reboots
 

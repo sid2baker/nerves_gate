@@ -1,7 +1,8 @@
 # Nerves Gate
 
 An Ethernet gateway with a small, local web UI, built with Nerves 2, ordinary OTP,
-Alarmist and Phoenix LiveView. EC100 is the primary target; x86_64 support is in progress.
+Alarmist and Phoenix LiveView. EC100 is the production target; an EC100-aligned
+x86_64/QEMU test system is in progress.
 
 ## Use it
 
@@ -31,7 +32,7 @@ Route approval and permissions belong to your tailnet; reachability is not verif
 five-second blink. RUN shows application state, USER1 Internet + Tailscale health, and USER2 alarms.
 The physical button identifies on a short release and requests reboot after 5 seconds.
 The 30-second factory-reset gesture erases EC100 application data and reboots;
-physical qualification is pending. Host recovery is simulation only.
+physical qualification is pending. Recovery tests use in-memory fakes.
 See [LEDs and button](docs/indicators.md).
 CAN/RS485 workspaces offer bounded receive-only captures and explicitly authorized
 Modbus register reads, with no scans, writes or retries. Physical CAN still needs
@@ -110,15 +111,19 @@ Use Elixir 1.20 and the Erlang/OTP major version required by your Nerves system
 ```sh
 mix deps.get
 mix ci                    # compile, format, tests, Credo, Dialyzer, duplication, architecture
-mix phx.server            # http://localhost:4000
+mix dev.ec100             # device backend + local UI at http://localhost:4000
+mix dev.qemu              # x86 Nerves backend + local UI
 ```
 
-Host mode simulates Ethernet, cellular uplinks, Tailscale, buses, button, LEDs and recovery. It never modifies the
-workstation's network, starts its VPN daemon or opens hardware controls. In IEx,
-`NervesGate.Network.Host.simulate/1` changes simulated observations, and
-`NervesGate.Indicators.Host.button(1)` / `.button(0)` simulate a press/release.
-Release once to arm after startup; simulated reboot/reset only records the request.
-Host HTTP listens on loopback only.
+For local Phoenix development against a device backend, use `mix dev.ec100` or
+`mix dev.qemu` after the [one-time setup](docs/development.md). The launchers select
+the backend before compilation and start a UI-only host with code reload,
+LiveReload and Tidewave. The existing API runs on the device over Erlang distribution.
+
+There is one backend, on EC100 or x86 Nerves. Both the device's Phoenix UI and
+optional workstation Phoenix UI use it. The workstation runs no device services,
+VPN daemon or hardware simulator. Its HTTP endpoint listens on loopback only.
+Hardware fakes live under `test/support` and compile only for tests.
 
 All browser assets are local and checked in. Rebuild CSS with
 `cd assets && npm ci && npm run build`. Node.js is not needed on the device or to
@@ -158,7 +163,7 @@ None of these checks substitutes for a firmware boot or hardware test.
 ## Build firmware
 
 ```sh
-export MIX_TARGET=ec100    # or x86_64
+export MIX_TARGET=ec100    # x86_64 is the development/QEMU test target
 export MIX_ENV=prod        # omit development tooling from firmware
 mix deps.get
 mix firmware --overwrite
@@ -166,14 +171,17 @@ mix firmware --overwrite
 
 Erlang distribution starts automatically once Tailscale is online, named
 `nerves_gate@<assigned-Tailscale-IPv4>`. No build-time node name or tailnet is needed.
-**Overview → Erlang distribution** shows the node name and persistent OTP cookie.
+**Overview → Erlang distribution** shows the node name and cookie. Production uses
+OTP's persistent cookie; `MIX_ENV=dev` builds always use the public `:mycookie`.
 Anyone who can read that page and reach distribution has full VM access.
 Use trusted networks or Tailscale. See [connecting Livebook](docs/networking.md#erlang-distribution-and-livebook).
 
 All targets share `mix.lock`. EC100 uses the local system checkout at
 `/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100`, retaining its bootloader,
-GPT and A/B update contract. See [systems/README.md](systems/README.md) for the
-unfinished x86 system work.
+GPT and A/B update contract. The x86/QEMU system lives under
+[`test/support/nerves_system_x86_64`](test/support/nerves_system_x86_64/GATEWAY.md).
+It shares EC100's gateway runtime configuration while retaining x86-specific
+boot and driver support; build/boot validation is still pending.
 
 The rootfs combines `rootfs_overlay/common` with `rootfs_overlay/<target>`. Supply a
 checksum-verified static `tailscaled` binary for the selected architecture at

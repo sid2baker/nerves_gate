@@ -10,7 +10,7 @@ defmodule NervesGateWeb.TailscaleLive do
       Process.send_after(self(), :check_login, 1000)
     end
 
-    projection = NervesGate.status()
+    projection = NervesGateWeb.Backend.status()
     name = hostname(projection.remote_access)
 
     {:ok,
@@ -37,7 +37,7 @@ defmodule NervesGateWeb.TailscaleLive do
        )}
 
   def handle_event("save", %{"remote" => params}, socket) do
-    projection = NervesGate.status()
+    projection = NervesGateWeb.Backend.status()
     online = projection.remote_access.state == "online"
 
     socket =
@@ -51,9 +51,9 @@ defmodule NervesGateWeb.TailscaleLive do
     else
       result =
         if online do
-          NervesGate.remote_configure(params["hostname"])
+          NervesGateWeb.Backend.remote_configure(params["hostname"])
         else
-          NervesGate.remote_connect(params["hostname"])
+          NervesGateWeb.Backend.remote_connect(params["hostname"])
         end
 
       socket =
@@ -80,13 +80,13 @@ defmodule NervesGateWeb.TailscaleLive do
   def handle_event("disconnect", _, socket) do
     reply(
       assign(socket, disconnecting: false, login_requested: false, login_url: nil),
-      NervesGate.remote_disconnect()
+      NervesGateWeb.Backend.remote_disconnect()
     )
   end
 
   @doc false
   def refresh_observations(socket) do
-    refresh(socket, NervesGate.status())
+    refresh(socket, NervesGateWeb.Backend.status())
   end
 
   def handle_info(:check_login, socket) do
@@ -94,7 +94,7 @@ defmodule NervesGateWeb.TailscaleLive do
 
     socket =
       if socket.assigns.login_requested do
-        refresh(socket, NervesGate.status())
+        refresh(socket, NervesGateWeb.Backend.status())
       else
         socket
       end
@@ -103,11 +103,11 @@ defmodule NervesGateWeb.TailscaleLive do
   end
 
   defp reply(socket, :ok) do
-    {:noreply, refresh(assign(socket, message: nil), NervesGate.status())}
+    {:noreply, refresh(assign(socket, message: nil), NervesGateWeb.Backend.status())}
   end
 
   defp reply(socket, {:error, error}) do
-    {:noreply, refresh(assign(socket, message: error.message), NervesGate.status())}
+    {:noreply, refresh(assign(socket, message: error.message), NervesGateWeb.Backend.status())}
   end
 
   defp refresh(socket, projection) do
@@ -166,7 +166,7 @@ defmodule NervesGateWeb.TailscaleLive do
   end
 
   defp read_login_url(socket) do
-    case NervesGate.remote_login_url() do
+    case NervesGateWeb.Backend.remote_login_url() do
       {:ok, url} -> assign(socket, login_url: url)
       _ -> assign(socket, login_url: nil)
     end
