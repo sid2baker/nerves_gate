@@ -2,13 +2,13 @@
 
 ## Port roles
 
-Port 1 is `eth0`; Port 2 is `eth1`. On a fresh gateway, both independently try
+LAN 1 is `eth0`; LAN 2 is `eth1`. Numbers always identify the same physical ports, even when the dedicated Internet port is hidden from Equipment. On a fresh gateway, both independently try
 DHCP. A single verified Internet port is suggested first; otherwise a single
 linked, addressed port is suggested. Ambiguous connections require a choice.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change automatically when a cable disappears or moves.
-Use **Settings → Network** to change them. Neither setup nor discovery bridges networks,
+Use **Overview → Internet** to change them. Neither setup nor discovery bridges networks,
 enables cellular backup or assigns an equipment address behind your back.
 
 - **Separate ports:** at most one Internet port (DHCP or static IPv4), optionally
@@ -33,7 +33,7 @@ Ethernet traffic. USB is never part of these changes.
 
 ## Internet source and cellular preparation
 
-**Settings → Network** offers Ethernet, 4G modem, and Ethernet with 4G backup.
+**Overview → Internet** offers Ethernet, 4G modem, and Ethernet with 4G backup.
 Existing saved settings remain Ethernet-only without migration. Cellular-only uses
 separate ports with no Ethernet Internet assignment; a shared bridge can use
 Ethernet or Ethernet with cellular backup. Equipment and USB are never modem bridges.
@@ -163,11 +163,10 @@ an Alarmist fault; successful restoration clears it. The alarm does not drive re
 
 ## Tailscale
 
-In **Settings → Tailscale**, enter a device name, select **Connect Tailscale**, then
+In **Overview → Remote access**, enter a device name, select **Connect Tailscale**, then
 follow the private sign-in link. Return to see connection or machine-approval
-status. No auth key is needed. **Remote access** shows gateway addresses and
-an on/off control for the equipment IPv4 subnet; rename and disconnect remain
-in Settings. Disconnect uses `Tailscale.down/0`, preserving enrollment and preferences.
+status. No auth key is needed. The same page shows gateway addresses, rename and
+disconnect. The equipment LAN page has the on/off control for its IPv4 subnet. Disconnect uses `Tailscale.down/0`, preserving enrollment and preferences.
 Reconnect uses `up/0` for an enrolled profile, or login when enrollment is needed.
 Disconnecting may interrupt a browser using that VPN. USB and LAN remain available. These operations do not use Ethernet's
 rollback timer.
@@ -250,7 +249,7 @@ end-to-end routing, NAT and real-device behavior still require target qualificat
 Old 4via6 advertisements are not converted or deleted automatically. They remain
 external Tailscale preferences and may still provide access. The equipment switch
 only controls the current IPv4 subnet; other advertisements must be removed before
-LAN changes. Inspect them under **Settings → Tailscale → Connection details**.
+LAN changes. Inspect them under **Overview → Remote access → Connection details**.
 From recovery IEx, remove only the exact unwanted route, preserving the others:
 
 ```elixir
@@ -281,7 +280,7 @@ Firmware listens on TCP **4369** (EPMD) and **9100** (distribution), on all IPv4
 INPUT rules. Native distribution is unencrypted; Tailscale supplies encryption on
 the VPN path. Do not expose these ports or the unauthenticated UI to the Internet.
 
-**Remote access → Erlang distribution** shows the running node name and cookie.
+**Overview → Erlang distribution** shows the running node name and cookie.
 The existing trusted-network model applies: anyone who can read the page and reach
 these ports can execute arbitrary code on the gateway. The cookie authenticates
 VM access, even when used operationally as a shared group value. It is not included
@@ -325,7 +324,7 @@ The listener starts normally without USB, cellular support or a boot marker, and
 accepts connections on interfaces added later. This does not configure an address
 or enroll a VPN. Host preview listens only on `127.0.0.1`.
 
-For USB recovery, open `http://<gateway-usb-address>:4000/settings/network`. VintageNetDirect
+For USB recovery, open `http://<gateway-usb-address>:4000/network`. VintageNetDirect
 derives the USB /30 subnet at runtime; there is no fixed device IP. From serial or
 SSH IEx, inspect:
 

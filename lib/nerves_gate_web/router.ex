@@ -23,13 +23,14 @@ defmodule NervesGateWeb.Router do
       layout: {NervesGateWeb.Layouts, :app}
     ) do
       live("/", DashboardLive, :overview)
+      live("/network", NetworkLive, :network)
+      live("/remote", TailscaleLive, :remote)
+      live("/distribution", DistributionLive, :distribution)
       live("/equipment", EquipmentLive, :equipment)
-      live("/equipment/buses", BusesLive, :buses)
-      live("/remote", RemoteLive, :remote)
-      live("/settings", SettingsLive, :settings)
-      live("/settings/network", NetworkLive, :network_settings)
-      live("/settings/tailscale", TailscaleLive, :tailscale_settings)
-      live("/settings/buses", BusesLive, :bus_settings)
+      live("/equipment/lan/:id", LanLive, :lan)
+      live("/equipment/rs485/:id", BusesLive, :rs485)
+      live("/equipment/can/:id", BusesLive, :can)
+      live("/device", DeviceLive, :device)
     end
   end
 end

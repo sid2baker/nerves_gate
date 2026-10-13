@@ -43,6 +43,7 @@ code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; fo
 .ui-brand > .ui-icon { color: var(--ui-accent); }
 .ui-navigation { display: flex; gap: 4px; }
 .ui-navigation a { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 12px; border-radius: 7px; font-size: 14px; line-height: 1.4; color: var(--ui-muted); }
+.ui-navigation .ui-device-link { margin-left: 16px; font-size: 12px; }
 .ui-navigation a:hover { background: #edf1f1; color: var(--ui-ink); }
 .ui-navigation a[aria-current="page"] { background: #e5eeeb; color: var(--ui-accent-dark); font-weight: 600; }
 .ui-main { max-width: 880px; margin: 32px auto 0; padding: 0 32px 40px; }
@@ -139,7 +140,8 @@ details[open] > summary { margin-bottom: 16px; }
 .phx-disconnected .ui-disconnected { display: block; }
 @media (max-width: 600px) {
   .ui-header { padding: 20px; flex-direction: column; align-items: flex-start; gap: 20px; }
-  .ui-navigation { width: 100%; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .ui-navigation { width: 100%; }
+  .ui-navigation .ui-device-link { margin-left: auto; }
   .ui-navigation a { padding: 10px 4px; font-size: 13px; text-align: center; }
   .ui-main { margin-top: 12px; padding: 0 20px 32px; }
   .ui-app-footer { padding: 0 20px 24px; }

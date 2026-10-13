@@ -4,7 +4,6 @@ defmodule NervesGateWeb.NetworkLive do
   alias NervesGateWeb.NetworkForm
   import NervesGateWeb.NetworkStatus, only: [port_label: 1]
   import NervesGateWeb.CoreComponents
-  import NervesGateWeb.Layouts, only: [settings_nav: 1]
 
   def mount(_, session, socket) do
     socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
@@ -213,12 +212,11 @@ defmodule NervesGateWeb.NetworkLive do
       )
 
     ~H"""
+    <.link navigate="/" class="ui-text-link">Back to Overview</.link>
     <.page_header
-      eyebrow="Settings"
-      title="Network"
+      title="Internet"
       description="Choose your Internet source and equipment port. USB stays independent for recovery."
     />
-    <.settings_nav current={:network} />
     <p :if={@initial} class="ui-help">
       First setup · Connect what you need. Everything else can wait.
     </p>
@@ -329,12 +327,12 @@ defmodule NervesGateWeb.NetworkLive do
                   />
                   <:option
                     value="eth0"
-                    title="Port 1"
+                    title="LAN 1"
                     description={internet_status("eth0", @projection.connections.ports)}
                   />
                   <:option
                     value="eth1"
-                    title="Port 2"
+                    title="LAN 2"
                     description={internet_status("eth1", @projection.connections.ports)}
                   />
                   <:option value="" title="Not now" />
@@ -353,8 +351,8 @@ defmodule NervesGateWeb.NetworkLive do
                 <.button variant="secondary" phx-click="add-equipment">Add equipment</.button>
               <% else %>
                 <.choice_group field={@form[:equipment_port]} label="Equipment port">
-                  <:option value="eth0" title="Port 1" />
-                  <:option value="eth1" title="Port 2" />
+                  <:option value="eth0" title="LAN 1" />
+                  <:option value="eth1" title="LAN 2" />
                 </.choice_group>
                 <div class="ui-field-grid">
                   <.field

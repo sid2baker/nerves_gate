@@ -7,14 +7,13 @@ Alarmist and Phoenix LiveView. EC100 is the primary target; x86_64 support is in
 
 Open `http://<gateway-address>:4000` through LAN, USB or Tailscale.
 
-- **Overview** — equipment, remote access and Internet status at a glance.
-- **Equipment** — neighbor observations, bounded ARP scan, device labels, and CAN/RS485 diagnostics.
-- **Remote access** — gateway addresses, equipment subnet sharing, and Erlang node/cookie details.
-- **Settings** — Ethernet or 4G Internet, optional 4G backup, Tailscale, CAN/RS485, and safe button/LED controls.
+- **Overview** — Internet, Remote access and Erlang distribution, in that order. Open a card for settings and connection details.
+- **Equipment** — LAN ports, both RS485 buses and both CAN buses. Open a port for its configuration and diagnostics; the dedicated Internet port is hidden.
+- **Device** — a small link for firmware/runtime information, identification and button/LED help.
 
 A new gateway tries DHCP on both Ethernet ports independently. It suggests the
 only plausible Internet port; it never joins networks or silently reassigns saved
-roles. First setup and later changes use the same form under **Settings → Network**.
+roles. First setup and later changes use the same form under **Overview → Internet**.
 Equipment and Internet are both optional.
 
 First setup through verified USB saves directly. Other network changes have a
@@ -27,7 +26,8 @@ do not expose it to the public Internet. CSRF and same-origin checks remain enab
 
 Tailscale connects **the gateway itself** and can share the confirmed dedicated equipment
 IPv4 subnet. Use equipment's normal addresses; overlapping networks are unsupported.
-Route approval and permissions belong to your tailnet; reachability is not verified. Settings can identify the gateway with a
+Open the equipment LAN page to turn subnet sharing on or off.
+Route approval and permissions belong to your tailnet; reachability is not verified. Device can identify the gateway with a
 five-second blink. RUN shows application state, USER1 Internet + Tailscale health, and USER2 alarms.
 The physical button identifies on a short release and requests reboot after 5 seconds.
 The 30-second factory-reset gesture erases EC100 application data and reboots;
@@ -166,7 +166,7 @@ mix firmware --overwrite
 
 Erlang distribution starts automatically once Tailscale is online, named
 `nerves_gate@<assigned-Tailscale-IPv4>`. No build-time node name or tailnet is needed.
-**Remote access → Erlang distribution** shows the node name and persistent OTP cookie.
+**Overview → Erlang distribution** shows the node name and persistent OTP cookie.
 Anyone who can read that page and reach distribution has full VM access.
 Use trusted networks or Tailscale. See [connecting Livebook](docs/networking.md#erlang-distribution-and-livebook).
 

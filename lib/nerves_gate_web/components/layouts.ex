@@ -21,8 +21,6 @@ defmodule NervesGateWeb.Layouts do
     """
   end
 
-  # Keep navigation inside the LiveView layout so it follows live navigation,
-  # including the return to Overview after first-time network setup.
   def app(assigns) do
     assigns = assign(assigns, :section, section(assigns.live_action))
 
@@ -33,8 +31,11 @@ defmodule NervesGateWeb.Layouts do
       <nav aria-label="Main navigation" class="ui-navigation">
         <.link navigate="/" aria-current={if @section == :overview, do: "page"}>Overview</.link>
         <.link navigate="/equipment" aria-current={if @section == :equipment, do: "page"}>Equipment</.link>
-        <.link navigate="/remote" aria-current={if @section == :remote, do: "page"}>Remote access</.link>
-        <.link navigate="/settings" aria-current={if @section == :settings, do: "page"}>Settings</.link>
+        <.link
+          navigate="/device"
+          class="ui-device-link"
+          aria-current={if @section == :device, do: "page"}
+        >Device</.link>
       </nav>
     </header>
     <main id="main-content" class="ui-main ui-stack" tabindex="-1">
@@ -45,12 +46,12 @@ defmodule NervesGateWeb.Layouts do
         </.notice>
       </div>
       <.notice
-        :if={@projection.network.pending && @live_action != :network_settings}
+        :if={@projection.network.pending && @live_action != :network}
         tone="warning"
         icon="clock"
         id="pending-network-notice"
       >
-        Network changes are not saved yet. <.link navigate="/settings/network" class="ui-text-link">Keep or restore changes</.link>.
+        Network changes are not saved yet. <.link navigate="/network" class="ui-text-link">Keep or restore changes</.link>.
       </.notice>
       {@inner_content}
     </main>
@@ -60,20 +61,7 @@ defmodule NervesGateWeb.Layouts do
     """
   end
 
-  attr(:current, :atom, required: true)
-
-  def settings_nav(assigns) do
-    ~H"""
-    <nav aria-label="Settings" class="ui-subnav">
-      <.link navigate="/settings" aria-current={if @current == :settings, do: "page"}>All settings</.link>
-      <.link navigate="/settings/network" aria-current={if @current == :network, do: "page"}>Network</.link>
-      <.link navigate="/settings/tailscale" aria-current={if @current == :tailscale, do: "page"}>Tailscale</.link>
-      <.link navigate="/settings/buses" aria-current={if @current == :buses, do: "page"}>Buses</.link>
-    </nav>
-    """
-  end
-
-  defp section(:buses), do: :equipment
-  defp section(action) when action in [:overview, :equipment, :remote], do: action
-  defp section(_), do: :settings
+  defp section(action) when action in [:equipment, :lan, :rs485, :can], do: :equipment
+  defp section(:device), do: :device
+  defp section(_), do: :overview
 end

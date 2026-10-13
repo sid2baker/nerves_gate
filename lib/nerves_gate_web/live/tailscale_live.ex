@@ -1,7 +1,6 @@
 defmodule NervesGateWeb.TailscaleLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  import NervesGateWeb.Layouts, only: [settings_nav: 1]
   alias NervesGateWeb.RemoteStatus
 
   def mount(_, _, socket) do
@@ -177,12 +176,11 @@ defmodule NervesGateWeb.TailscaleLive do
     assigns = assign(assigns, remote: assigns.projection.remote_access)
 
     ~H"""
+    <.link navigate="/" class="ui-text-link">Back to Overview</.link>
     <.page_header
-      eyebrow="Settings"
-      title="Tailscale"
+      title="Remote access"
       description="Connect this gateway to your private network."
     />
-    <.settings_nav current={:tailscale} />
     <.notice :if={@remote.simulated}>
       Development preview. Tailscale is simulated; your computer’s VPN is never changed.
     </.notice>
@@ -252,8 +250,7 @@ defmodule NervesGateWeb.TailscaleLive do
       </p>
     </RemoteStatus.connection>
     <p class="ui-help">
-      <.link navigate="/remote" class="ui-text-link">Remote access</.link>
-      shows gateway addresses and advertised equipment routes.
+      To share an equipment subnet, open its <.link navigate="/equipment" class="ui-text-link">LAN connection</.link>.
     </p>
     <details
       id="tailscale-details"

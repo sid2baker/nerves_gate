@@ -3,9 +3,7 @@ defmodule NervesGateWeb.DashboardLive do
   alias NervesGate.Config
   alias NervesGateWeb.RemoteStatus
   import NervesGateWeb.CoreComponents
-
-  import NervesGateWeb.NetworkStatus,
-    only: [port_label: 1, equipment_interface: 1, equipment_status: 1]
+  import NervesGateWeb.NetworkStatus, only: [port_label: 1]
 
   on_mount({NervesGateWeb.Observations, :status})
 
@@ -17,36 +15,25 @@ defmodule NervesGateWeb.DashboardLive do
     assigns =
       assign(assigns,
         settings: settings,
-        equipment: equipment_interface(assigns.projection),
-        remote: assigns.projection.remote_access
+        remote: assigns.projection.remote_access,
+        distribution_node: Node.self()
       )
 
     ~H"""
     <.page_header title="Overview" description={@remote.hostname || "Your gateway at a glance."} />
-    <.notice :if={@projection.network.observed && @projection.network.observed.simulated}>
+    <p :if={@projection.network.observed && @projection.network.observed.simulated} class="ui-help">
       Preview mode · simulated connections
-    </.notice>
-    <p :if={!@projection.network.setup_completed} class="ui-help">
-      Looking for Internet automatically. When you’re ready, <.link
-        navigate="/settings/network"
-        class="ui-text-link"
-      >configure your connections in Settings</.link>.
     </p>
-    <.notice :if={@projection.network.error} tone="warning" role="alert">
-      {@projection.network.error.message}
-    </.notice>
-    <.notice :for={problem <- @projection.connections.problems} tone="warning">{problem}</.notice>
     <section class="ui-connections" aria-label="Gateway connections">
       <.navigation_card
-        title="Equipment"
-        icon="equipment"
-        href="/equipment"
-        id="connection-equipment"
-        status={
-          if @projection.network.observed, do: equipment_status(@equipment), else: "Unavailable"
-        }
+        title="Internet"
+        icon="internet"
+        href="/network"
+        id="connection-internet"
+        status={internet_status(@projection)}
+        tone={if @projection.connections.internet.health == "online", do: "good", else: "neutral"}
       >
-        {equipment_detail(@equipment)}
+        {internet_detail(@projection, @settings)}
       </.navigation_card>
       <.navigation_card
         title="Remote access"
@@ -56,36 +43,21 @@ defmodule NervesGateWeb.DashboardLive do
         status={RemoteStatus.label(@remote)}
         tone={if @remote.available && @remote.state == "online", do: "good", else: "neutral"}
       >
-        {@remote.ipv4 || "Private access to this gateway through Tailscale"}
+        {@remote.ipv4 || "Tailscale"}
       </.navigation_card>
       <.navigation_card
-        title="Internet"
-        icon="internet"
-        href="/settings/network"
-        id="connection-internet"
-        status={internet_status(@projection)}
-        tone={if @projection.connections.internet.health == "online", do: "good", else: "neutral"}
+        title="Erlang distribution"
+        icon="network"
+        href="/distribution"
+        id="connection-distribution"
+        status={if @distribution_node == :nonode@nohost, do: "Not running", else: "Running"}
+        tone={if @distribution_node == :nonode@nohost, do: "neutral", else: "good"}
       >
-        {internet_detail(@projection, @settings)}
+        {if @distribution_node == :nonode@nohost,
+          do: "Connect an Erlang or Elixir node",
+          else: Atom.to_string(@distribution_node)}
       </.navigation_card>
     </section>
-    <details
-      id="connection-details"
-      class="ui-details"
-      phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
-    >
-      <summary>Gateway details</summary>
-      <div class="ui-stack">
-        <.live_component
-          module={NervesGateWeb.ConnectionPanel}
-          id="gateway-connections"
-          projection={@projection}
-        />
-        <p class="ui-help">
-          Firmware {@projection.system.firmware} · {@projection.system.target}. USB remains separate for setup and recovery.
-        </p>
-      </div>
-    </details>
     """
   end
 
@@ -107,13 +79,6 @@ defmodule NervesGateWeb.DashboardLive do
         do: projection.connections.suggested_internet_port,
         else: Config.role_port(settings, "internet")
 
-    if port, do: port_label(port), else: "Choose an Internet connection in Settings"
-  end
-
-  defp equipment_detail(nil), do: "Configure an equipment connection in Settings"
-
-  defp equipment_detail(port) do
-    addresses = Enum.map_join(port.addresses, ", ", & &1.address)
-    Enum.join(Enum.reject([port_label(port.name), addresses], &(&1 == "")), " · ")
+    if port, do: port_label(port), else: "Choose an Internet connection"
   end
 end

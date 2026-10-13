@@ -1,7 +1,8 @@
 # CAN and RS485 diagnostics
 
-**Settings → Buses** configures interfaces. **Equipment → CAN and RS485** runs
-explicit, bounded operations. Visiting either page sends no bus traffic. Only one
+Open **Equipment → RS485 1 / 2** or **CAN 1 / 2** for that bus's configuration and
+explicit, bounded diagnostics. RS485 1/2 map to `ttyS3`/`ttyS4`; CAN 1/2 map to
+`can0`/`can1`. Each page acts only on its selected port. Visiting sends no bus traffic. Only one
 bus operation runs at a time, independently of LAN trials, USB recovery and VPN.
 Host mode simulates everything in memory; other non-EC100 firmware targets are
 unsupported. No workstation CAN sockets or serial ports are opened in host mode.

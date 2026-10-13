@@ -294,7 +294,7 @@ defmodule NervesGate.BridgeIntegrationTest do
           "-fsS",
           "--max-time",
           "2",
-          "http://#{address}:#{port}/settings/network"
+          "http://#{address}:#{port}/network"
         ],
         stderr_to_stdout: true
       )

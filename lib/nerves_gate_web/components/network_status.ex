@@ -75,11 +75,35 @@ defmodule NervesGateWeb.NetworkStatus do
   defp uplink_label(name) when name in ["eth0", "eth1"], do: port_label(name)
   defp uplink_label(_), do: "4G modem"
 
-  def equipment_interface(%{connections: %{mode: "shared"}, network: %{observed: observed}}),
-    do: observed && observed.bridge
+  def equipment_interface(%{connections: %{mode: "shared"}, network: %{observed: observed}}) do
+    observed && observed.bridge
+  end
 
-  def equipment_interface(projection),
-    do: Enum.find(projection.connections.ports, &(&1.role == "equipment"))
+  def equipment_interface(projection) do
+    Enum.find(projection.connections.ports, &(&1.role == "equipment"))
+  end
+
+  def lan_ports(projection) do
+    settings =
+      (projection.network.pending && projection.network.pending.network) ||
+        projection.network.desired
+
+    Enum.map([{"1", "eth0"}, {"2", "eth1"}], fn {id, name} ->
+      role =
+        if settings && settings["mode"] == "shared" do
+          "shared"
+        else
+          get_in(NervesGate.Config.ports(settings), [name, "role"]) || "unassigned"
+        end
+
+      %{
+        id: id,
+        name: name,
+        role: role,
+        observed: Enum.find(projection.connections.ports, &(&1.name == name))
+      }
+    end)
+  end
 
   def equipment_status(nil), do: "Not configured"
   def equipment_status(%{present: false}), do: "Not installed"
@@ -88,8 +112,14 @@ defmodule NervesGateWeb.NetworkStatus do
 
   # Reused in settings and observed port tiles; never expose interface names
   # in everyday controls. Technical names remain available under diagnostics.
-  def port_label("eth0"), do: "Port 1"
-  def port_label("eth1"), do: "Port 2"
+  def port_label("eth0") do
+    "LAN 1"
+  end
+
+  def port_label("eth1") do
+    "LAN 2"
+  end
+
   def port_label(_), do: "Ethernet"
   defp role_label("internet"), do: "Internet"
   defp role_label("equipment"), do: "Equipment"

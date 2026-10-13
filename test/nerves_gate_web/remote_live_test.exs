@@ -71,7 +71,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
 
   test "connect, private sign-in link, approval, live connection, rename and explicit disconnect",
        ctx do
-    {:ok, view, html} = live(build_conn(), "/settings/tailscale")
+    {:ok, view, html} = live(build_conn(), "/remote")
     assert html =~ "Tailscale"
     assert has_element?(view, "#remote_hostname[value=nerves-gate]")
     refute has_element?(view, "#tailscale-login-link")
@@ -121,7 +121,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
   end
 
   test "draft name survives live updates and cannot overwrite another session", ctx do
-    {:ok, view, _} = live(build_conn(), "/settings/tailscale")
+    {:ok, view, _} = live(build_conn(), "/remote")
     view |> form("#tailscale-form", remote: %{hostname: "my-draft"}) |> render_change()
     Agent.update(ctx.adapter, &put_in(&1.snapshot.hostname, "someone-else"))
     eventually(fn -> NervesGate.status().remote_access.hostname == "someone-else" end)
@@ -132,13 +132,13 @@ defmodule NervesGateWeb.RemoteLiveTest do
 
   test "unavailable daemon is honest and cannot be configured", ctx do
     Agent.update(ctx.adapter, &put_in(&1.snapshot.available, false))
-    {:ok, view, _} = live(build_conn(), "/settings/tailscale")
+    {:ok, view, _} = live(build_conn(), "/remote")
     assert has_element?(view, "#tailscale-save[disabled]")
     assert render(view) =~ "starting or unavailable"
   end
 
   test("failed input and async failures keep the entered name", ctx) do
-    {:ok, view, _} = live(build_conn(), "/settings/tailscale")
+    {:ok, view, _} = live(build_conn(), "/remote")
     view |> form("#tailscale-form", remote: %{hostname: "invalid name"}) |> render_submit()
     assert has_element?(view, "#remote_hostname[value='invalid name']")
     assert render(view) =~ "Use 1–63"
@@ -157,7 +157,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
       &(&1 |> Map.put(:delay, 100) |> put_in([:snapshot, :auth_state], "unknown"))
     )
 
-    {:ok, view, _} = live(build_conn(), "/settings/tailscale")
+    {:ok, view, _} = live(build_conn(), "/remote")
     view |> form("#tailscale-form", remote: %{hostname: "slow-login"}) |> render_submit()
     eventually(fn -> has_element?(view, "#tailscale-login-link") end)
     Agent.update(ctx.adapter, &%{&1 | url: nil})
@@ -166,7 +166,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
   end
 
   test(
-    "remote access shows a simple sharing control without exposing unrelated route controls",
+    "remote access combines status and enrollment without sharing controls or distribution",
     ctx
   ) do
     Agent.update(ctx.adapter, fn state ->
@@ -185,21 +185,12 @@ defmodule NervesGateWeb.RemoteLiveTest do
     {:ok, view, html} = live(build_conn(), "/remote")
     assert has_element?(view, "h1", "Remote access")
     assert has_element?(view, "#gateway-remote-access", "100.64.1.2")
-    assert has_element?(view, "#equipment-remote-access", "Configure a dedicated equipment port")
-    assert has_element?(view, "#equipment-remote-access", "Other subnet routes")
-    assert has_element?(view, "a[href='/settings/tailscale']", "Manage Tailscale")
-    assert has_element?(view, "#equipment-sharing-toggle[disabled]", "Turn sharing on")
-    assert has_element?(view, "#equipment-sharing-state", "Off")
-    refute has_element?(view, "#equipment-sharing-form")
-    refute has_element?(view, "input[name='sharing[site]']")
-    refute has_element?(view, "button[phx-value-route]")
-    refute has_element?(view, "#calculated-via6")
+    assert has_element?(view, "#tailscale-form")
+    refute has_element?(view, "#equipment-sharing-toggle")
+    refute has_element?(view, "#erlang-distribution")
     refute html =~ "private-token"
-    refute html =~ "4via6"
-    refute html =~ "192.168.1.0/24"
     Agent.update(ctx.adapter, &put_in(&1.snapshot.available, false))
-    eventually(fn -> has_element?(view, "#equipment-sharing-state", "Unknown") end)
-    assert has_element?(view, "#equipment-sharing-toggle[disabled]")
+    eventually(fn -> has_element?(view, "#tailscale-save[disabled]") end)
     refute has_element?(view, "#gateway-remote-access", "100.64.1.2")
   end
 
@@ -209,7 +200,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
   ) do
     configure_equipment()
     Agent.update(ctx.adapter, &put_in(&1.snapshot.advertised_routes, ["fd00::/64"]))
-    {:ok, view, _} = live(build_conn(), "/remote")
+    {:ok, view, _} = live(build_conn(), "/equipment/lan/1")
     assert has_element?(view, "#equipment-remote-access", "192.168.50.0/24")
     assert has_element?(view, "#equipment-sharing-toggle:not([disabled])", "Turn sharing on")
     assert Remote.status().advertised_routes == ["fd00::/64"]
@@ -225,9 +216,9 @@ defmodule NervesGateWeb.RemoteLiveTest do
     assert NervesGate.status().sharing.other_routes == ["fd00::/64"]
   end
 
-  test "remote access reports distribution without starting it on the host" do
+  test "distribution detail does not start distribution on the host" do
     refute Node.alive?()
-    {:ok, view, _} = live(build_conn(), "/remote")
+    {:ok, view, _} = live(build_conn(), "/distribution")
     assert has_element?(view, "#erlang-distribution", "Erlang distribution")
     assert has_element?(view, "#distribution-disabled", "Not running")
     refute has_element?(view, "#distribution-cookie")
@@ -242,7 +233,7 @@ defmodule NervesGateWeb.RemoteLiveTest do
       %{state | sharing: %{ready: true, uncertain: ["192.168.50.0/24"]}}
     end)
 
-    {:ok, view, _} = live(build_conn(), "/remote")
+    {:ok, view, _} = live(build_conn(), "/equipment/lan/1")
     assert has_element?(view, "#equipment-sharing-state", "Unknown")
     assert has_element?(view, "#equipment-sharing-toggle:not([disabled])", "Turn sharing off")
     view |> element("#equipment-sharing-toggle") |> render_click()

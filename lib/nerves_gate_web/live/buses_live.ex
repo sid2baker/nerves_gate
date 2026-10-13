@@ -1,52 +1,87 @@
 defmodule NervesGateWeb.BusesLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  import NervesGateWeb.Layouts, only: [settings_nav: 1]
 
   on_mount({NervesGateWeb.Observations, :status})
 
-  def mount(_, _, socket) do
-    forms =
-      Map.new(socket.assigns.projection.buses.ports, fn port ->
-        {port.name,
-         config_form(%{
-           "port" => port.name,
-           "enabled" => to_string(port.enabled),
-           "bitrate" => to_string(Map.get(port, :bitrate) || 125_000)
-         })}
-      end)
+  def handle_params(%{"id" => id}, _, socket) do
+    ports = %{rs485: %{"1" => "ttyS3", "2" => "ttyS4"}, can: %{"1" => "can0", "2" => "can1"}}
 
-    {:ok,
-     assign(socket,
-       forms: forms,
-       modbus:
-         modbus_form(%{
-           "port" => "ttyS3",
-           "unit" => "1",
-           "function" => "3",
-           "address" => "0",
-           "count" => "1",
-           "authorized" => "false"
-         })
-     )}
+    case get_in(ports, [socket.assigns.live_action, id]) do
+      nil ->
+        {:noreply, push_navigate(socket, to: "/equipment")}
+
+      name ->
+        port = Enum.find(socket.assigns.projection.buses.ports, &(&1.name == name))
+
+        params = %{
+          "port" => name,
+          "enabled" => to_string((port && port.enabled) || false),
+          "bitrate" => to_string((port && Map.get(port, :bitrate)) || 125_000)
+        }
+
+        {:noreply,
+         assign(socket,
+           port_name: name,
+           title:
+             "#{if socket.assigns.live_action == :can do
+               "CAN"
+             else
+               "RS485"
+             end} #{id}",
+           forms: %{name => config_form(params)},
+           modbus:
+             modbus_form(%{
+               "port" => name,
+               "unit" => "1",
+               "function" => "3",
+               "address" => "0",
+               "count" => "1",
+               "authorized" => "false"
+             })
+         )}
+    end
   end
 
-  def handle_event("change-config", %{"bus" => params}, socket) do
-    {:noreply, update(socket, :forms, &Map.put(&1, params["port"], config_form(params)))}
+  def handle_event(
+        "change-config",
+        %{"bus" => %{"port" => port} = params},
+        %{assigns: %{port_name: port}} = socket
+      ) do
+    {:noreply, assign(socket, :forms, %{port => config_form(params)})}
   end
 
-  def handle_event("configure", %{"bus" => params}, socket),
-    do: reply(socket, NervesGate.bus_configure(params["port"], params))
+  def handle_event(
+        "configure",
+        %{"bus" => %{"port" => port} = params},
+        %{assigns: %{port_name: port}} = socket
+      ) do
+    reply(socket, NervesGate.bus_configure(port, params))
+  end
 
-  def handle_event("capture", %{"port" => port}, socket),
-    do: reply(socket, NervesGate.bus_capture(port))
+  def handle_event("capture", %{"port" => port}, %{assigns: %{port_name: port}} = socket) do
+    reply(socket, NervesGate.bus_capture(port))
+  end
 
-  def handle_event("change-modbus", %{"modbus" => params}, socket),
-    do: {:noreply, assign(socket, :modbus, modbus_form(params))}
+  def handle_event(
+        "change-modbus",
+        %{"modbus" => %{"port" => port} = params},
+        %{assigns: %{port_name: port, live_action: :rs485}} = socket
+      ) do
+    {:noreply, assign(socket, :modbus, modbus_form(params))}
+  end
 
-  def handle_event("modbus-read", %{"modbus" => params}, socket) do
+  def handle_event(
+        "modbus-read",
+        %{"modbus" => %{"port" => port} = params},
+        %{assigns: %{port_name: port, live_action: :rs485}} = socket
+      ) do
     socket = assign(socket, :modbus, modbus_form(Map.put(params, "authorized", "false")))
-    reply(socket, NervesGate.modbus_read(params["port"], params))
+    reply(socket, NervesGate.modbus_read(port, params))
+  end
+
+  def handle_event(_, _, socket) do
+    reply(socket, {:error, %{message: "This request does not match the selected port."}})
   end
 
   defp reply(socket, result) do
@@ -79,17 +114,13 @@ defmodule NervesGateWeb.BusesLive do
     assigns =
       assign(assigns,
         buses: assigns.projection.buses,
-        settings: assigns.live_action == :bus_settings,
+        ports: Enum.filter(assigns.projection.buses.ports, &(&1.name == assigns.port_name)),
         forms: forms
       )
 
     ~H"""
-    <.page_header
-      title={if @settings, do: "Bus settings", else: "CAN and RS485"}
-      description="Explicit, bounded diagnostics. No automatic discovery or remote protocol bridge."
-    />
-    <.settings_nav :if={@settings} current={:buses} />
-    <.link :if={!@settings} navigate="/equipment" class="ui-text-link">Back to Equipment</.link>
+    <.link navigate="/equipment" class="ui-text-link">Back to Equipment</.link>
+    <.page_header title={@title} description={@port_name} />
     <.notice :if={@buses.simulated}>
       Preview mode · simulated buses. Workstation hardware is never opened.
     </.notice>
@@ -107,15 +138,20 @@ defmodule NervesGateWeb.BusesLive do
       Working: {@buses.operation.kind} on {@buses.operation.port}. Other bus operations are unavailable until it finishes.
     </.notice>
     <.notice tone="warning">
-      Verify connectors, wiring and termination before enabling an interface. Only use equipment you are authorized to inspect.
-      CAN connector mapping and physical traffic still need on-device qualification. No CAN transmission or CAN FD is supported.
+      Verify connectors, wiring and termination before enabling this interface. Only use equipment you are authorized to inspect.
     </.notice>
-    <p :if={@settings} class="ui-help">
-      CAN configuration changes the live kernel interface in listen-only mode, without persistent boot settings or automatic retry.
-      A failed change may leave CAN down. RS485 enable is permission for this app to open the port, not proof of a connected device;
-      it resets on service restart. Only the qualified 9600 8N1 automatic-direction profile is offered. No DE/RTS GPIO is guessed.
+    <p :if={@live_action == :can} class="ui-help">
+      CAN connector mapping and physical traffic still need on-device qualification. No CAN transmission or CAN FD is supported.
+      Configuration changes the live kernel interface in listen-only mode, without persistent boot settings or automatic retry. A failed change may leave CAN down.
     </p>
-    <.panel :for={port <- @buses.ports} title={port.name} icon="port" id={"port-#{port.name}"}>
+    <p :if={@live_action == :rs485} class="ui-help">
+      RS485 enable is permission for this app to open the port, not proof of a connected device; it resets on service restart.
+      Only the qualified 9600 8N1 automatic-direction profile is offered. No DE/RTS GPIO is guessed.
+    </p>
+    <.notice :if={@buses.available && @ports == []} tone="warning">
+      This port is not detected.
+    </.notice>
+    <.panel :for={port <- @ports} title="Interface" icon="port" id={"port-#{port.name}"}>
       <:meta>
         <.status>
           {cond do
@@ -127,14 +163,14 @@ defmodule NervesGateWeb.BusesLive do
       </:meta>
       <.port_details port={port} />
       <.form
-        :if={@settings}
         for={@forms[port.name]}
         id={"configure-#{port.name}"}
+        class="ui-stack"
         phx-change="change-config"
         phx-submit="configure"
       >
         <input type="hidden" name="bus[port]" value={port.name} />
-        <.choice_group field={@forms[port.name][:enabled]} label={"#{port.name} enabled"}>
+        <.choice_group field={@forms[port.name][:enabled]} label="Interface state">
           <:option value="false" title="Disabled" />
           <:option value="true" title="Enabled" />
         </.choice_group>
@@ -145,10 +181,9 @@ defmodule NervesGateWeb.BusesLive do
           help="10000, 20000, 50000, 100000, 125000, 250000, 500000 or 1000000. Listen-only is always used."
           inputmode="numeric"
         />
-        <.button type="submit" disabled={!port.present || @buses.operation != nil}>Apply {port.name}</.button>
+        <.button type="submit" disabled={!port.present || @buses.operation != nil}>Apply changes</.button>
       </.form>
       <.button
-        :if={!@settings}
         id={"capture-#{port.name}"}
         phx-click="capture"
         phx-value-port={port.name}
@@ -157,23 +192,17 @@ defmodule NervesGateWeb.BusesLive do
             (port.transport == "can" && port.listen_only != true)
         }
       >
-        Capture {port.name}
+        Capture once
       </.button>
-      <p :if={!@settings} class="ui-help">
+      <p class="ui-help">
         Receive only, at most five seconds and {if port.transport == "can",
           do: "200 classic CAN frames",
           else: "4096 raw bytes at 9600 8N1"}.
         Empty results do not prove that equipment is absent or healthy. Visiting this page never starts a capture.
       </p>
     </.panel>
-    <.link
-      navigate={if @settings, do: "/equipment/buses", else: "/settings/buses"}
-      class="ui-text-link"
-    >
-      {if @settings, do: "Open bus workspace", else: "Configure interfaces in Settings"}
-    </.link>
     <.panel
-      :if={!@settings && @buses.available}
+      :if={@live_action == :rs485 && @buses.available && @ports != []}
       title="Modbus RTU read"
       icon="equipment"
       id="modbus-read"
@@ -182,20 +211,15 @@ defmodule NervesGateWeb.BusesLive do
         This sends one request. Another master must not be using the bus. A brief quiet-bus check cannot guarantee exclusive access.
         Read functions can have device-specific side effects; consult its register map. No broadcasts, writes, unit scans or retries.
       </.notice>
-      <.form for={@modbus} id="modbus-form" phx-change="change-modbus" phx-submit="modbus-read">
+      <.form
+        for={@modbus}
+        id="modbus-form"
+        class="ui-stack"
+        phx-change="change-modbus"
+        phx-submit="modbus-read"
+      >
         <div class="ui-field-grid">
-          <div class="ui-field">
-            <label for="modbus-port">RS485 port</label>
-            <select id="modbus-port" name="modbus[port]">
-              <option
-                :for={name <- ["ttyS3", "ttyS4"]}
-                value={name}
-                selected={@modbus[:port].value == name}
-              >
-                {name}
-              </option>
-            </select>
-          </div>
+          <input type="hidden" name="modbus[port]" value={@port_name} />
           <div class="ui-field">
             <label for="modbus-function">Register function</label>
             <select id="modbus-function" name="modbus[function]">
@@ -237,7 +261,7 @@ defmodule NervesGateWeb.BusesLive do
         </.button>
       </.form>
     </.panel>
-    <.bus_result :if={@buses.result} result={@buses.result} />
+    <.bus_result :if={@buses.result && @buses.result.port == @port_name} result={@buses.result} />
     """
   end
 

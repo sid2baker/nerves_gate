@@ -75,7 +75,7 @@ There is no automatic retry, and only one recovery attempt is accepted per
 Indicators instance. The host adapter additionally records only one attempt per
 simulator lifetime. The EC100 adapter latches its attempt for the VM lifetime
 and uses `Nerves.Runtime.reboot/0`. A timeout is an unknown outcome, not proof that
-an independent OS shutdown stopped. Failure appears in Settings, status and USER2.
+an independent OS shutdown stopped. Failure appears in Device, status and USER2.
 
 **EC100 factory reset deletes everything in `/root` (`/data`)**, including
 software credentials, Tailscale identity, network settings and persistent shell
@@ -98,7 +98,7 @@ Runtime starts before data users with a fatal-on-error boot mode, so failed form
 or mount cannot silently start services. No custom formatter or reset journal.
 
 Failure leaves services stopped; no cleanup, remount, graceful shutdown or retry
-is requested after invalidation. USER2 reports failure; Settings remains readable
+is requested after invalidation. USER2 reports failure; Device remains readable
 only if connectivity survives writer shutdown. A timeout is an unknown outcome.
 Host simulation records reset followed by reboot only on success.
 

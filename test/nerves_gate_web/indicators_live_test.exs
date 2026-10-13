@@ -25,8 +25,8 @@ defmodule NervesGateWeb.IndicatorsLiveTest do
   end
 
   test "settings explains fixed gestures and observes identify completion in two browsers", ctx do
-    {:ok, view, html} = live(build_conn(), "/settings")
-    {:ok, other, _} = live(build_conn(), "/settings")
+    {:ok, view, html} = live(build_conn(), "/device")
+    {:ok, other, _} = live(build_conn(), "/device")
     assert html =~ "simulated button, LEDs and recovery"
     assert html =~ "USER1"
     assert html =~ "USER2"
@@ -45,7 +45,7 @@ defmodule NervesGateWeb.IndicatorsLiveTest do
 
   test "obsolete/forged recovery events have no effects; absent indicators do not crash settings",
        ctx do
-    {:ok, view, _} = live(build_conn(), "/settings")
+    {:ok, view, _} = live(build_conn(), "/device")
     render_click(view, "button-mode", %{"mode" => "reset"})
     render_click(view, "factory-reset", %{})
     assert Host.snapshot(ctx.host).recoveries == []
@@ -62,7 +62,7 @@ defmodule NervesGateWeb.IndicatorsLiveTest do
       ctx.host
     )
 
-    {:ok, view, _} = live(build_conn(), "/settings")
+    {:ok, view, _} = live(build_conn(), "/device")
 
     :sys.replace_state(Indicators, fn state ->
       %{
