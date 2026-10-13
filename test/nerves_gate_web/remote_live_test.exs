@@ -225,6 +225,16 @@ defmodule NervesGateWeb.RemoteLiveTest do
     assert NervesGate.status().sharing.other_routes == ["fd00::/64"]
   end
 
+  test "remote access reports distribution without starting it on the host" do
+    refute Node.alive?()
+    {:ok, view, _} = live(build_conn(), "/remote")
+    assert has_element?(view, "#erlang-distribution", "Erlang distribution")
+    assert has_element?(view, "#distribution-disabled", "Not running")
+    refute has_element?(view, "#distribution-cookie")
+    refute Map.has_key?(NervesGate.status(), :distribution_cookie)
+    refute Node.alive?()
+  end
+
   test "unknown sharing is not shown as off and can be explicitly withdrawn" do
     configure_equipment()
 

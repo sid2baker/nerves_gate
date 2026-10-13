@@ -261,6 +261,47 @@ Tailscale.update_configuration(%{advertise_routes: List.delete(routes, "old-rout
 
 Do not reset all daemon preferences or delete routes belonging to other services.
 
+## Erlang distribution and Livebook
+
+Firmware starts standard OTP distribution when the existing Tailscale observations
+report an online IPv4 address. The node is named `nerves_gate@<Tailscale-IPv4>`, for
+example `nerves_gate@100.88.166.70`. Neither the tailnet nor node name needs to be
+known at build time; MagicDNS is not required. Before enrollment/connection, distribution
+waits without blocking startup, HTTP or recovery. Normal host preview/tests never
+start distribution.
+
+The existing Remote status updates call `Node.start/2` once the address is known.
+OTP owns the distribution processes and EPMD; there is no extra watcher, manager or
+clustering dependency. Temporary VPN outages leave the node running. Re-enrolling
+with a different IPv4 address restarts distribution under the new name, disconnecting
+attached clients; read the page again and reconnect. A Tailscale hostname rename
+does not affect the node name.
+
+Firmware listens on TCP **4369** (EPMD) and **9100** (distribution), on all IPv4 interfaces. Restrict both ports in your tailnet/network policy. There are no new
+INPUT rules. Native distribution is unencrypted; Tailscale supplies encryption on
+the VPN path. Do not expose these ports or the unauthenticated UI to the Internet.
+
+**Remote access → Erlang distribution** shows the running node name and cookie.
+The existing trusted-network model applies: anyone who can read the page and reach
+these ports can execute arbitrary code on the gateway. The cookie authenticates
+VM access, even when used operationally as a shared group value. It is not included
+in the general `NervesGate.status()` projection or observation broadcasts.
+
+OTP creates/reuses `$HOME/.erlang.cookie` (normally `/root/.erlang.cookie`, on the
+persistent data partition). It survives reboot and in-place firmware updates; factory
+reset erases it. No cookie is baked into firmware. To give several nodes the same
+cookie, provision that standard file with identical contents and owner-only permissions,
+then reboot. Changing a running node's cookie with `Node.set_cookie/1` alone does not
+persist it or disconnect existing peers. Matching cookies do not discover nodes;
+connect explicitly with `Node.connect(:"nerves_gate@100.64.0.2")`.
+
+Run Livebook on your computer/server, not on the gateway. Choose **Attached node**
+and copy the node name and cookie from the page. Livebook must use the same Elixir
+minor version shown there and a compatible OTP version (currently Elixir 1.20 / OTP 29).
+An attached runtime cannot install dependencies: add S7, EtherCAT or other libraries
+to firmware when needed. Permanent equipment sessions belong under the gateway's
+supervision tree, not the notebook evaluator. SSH/serial IEx remains the recovery path.
+
 ## Observations
 
 LiveViews subscribe to existing VintageNet/Tailscale properties and application

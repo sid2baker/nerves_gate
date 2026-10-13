@@ -1,7 +1,7 @@
 defmodule NervesGateWeb.RemoteLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  alias NervesGateWeb.RemoteStatus
+  alias NervesGateWeb.{DistributionPanel, RemoteStatus}
 
   on_mount({NervesGateWeb.Observations, :status})
 
@@ -36,7 +36,9 @@ defmodule NervesGateWeb.RemoteLive do
       assign(assigns,
         remote: assigns.projection.remote_access,
         sharing: sharing,
-        action: assigns.projection.actions[action]
+        action: assigns.projection.actions[action],
+        distribution_node: Node.self(),
+        distribution_cookie: Node.get_cookie()
       )
 
     ~H"""
@@ -98,6 +100,12 @@ defmodule NervesGateWeb.RemoteLive do
       </.notice>
       <.link navigate="/equipment" class="ui-text-link">View local equipment</.link>
     </.panel>
+    <DistributionPanel.connection
+      node={@distribution_node}
+      cookie={@distribution_cookie}
+      elixir={System.version()}
+      otp={System.otp_release()}
+    />
     <p class="ui-help">
       <a
         href="https://login.tailscale.com/admin/machines"

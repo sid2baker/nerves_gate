@@ -85,6 +85,19 @@ defmodule NervesGate.FirmwareBuildTest do
     end
   end
 
+  test "distribution has no build-time identity and uses OTP's persistent cookie" do
+    args = Path.expand("../../rel/vm.args.eex", __DIR__) |> EEx.eval_file()
+    lines = String.split(args, "\n")
+    assert "-kernel inet_dist_listen_min 9100 inet_dist_listen_max 9100" in lines
+    refute "-nocookie" in lines
+    refute args =~ "-name "
+    refute args =~ "-sname "
+    refute args =~ "-setcookie"
+    refute args =~ "NERVES_GATE_NODE"
+    assert "-kernel shell_history enabled" in lines
+    assert "-heart -env HEART_BEAT_TIMEOUT 30" in lines
+  end
+
   test "firmware enables the startup guard required by the Heart init timeout" do
     vm_args = Path.expand("../../rel/vm.args.eex", __DIR__) |> File.read!() |> String.split("\n")
     assert "-env HEART_INIT_TIMEOUT 600" in vm_args

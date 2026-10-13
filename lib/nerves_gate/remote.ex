@@ -227,6 +227,7 @@ defmodule NervesGate.Remote do
 
   defp publish(state) do
     observed = snapshot(state)
+    NervesGate.Distribution.ensure_started(observed)
 
     enabled =
       cond do

@@ -9,7 +9,7 @@ Open `http://<gateway-address>:4000` through LAN, USB or Tailscale.
 
 - **Overview** — equipment, remote access and Internet status at a glance.
 - **Equipment** — neighbor observations, bounded ARP scan, device labels, and CAN/RS485 diagnostics.
-- **Remote access** — gateway addresses and one on/off control for equipment subnet sharing.
+- **Remote access** — gateway addresses, equipment subnet sharing, and Erlang node/cookie details.
 - **Settings** — Ethernet or 4G Internet, optional 4G backup, Tailscale, CAN/RS485, and safe button/LED controls.
 
 A new gateway tries DHCP on both Ethernet ports independently. It suggests the
@@ -163,6 +163,12 @@ export MIX_ENV=prod        # omit development tooling from firmware
 mix deps.get
 mix firmware --overwrite
 ```
+
+Erlang distribution starts automatically once Tailscale is online, named
+`nerves_gate@<assigned-Tailscale-IPv4>`. No build-time node name or tailnet is needed.
+**Remote access → Erlang distribution** shows the node name and persistent OTP cookie.
+Anyone who can read that page and reach distribution has full VM access.
+Use trusted networks or Tailscale. See [connecting Livebook](docs/networking.md#erlang-distribution-and-livebook).
 
 All targets share `mix.lock`. EC100 uses the local system checkout at
 `/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100`, retaining its bootloader,
