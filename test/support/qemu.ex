@@ -1,41 +1,31 @@
 defmodule NervesGate.TestQemu do
   @moduledoc "Test-only controls for an owned QEMU, never a physical device."
   import ExUnit.Assertions
-  import ExUnit.Callbacks
 
   @guest :"nerves_gate@192.168.77.2"
+  # VintageNet's default TCP reachability targets, hosted ONLY in the test namespace.
+  @probe_ips ~w(1.1.1.1 8.8.8.8 208.67.222.222 9.9.9.9 156.154.70.5)
 
-  def start do
-    if File.read_link!("/proc/self/ns/net") == System.fetch_env!("NERVES_GATE_HOST_NETNS"),
-      do: raise("Refusing to fault networking in the workstation namespace")
-
+  def start(options \\ []) do
+    isolated!()
+    {:ok, _} = Supervisor.start_link([], strategy: :one_for_one, name: __MODULE__.Supervisor)
     dir = Path.join("_build/qemu-tests", "#{System.system_time(:millisecond)}-#{System.pid()}")
     File.mkdir_p!(dir)
-    File.chmod!(dir, 0o700)
+    File.chmod!(dir, 448)
     IO.puts("QEMU diagnostics: #{dir}")
     image = Path.join(dir, "gateway.img")
     on_exit(fn -> File.rm(image) end)
+    command!("ip", ~w"link set lo up")
+    command!("ip", ~w"tuntap add dev ng-test mode tap")
+    on_exit(fn -> command!("ip", ~w"link delete ng-test") end)
+    command!("ip", ~w"addr add 192.168.77.1/24 dev ng-test")
+    command!("ip", ~w"link set ng-test up")
 
-    command!("ip", ~w(link set lo up))
-    command!("ip", ~w(tuntap add dev ng-test mode tap))
-    on_exit(fn -> command!("ip", ~w(link delete ng-test)) end)
-    command!("ip", ~w(addr add 192.168.77.1/24 dev ng-test))
-    command!("ip", ~w(link set ng-test up))
-
-    command!("fwup", [
-      "-q",
-      "-a",
-      "-i",
-      "_build/x86_64_dev/nerves/images/nerves_gate.fw",
-      "-d",
-      image,
-      "-t",
-      "complete"
-    ])
+    create_image(image)
 
     daemon!(:epmd, "epmd", [], dir)
 
-    poll(dir, "epmd", deadline(5_000), fn ->
+    poll(dir, "epmd", deadline(5000), fn ->
       case :gen_tcp.connect({127, 0, 0, 1}, 4369, [:binary, active: false], 500) do
         {:ok, socket} ->
           :gen_tcp.close(socket)
@@ -49,50 +39,66 @@ defmodule NervesGate.TestQemu do
     {:ok, _} = Node.start(:"gateway_test@192.168.77.1", name_domain: :longnames)
     Node.set_cookie(:mycookie)
     on_exit(fn -> Node.stop() end)
+    boot_vm(dir, image, options)
+  end
 
+  defp boot_vm(dir, image, options \\ []) do
     socket_path = Path.join(dir, "qmp.sock")
+    File.rm(socket_path)
+    boot = System.unique_integer([:positive])
+    stall = if options[:receive_stall], do: "on", else: "off"
 
-    daemon!(
-      :qemu,
-      "qemu-system-x86_64",
-      [
-        "-m",
-        "1024",
-        "-display",
-        "none",
-        "-monitor",
-        "none",
-        "-serial",
-        "file:#{dir}/console.log",
-        "-qmp",
-        "unix:#{socket_path},server=on,wait=off",
-        "-drive",
-        "file=#{image},format=raw,if=virtio",
-        "-netdev",
-        "user,id=wan",
-        "-device",
-        "virtio-net-pci,netdev=wan,id=wan-nic",
-        "-netdev",
-        "user,id=equipment,net=10.0.3.0/24",
-        "-device",
-        "virtio-net-pci,netdev=equipment",
-        "-netdev",
-        "tap,id=management,ifname=ng-test,script=no,downscript=no",
-        "-device",
-        "virtio-net-pci,netdev=management"
-      ],
-      dir
-    )
+    daemon =
+      daemon!(
+        :qemu,
+        "qemu-system-x86_64",
+        [
+          "-m",
+          "1024",
+          "-display",
+          "none",
+          "-monitor",
+          "none",
+          "-serial",
+          "file:#{dir}/console-#{boot}.log",
+          "-pidfile",
+          "#{dir}/qemu.pid",
+          "-qmp",
+          "unix:#{socket_path},server=on,wait=off",
+          "-blockdev",
+          "driver=file,node-name=storage,filename=#{image}",
+          "-blockdev",
+          "driver=raw,node-name=disk,file=storage",
+          "-device",
+          "virtio-blk-pci,drive=disk,werror=report,rerror=report",
+          "-netdev",
+          "user,id=wan",
+          "-device",
+          "virtio-net-pci,netdev=wan,id=wan-nic,mac=52:54:00:12:34:56",
+          "-netdev",
+          "user,id=equipment,net=10.0.3.0/24",
+          "-device",
+          "virtio-net-pci,netdev=equipment,id=equipment-nic",
+          "-netdev",
+          "tap,id=management,ifname=ng-test,script=no,downscript=no",
+          "-device",
+          "virtio-net-pci,netdev=management",
+          "-object",
+          "filter-buffer,id=wan-stall,netdev=wan,queue=tx,interval=3600000000,status=#{stall}"
+        ],
+        dir
+      )
 
     poll(dir, "QMP socket", deadline(10_000), fn -> File.exists?(socket_path) end)
 
     {:ok, socket} =
       :gen_tcp.connect({:local, socket_path}, 0, [:binary, packet: :line, active: false], 2_000)
 
-    on_exit(fn -> :gen_tcp.close(socket) end)
     {:ok, greeting} = :gen_tcp.recv(socket, 0, 2_000)
     assert Map.has_key?(Jason.decode!(greeting), "QMP")
-    vm = %{dir: dir, socket: socket}
+    pid = dir |> Path.join("qemu.pid") |> File.read!() |> String.trim() |> String.to_integer()
+    vm = %{dir: dir, socket: socket, daemon: daemon, pid: pid}
+    Process.put(:qemu_vm, vm)
     qmp!(vm, "qmp_capabilities", %{})
     status = await(vm, "boot", & &1, 100_000)
     assert status.system.target == "x86_64"
@@ -100,26 +106,280 @@ defmodule NervesGate.TestQemu do
     vm
   end
 
-  def disconnect_wan(vm), do: qmp!(vm, "set_link", %{name: "wan-nic", up: false})
-  def reconnect_wan(vm), do: qmp!(vm, "set_link", %{name: "wan-nic", up: true})
+  # QEMU TX is backend-to-guest traffic; turning the filter off flushes its buffer.
+  def release_wan_receive(vm) do
+    assert "tx" == qmp!(vm, "qom-get", %{path: "/objects/wan-stall", property: "queue"})
+    assert "on" == qmp!(vm, "qom-get", %{path: "/objects/wan-stall", property: "status"})
+    qmp!(vm, "qom-set", %{path: "/objects/wan-stall", property: "status", value: "off"})
+  end
+
+  def start_upstream(vm) do
+    for ip <- @probe_ips do
+      command!("ip", ["addr", "add", "#{ip}/32", "dev", "lo"])
+      on_exit(fn -> command!("ip", ["addr", "del", "#{ip}/32", "dev", "lo"]) end)
+    end
+
+    command!("nft", ["add", "table", "inet", "ng_faults"])
+    on_exit(fn -> command!("nft", ~w"delete table inet ng_faults") end)
+
+    command!("nft", [
+      "add",
+      "chain",
+      "inet",
+      "ng_faults",
+      "outage",
+      "{ type filter hook output priority 0; policy accept; }"
+    ])
+
+    daemon!(
+      :upstream,
+      "socat",
+      ["-d", "-d", "TCP-LISTEN:53,reuseaddr,fork", "EXEC:/bin/true"],
+      vm.dir
+    )
+
+    log(vm.dir, "faults.log", :upstream_started)
+  end
+
+  def delay_internet(vm) do
+    command!(
+      "tc",
+      ~w"qdisc add dev lo root handle 1: prio bands 3 priomap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+    )
+
+    on_exit(:netem, fn -> command!("tc", ~w"qdisc del dev lo root") end)
+    command!("tc", ~w"qdisc add dev lo parent 1:3 handle 30: netem delay 200ms")
+
+    for ip <- @probe_ips do
+      command!("tc", [
+        "filter",
+        "add",
+        "dev",
+        "lo",
+        "protocol",
+        "ip",
+        "parent",
+        "1:",
+        "prio",
+        "1",
+        "u32",
+        "match",
+        "ip",
+        "dst",
+        "#{ip}/32",
+        "match",
+        "ip",
+        "dport",
+        "53",
+        "0xffff",
+        "flowid",
+        "1:3"
+      ])
+    end
+
+    log(vm.dir, "faults.log", :internet_delayed_200ms)
+  end
+
+  def clear_delay(vm) do
+    isolated!()
+    {stats, 0} = System.cmd("tc", ~w"-s qdisc show dev lo")
+    log(vm.dir, "faults.log", stats)
+    command!("tc", ~w"qdisc del dev lo root")
+    on_exit(:netem, fn -> :ok end)
+  end
+
+  def probe_count(vm) do
+    case File.read(Path.join(vm.dir, "upstream.log")) do
+      {:ok, text} -> length(Regex.scan(~r"accepting connection from", text))
+      {:error, :enoent} -> 0
+    end
+  end
+
+  def drop_internet(vm) do
+    command!("nft", [
+      "add",
+      "rule",
+      "inet",
+      "ng_faults",
+      "outage",
+      "ip",
+      "daddr",
+      "{ #{Enum.join(@probe_ips, ", ")} }",
+      "tcp",
+      "dport",
+      "53",
+      "counter",
+      "drop"
+    ])
+
+    log(vm.dir, "faults.log", :internet_dropped)
+  end
+
+  def lose_internet_packets(vm) do
+    command!("nft", [
+      "add",
+      "rule",
+      "inet",
+      "ng_faults",
+      "outage",
+      "ip",
+      "daddr",
+      "{ #{Enum.join(@probe_ips, ", ")} }",
+      "tcp",
+      "dport",
+      "53",
+      "numgen",
+      "inc",
+      "mod",
+      "2",
+      "==",
+      "0",
+      "counter",
+      "drop"
+    ])
+
+    log(vm.dir, "faults.log", :every_other_probe_packet_dropped)
+  end
+
+  def dropped_packets(vm) do
+    %{"nftables" => entries} = Jason.decode!(command!("nft", ~w"-j list table inet ng_faults"))
+
+    total =
+      for %{"rule" => %{"expr" => expressions}} <- entries,
+          %{"counter" => %{"packets" => packets}} <- expressions,
+          reduce: 0 do
+        total -> total + packets
+      end
+
+    log(vm.dir, "faults.log", {:dropped_packets, total})
+    total
+  end
+
+  def restore_internet(vm) do
+    isolated!()
+    {rules, 0} = System.cmd("nft", ~w"list table inet ng_faults")
+    log(vm.dir, "faults.log", rules)
+    command!("nft", ~w"flush chain inet ng_faults outage")
+    log(vm.dir, "faults.log", :internet_restored)
+  end
+
+  def disconnect_wan(vm) do
+    qmp!(vm, "set_link", %{name: "wan-nic", up: false})
+  end
+
+  def reconnect_wan(vm) do
+    qmp!(vm, "set_link", %{name: "wan-nic", up: true})
+  end
+
+  def disconnect_equipment(vm) do
+    qmp!(vm, "set_link", %{name: "equipment-nic", up: false})
+  end
+
+  def reconnect_equipment(vm) do
+    qmp!(vm, "set_link", %{name: "equipment-nic", up: true})
+  end
+
+  def unplug_wan(vm) do
+    qmp!(vm, "device_del", %{id: "wan-nic"})
+  end
+
+  def plug_wan(vm) do
+    devices = qmp!(vm, "qom-list", %{path: "/machine/peripheral"})
+
+    unless Enum.any?(devices, &(&1["name"] == "wan-nic")) do
+      qmp!(vm, "device_add", %{
+        driver: "virtio-net-pci",
+        netdev: "wan",
+        id: "wan-nic",
+        mac: "52:54:00:12:34:56"
+      })
+    end
+  end
+
+  def fail_disk_writes(vm) do
+    qmp!(vm, "blockdev-add", %{
+      driver: "blkdebug",
+      "node-name": "write-fault",
+      image: "storage",
+      "inject-error": [
+        %{event: "write_aio", iotype: "write", errno: 5, immediately: true, once: false}
+      ]
+    })
+
+    qmp!(vm, "blockdev-reopen", %{
+      options: [%{"node-name": "disk", driver: "raw", file: "write-fault"}]
+    })
+
+    log(vm.dir, "faults.log", :disk_write_eio_enabled)
+  end
+
+  def restore_disk_writes(vm) do
+    isolated!()
+    log(vm.dir, "faults.log", qmp!(vm, "query-blockstats", %{}))
+
+    qmp!(vm, "blockdev-reopen", %{
+      options: [%{"node-name": "disk", driver: "raw", file: "storage"}]
+    })
+
+    qmp!(vm, "blockdev-del", %{"node-name": "write-fault"})
+    log(vm.dir, "faults.log", :disk_write_eio_removed)
+  end
+
+  def failed_disk_writes(vm) do
+    Enum.sum(
+      Enum.reject(
+        Enum.map(
+          qmp!(vm, "query-blockstats", %{}),
+          &get_in(&1, ["stats", "failed_wr_operations"])
+        ),
+        &is_nil/1
+      )
+    )
+  end
+
+  def pause(vm) do
+    qmp!(vm, "stop", %{})
+  end
+
+  def resume(vm) do
+    qmp!(vm, "cont", %{})
+  end
 
   # A hard reset, using the same disk. Management and QMP are never faulted.
   def reboot(vm) do
     qmp!(vm, "system_reset", %{})
-    # A hard reset cannot close the old TCP session cleanly. Reconnect explicitly
-    # rather than waiting for OTP's distribution heartbeat to expire.
+    # Drop the stale TCP session rather than waiting for OTP's heartbeat timeout.
     Node.disconnect(@guest)
     await(vm, "boot after reset", & &1, 100_000)
   end
 
+  def power_cycle(vm) do
+    isolated!()
+    ref = Process.monitor(vm.daemon)
+    command!("kill", ["-KILL", to_string(vm.pid)])
+    assert_receive {:DOWN, ^ref, :process, _, _}, 5000
+    stop_supervised(:qemu)
+    :gen_tcp.close(vm.socket)
+    Node.disconnect(@guest)
+    assert status(vm) == nil
+    log(vm.dir, "faults.log", :qemu_process_killed)
+    boot_vm(vm.dir, Path.join(vm.dir, "gateway.img"))
+  end
+
   def call(vm, function, args) do
+    isolated!()
     result = :erpc.call(@guest, NervesGate, function, args, 15_000)
     log(vm.dir, "api.log", {function, result})
-    if match?({:error, _}, result), do: capture_logs(vm)
+
+    if match?({:error, _}, result) do
+      capture_logs(vm)
+    end
+
     result
   end
 
   def status(vm) do
+    isolated!()
     status = :erpc.call(@guest, NervesGate, :status, [], 2_000)
     log(vm.dir, "snapshots.log", status)
     status
@@ -130,9 +390,14 @@ defmodule NervesGate.TestQemu do
   end
 
   def await(vm, phase, predicate, timeout \\ 30_000) do
+    if report = Process.get(:qemu_report), do: report.(phase)
+
     poll(vm.dir, phase, deadline(timeout), fn ->
       status = status(vm)
-      if status && predicate.(status), do: status
+
+      if status && predicate.(status) do
+        status
+      end
     end)
   end
 
@@ -154,12 +419,77 @@ defmodule NervesGate.TestQemu do
         restart: :temporary
       )
 
-    start_supervised!(spec)
+    {:ok, pid} = Supervisor.start_child(__MODULE__.Supervisor, spec)
+    if id == :upstream, do: on_exit(fn -> stop_supervised(id) end)
+    pid
+  end
+
+  def current, do: Process.get(:qemu_vm)
+  def adopt(vm), do: Process.put(:qemu_vm, vm)
+
+  def fresh(vm, options \\ []) do
+    isolated!()
+    stop_supervised(:qemu)
+    :gen_tcp.close(vm.socket)
+    Node.disconnect(@guest)
+    image = Path.join(vm.dir, "gateway.img")
+    File.rm!(image)
+    create_image(image)
+    boot_vm(vm.dir, image, options)
+  end
+
+  def cleanup do
+    callbacks = Process.delete(:qemu_cleanup) || []
+
+    errors =
+      for {_, callback} <- callbacks, reduce: [] do
+        errors ->
+          try do
+            callback.()
+            errors
+          rescue
+            error -> [error | errors]
+          end
+      end
+
+    if errors != [], do: raise("Fault cleanup failed: #{inspect(errors)}; restart mix dev.qemu")
+  end
+
+  defp on_exit(callback), do: on_exit(make_ref(), callback)
+
+  defp on_exit(id, callback) do
+    callbacks = Process.get(:qemu_cleanup, [])
+    Process.put(:qemu_cleanup, [{id, callback} | List.keydelete(callbacks, id, 0)])
+  end
+
+  defp stop_supervised(id) do
+    Supervisor.terminate_child(__MODULE__.Supervisor, id)
+    Supervisor.delete_child(__MODULE__.Supervisor, id)
+  end
+
+  defp create_image(image) do
+    command!("fwup", [
+      "-q",
+      "-a",
+      "-i",
+      "_build/x86_64_dev/nerves/images/nerves_gate.fw",
+      "-d",
+      image,
+      "-t",
+      "complete"
+    ])
+  end
+
+  defp isolated! do
+    if File.read_link!("/proc/self/ns/net") == System.fetch_env!("NERVES_GATE_HOST_NETNS"),
+      do: raise("Refusing to fault networking in the workstation namespace")
   end
 
   defp command!(executable, args) do
+    isolated!()
     {output, status} = System.cmd(executable, args, stderr_to_stdout: true)
     assert status == 0, "#{executable} failed: #{output}"
+    output
   end
 
   defp capture_logs(vm) do
@@ -196,6 +526,7 @@ defmodule NervesGate.TestQemu do
   end
 
   defp qmp!(vm, command, arguments) do
+    isolated!()
     id = System.unique_integer([:positive])
     request = Jason.encode!(%{execute: command, arguments: arguments, id: id})
     log(vm.dir, "qmp.log", {:send, request})

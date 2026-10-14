@@ -22,7 +22,10 @@ defmodule NervesGateWeb.Layouts do
   end
 
   def app(assigns) do
-    assigns = assign(assigns, :section, section(assigns.live_action))
+    assigns =
+      assigns
+      |> assign(:section, section(assigns.live_action))
+      |> assign(:dev_tests, Application.get_env(:nerves_gate, :dev_tests, false))
 
     ~H"""
     <a href="#main-content" class="ui-skip-link">Skip to content</a>
@@ -36,6 +39,7 @@ defmodule NervesGateWeb.Layouts do
           class="ui-device-link"
           aria-current={if @section == :device, do: "page"}
         >Device</.link>
+        <.link :if={@dev_tests} navigate="/tests">Tests</.link>
       </nav>
     </header>
     <main id="main-content" class="ui-main ui-stack" tabindex="-1">

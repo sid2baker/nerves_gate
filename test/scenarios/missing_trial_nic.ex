@@ -1,0 +1,38 @@
+defmodule NervesGate.Scenarios.MissingTrialNic do
+  @moduledoc false
+  import ExUnit.Assertions
+  import NervesGate.ScenarioHelpers
+  alias NervesGate.TestQemu, as: Qemu
+
+  def name, do: "removing the proposed Internet NIC prevents confirmation and permits rollback"
+
+  def run(vm) do
+    saved = settings("eth1")
+    save(vm, saved)
+    trial = propose(vm, settings("eth0"))
+
+    try do
+      Qemu.unplug_wan(vm)
+
+      Qemu.await(vm, "required trial NIC removed", fn status ->
+        Enum.any?(status.connections.ports, &match?(%{name: "eth0", present: false}, &1)) &&
+          not status.actions["network.confirm"].enabled
+      end)
+
+      assert {:error, %{code: "not_connected"}} = Qemu.call(vm, :network_confirm, [trial])
+      assert :ok = Qemu.call(vm, :network_cancel, [trial])
+
+      Qemu.await(vm, "confirmed topology restored without removed NIC", fn status ->
+        status.network.pending == nil && not status.network.recovering &&
+          status.network.desired == saved
+      end)
+    after
+      Qemu.plug_wan(vm)
+    end
+
+    Qemu.await(vm, "removed NIC returned without changing settings", fn status ->
+      status.network.desired == saved &&
+        Enum.any?(status.connections.ports, &match?(%{name: "eth0", present: true}, &1))
+    end)
+  end
+end

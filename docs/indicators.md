@@ -100,14 +100,11 @@ or mount cannot silently start services. No custom formatter or reset journal.
 Failure leaves services stopped; no cleanup, remount, graceful shutdown or retry
 is requested after invalidation. USER2 reports failure; Device remains readable
 only if connectivity survives writer shutdown. A timeout is an unknown outcome.
-Host simulation records reset followed by reboot only on success.
 
 This is a logical reset, **not secure erasure**; old blocks may remain recoverable.
 Hardware qualification remains pending: expanded p3, busy mounts and I/O failures,
 power cuts during invalidation/reformatting, usable empty storage after boot, and
 unchanged firmware/identity. Nothing here erases or reboots a workstation.
 
-For host button preview in IEx, release once, wait at least 50 ms, then press and
-release with `NervesGate.Indicators.Host.button(0)` / `.button(1)`. Inspect
-`NervesGate.Indicators.Host.snapshot(NervesGate.Indicators.Host).recoveries` to see
-simulated recovery actions. Restart the preview to clear its one-shot attempt.
+There is no host button simulator. QEMU has no EC100 GPIO button, LEDs or watchdog;
+the integration suite does not qualify their behavior.

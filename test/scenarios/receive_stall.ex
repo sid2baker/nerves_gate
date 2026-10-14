@@ -1,0 +1,37 @@
+defmodule NervesGate.Scenarios.ReceiveStall do
+  @moduledoc false
+  import ExUnit.Assertions
+  import NervesGate.ScenarioHelpers
+  alias NervesGate.TestQemu, as: Qemu
+
+  def name, do: "WAN receive stall leaves carrier up and DHCP recovers when released"
+  def boot_options, do: [receive_stall: true]
+
+  def run(vm) do
+    try do
+      Qemu.await(vm, "carrier without an address", fn status ->
+        Enum.any?(
+          status.connections.ports,
+          &match?(%{name: "eth0", link: true, addresses: []}, &1)
+        )
+      end)
+
+      for _ <- 1..10 do
+        Process.sleep(1_000)
+        status = Qemu.status(vm)
+        assert status.system.target == "x86_64"
+
+        assert Enum.any?(
+                 status.connections.ports,
+                 &match?(%{name: "eth0", link: true, addresses: []}, &1)
+               )
+
+        refute status.connections.internet.health == "online"
+      end
+    after
+      Qemu.release_wan_receive(vm)
+    end
+
+    Qemu.await(vm, "DHCP recovered after receive buffer released", &addressed?/1, 60_000)
+  end
+end

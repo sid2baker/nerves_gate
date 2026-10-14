@@ -1,0 +1,49 @@
+defmodule NervesGate.Scenarios.Equipment do
+  @moduledoc false
+  import ExUnit.Assertions
+  import NervesGate.ScenarioHelpers
+  alias NervesGate.TestQemu, as: Qemu
+
+  def name, do: "equipment cable failure leaves Internet and management available"
+
+  def run(vm) do
+    Qemu.start_upstream(vm)
+
+    network =
+      Map.put(settings("eth0"), "eth1", %{
+        "role" => "equipment",
+        "address" => %{
+          "ip_method" => "static",
+          "static_ip" => "10.44.0.1",
+          "subnet_mask" => "255.255.255.0",
+          "gateway" => nil
+        }
+      })
+
+    save(vm, network)
+    Qemu.await(vm, "Internet reachable before equipment failure", &internet?/1, 60_000)
+
+    try do
+      Qemu.disconnect_equipment(vm)
+
+      failed =
+        Qemu.await(vm, "equipment cable disconnected", fn status ->
+          assert internet?(status), "Equipment failure must not take down the Internet port"
+          Enum.any?(status.connections.ports, &match?(%{name: "eth1", link: false}, &1))
+        end)
+
+      assert failed.network.desired == network
+      assert failed.backend.available
+    after
+      Qemu.reconnect_equipment(vm)
+    end
+
+    Qemu.await(vm, "equipment and Internet recovered", fn status ->
+      internet?(status) &&
+        Enum.any?(
+          status.connections.ports,
+          &match?(%{name: "eth1", link: true, addresses: [_ | _]}, &1)
+        )
+    end)
+  end
+end

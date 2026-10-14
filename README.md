@@ -32,7 +32,7 @@ Route approval and permissions belong to your tailnet; reachability is not verif
 five-second blink. RUN shows application state, USER1 Internet + Tailscale health, and USER2 alarms.
 The physical button identifies on a short release and requests reboot after 5 seconds.
 The 30-second factory-reset gesture erases EC100 application data and reboots;
-physical qualification is pending. Recovery tests use in-memory fakes.
+physical qualification is pending; the QEMU suite does not qualify this gesture.
 See [LEDs and button](docs/indicators.md).
 CAN/RS485 workspaces offer bounded receive-only captures and explicitly authorized
 Modbus register reads, with no scans, writes or retries. Physical CAN still needs
@@ -123,7 +123,7 @@ LiveReload and Tidewave. The existing API runs on the device over Erlang distrib
 There is one backend, on EC100 or x86 Nerves. Both the device's Phoenix UI and
 optional workstation Phoenix UI use it. The workstation runs no device services,
 VPN daemon or hardware simulator. Its HTTP endpoint listens on loopback only.
-Hardware fakes live under `test/support` and compile only for tests.
+Tests run against real QEMU Nerves devices, not host hardware fakes.
 
 All browser assets are local and checked in. Rebuild CSS with
 `cd assets && npm ci && npm run build`. Node.js is not needed on the device or to
@@ -131,34 +131,26 @@ compile firmware.
 
 ### Integration checks
 
-These bootstrap isolated runtimes and are deliberately separate from `mix test`:
-
 ```sh
-scripts/test_bridge.sh
-scripts/test_equipment.sh
-scripts/test_routing.sh
-MIX_TARGET=host mix run --no-start test/integration/buses_test.exs --pty
-MIX_TARGET=host mix run --no-start test/integration/tailscale_test.exs /absolute/path/to/tailscaled
+mix dev.qemu                     # terminal 1: boot one disposable device and Phoenix
+mix test --only cable_loss        # terminal 2: run one scenario, shown live at /tests
+mix test                         # run all scenarios on the same device
+mix test --ci                    # clean boot, same scenarios, automatic shutdown
+mix ci                           # static checks, then the same CI lifecycle
 ```
 
-The Linux network check requires user namespaces, `ip`, `brctl`, `ifconfig`,
-`udhcpc`, `dnsmasq`, `ping` and `curl`. It creates disposable LAN/USB peers and checks
-DHCP discovery, bridging, hotplug, static addresses, port roles, rollback and real
-HTTP access. It does not configure the workstation LAN.
+Open `http://localhost:4000/tests` to run individual scenarios or watch CLI-triggered
+runs. `test/scenarios/` is the single source for the UI, CLI and CI. One runner
+reuses one booted device; destructive scenarios explicitly reset it. Scenarios
+use the real public API and external QEMU/network faults, never host hardware fakes.
+The page and runner exist only in host dev/test, not production or device firmware.
 
-The Tailscale check uses a private userspace daemon, temporary identity storage
-and a private socket. It does not enroll an account, attach to the workstation
-daemon or change kernel routes. It checks cached status, configuration writes and
-preservation of omitted preferences against daemon 1.104.1.
+`mix test.qemu` is a compatibility alias for `mix test`. See
+[setup, coverage and limitations](docs/development.md).
 
-The routing check uses a private namespace and `iptables` to verify firmware's
-default-deny IPv4 forwarding, local recovery access, and fail-closed setup. It does
-not test Tailscale's rules/NAT or authenticated end-to-end equipment access.
-
-The equipment check uses a private namespace for ARP/vcan. The bus check requires
-`socat` and tests only disposable serial PTYs: fragmented Modbus replies, CRC/errors,
-timeouts, no retry, passive capture bounds and cleanup. See [bus safety](docs/buses.md).
-None of these checks substitutes for a firmware boot or hardware test.
+The suite does not yet cover bus protocols, physical indicators/recovery,
+authenticated Tailscale access, forwarding/NAT isolation, or browser interactions.
+Removing the former host tests does not make those areas device-qualified.
 
 ## Build firmware
 
@@ -179,9 +171,10 @@ Use trusted networks or Tailscale. See [connecting Livebook](docs/networking.md#
 All targets share `mix.lock`. EC100 uses the local system checkout at
 `/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100`, retaining its bootloader,
 GPT and A/B update contract. The x86/QEMU system lives under
-[`test/support/nerves_system_x86_64`](test/support/nerves_system_x86_64/GATEWAY.md).
+[`systems/nerves_system_x86_64`](systems/nerves_system_x86_64/GATEWAY.md).
 It shares EC100's gateway runtime configuration while retaining x86-specific
-boot and driver support; build/boot validation is still pending.
+boot and driver support. QEMU build/boot is verified; EC100 hardware parity and
+A/B update/recovery qualification are not.
 
 The rootfs combines `rootfs_overlay/common` with `rootfs_overlay/<target>`. Supply a
 checksum-verified static `tailscaled` binary for the selected architecture at

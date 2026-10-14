@@ -102,14 +102,14 @@ to cellular. Reboot restores saved configuration, never an unconfirmed trial.
 
 Qualify real hardware with a working SIM: boot, modem removal, Ethernet cable loss,
 Ethernet Internet loss with link still up, failback, both uplinks failing, reboot,
-rollback, DNS, VPN traffic and blocked direct cellular HTTP access. Host tests do not
-exercise actual routing, carrier registration or modem power.
+rollback, DNS, VPN traffic and blocked direct cellular HTTP access. The QEMU suite does not
+qualify a cellular modem, carrier registration or modem power.
 
 ## Saving and rollback
 
 VintageNet stores each LAN interface's settings using its FlatFile persistence
-backend. The application keeps only the current trial in memory; test fakes
-also keep saved settings in memory. Unreadable saved settings fail closed.
+backend. The application keeps only the current trial in memory. QEMU integration
+tests use the real persistence backend on a disposable disk. Unreadable saved settings fail closed.
 
 The Ethernet modes remain `unconfigured`, `ports` and `shared`. An optional
 `internet` object selects `ethernet`, `cellular`, or `backup`; cellular modes also

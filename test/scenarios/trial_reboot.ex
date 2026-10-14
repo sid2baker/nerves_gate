@@ -1,0 +1,22 @@
+defmodule NervesGate.Scenarios.TrialReboot do
+  @moduledoc false
+  import ExUnit.Assertions
+  import NervesGate.ScenarioHelpers
+  alias NervesGate.TestQemu, as: Qemu
+
+  def name, do: "reset during an unconfirmed trial restores only confirmed settings"
+
+  def run(vm) do
+    saved = save(vm, settings("eth0"))
+    propose(vm, settings("eth1"))
+    Qemu.reboot(vm)
+
+    restored =
+      Qemu.await(vm, "unconfirmed settings discarded after reset", fn status ->
+        status.network.desired == saved && status.network.pending == nil &&
+          not status.network.recovering && addressed?(status)
+      end)
+
+    assert restored.network.setup_completed
+  end
+end

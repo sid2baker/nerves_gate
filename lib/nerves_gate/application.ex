@@ -3,18 +3,18 @@ defmodule NervesGate.Application do
   use Application
 
   @backend_node Application.compile_env(:nerves_gate, :backend_node)
-  @host_ui Application.compile_env(:nerves_gate, :target) == :host
 
   @impl true
   def start(_type, _args) do
-    if @host_ui and is_nil(@backend_node),
-      do: raise("Host mode requires a device backend. Run mix dev.ec100 or mix dev.qemu.")
+    if Application.get_env(:nerves_gate, :target) == :host and
+         is_nil(Application.get_env(:nerves_gate, :backend_node)),
+       do: raise("Host mode requires a device backend. Run mix dev.ec100 or mix dev.qemu.")
 
     NervesGate.Distribution.configure_cookie()
 
     children =
       [{Phoenix.PubSub, [name: NervesGate.PubSub]}] ++
-        backend_children() ++ [NervesGateWeb.Endpoint]
+        backend_children() ++ dev_children() ++ [NervesGateWeb.Endpoint]
 
     Supervisor.start_link(children, strategy: :rest_for_one, name: NervesGate.Supervisor)
   end
@@ -40,6 +40,12 @@ defmodule NervesGate.Application do
         NervesGate.Buses
       ]
     end
+  end
+
+  if Application.compile_env(:nerves_gate, :dev_tests, false) do
+    defp dev_children, do: [NervesGate.QemuTests]
+  else
+    defp dev_children, do: []
   end
 
   @impl true

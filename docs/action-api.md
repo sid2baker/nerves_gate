@@ -203,7 +203,7 @@ status = NervesGate.status(opts)
 ```
 
 The former `NervesGate.Device` module, `dispatch/3`, `projection/1` and result/status
-envelopes were removed. See [`api_test.exs`](../test/nerves_gate/api_test.exs) for
+envelopes were removed. See [QEMU scenarios](../test/scenarios) for
 public API examples and safety regressions, and [architecture](architecture.md)
 for internal execution and recovery.
 

@@ -75,14 +75,8 @@ current UI sessions, not a retained log. The next operation clears the prior res
 Idle availability polling every five seconds is read-only. UI drafts do not overwrite
 live observations; an explicit apply uses the submitted values without revision locks.
 
-`mix ci` covers admission, host simulation, bounds/validation, worker failure and
-LiveView behavior. `scripts/test_equipment.sh` exercises SocketCAN in a private
-network namespace when vcan is available. The serial integration test uses only
-fresh PTYs and requires `socat`:
-
-```sh
-MIX_TARGET=host mix run --no-start test/integration/buses_test.exs --pty
-```
-
-These checks do not qualify transceivers, bus wiring or actual EC100 traffic.
+`mix ci` runs static checks and the QEMU device integration suite. The former
+host-fake and standalone PTY/vcan tests have been removed. Bus protocol integration
+coverage on the QEMU device remains to be added; QEMU does not reproduce EC100
+transceivers or wiring. Actual EC100 bus traffic still requires hardware qualification.
 The trusted-network, unauthenticated HTTP deployment assumption is unchanged.
