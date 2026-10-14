@@ -181,7 +181,9 @@ defmodule Mix.Tasks.Dev.Qemu do
   end
 
   defp check_port!(port) do
-    case :gen_tcp.listen(port, ip: {127, 0, 0, 1}) do
+    # Match socat's reuseaddr: closed connections in TIME_WAIT are not a running
+    # server. An active listener still fails with :eaddrinuse.
+    case :gen_tcp.listen(port, ip: {127, 0, 0, 1}, reuseaddr: true) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
 

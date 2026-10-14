@@ -6,22 +6,20 @@ defmodule NervesGate.Application do
 
   @impl true
   def start(_type, _args) do
-    if @host and
-         is_nil(Application.get_env(:nerves_gate, :backend_node)),
-       do: raise("Host mode requires a device backend. Run mix dev.ec100 or mix dev.qemu.")
-
-    NervesGate.Distribution.configure_cookie()
-
     children =
       [{Phoenix.PubSub, [name: NervesGate.PubSub]}] ++
         backend_children() ++ dev_children() ++ [NervesGateWeb.Endpoint]
 
+    NervesGate.Distribution.configure_cookie()
     Supervisor.start_link(children, strategy: :rest_for_one, name: NervesGate.Supervisor)
   end
 
   if @host do
     # The host serves the UI only. No device services, tables or simulators.
     defp backend_children do
+      if is_nil(Application.get_env(:nerves_gate, :backend_node)),
+        do: raise("Host mode requires a device backend. Run mix dev.ec100 or mix dev.qemu.")
+
       unless Node.alive?(),
         do: raise("Start the remote UI with elixir --name <name@address> -S mix phx.server")
 

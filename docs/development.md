@@ -75,6 +75,46 @@ variables remain exported. All browser assets are checked in. Only when changing
 CSS, rebuild with `cd assets && npm ci && npm run build`; Node.js is not needed
 for normal development or firmware compilation.
 
+## Which configuration is used?
+
+**`MIX_TARGET` selects where the code runs, not which device to connect to.**
+`MIX_ENV` independently selects development (`dev`), testing (`test`) or production
+(`prod`) behavior. `dev` is the default; it is not a device type.
+
+Only these five combinations are supported. `config/config.exs` rejects other
+combinations, loads common settings, then imports exactly one platform file:
+
+| `MIX_TARGET` | `MIX_ENV` | Platform file | Purpose |
+| --- | --- | --- | --- |
+| `host` | `dev` | `config/host.exs` | Workstation UI/tools with code reload (default) |
+| `host` | `test` | `config/host.exs` | Test/CI tooling without development reloaders |
+| `x86_64` | `dev` | `config/x86_64.exs` | QEMU firmware for development and tests |
+| `ec100` | `dev` | `config/ec100.exs` | Physical-device development |
+| `ec100` | `prod` | `config/ec100.exs` | Deployment firmware |
+
+There is no separate test firmware. `mix test` runs as `host/test` against the
+same `x86_64/dev` firmware used by the development UI; CI uses that firmware too.
+The host environment changes tooling behavior, not the scenarios or device logic.
+
+Both firmware platform files first import `config/firmware.exs` for shared device
+services, then add their own hardware and recovery-network settings. Workstation
+code reload and LiveReload live in `host.exs`, enabled only in `dev`; there is no
+separate `dev.exs` or catch-all `target.exs`.
+
+At startup, `config/runtime.exs` supplies the HTTP session secret and the host's
+remote `backend_node`. **That node selects the connection destination**, not
+`MIX_TARGET`. The development launchers supply it:
+
+- `mix dev.qemu` builds `x86_64` firmware, then runs the `host` UI connected to it.
+- `mix dev.ec100` runs the `host` UI connected to `ec100_node` in `config/host.exs`.
+  It does not build or flash EC100 firmware.
+- `MIX_TARGET=ec100 mix firmware` builds EC100 firmware; it does not connect to or
+  flash a device.
+
+Do not globally export a target for everyday development. The launchers and test
+command select their targets automatically; use per-command `MIX_TARGET=...` for
+explicit firmware builds.
+
 ### Troubleshooting
 
 - **Port 4000 in use:** run `mix dev.qemu --port 4001`.
@@ -136,8 +176,10 @@ observations and timers are not mocked.
 
 Bus protocols, physical LEDs/button/recovery, authenticated Tailscale traffic,
 forwarding/NAT isolation and automated browser workflows remain unqualified.
-QEMU does not reproduce EC100 peripherals, flash or its boot chain. See also the
-[known MuonTrap limitation](networking.md#known-runtime-limitation).
+QEMU does not reproduce EC100 peripherals, flash or its boot chain. A cellular
+uplink/emulation is deferred until the actual EC100 modem and its data/control
+interfaces are known; cellular remains disabled on both firmware targets.
+See also the [known MuonTrap limitation](networking.md#known-runtime-limitation).
 
 ## EC100 UI development
 
@@ -147,7 +189,7 @@ With a reachable device running compatible development firmware, run:
 mix dev.ec100
 ```
 
-The command uses the device node in `config/dev.exs`, derives the workstation
+The command uses the device node in `config/host.exs`, derives the workstation
 address from its route to that device, and serves Phoenix on loopback. Both ends
 must use compatible OTP/Elixir and cookie `mycookie`. No QEMU scenarios run against it.
 Backend selection is runtime configuration; restart the launcher after changing it.

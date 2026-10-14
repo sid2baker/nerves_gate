@@ -1,32 +1,13 @@
 import Config
 
+# Shared device settings, imported by ec100.exs and x86_64.exs only.
+# Nothing in this file configures the workstation UI.
 config :nerves_gate,
-  target: config_target(),
-  # Set only after identifying and qualifying the modem; see docs/networking.md.
+  # Disabled until the real modem is identified; QEMU does not emulate one.
   cellular: nil,
   network_adapter: {NervesGate.Network.Vintage, nil},
   remote_adapter: {NervesGate.Remote.Tailscale, nil},
-  equipment_adapter: {NervesGate.Equipment.Linux, nil},
-  buses_adapter: if(config_target() == :ec100, do: {NervesGate.Buses.EC100, nil}, else: nil),
-  recovery_adapter:
-    if(config_target() == :ec100, do: {NervesGate.Recovery.EC100, nil}, else: nil),
-  indicators_adapter:
-    if(config_target() == :ec100,
-      do: {NervesGate.Indicators.EC100, "/sys/class/leds"},
-      else: nil
-    )
-
-# Optional development distribution without Tailscale enrollment. Production
-# keeps its existing automatic Tailscale identity and native persistent cookie.
-if config_env() == :dev do
-  node =
-    System.get_env("NERVES_GATE_DEVICE_NODE") ||
-      if(config_target() == :x86_64, do: "nerves_gate@192.168.77.2")
-
-  if node do
-    config :nerves_gate, development_node: String.to_atom(node)
-  end
-end
+  equipment_adapter: {NervesGate.Equipment.Linux, nil}
 
 # Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
 # The UI is unauthenticated; use only on trusted networks.
@@ -42,16 +23,9 @@ config :nerves, :erlinit, update_clock: true
 # Validate firmware only after OTP applications start; internet is not required.
 config :nerves_runtime, startup_guard_enabled: true
 
-# Nerves 2 ordering is explicit: the data check must precede Tailscale,
+# Nerves 2 ordering is explicit: data initialization must precede Tailscale,
 # VintageNet, SSH, time persistence, and application services.
 config :nerves, application_sort: [init: [:nerves_runtime]]
-
-if config_target() == :ec100 do
-  config :nerves_runtime, init_module: NervesGate.Recovery.DataInit
-
-  config :ssh_subsystem_fwup,
-    precheck_callback: {NervesGate.Recovery.EC100, :firmware_precheck, []}
-end
 
 # Nerves 2 requires an explicit source timestamp. Keep rebuilds deterministic;
 # source-archive builds without Git can supply SOURCE_DATE_EPOCH instead.
@@ -88,25 +62,11 @@ config :tailscale,
   tun: :kernel
 
 # VintageNet owns saved LAN settings. Trials use persist: false until confirmation.
-# USB provisioning is independent of LAN trials.
-# VintageNetDirect's DHCP server is confined to the point-to-point USB link.
+# Each platform adds its own independent recovery/management connection.
 config :vintage_net,
   route_metric_fun: {NervesGate.Network.RouteMetric, :compute_metric, 2},
   persistence: VintageNet.Persistence.FlatFile,
-  config: if(config_target() == :ec100, do: [{"usb0", %{type: VintageNetDirect}}], else: [])
-
-# A separate management NIC for QEMU development. The gateway only manages
-# equipment/Internet ports eth0 and eth1, so trials cannot remove this address.
-if config_target() == :x86_64 and config_env() == :dev do
-  config :vintage_net,
-    config: [
-      {"eth2",
-       %{
-         type: VintageNetEthernet,
-         ipv4: %{method: :static, address: "192.168.77.2", prefix_length: 24}
-       }}
-    ]
-end
+  config: []
 
 # Recovery SSH is key-only. Supply a public key at firmware build time.
 config :nerves_ssh,

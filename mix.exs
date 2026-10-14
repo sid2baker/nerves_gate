@@ -91,7 +91,7 @@ defmodule NervesGate.MixProject do
   end
 
   defp elixirc_paths do
-    if Mix.target() == :host and Mix.env() in [:dev, :test],
+    if Mix.target() == :host,
       do: ["lib", "dev", "test/support", "test/scenarios"],
       else: ["lib"]
   end

@@ -38,13 +38,11 @@ defmodule NervesGateWeb.Backend do
   def bus_capture(port), do: call(:bus_capture, [port])
   def modbus_read(port, params), do: call(:modbus_read, [port, params])
 
-  def network_propose(settings, opts \\ []) do
-    # Workstation HTTP addresses cannot prove USB access to the device.
-    opts = if @host, do: Keyword.delete(opts, :access), else: opts
-    call(:network_propose, [settings, opts])
-  end
-
   if @host do
+    # Workstation HTTP addresses cannot prove USB access to the device.
+    def network_propose(settings, opts \\ []),
+      do: call(:network_propose, [settings, Keyword.delete(opts, :access)])
+
     defp request_projection(request) do
       case Application.get_env(:nerves_gate, :backend_node) do
         nil -> {:error, :unavailable}
@@ -75,6 +73,8 @@ defmodule NervesGateWeb.Backend do
        }}
     end
   else
+    def network_propose(settings, opts \\ []), do: call(:network_propose, [settings, opts])
+
     defp request_projection(request), do: GenServer.call(NervesGate.ProjectionServer, request)
 
     defp call(function, args), do: apply(NervesGate, function, args)
