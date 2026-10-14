@@ -1,7 +1,8 @@
 # LEDs and physical button
 
 One `NervesGate.Indicators` process owns policy, blink timing and button state.
-EC100 uses the standard Linux LED/input devices; host mode only changes memory.
+EC100 uses standard Linux LED/input devices. Workstation UI clients control that
+device; QEMU does not simulate the missing EC100 peripherals.
 
 ## LEDs
 
@@ -32,7 +33,7 @@ missing observations are unknown. Tailscale `Running`/`:online` is a separate
 backend state; health warnings can report control-server failures while it remains
 Running. USER1 is solid only with confirmed Internet, authenticated online Tailscale,
 no health warnings and no managed connectivity fault. Stopped/needs-login is off;
-unknown is slow, never healthy. There is no separate LED connection-history latch.
+unknown is slow, never healthy. LED policy uses current observations and managed faults.
 
 Network, Remote and Alarmist events refresh policy. Five-second reconciliation repairs
 missed notifications and retries unavailable LEDs. A monotonic 125 ms tick drives
@@ -72,8 +73,7 @@ patterns. There are no configurable button modes and no web reboot/reset action.
 
 Recovery runs outside the LED loop in one worker, with a 15-second deadline.
 There is no automatic retry, and only one recovery attempt is accepted per
-Indicators instance. The host adapter additionally records only one attempt per
-simulator lifetime. The EC100 adapter latches its attempt for the VM lifetime
+Indicators instance. The EC100 adapter also latches its attempt for the VM lifetime
 and uses `Nerves.Runtime.reboot/0`. A timeout is an unknown outcome, not proof that
 an independent OS shutdown stopped. Failure appears in Device, status and USER2.
 
@@ -86,7 +86,8 @@ The adapter blocks SSH firmware uploads, stops application writers, Tailscale,
 VintageNet, SSH and time persistence, closes shell history, leaves the data working
 directory, and normally unmounts every mount of the data partition. Shell history
 remains persistent across ordinary reboots; it is disabled only during reset.
-RingLogger is in-memory. Busy mounts abort reset—no lazy or forced unmount.
+RingLogger's periodic persistence is stopped before unmounting. Busy mounts abort
+reset—no lazy or forced unmount.
 After **any** admitted SSH upload (even a failed one), recovery requires a reboot,
 so reset cannot race an update or its delayed reboot callback.
 
@@ -106,5 +107,5 @@ Hardware qualification remains pending: expanded p3, busy mounts and I/O failure
 power cuts during invalidation/reformatting, usable empty storage after boot, and
 unchanged firmware/identity. Nothing here erases or reboots a workstation.
 
-There is no host button simulator. QEMU has no EC100 GPIO button, LEDs or watchdog;
-the integration suite does not qualify their behavior.
+See [test coverage and limits](development.md#coverage-and-limits). QEMU cannot
+qualify the physical button, LEDs, watchdog or reset behavior.

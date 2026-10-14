@@ -19,8 +19,6 @@ defmodule Mix.Tasks.Dev.Ec100 do
       end
 
     System.put_env("NERVES_GATE_BACKEND_NODE", backend)
-    Mix.Task.rerun("loadconfig")
-    Mix.Task.rerun("compile", ["--force"])
     {_, 0} = System.cmd("epmd", ["-daemon"])
     {:ok, _} = Node.start(:"nerves_gate_ui@#{:inet.ntoa(ip)}", name_domain: :longnames)
     Mix.Task.run("phx.server")

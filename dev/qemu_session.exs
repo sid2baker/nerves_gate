@@ -46,6 +46,9 @@ result =
       Process.sleep(:infinity)
     end
   after
+    # PubSub links subscribers to its Registry partition. Unsubscribe before
+    # stopping the application so its shutdown cannot kill this cleanup owner.
+    QemuTests.unsubscribe()
     Application.stop(:nerves_gate)
     Supervisor.stop(NervesGate.TestQemu.Supervisor, :normal)
     TestQemu.cleanup()

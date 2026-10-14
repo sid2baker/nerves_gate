@@ -15,7 +15,8 @@
   ],
   calls: [
     forbidden: [
-      {"NervesGate.*", ["NervesGateWeb.*"], except: ["NervesGate.Application"]},
+      {"NervesGate.*", ["NervesGateWeb.*"],
+       except: ["NervesGate.Application", "NervesGate.Scenarios.ProjectionStream"]},
       {"NervesGateWeb.*",
        [
          "Alarmist.*",
@@ -44,9 +45,14 @@
          "VintageNet.Persistence.*",
          "Tailscale.*"
        ]},
-      {["NervesGate.Network.Policy", "NervesGate.Status"],
+      {["NervesGate.Network.Policy", "NervesGate.Status", "NervesGate.Projection"],
        [
          "GenServer.call",
+         "Node.self",
+         "System.version",
+         "System.otp_release",
+         "NervesGate.status",
+         "NervesGate.status_input",
          "System.cmd",
          "File.write*",
          "NervesGate.Network.Adapter.*",

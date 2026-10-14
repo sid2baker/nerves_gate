@@ -4,13 +4,13 @@ defmodule NervesGateWeb.TailscaleLive do
   alias NervesGateWeb.RemoteStatus
 
   def mount(_, _, socket) do
-    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
+    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/2)
 
     if connected?(socket) do
       Process.send_after(self(), :check_login, 1000)
     end
 
-    projection = NervesGateWeb.Backend.status()
+    projection = socket.assigns.projection
     name = hostname(projection.remote_access)
 
     {:ok,
@@ -85,16 +85,20 @@ defmodule NervesGateWeb.TailscaleLive do
   end
 
   @doc false
-  def refresh_observations(socket) do
-    refresh(socket, NervesGateWeb.Backend.status())
-  end
+  def refresh_observations(socket, %{backend: %{available: false}} = projection),
+    do: assign(socket, projection: projection, login_url: nil, login_requested: false)
+
+  def refresh_observations(socket, projection), do: refresh(socket, projection)
 
   def handle_info(:check_login, socket) do
     Process.send_after(self(), :check_login, 1000)
 
+    remote = socket.assigns.projection.remote_access
+
     socket =
-      if socket.assigns.login_requested do
-        refresh(socket, NervesGateWeb.Backend.status())
+      if socket.assigns.login_requested and remote.available and remote.operation == nil and
+           remote.auth_state in ["authenticating", "needs_login"] do
+        read_login_url(socket)
       else
         socket
       end
@@ -103,21 +107,27 @@ defmodule NervesGateWeb.TailscaleLive do
   end
 
   defp reply(socket, :ok) do
-    {:noreply, refresh(assign(socket, message: nil), NervesGateWeb.Backend.status())}
+    {:noreply, assign(socket, message: nil)}
   end
 
   defp reply(socket, {:error, error}) do
-    {:noreply, refresh(assign(socket, message: error.message), NervesGateWeb.Backend.status())}
+    {:noreply, assign(socket, message: error.message)}
   end
 
   defp refresh(socket, projection) do
-    socket
-    |> assign(projection: projection)
-    |> refresh_name(projection.remote_access)
-    |> refresh_login(projection.remote_access)
+    previous = socket.assigns.projection.remote_access
+    socket = assign(socket, projection: projection)
+
+    if previous == projection.remote_access do
+      socket
+    else
+      socket
+      |> refresh_name(projection.remote_access, previous)
+      |> refresh_login(projection.remote_access)
+    end
   end
 
-  defp refresh_name(socket, remote) do
+  defp refresh_name(socket, remote, previous) do
     name = hostname(remote)
 
     cond do
@@ -127,7 +137,7 @@ defmodule NervesGateWeb.TailscaleLive do
       not socket.assigns.dirty ->
         assign(socket, form: to_form(%{"hostname" => name}, as: :remote), base: name)
 
-      remote.operation == nil ->
+      previous.operation != nil and remote.operation == nil ->
         assign(socket, pending_name: nil)
 
       true ->

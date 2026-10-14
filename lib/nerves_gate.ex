@@ -127,8 +127,27 @@ defmodule NervesGate do
         remote_status(remote(opts)),
         equipment_status(equipment(opts)),
         indicators_status(indicators(opts)),
-        buses_status(buses(opts))
+        buses_status(buses(opts)),
+        status_input(:system)
       )
+
+  # Sanitized inputs shared by direct status queries and the device read model.
+  @doc false
+  def status_input(:network), do: network_status(Network)
+  def status_input(:remote), do: remote_status(Remote)
+  def status_input(:equipment), do: equipment_status(Equipment)
+  def status_input(:indicators), do: indicators_status(Indicators)
+  def status_input(:buses), do: buses_status(Buses)
+
+  def status_input(:system) do
+    %{
+      firmware: version(),
+      target: to_string(target()),
+      node: Node.self(),
+      elixir: System.version(),
+      otp: System.otp_release()
+    }
+  end
 
   @doc "Subscribe the calling process to domain observations; read status afterward."
   @spec subscribe(keyword()) :: command_result()

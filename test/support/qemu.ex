@@ -355,10 +355,25 @@ defmodule NervesGate.TestQemu do
 
   def power_cycle(vm) do
     isolated!()
+    IO.puts("QEMU fault injection: intentional SIGKILL (power cycle)")
+    log(vm.dir, "faults.log", :qemu_power_cut_requested)
     ref = Process.monitor(vm.daemon)
-    command!("kill", ["-KILL", to_string(vm.pid)])
-    assert_receive {:DOWN, ^ref, :process, _, _}, 5000
-    stop_supervised(:qemu)
+    # Hold the exit-status handler only for this intentional kill, then stop the
+    # daemon normally. Unexpected exits elsewhere still produce crash reports.
+    :ok = :sys.suspend(vm.daemon)
+
+    try do
+      command!("kill", ["-KILL", to_string(vm.pid)])
+
+      poll(vm.dir, "QEMU power cut", deadline(5000), fn -> not File.exists?("/proc/#{vm.pid}") end)
+
+      stop_supervised(:qemu)
+      assert_receive {:DOWN, ^ref, :process, _, :shutdown}, 5000
+    after
+      if Process.alive?(vm.daemon), do: :sys.resume(vm.daemon)
+      Process.demonitor(ref, [:flush])
+    end
+
     :gen_tcp.close(vm.socket)
     Node.disconnect(@guest)
     assert status(vm) == nil
@@ -430,6 +445,11 @@ defmodule NervesGate.TestQemu do
   def fresh(vm, options \\ []) do
     isolated!()
     stop_supervised(:qemu)
+    # The daemon exits before its OS child finishes releasing the image and PID file.
+    poll(vm.dir, "QEMU stopped", deadline(5_000), fn ->
+      not File.exists?("/proc/#{vm.pid}")
+    end)
+
     :gen_tcp.close(vm.socket)
     Node.disconnect(@guest)
     image = Path.join(vm.dir, "gateway.img")

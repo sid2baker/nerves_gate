@@ -48,19 +48,13 @@ this system does not simulate them.
   The soft watchdog is also disabled, matching EC100's kernel policy.
 - x86 board-ID hostname and disk discovery remain platform-specific.
 
-## Build from the application root
+## Build and run
 
-```sh
-MIX_TARGET=x86_64 mix deps.get
-MIX_TARGET=x86_64 mix nerves.artifact.build nerves_system_x86_64
-# Supply a verified x86_64 tailscaled at rootfs_overlay/x86_64/usr/sbin/tailscaled.
-# See the main README; building firmware does not download or replace it.
-MIX_TARGET=x86_64 MIX_ENV=prod mix firmware
-```
-
-See the upstream [QEMU instructions](README.md#running-in-qemu) for making and
-booting a disposable disk image. Do not use `fwup` against a physical disk for
-this test target.
+From the application root, use `mix setup`, then `mix dev.qemu`. Setup builds this
+local system and installs the checksum-pinned x86 daemon; the launcher builds
+firmware and boots an isolated disposable device. See the
+[development guide](../../docs/development.md) for prerequisites and scenarios.
+Do not use `fwup` against a physical disk for this test target.
 
 **Development build and QEMU boot verified**, including both device and workstation
 Phoenix clients using the same Nerves backend. A/B updates, recovery and complete

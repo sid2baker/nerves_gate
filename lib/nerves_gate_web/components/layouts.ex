@@ -39,7 +39,7 @@ defmodule NervesGateWeb.Layouts do
           class="ui-device-link"
           aria-current={if @section == :device, do: "page"}
         >Device</.link>
-        <.link :if={@dev_tests} navigate="/tests">Tests</.link>
+        <.link :if={@dev_tests} href="/tests">Tests</.link>
       </nav>
     </header>
     <main id="main-content" class="ui-main ui-stack" tabindex="-1">

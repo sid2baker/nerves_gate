@@ -2,14 +2,16 @@
 
 ## Port roles
 
-LAN 1 is `eth0`; LAN 2 is `eth1`. Numbers always identify the same physical ports, even when the dedicated Internet port is hidden from Equipment. On a fresh gateway, both independently try
-DHCP. A single verified Internet port is suggested first; otherwise a single
-linked, addressed port is suggested. Ambiguous connections require a choice.
+LAN 1 is `eth0`; LAN 2 is `eth1`. Numbers always identify the same physical ports,
+even when the Internet port is hidden from Equipment. On a fresh gateway, both
+independently try DHCP. A single verified Internet port is suggested first;
+otherwise a single linked, addressed port is suggested. Ambiguous connections
+require a choice.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change automatically when a cable disappears or moves.
-Use **Overview → Internet** to change them. Neither setup nor discovery bridges networks,
-enables cellular backup or assigns an equipment address behind your back.
+Use **Overview → Internet** to change them. Neither setup nor discovery bridges
+networks, enables cellular backup or assigns an equipment address behind your back.
 
 - **Separate ports:** at most one Internet port (DHCP or static IPv4), optionally
   one equipment port (static IPv4, no default route or DNS). Either may be omitted.
@@ -28,22 +30,22 @@ address or discover equipment's static subnet. Check before saving; reserve a DH
 address before reusing it manually. Existing drafts are preserved.
 
 Port configuration does not change equipment addresses, run an Ethernet DHCP
-server or enable Internet sharing. VPN subnet access is a separate opt-in below. Joining/splitting ports interrupts
-Ethernet traffic. USB is never part of these changes.
+server or enable Internet sharing. VPN subnet access is a separate opt-in below.
+Joining/splitting ports interrupts Ethernet traffic. USB is never part of these changes.
 
 ## Internet source and cellular preparation
 
 **Overview → Internet** offers Ethernet, 4G modem, and Ethernet with 4G backup.
-Existing saved settings remain Ethernet-only without migration. Cellular-only uses
-separate ports with no Ethernet Internet assignment; a shared bridge can use
+Saved settings without an Internet-source selection remain Ethernet-only.
+Cellular-only uses separate ports with no Ethernet Internet assignment; a shared bridge can use
 Ethernet or Ethernet with cellular backup. Equipment and USB are never modem bridges.
 
 VintageNet owns Internet checks, route metrics, DNS and reconnection. Its normal
 Internet-first routing prefers working Ethernet over working cellular, but working
 cellular over Ethernet that only reaches its LAN. Our small metric callback also
-classifies `br0` as Ethernet and a dedicated `cellN` modem as mobile. No failover
-process, custom probes, Tailscale restart or route-writing loop is added. Failover
-and failback follow VintageNet's connectivity detection, not Alarmist's debounce.
+classifies `br0` as Ethernet and a dedicated `cellN` modem as mobile. The application
+does not restart Tailscale or manage failover itself. Failover and failback follow
+VintageNet's connectivity detection, not Alarmist's debounce.
 Existing sessions can briefly interrupt; seamless handover is not promised.
 
 Backup is connected standby. Modem registration and connectivity checks can consume
@@ -61,8 +63,8 @@ solid on healthy cellular plus healthy Tailscale; USER2 indicates degraded redun
 
 **The default EC100 firmware has cellular support disabled (`cellular: nil`).**
 The local BSP has USB groundwork but no qualified modem power/reset or networking.
-This repository prepares configuration, selection, persistence, UI and host tests;
-it does not claim the unidentified factory modem works. No BSP changes are included.
+Configuration, selection, persistence and UI support are prepared; the unidentified
+factory modem and its EC100 BSP drivers remain unqualified.
 
 Before enabling a modem, qualify inbound access protection for the unauthenticated
 web UI as described under [HTTP exposure](#local-recovery-and-http-exposure).
@@ -107,13 +109,9 @@ qualify a cellular modem, carrier registration or modem power.
 
 ## Saving and rollback
 
-VintageNet stores each LAN interface's settings using its FlatFile persistence
-backend. The application keeps only the current trial in memory. QEMU integration
-tests use the real persistence backend on a disposable disk. Unreadable saved settings fail closed.
-
-The Ethernet modes remain `unconfigured`, `ports` and `shared`. An optional
-`internet` object selects `ethernet`, `cellular`, or `backup`; cellular modes also
-require `apn`. There is no legacy JSON importer or second persistence store.
+VintageNet stores interface settings; the current trial exists only in memory.
+Unreadable saved settings fail closed. The [public API](action-api.md) describes
+the configuration format.
 
 First setup **through verified USB** saves automatically after successful
 application. It has an internal 15-second deadline, not a user countdown. Verification
@@ -132,50 +130,31 @@ Internet/equipment/USB subnet overlaps block confirmation; later DHCP overlaps
 remain visible as warnings. Configuration readiness does not imply equipment or
 remote reachability.
 
-### Temporary trials, subsystem-owned persistence
+Cancellation, expiry or failed application restores the prior applied configuration.
+Rollback is device-owned and continues if the browser disconnects. A restart/reboot
+loads saved settings, never an unconfirmed trial or resumed countdown. Failed
+restoration raises an alarm and retries with new proposals blocked.
 
-One Network GenServer admits and acknowledges commands using standard OTP calls and
-replies. It checks first-USB-setup auto-save directly against current observations
-and owns the independent watchdog and bounded hardware worker.
-
-1. **Propose:** apply temporarily without changing saved settings. Acknowledge
-   after application; immediately-ready first USB setup waits for auto-save.
-2. **Confirm:** recheck the exact trial ID, monotonic deadline, readiness and
-   conflicts, then save each LAN interface through VintageNet's persistence API.
-3. **Cancel, timeout or failed apply:** stop and join the worker,
-   then restore the prior applied configuration. USB remains untouched.
-4. **Server restart/reboot:** load and apply VintageNet's saved settings, not a
-   pending trial or a resumed countdown. Failed restoration retries with new
-   proposals blocked.
-
-**There is no multi-interface transaction.** Interrupted or failed confirmation
-can leave some interfaces saved and others unchanged. Runtime rollback does not
-undo those disk writes; the next restart uses the settings VintageNet has. This
-is an accepted tradeoff, not a promise of all-or-nothing power-loss recovery.
-There is no trial journal, commit marker or custom application file-writing layer.
-Keep USB/serial recovery available.
-
-VintageNet owns interface state, hotplug, cleanup and asynchronous retries. An
-admitted operation can outlive its caller, so the adapter retains a bounded
-configuration/bridge-membership settlement barrier. Rollback does not depend on
-the browser, Alarmist or successful notification delivery. Failed restoration raises
-an Alarmist fault; successful restoration clears it. The alarm does not drive recovery.
+**Saving several interfaces is not a transaction.** Interrupted or failed
+confirmation can save some interfaces but not others. Runtime rollback does not
+undo those disk writes; restart uses whatever VintageNet saved. Keep USB/serial
+recovery available. See [persistence ownership](architecture.md#persistence-and-recovery)
+for implementation details.
 
 ## Tailscale
 
 In **Overview → Remote access**, enter a device name, select **Connect Tailscale**, then
 follow the private sign-in link. Return to see connection or machine-approval
 status. No auth key is needed. The same page shows gateway addresses, rename and
-disconnect. The equipment LAN page has the on/off control for its IPv4 subnet. Disconnect uses `Tailscale.down/0`, preserving enrollment and preferences.
-Reconnect uses `up/0` for an enrolled profile, or login when enrollment is needed.
-Disconnecting may interrupt a browser using that VPN. USB and LAN remain available. These operations do not use Ethernet's
-rollback timer.
+disconnect. The equipment LAN page controls sharing its IPv4 subnet. Disconnect
+uses `Tailscale.down/0`, preserving enrollment and preferences. Reconnect uses
+`up/0` for an enrolled profile, or login when enrollment is needed. Disconnecting
+may interrupt a browser using that VPN; USB and LAN remain available. These
+operations do not use Ethernet's rollback timer.
 
-Remote is one GenServer admitting one bounded, linked daemon worker at a time.
-Acceptance does not mean completion. Crashes or timeouts stop the worker;
-startup only observes
-the daemon, never replays a connect/rename/disconnect. Daemon-side work may still have
-completed, so read status before retrying.
+Only one remote operation runs at a time. Acceptance is not completion; check its
+status and error. A timed-out daemon operation may still have completed, so read
+status before retrying. Restart observes the daemon without replaying commands.
 
 The Tailscale OTP application supervises `/usr/sbin/tailscaled` in kernel mode.
 Kernel TUN support is required. Identity and settings stay daemon-owned in
@@ -233,9 +212,8 @@ Restart reads preferences without replaying writes.
 
 At firmware application startup, `Network.Vintage.prepare_routing/0` sets the IPv4
 FORWARD policy to DROP before enabling `net.ipv4.ip_forward`, preventing unrestricted
-Ethernet/USB forwarding. It uses a direct `System.cmd/3` call and `File.write/2`;
-there is no shell script, boot marker or extra process. Tailscale's native netfilter
-rules and default subnet SNAT provide VPN forwarding. A setup failure logs a warning
+Ethernet/USB forwarding. Tailscale's native netfilter rules and default subnet SNAT
+provide VPN forwarding. A setup failure logs a warning
 without preventing the web UI or local recovery from starting. Host builds do nothing.
 This does not change INPUT/OUTPUT policy or enable IPv6 forwarding.
 
@@ -266,8 +244,8 @@ Firmware starts standard OTP distribution when the existing Tailscale observatio
 report an online IPv4 address. The node is named `nerves_gate@<Tailscale-IPv4>`, for
 example `nerves_gate@100.88.166.70`. Neither the tailnet nor node name needs to be
 known at build time; MagicDNS is not required. Before enrollment/connection, distribution
-waits without blocking startup, HTTP or recovery. Normal host preview/tests never
-start distribution.
+waits without blocking startup, HTTP or recovery. Development launchers instead
+start distribution explicitly; QEMU keeps it inside the isolated test namespace.
 
 The existing Remote status updates call `Node.start/2` once the address is known.
 OTP owns the distribution processes and EPMD; there is no extra watcher, manager or
@@ -305,15 +283,15 @@ supervision tree, not the notebook evaluator. SSH/serial IEx remains the recover
 
 ## Observations
 
-LiveViews subscribe to existing VintageNet/Tailscale properties and application
-workflow metadata, then reread status. There is no central snapshot server or
-second PubSub lifecycle feed. Private login URLs are excluded. Pending network
-trials reconcile current readiness periodically if a notification was missed.
+Internet status comes from permitted interfaces, never USB or the global best
+connection. Unconfigured or equipment-only networking does not require Internet.
+Unknown observations are not healthy. Tailscale Running is a separate fact, not
+proof of Internet or control-server access.
 
-Internet status comes from the permitted interfaces' VintageNet observations.
-Unconfigured or equipment-only networking does not require Internet. There is no
-separate connectivity retry agent, automatic role reassignment, DHCP restart, VPN
-reconnect, enrollment or DNS reset. Explicit cellular backup uses VintageNet routing.
+The [UI projection](architecture.md#ui-projection) distributes sanitized observations;
+it never admits commands or controls trial deadlines. Network roles do not change
+automatically, and alarms do not restart DHCP/VPN or reset DNS. Configured cellular
+backup follows VintageNet routing.
 
 ## Local recovery and HTTP exposure
 
@@ -324,7 +302,7 @@ enabling cellular; this application does not install cellular INPUT rules.
 
 The listener starts normally without USB, cellular support or a boot marker, and
 accepts connections on interfaces added later. This does not configure an address
-or enroll a VPN. Host preview listens only on `127.0.0.1`.
+or enroll a VPN. The workstation UI listens only on `127.0.0.1`.
 
 For USB recovery, open `http://<gateway-usb-address>:4000/network`. VintageNetDirect
 derives the USB /30 subnet at runtime; there is no fixed device IP. From serial or
@@ -342,7 +320,7 @@ restoration; x86 does not assume a USB gadget exists.
 Keep a local recovery path when changing Ethernet or updating firmware. SSH is
 key-only, with build-time `NERVES_GATE_SSH_KEYS`; the HTTP listener's policy does not
 change SSH exposure. USB, serial and real cable/hotplug behavior require hardware
-verification, not only tests with hardware fakes.
+verification beyond QEMU scenarios.
 
 ## Logs across reboots
 

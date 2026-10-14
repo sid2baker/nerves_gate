@@ -6,7 +6,7 @@ defmodule NervesGateWeb.DeviceLive do
 
   def handle_event("identify", _, socket) do
     result = NervesGateWeb.Backend.identify()
-    socket = socket |> clear_flash() |> assign(:projection, NervesGateWeb.Backend.status())
+    socket = clear_flash(socket)
 
     case result do
       :ok -> {:noreply, socket}

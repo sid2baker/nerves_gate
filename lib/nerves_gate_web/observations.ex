@@ -1,79 +1,85 @@
 defmodule NervesGateWeb.Observations do
   @moduledoc """
-  LiveView lifecycle bindings to domain properties. Only connected views
-  subscribe; subscriptions die with the view. Bursts are coalesced and
-  payloads never overwrite a newer command reply or a form draft.
-  Remote views poll every five seconds and refresh on node up/down events.
-  There is no state mirror.
+  Bind LiveViews to the device's projection stream. Each view reduces the same
+  ordered operations, with separate form drafts. A lost server means unavailable,
+  then a fresh subscription snapshot, never continued use of a stale cache.
   """
-  import Phoenix.Component, only: [assign: 3]
+  import Phoenix.Component, only: [assign: 2, assign: 3]
+  alias NervesGate.Projection
+  alias NervesGateWeb.Backend
 
-  @backend_node Application.compile_env(:nerves_gate, :backend_node)
+  def on_mount(:status, _, _, socket), do: {:cont, subscribe(socket)}
 
-  # Read-only pages share this hook. Editors retain their own refresh functions
-  # so observation updates never overwrite drafts.
-  def on_mount(:status, _, _, socket) do
-    {:cont, socket |> subscribe(&refresh_status/1) |> refresh_status()}
+  # The callback receives the new status and the old socket, so editors can
+  # update clean fields without losing drafts or their previous observation.
+  def subscribe(socket, refresh \\ &assign(&1, :projection, &2)) do
+    socket =
+      socket
+      |> assign(projection_server: nil, projection_monitor: nil, projection_retry: nil)
+      |> initialize()
+
+    Phoenix.LiveView.attach_hook(socket, :observations, :handle_info, fn message, socket ->
+      handle_message(message, socket, refresh)
+    end)
   end
 
-  defp refresh_status(socket), do: assign(socket, :projection, NervesGateWeb.Backend.status())
-
-  def subscribe(socket, refresh) do
+  defp initialize(socket) do
     if Phoenix.LiveView.connected?(socket) do
-      if @backend_node, do: :net_kernel.monitor_nodes(true)
-
-      bind()
-    end
-
-    socket
-    |> assign(:observation_pending, false)
-    |> Phoenix.LiveView.attach_hook(:observations, :handle_info, &handle_message(&1, &2, refresh))
-  end
-
-  defp handle_message(message, socket, refresh) do
-    case message do
-      message when message in [:subscribe_observations, :poll_backend] ->
-        bind()
-        {:halt, queue(socket)}
-
-      :refresh_observations ->
-        {:halt, socket |> assign(:observation_pending, false) |> refresh.()}
-
-      {event, @backend_node} when event in [:nodeup, :nodedown] ->
-        {:halt, queue(socket)}
-
-      {event, _} when event in [:nodeup, :nodedown] ->
-        {:halt, socket}
-
-      %PropertyTable.Event{} ->
-        {:halt, queue(socket)}
-
-      {VintageNet, _, _, _, _} ->
-        {:halt, queue(socket)}
-
-      {Tailscale, _, _, _, _} ->
-        {:halt, queue(socket)}
-
-      _ ->
-        {:cont, socket}
+      bind(socket)
+    else
+      put_projection(socket, Backend.projection())
     end
   end
 
-  if @backend_node do
-    defp bind, do: Process.send_after(self(), :poll_backend, 5_000)
-  else
-    defp bind do
-      case NervesGate.subscribe() do
-        :ok -> :ok
-        {:error, _} -> Process.send_after(self(), :subscribe_observations, 1_000)
-      end
+  defp bind(socket) do
+    case Backend.subscribe_projection() do
+      {:ok, pid, projection} ->
+        socket
+        |> assign(projection_server: pid, projection_monitor: Process.monitor(pid))
+        |> put_projection(projection)
+
+      {:error, :unavailable} ->
+        socket |> put_projection(Projection.disconnected()) |> retry()
     end
   end
 
-  defp queue(%{assigns: %{observation_pending: true}} = socket), do: socket
-
-  defp queue(socket) do
-    Process.send_after(self(), :refresh_observations, 20)
-    assign(socket, :observation_pending, true)
+  defp handle_message({:projection, pid, operation}, socket, refresh) do
+    if pid == socket.assigns.projection_server do
+      projection = Projection.apply(socket.assigns.projection_state, operation)
+      {:halt, socket |> assign(:projection_state, projection) |> refresh.(projection.status)}
+    else
+      {:halt, socket}
+    end
   end
+
+  defp handle_message({:DOWN, ref, :process, _, _}, socket, refresh)
+       when ref == socket.assigns.projection_monitor do
+    projection = Projection.disconnected()
+
+    socket =
+      socket
+      |> assign(projection_server: nil, projection_monitor: nil, projection_state: projection)
+      |> refresh.(projection.status)
+      |> retry()
+
+    {:halt, socket}
+  end
+
+  defp handle_message(:subscribe_projection, socket, refresh) do
+    previous = socket.assigns.projection
+    socket = socket |> assign(:projection_retry, nil) |> bind()
+    status = socket.assigns.projection_state.status
+    {:halt, socket |> assign(:projection, previous) |> refresh.(status)}
+  end
+
+  defp handle_message(_, socket, _), do: {:cont, socket}
+
+  defp put_projection(socket, projection),
+    do: assign(socket, projection_state: projection, projection: projection.status)
+
+  defp retry(%{assigns: %{projection_retry: nil}} = socket) do
+    assign(socket, :projection_retry, Process.send_after(self(), :subscribe_projection, 1_000))
+  end
+
+  defp retry(socket), do: socket
 end

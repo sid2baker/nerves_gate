@@ -16,6 +16,7 @@ defmodule NervesGate.QemuTests do
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
   def run(selection \\ "all"), do: GenServer.call(__MODULE__, {:run, selection})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
+  def unsubscribe, do: Phoenix.PubSub.unsubscribe(NervesGate.PubSub, @topic)
 
   @impl true
   def init(_) do

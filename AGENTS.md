@@ -1,15 +1,43 @@
-# VibeKit quality gate
+# Nerves Gate
 
-## Development
+## Most important: KISS — Keep it stupidly simple
 
-```sh
-mix deps.get
-mix ci
-```
+- Choose the simplest design that correctly solves the problem.
+- Large changes are welcome when they simplify the system. Minimize concepts and indirection, not necessarily changed lines.
+- Prefer direct code and ordinary Elixir/OTP over frameworks, generic machinery, speculative abstractions or configuration layers.
+- Keep one clear way to do each job. Remove obsolete code rather than carrying parallel implementations.
+- Solve today's requirements. Optimize or generalize only when there is a demonstrated need.
 
-## Conventions
+## Elixir only
 
-- Use `mix ci` for the full validation suite before finishing changes.
-- For Phoenix/web apps, keep Phoenix's generated guidance, but treat this VibeKit section as the final quality gate.
-- For non-web Elixir projects, VibeKit is the default project baseline.
-- Keep changes small, tested, and formatted.
+- Write application logic, tests and development tooling in Elixir. Do not introduce helper scripts in other languages.
+- Prefer Elixir libraries over shelling out when they cover the task; for example, use Req for HTTP.
+- External system tools remain appropriate for actual firmware, networking and QEMU operations. Do not wrap ordinary application logic in shell scripts.
+
+## Ownership and architecture
+
+- Domain processes own commands, admission, deadlines and persistence.
+- The projection is a read model, not a command coordinator. UI action availability never replaces backend validation.
+- Keep `NervesGate.status/1` as a direct domain query. LiveViews share the device-owned projection stream and keep form drafts separate.
+- Preserve clear boundaries without adding layers just to enforce them.
+
+## Safety
+
+- Tests operate only on disposable, owned QEMU instances inside the isolated test namespace.
+- Never flash physical devices, modify workstation networking/VPN, or stop unrelated processes without explicit authorization.
+- Keep private login URLs, distribution cookies and other secrets out of projections, notifications and logs.
+
+## Development and validation
+
+- Use `mix setup` for initial QEMU development setup; use `mix deps.get` when only fetching dependencies.
+- The user runs `mix dev.qemu` in another shell. Do not launch or stop that session. If it is unavailable, ask the user to start it.
+- Run focused scenarios against the existing session with `mix test --only <scenario>`; do not use `--ci` to launch another VM.
+- UI, CLI and CI use the same QEMU scenarios. Extend those rather than creating a separate hardware-mock or simulator suite.
+- `mix ci` is expensive and is run only by the user. Do not run it; report the focused checks you performed and leave full CI to the user.
+- Keep code formatted and test changed behavior. Documentation-only changes do not require QEMU checks.
+
+## Start here
+
+- [Architecture](docs/architecture.md)
+- [Development and QEMU workflow](docs/development.md)
+- [Public API](lib/nerves_gate.ex)

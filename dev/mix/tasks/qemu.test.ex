@@ -12,32 +12,41 @@ defmodule Mix.Tasks.Qemu.Test do
     else
       socket = Path.expand("_build/qemu-dev/http.sock")
       unless File.exists?(socket), do: Mix.raise("Start mix dev.qemu, then open /tests")
-      cookie = Path.join(System.tmp_dir!(), "qemu-tests-#{System.pid()}.cookie")
-      File.write!(cookie, "")
-      File.chmod!(cookie, 0o600)
+      {:ok, _} = Application.ensure_all_started(:req)
 
-      try do
-        state = request(socket, cookie, "/tests/state", [])
+      client =
+        Req.new(
+          base_url: "http://localhost",
+          unix_socket: socket,
+          retry: false,
+          redirect: false,
+          receive_timeout: 10_000,
+          http_errors: :raise
+        )
 
-        run =
-          request(socket, cookie, "/tests/run", [
-            "-H",
-            "x-csrf-token: #{state["csrf_token"]}",
-            "--data-urlencode",
-            "scenario=#{options[:only] || "all"}"
-          ])
+      response = Req.get!(client, url: "/tests/state")
 
-        if run["error"], do: Mix.raise(run["error"])
-        IO.puts("Run ##{run["id"]}; live results on /tests")
-        wait(socket, cookie, run["id"], MapSet.new())
-      after
-        File.rm(cookie)
-      end
+      cookie =
+        response
+        |> Req.Response.get_header("set-cookie")
+        |> Enum.map_join("; ", &(String.split(&1, ";", parts: 2) |> hd()))
+
+      client =
+        Req.merge(client,
+          headers: [cookie: cookie, "x-csrf-token": response.body["csrf_token"]]
+        )
+
+      run =
+        Req.post!(client, url: "/tests/run", form: [scenario: options[:only] || "all"]).body
+
+      if run["error"], do: Mix.raise(run["error"])
+      IO.puts("Run ##{run["id"]}; live results on /tests")
+      wait(client, run["id"], MapSet.new())
     end
   end
 
-  defp wait(socket, cookie, id, seen) do
-    state = request(socket, cookie, "/tests/state", [])
+  defp wait(client, id, seen) do
+    state = Req.get!(client, url: "/tests/state").body
     if state["id"] != id, do: Mix.raise("Run was replaced; see /tests")
 
     seen =
@@ -53,7 +62,7 @@ defmodule Mix.Tasks.Qemu.Test do
     case state["status"] do
       "running" ->
         Process.sleep(250)
-        wait(socket, cookie, id, seen)
+        wait(client, id, seen)
 
       "passed" ->
         :ok
@@ -61,28 +70,5 @@ defmodule Mix.Tasks.Qemu.Test do
       _ ->
         Mix.raise("QEMU scenarios failed")
     end
-  end
-
-  defp request(socket, cookie, path, args) do
-    {body, status} =
-      System.cmd(
-        "curl",
-        [
-          "--silent",
-          "--show-error",
-          "--fail-with-body",
-          "--max-time",
-          "10",
-          "--unix-socket",
-          socket,
-          "-b",
-          cookie,
-          "-c",
-          cookie
-        ] ++ args ++ ["http://localhost#{path}"]
-      )
-
-    if status != 0, do: Mix.raise("QEMU page unavailable: #{body}")
-    Jason.decode!(body)
   end
 end

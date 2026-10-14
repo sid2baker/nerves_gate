@@ -85,7 +85,7 @@ defmodule NervesGateWeb.BusesLive do
   end
 
   defp reply(socket, result) do
-    socket = socket |> clear_flash() |> assign(:projection, NervesGateWeb.Backend.status())
+    socket = clear_flash(socket)
 
     case result do
       :ok ->

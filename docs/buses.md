@@ -4,8 +4,8 @@ Open **Equipment → RS485 1 / 2** or **CAN 1 / 2** for that bus's configuration
 explicit, bounded diagnostics. RS485 1/2 map to `ttyS3`/`ttyS4`; CAN 1/2 map to
 `can0`/`can1`. Each page acts only on its selected port. Visiting sends no bus traffic. Only one
 bus operation runs at a time, independently of LAN trials, USB recovery and VPN.
-Host mode simulates everything in memory; other non-EC100 firmware targets are
-unsupported. No workstation CAN sockets or serial ports are opened in host mode.
+Bus operations require EC100. QEMU reports these peripherals as unsupported;
+workstation UI clients never open local CAN sockets or serial ports.
 
 ## CAN
 
@@ -75,8 +75,7 @@ current UI sessions, not a retained log. The next operation clears the prior res
 Idle availability polling every five seconds is read-only. UI drafts do not overwrite
 live observations; an explicit apply uses the submitted values without revision locks.
 
-`mix ci` runs static checks and the QEMU device integration suite. The former
-host-fake and standalone PTY/vcan tests have been removed. Bus protocol integration
-coverage on the QEMU device remains to be added; QEMU does not reproduce EC100
-transceivers or wiring. Actual EC100 bus traffic still requires hardware qualification.
-The trusted-network, unauthenticated HTTP deployment assumption is unchanged.
+Bus protocol integration coverage remains to be added. QEMU does not reproduce
+EC100 transceivers or wiring; actual bus traffic still requires hardware qualification.
+See [test coverage](development.md#coverage-and-limits) and
+[unauthenticated HTTP exposure](networking.md#local-recovery-and-http-exposure).

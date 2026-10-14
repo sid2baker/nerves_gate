@@ -4,18 +4,26 @@ defmodule NervesGateWeb.DistributionLive do
   alias NervesGateWeb.{DistributionPanel, Observations}
 
   def mount(_, _, socket) do
-    {:ok, socket |> Observations.subscribe(&refresh/1) |> refresh()}
+    socket = Observations.subscribe(socket, &refresh/2)
+    {:ok, refresh(socket, socket.assigns.projection)}
   end
 
-  defp refresh(socket) do
-    projection = NervesGateWeb.Backend.status()
-
+  defp refresh(socket, projection) do
     cookie =
-      if projection.backend.available do
-        case NervesGateWeb.Backend.distribution_cookie() do
-          {:ok, cookie} -> cookie
-          {:error, _} -> nil
-        end
+      cond do
+        not projection.backend.available ->
+          nil
+
+        not Map.has_key?(socket.assigns, :cookie) or
+          not socket.assigns.projection.backend.available or
+            socket.assigns.projection.system.node != projection.system.node ->
+          case NervesGateWeb.Backend.distribution_cookie() do
+            {:ok, cookie} -> cookie
+            {:error, _} -> nil
+          end
+
+        true ->
+          socket.assigns.cookie
       end
 
     assign(socket, projection: projection, cookie: cookie)

@@ -18,29 +18,10 @@ jobs:
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
-      - name: Check runner prerequisites
-        run: |
-          for tool in mise qemu-system-x86_64 ip nft tc socat unshare docker curl tar sha256sum; do
-            command -v "$tool" || exit 1
-          done
-          docker info >/dev/null
-          unshare --user --map-root-user --net ip link set lo up
-          mise install
-          mise exec -- fwup --version
-          qemu-system-x86_64 --version
-      - name: Fetch dependencies
-        run: |
-          mise exec -- env MIX_TARGET=host MIX_ENV=test mix deps.get
-          mise exec -- env MIX_TARGET=x86_64 MIX_ENV=dev mix deps.get
-      - name: Install checksum-pinned x86 tailscaled
-        run: |
-          archive="$RUNNER_TEMP/tailscale_1.104.1_amd64.tgz"
-          curl --fail --location --retry 3 https://pkgs.tailscale.com/stable/tailscale_1.104.1_amd64.tgz -o "$archive"
-          echo "108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528  $archive" | sha256sum --check
-          tar -xzf "$archive" -C "$RUNNER_TEMP" tailscale_1.104.1_amd64/tailscaled
-          install -Dm755 "$RUNNER_TEMP/tailscale_1.104.1_amd64/tailscaled" rootfs_overlay/x86_64/usr/sbin/tailscaled
-      - name: Build gateway system
-        run: mise exec -- env MIX_TARGET=x86_64 MIX_ENV=dev mix nerves.artifact.build nerves_system_x86_64
+      - name: Install Elixir and OTP
+        run: mise install
+      - name: Set up development and test dependencies
+        run: mise exec -- mix setup
       - name: Quality gate and isolated QEMU scenarios
         run: |
           mkdir -p _build/qemu-tests

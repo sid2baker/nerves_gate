@@ -2,11 +2,11 @@ defmodule NervesGate.Application do
   @moduledoc false
   use Application
 
-  @backend_node Application.compile_env(:nerves_gate, :backend_node)
+  @host Application.compile_env(:nerves_gate, :target) == :host
 
   @impl true
   def start(_type, _args) do
-    if Application.get_env(:nerves_gate, :target) == :host and
+    if @host and
          is_nil(Application.get_env(:nerves_gate, :backend_node)),
        do: raise("Host mode requires a device backend. Run mix dev.ec100 or mix dev.qemu.")
 
@@ -19,7 +19,7 @@ defmodule NervesGate.Application do
     Supervisor.start_link(children, strategy: :rest_for_one, name: NervesGate.Supervisor)
   end
 
-  if @backend_node do
+  if @host do
     # The host serves the UI only. No device services, tables or simulators.
     defp backend_children do
       unless Node.alive?(),
@@ -37,7 +37,8 @@ defmodule NervesGate.Application do
         NervesGate.Remote,
         NervesGate.Equipment,
         NervesGate.Indicators,
-        NervesGate.Buses
+        NervesGate.Buses,
+        NervesGate.ProjectionServer
       ]
     end
   end

@@ -6,9 +6,9 @@ defmodule NervesGateWeb.NetworkLive do
   import NervesGateWeb.CoreComponents
 
   def mount(_, session, socket) do
-    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/1)
+    socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/2)
     if connected?(socket), do: Process.send_after(self(), :tick, 1_000)
-    projection = NervesGateWeb.Backend.status()
+    projection = socket.assigns.projection
     peer = get_connect_info(socket, :peer_data)
 
     socket =
@@ -52,8 +52,7 @@ defmodule NervesGateWeb.NetworkLive do
     do: {:noreply, assign(socket, form: draft(socket, %{"equipment_port" => ""}), dirty: true)}
 
   def handle_event("reload", _, socket) do
-    {:noreply,
-     socket |> assign(dirty: false, message: nil) |> refresh(NervesGateWeb.Backend.status())}
+    {:noreply, socket |> assign(dirty: false, message: nil) |> refresh(socket.assigns.projection)}
   end
 
   def handle_event("save", %{"network" => params}, socket) do
@@ -63,7 +62,6 @@ defmodule NervesGateWeb.NetworkLive do
     if socket.assigns.base != projection.network.desired do
       {:noreply,
        assign(socket,
-         projection: projection,
          dirty: true,
          message: "Settings changed in another session. Reload saved settings before editing."
        )}
@@ -101,9 +99,10 @@ defmodule NervesGateWeb.NetworkLive do
       )
 
   @doc false
-  def refresh_observations(socket) do
-    refresh(socket, NervesGateWeb.Backend.status())
-  end
+  def refresh_observations(socket, %{backend: %{available: false}} = projection),
+    do: assign(socket, :projection, projection)
+
+  def refresh_observations(socket, projection), do: refresh(socket, projection)
 
   def handle_info(:tick, socket) do
     Process.send_after(self(), :tick, 1_000)
@@ -139,10 +138,10 @@ defmodule NervesGateWeb.NetworkLive do
     socket = assign(socket, projection: projection, initial: not network.setup_completed)
 
     cond do
-      saved?(socket.assigns, network) ->
+      saved?(socket.assigns, network, previous) ->
         saved(socket, network, previous)
 
-      socket.assigns.own_save and network.pending == nil ->
+      socket.assigns.own_save and previous.pending != nil and network.pending == nil ->
         assign(socket, own_save: false)
 
       not socket.assigns.dirty and network.desired != socket.assigns.base ->
@@ -156,10 +155,11 @@ defmodule NervesGateWeb.NetworkLive do
     end
   end
 
-  defp saved?(assigns, network) do
+  defp saved?(assigns, network, previous) do
     assigns.own_save and network.pending == nil and network.setup_completed and
-      network.error == nil and
-      network.desired == assigns.saving_network
+      network.error == nil and network.desired == assigns.saving_network and
+      (previous.pending != nil or previous.desired != network.desired or
+         previous.setup_completed != network.setup_completed)
   end
 
   defp saved(socket, network, previous) do
@@ -184,14 +184,11 @@ defmodule NervesGateWeb.NetworkLive do
     reply(socket, :ok)
   end
 
-  defp reply(socket, :ok) do
-    {:noreply, refresh(socket, NervesGateWeb.Backend.status())}
-  end
+  defp reply(socket, :ok), do: {:noreply, socket}
 
   defp reply(socket, {:error, error}) do
     {:noreply,
      assign(socket,
-       projection: NervesGateWeb.Backend.status(),
        own_save: false,
        message: error.message
      )}

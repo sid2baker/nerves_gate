@@ -1,6 +1,6 @@
 # Select host tooling before Nerves reads the project, even after firmware builds.
 case List.first(System.argv()) do
-  command when command in ["dev.ec100", "dev.qemu"] ->
+  command when command in ["setup", "dev.ec100", "dev.qemu"] ->
     Mix.env(:dev)
     Mix.target(:host)
 
@@ -45,6 +45,7 @@ defmodule NervesGate.MixProject do
         ]
       ],
       aliases: [
+        setup: &setup/1,
         test: ["qemu.test"],
         "test.qemu": ["qemu.test"],
         ci: [
@@ -66,14 +67,27 @@ defmodule NervesGate.MixProject do
     [
       preferred_targets: [
         run: :host,
+        setup: :host,
         test: :host,
         ci: :host,
         "dev.ec100": :host,
         "dev.qemu": :host,
         "qemu.test": :host
       ],
-      preferred_envs: [ci: :test, "dev.ec100": :dev, "dev.qemu": :dev, "qemu.test": :test]
+      preferred_envs: [
+        setup: :dev,
+        ci: :test,
+        "dev.ec100": :dev,
+        "dev.qemu": :dev,
+        "qemu.test": :test
+      ]
     ]
+  end
+
+  # Setup must be available before dependencies or ordinary dev tasks can compile.
+  defp setup(args) do
+    Code.require_file("dev/setup.exs", __DIR__)
+    Mix.Task.run("setup.qemu", args)
   end
 
   defp elixirc_paths do
@@ -96,6 +110,7 @@ defmodule NervesGate.MixProject do
       {:phoenix, "~> 1.8"},
       {:phoenix_live_reload, "~> 1.5", only: :dev, targets: :host},
       {:tidewave, "~> 0.9", only: :dev, targets: :host},
+      {:req, "~> 0.7", only: [:dev, :test], targets: :host},
       # PR #4441: lifecycle-managed LiveView/LiveComponent PubSub subscriptions.
       {:phoenix_live_view, github: "phoenixframework/phoenix_live_view", branch: "main"},
       {:phoenix_pubsub, "~> 2.4"},

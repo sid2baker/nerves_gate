@@ -20,7 +20,7 @@ defmodule NervesGateWeb.TestsLive do
   def render(assigns) do
     ~H"""
     <main class="ui-main ui-stack" id="tests">
-      <.link navigate="/" class="ui-text-link">Back to Overview</.link>
+      <.link href="/" class="ui-text-link">Back to Overview</.link>
       <.page_header
         title="QEMU scenarios"
         description="One disposable device. The same scenarios from the page, CLI and CI."

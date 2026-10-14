@@ -1,9 +1,25 @@
 defmodule NervesGateWeb.Backend do
   @moduledoc """
-  UI calls run locally in firmware, or on the compile-time `:backend_node` in
-  development. No local fallback, cached device state or command retries.
+  UI calls run locally in firmware, or on the runtime `:backend_node` in
+  development. Commands have no local fallback or retries. Projection subscriptions
+  call the device server directly, preserving the LiveView caller's identity.
   """
-  @node Application.compile_env(:nerves_gate, :backend_node)
+  @host Application.compile_env(:nerves_gate, :target) == :host
+
+  def subscribe_projection, do: projection_call(:subscribe)
+
+  def projection do
+    case projection_call(:snapshot) do
+      {:error, :unavailable} -> NervesGate.Projection.disconnected()
+      projection -> projection
+    end
+  end
+
+  defp projection_call(request) do
+    request_projection(request)
+  catch
+    :exit, {_, {GenServer, :call, _}} -> {:error, :unavailable}
+  end
 
   def status, do: call(:status, [])
   def distribution_cookie, do: call(:distribution_cookie, [])
@@ -24,16 +40,25 @@ defmodule NervesGateWeb.Backend do
 
   def network_propose(settings, opts \\ []) do
     # Workstation HTTP addresses cannot prove USB access to the device.
-    opts = if @node, do: Keyword.delete(opts, :access), else: opts
+    opts = if @host, do: Keyword.delete(opts, :access), else: opts
     call(:network_propose, [settings, opts])
   end
 
-  if @node do
+  if @host do
+    defp request_projection(request) do
+      case Application.get_env(:nerves_gate, :backend_node) do
+        nil -> {:error, :unavailable}
+        node -> GenServer.call({NervesGate.ProjectionServer, node}, request)
+      end
+    end
+
     defp call(function, args) do
-      :erpc.call(@node, NervesGate, function, args, 5_000)
+      case Application.get_env(:nerves_gate, :backend_node) do
+        nil -> unavailable(function)
+        node -> :erpc.call(node, NervesGate, function, args, 5_000)
+      end
     catch
-      :error, {:erpc, reason} when reason in [:noconnection, :timeout] ->
-        unavailable(function)
+      :error, {:erpc, reason} when reason in [:noconnection, :timeout] -> unavailable(function)
     end
 
     defp unavailable(:status), do: NervesGate.Status.disconnected()
@@ -41,15 +66,17 @@ defmodule NervesGateWeb.Backend do
     defp unavailable(function) when function in [:remote_login_url, :distribution_cookie],
       do: {:error, %{code: "backend_disconnected", message: "The device did not reply."}}
 
-    defp unavailable(_),
-      do:
-        {:error,
-         %{
-           code: "outcome_unknown",
-           message:
-             "The device did not reply. The command may have run; read status before retrying."
-         }}
+    defp unavailable(_) do
+      {:error,
+       %{
+         code: "outcome_unknown",
+         message:
+           "The device did not reply. The command may have run; read status before retrying."
+       }}
+    end
   else
+    defp request_projection(request), do: GenServer.call(NervesGate.ProjectionServer, request)
+
     defp call(function, args), do: apply(NervesGate, function, args)
   end
 end

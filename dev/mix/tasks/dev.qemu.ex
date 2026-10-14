@@ -5,48 +5,149 @@ defmodule Mix.Tasks.Dev.Qemu do
 
   @impl true
   def run(args) do
-    {options, []} =
-      OptionParser.parse!(args, strict: [port: :integer, ci: :boolean, only: :string])
-
+    options = options!(args)
     Mix.Task.run("compile")
-    {:ok, _} = Application.ensure_all_started(:muontrap)
 
     dir =
       Path.expand(if options[:ci], do: "_build/qemu-ci-#{System.pid()}", else: "_build/qemu-dev")
 
     File.mkdir_p!(dir)
     File.chmod!(dir, 0o700)
-    lock = Path.join(dir, "session.lock")
-    lock!(lock)
-    socket = Path.join(dir, "http.sock")
 
-    try do
-      session(options, socket)
-    after
-      File.rm(socket)
-      File.rm(lock)
+    # Execute flock before MuonTrap so the OS wrapper owns the lock throughout
+    # child cleanup, even when this BEAM aborts. Never unlink the lock file.
+    flock = System.find_executable("flock") || Mix.raise("Install flock (util-linux)")
+
+    port =
+      Port.open({:spawn_executable, flock}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: [
+          "--nonblock",
+          "--conflict-exit-code",
+          "75",
+          "--no-fork",
+          Path.join(dir, "session.lock"),
+          MuonTrap.muontrap_path(),
+          "--capture-output",
+          "--capture-stderr",
+          "--",
+          "mix",
+          "run",
+          "--no-start",
+          "dev/qemu_host.exs",
+          dir | args
+        ],
+        env: [{~c"MIX_TARGET", ~c"host"}, {~c"MIX_ENV", Atom.to_charlist(Mix.env())}]
+      ])
+
+    status =
+      try do
+        session_output(port)
+      after
+        if Port.info(port), do: Port.close(port)
+      end
+
+    case status do
+      0 -> :ok
+      75 -> Mix.raise("A QEMU session is already running. Stop it before starting another.")
+      _ -> Mix.raise("QEMU session failed (exit #{status})")
     end
   end
 
-  defp session(options, socket) do
+  defp session_output(port) do
+    receive do
+      {^port, {:data, data}} ->
+        IO.binwrite(data)
+        MuonTrap.Port.report_bytes_handled(port, byte_size(data))
+        session_output(port)
+
+      {^port, {:exit_status, status}} ->
+        status
+    end
+  end
+
+  # Entered only by dev/qemu_host.exs, under flock and MuonTrap.
+  def session(dir, args) do
+    options = options!(args)
     ci? = options[:ci] || false
     port = options[:port] || 4000
+    socket = Path.join(dir, "http.sock")
     unless ci?, do: check_port!(port)
-    build_firmware!()
-    proxy = unless ci?, do: proxy!(port, socket)
+    File.rm(socket)
+    {:ok, _} = Application.ensure_all_started(:muontrap)
 
     try do
-      IO.puts(if ci?, do: "Starting CI QEMU", else: "QEMU page: http://localhost:#{port}/tests")
-      isolated(ci?, socket, options[:only] || "all")
+      build_firmware!()
+      IO.puts("Starting QEMU; waiting for the device and Phoenix...")
+
+      status =
+        if ci? do
+          isolated(true, socket, options[:only] || "all")
+        else
+          serve(port, socket)
+        end
+
+      if status != 0, do: Mix.raise("Isolated QEMU session failed (exit #{status})")
     after
-      stop_proxy(proxy)
+      File.rm(socket)
     end
   end
 
-  defp stop_proxy(nil), do: :ok
-  defp stop_proxy(pid), do: GenServer.stop(pid, :normal)
+  defp options!(args) do
+    {options, []} =
+      OptionParser.parse!(args, strict: [port: :integer, ci: :boolean, only: :string])
+
+    options
+  end
+
+  defp serve(port, socket) do
+    {:ok, _} = Application.ensure_all_started(:req)
+    task = Task.async(fn -> isolated(false, socket, "all") end)
+
+    try do
+      await_http(task, socket, System.monotonic_time(:millisecond) + 180_000)
+      proxy = proxy!(port, socket)
+
+      try do
+        IO.puts("QEMU ready: http://localhost:#{port}/tests")
+        Task.await(task, :infinity)
+      after
+        GenServer.stop(proxy, :normal)
+      end
+    after
+      Task.shutdown(task, :brutal_kill)
+    end
+  end
+
+  defp await_http(task, socket, deadline) do
+    case Task.yield(task, 100) do
+      {:ok, status} -> Mix.raise("QEMU exited before HTTP was ready (exit #{status})")
+      nil -> :ok
+    end
+
+    case Req.get("http://localhost/tests/state",
+           unix_socket: socket,
+           retry: false,
+           redirect: false,
+           connect_options: [timeout: 200],
+           receive_timeout: 500
+         ) do
+      {:ok, %{status: 200}} ->
+        :ok
+
+      _ ->
+        if System.monotonic_time(:millisecond) >= deadline,
+          do: Mix.raise("Timed out waiting for QEMU HTTP readiness")
+
+        await_http(task, socket, deadline)
+    end
+  end
 
   defp isolated(ci?, socket, selection) do
+    # Initialize Nerves before `mix run` replaces System.argv with the script's
+    # empty argument list. Compilation stays incremental; --force is unnecessary.
     {_, status} =
       MuonTrap.cmd(
         "unshare",
@@ -57,7 +158,6 @@ defmodule Mix.Tasks.Dev.Qemu do
           "mix",
           "do",
           "compile",
-          "--force",
           "+",
           "run",
           "--no-start",
@@ -77,19 +177,7 @@ defmodule Mix.Tasks.Dev.Qemu do
         stderr_to_stdout: true
       )
 
-    if status != 0, do: Mix.raise("QEMU session failed (exit #{status})")
-  end
-
-  defp lock!(path) do
-    case File.open(path, [:write, :exclusive]) do
-      {:ok, file} ->
-        File.close(file)
-
-      {:error, _} ->
-        Mix.raise(
-          "QEMU session already owns #{path}. Stop it first; remove the lock only after a crash."
-        )
-    end
+    status
   end
 
   defp check_port!(port) do
@@ -116,7 +204,7 @@ defmodule Mix.Tasks.Dev.Qemu do
 
   defp build_firmware! do
     {_, status} =
-      System.cmd("mix", ["firmware", "--overwrite"],
+      MuonTrap.cmd("mix", ["firmware", "--overwrite"],
         env: [
           {"MIX_TARGET", "x86_64"},
           {"MIX_ENV", "dev"},

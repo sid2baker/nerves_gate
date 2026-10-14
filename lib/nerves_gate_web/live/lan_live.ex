@@ -28,7 +28,6 @@ defmodule NervesGateWeb.LanLive do
   # Recheck scope on every command: another session may have reassigned this port.
   def handle_event(event, params, socket) do
     projection = NervesGateWeb.Backend.status()
-    socket = assign(socket, :projection, projection)
     scope = projection.equipment.scope
 
     scoped =
@@ -141,7 +140,7 @@ defmodule NervesGateWeb.LanLive do
         {:error, error} -> %{tone: "warning", text: error.message}
       end
 
-    assign(socket, projection: NervesGateWeb.Backend.status(), message: message)
+    assign(socket, message: message)
   end
 
   defp equipment_port?(projection, name),
