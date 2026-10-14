@@ -27,8 +27,6 @@ if config_env() == :dev do
   config :phoenix, :plug_init_mode, :runtime
   config :volt, :server, prefix: "/assets", watch_dirs: ["lib/", "dev/"]
 
-  config :nerves_gate, ec100_node: :"nerves_gate@100.88.166.70"
-
   config :nerves_gate, NervesGateWeb.Endpoint,
     url: [host: "localhost"],
     http: [ip: {127, 0, 0, 1}, port: 4000],

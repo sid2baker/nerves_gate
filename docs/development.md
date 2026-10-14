@@ -158,8 +158,8 @@ remote `backend_node`. **That node selects the connection destination**, not
 `MIX_TARGET`. The development launchers supply it:
 
 - `mix dev.qemu` builds `x86_64` firmware, then runs the `host` UI connected to it.
-- `mix dev.ec100` runs the `host` UI connected to `ec100_node` in `config/host.exs`.
-  It does not build or flash EC100 firmware.
+- `mix dev.ec100` discovers EC100 gateways on the current tailnet and runs the
+  `host` UI connected to one. It does not build or flash EC100 firmware.
 - `MIX_TARGET=ec100 mix firmware` builds EC100 firmware; it does not connect to or
   flash a device.
 
@@ -196,6 +196,8 @@ including cleanup with a paused VM and combined faults. `mix test --only fronten
 checks host and firmware CSS/JS delivery, firmware cache revalidation and strict CSP,
 and absence of the Volt runtime on the guest. Restart `mix dev.qemu` after rebuilding
 assets so that this check sees the new files in firmware too.
+`mix test --only dev_discovery` checks service discovery against the real guest
+and verifies that the EC100 launcher excludes QEMU and rejects ambiguous selections.
 
 The page, CLI endpoints, runner and scenarios exist only in host dev/test. The
 runner refuses EC100 or arbitrary VMs; CLI requests use the page's session and
@@ -289,16 +291,34 @@ See also the [known MuonTrap limitation](networking.md#known-runtime-limitation)
 
 ## EC100 UI development
 
-With a reachable device running compatible development firmware, run:
+Connect workstation Tailscale to the device's tailnet. With the device online
+and running compatible development firmware, run:
 
 ```sh
 mix dev.ec100
 ```
 
-The command uses the device node in `config/host.exs`, derives the workstation
-address from its route to that device, and serves Phoenix on loopback. Both ends
-must use compatible OTP/Elixir and cookie `mycookie`. No QEMU scenarios run against it.
-Backend selection is runtime configuration; restart the launcher after changing it.
+The command reads the existing local Tailscale daemon, probes online peers for
+the `nerves_gate` Erlang service, and authenticates with a bounded, read-only
+`NervesGate.target/0` call. It connects automatically only when exactly one EC100
+answers; QEMU gateways are excluded. It does not start or reconfigure Tailscale.
+If none answer, it reports an error instead of opening a disconnected UI. If
+several answer, it lists explicit commands to choose one:
+
+```sh
+mix dev.ec100 --node nerves_gate@100.101.102.103
+```
+
+Use the device's actual node name (`nerves_gate@<Tailscale IPv4>`), not its
+MagicDNS alias. `--node` probes only that address and still verifies it is an
+EC100; it also requires connected workstation Tailscale. Both ends must use
+compatible OTP/Elixir and cookie `mycookie`. Tailnet policy must allow EPMD
+(TCP 4369) and the device's Erlang distribution port. The local daemon must be
+readable through `/var/run/tailscale/tailscaled.sock`.
+
+Phoenix serves on loopback; the UI distribution node uses the workstation's
+Tailscale IPv4. No QEMU scenarios run against EC100. Backend selection is runtime
+configuration; restart the launcher to discover again or choose another device.
 Switching between QEMU and EC100 does not require a forced recompile or build cleanup.
 Host HTTP access never counts as trusted USB access to the device. Use trusted
 networks: development distribution and the UI grant device access.
