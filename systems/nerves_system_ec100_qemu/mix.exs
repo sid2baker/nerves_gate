@@ -1,8 +1,8 @@
-defmodule NervesSystemX8664.MixProject do
+defmodule NervesSystemEC100Qemu.MixProject do
   use Mix.Project
 
-  @app :nerves_system_x86_64
-  @version Path.join(__DIR__, "VERSION") |> File.read!() |> String.trim()
+  @app :nerves_system_ec100_qemu
+  @version String.trim(File.read!(Path.join(__DIR__, "VERSION")))
 
   def project do
     [
@@ -17,7 +17,9 @@ defmodule NervesSystemX8664.MixProject do
     ]
   end
 
-  def application, do: []
+  def application do
+    []
+  end
 
   defp bootstrap(args) do
     Mix.target(:target)
@@ -28,8 +30,9 @@ defmodule NervesSystemX8664.MixProject do
   defp nerves_package do
     [
       type: :system,
-      # Test-only local variant; never substitute an upstream artifact.
-      artifact_sites: [],
+      artifact_sites: [
+        {:github_releases, "sid2baker/nerves_gate", tag: "ec100-qemu-v#{@version}"}
+      ],
       platform: Nerves.System.BR,
       platform_config: [defconfig: "nerves_defconfig"],
       env: [
@@ -47,7 +50,7 @@ defmodule NervesSystemX8664.MixProject do
     [
       {:nerves, "~> 2.0 or ~> 2.0.0-pre.3", runtime: false},
       {:nerves_system_br, "1.34.5", runtime: false},
-      {:nerves_toolchain_x86_64_nerves_linux_musl, "~> 15.3.0", runtime: false},
+      {:nerves_toolchain_x86_64_nerves_linux_musl, "15.3.1", runtime: false},
       {:nerves_system_linter, "~> 0.4", only: [:dev, :test], runtime: false}
     ]
   end
@@ -57,17 +60,14 @@ defmodule NervesSystemX8664.MixProject do
       "fwup_include",
       "linux",
       "rootfs_overlay",
-      "CHANGELOG.md",
-      "GATEWAY.md",
-      "LICENSES/*",
-      "README.md",
-      "REUSE.toml",
+      "Config.in",
       "VERSION",
       "fwup-ops.conf",
       "fwup.conf",
       "grub.cfg",
       "linux-6.18.defconfig",
       "mix.exs",
+      "mix.lock",
       "nerves_defconfig",
       "post-build.sh",
       "post-createfs.sh"

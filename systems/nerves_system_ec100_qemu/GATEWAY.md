@@ -9,16 +9,18 @@ is not copied or modified here.
 The x86 source is based on
 [`nerves-project/nerves_system_x86_64`](https://github.com/nerves-project/nerves_system_x86_64)
 commit `5d755dba94fff478eac2bfd90ba91d2e0025d4eb` (1.34.2). Upstream licenses,
-changelog and [hardware documentation](README.md) are retained. The local
-`1.34.2-gate.1` variant uses fingerprinted local artifacts only, never an
-unmodified upstream download.
+[changelog](UPSTREAM_CHANGELOG.md) and [hardware documentation](UPSTREAM_README.md)
+are retained. `nerves_system_ec100_qemu` has its own version, starting at `0.1.0`.
+Fingerprint-matched artifacts come from this project's GitHub Releases, never
+from an unmodified upstream system.
 
 ## Alignment with EC100
 
 Keep platform-independent settings aligned with `nerves_system_ec100`:
 
 - Nerves 2, `nerves_system_br 1.34.5` (Buildroot 2026.05.3 / OTP 29.0.6),
-  and the 15.3 toolchain family. All application targets share `mix.lock`.
+  and the 15.3 toolchain family. All application targets share `mix.lock`;
+  the release check also verifies its system dependencies match this package's lock.
 - The standard Nerves skeleton, device table, BusyBox configuration, reproducible
   builds, and tar rootfs used by Nerves 2 firmware assembly.
 - Bridge tools, iptables/ip6tables with the legacy firewall backend, CA
@@ -58,14 +60,16 @@ this system does not simulate them.
 
 ## Build and run
 
-From the application root, use `mix setup`, then `mix dev.qemu`. Setup builds this
-local system and installs the checksum-pinned x86 daemon; the launcher builds
-firmware and boots an isolated disposable device. See the
+From the application root, use `mix setup`, then `mix dev.qemu`. Setup downloads
+this prebuilt system and installs the checksum-pinned x86 daemon; the launcher
+builds firmware and boots an isolated disposable device. See the
 [development guide](../../docs/development.md) for prerequisites and scenarios.
 Do not use `fwup` against a physical disk for this test target.
 
-**Development build and QEMU boot verified**, including both device and workstation
-Phoenix clients using the same Nerves backend. A/B updates, recovery and complete
-kernel-feature parity still need qualification; configuration tests alone do not
-prove them. See the [local Phoenix development guide](../../docs/development.md)
-for the verified workflow and a separate QEMU management NIC.
+The previous local variant was boot-tested with both device and workstation
+Phoenix clients using the same Nerves backend. The renamed package's first hosted
+build, published download and QEMU boot still need end-to-end validation. A/B
+updates, recovery and complete kernel-feature parity also need qualification;
+configuration tests alone do not prove them. See the
+[development guide](../../docs/development.md) for the workflow and separate QEMU
+management NIC.

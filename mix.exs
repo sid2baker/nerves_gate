@@ -36,6 +36,7 @@ defmodule NervesGate.MixProject do
       dialyzer: [
         plt_add_apps: [
           :mix,
+          :nerves,
           :muontrap,
           :ex_unit,
           :tailscale,
@@ -141,8 +142,8 @@ defmodule NervesGate.MixProject do
        path: "/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100",
        runtime: false,
        targets: :ec100},
-      {:nerves_system_x86_64,
-       path: "systems/nerves_system_x86_64", runtime: false, targets: :x86_64}
+      {:nerves_system_ec100_qemu,
+       path: "systems/nerves_system_ec100_qemu", runtime: false, targets: :x86_64}
     ]
   end
 end

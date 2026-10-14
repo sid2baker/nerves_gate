@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Setup.Qemu do
   @compile {:no_warn_undefined, Req}
   @version "1.104.1"
   @archive_sha256 "108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528"
-  @tools ~w(git make cc pkg-config fwup docker qemu-system-x86_64 pasta unshare mount flock ip nft tc socat)
+  @tools ~w(git make cc pkg-config fwup qemu-system-x86_64 pasta unshare mount flock ip nft tc socat)
 
   @impl true
   def run([]) do
@@ -20,11 +20,8 @@ defmodule Mix.Tasks.Setup.Qemu do
     tailscaled!()
     target_mix!(["deps.get"])
 
-    Mix.shell().info(
-      "Building the QEMU system (first build can take an hour; reruns are incremental)."
-    )
-
-    target_mix!(["nerves.artifact.build", "nerves_system_x86_64"])
+    Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached on subsequent runs).")
+    target_mix!(["nerves.artifact.get"])
     Mix.shell().info("Ready. Run mix dev.qemu, then open http://localhost:4000.")
   end
 
@@ -49,8 +46,6 @@ defmodule Mix.Tasks.Setup.Qemu do
     end
 
     unless File.exists?("/dev/net/tun"), do: Mix.raise("QEMU requires /dev/net/tun on the host.")
-
-    check!("docker", ["info"], "Docker must be running and accessible without sudo.")
 
     check!(
       "unshare",

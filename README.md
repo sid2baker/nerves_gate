@@ -14,9 +14,10 @@ mix dev.qemu
 ```
 
 Open **http://localhost:4000**. Setup installs Mix tooling and dependencies,
-verifies and installs the x86 Tailscale binary, and builds the local Nerves system.
-The first system build can take an hour; reruns reuse its build cache. No physical
-device, tailnet enrollment, workstation network changes or Node.js are needed.
+verifies and installs the x86 Tailscale binary, and downloads the prebuilt EC100
+QEMU system. Dependencies and application firmware still compile locally, but
+Linux and Erlang do not. No Docker, physical device, tailnet enrollment,
+workstation network changes or Node.js are needed for normal development.
 
 Keep `mix dev.qemu` running. In another terminal:
 
@@ -93,5 +94,5 @@ and firmware validation.
 Before updating, verify device identity, firmware platform and a local recovery
 path. Use an in-place firmware update to preserve `/data` and Tailscale identity,
 not a full-disk burn. EC100 A/B updates and recovery still require hardware
-qualification. See the [x86 system notes](systems/nerves_system_x86_64/GATEWAY.md)
+qualification. See the [x86 system notes](systems/nerves_system_ec100_qemu/GATEWAY.md)
 for the test target's deliberate differences.

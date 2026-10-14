@@ -15,10 +15,11 @@ No EC100, Tailscale login, environment file or manual network setup is needed.
 
 `mix setup` checks the workstation, installs missing Hex/Rebar/Nerves bootstrap,
 fetches host and x86 dependencies, verifies a pinned Tailscale archive and installs
-its x86 daemon, then builds the local Nerves system. The first build can take an
-hour and needs Internet access and substantial disk space. Reruns reuse the
-archive and incremental build cache. A different existing x86 daemon is not
-overwritten: remove it explicitly if you want setup to install the pinned one.
+its x86 daemon, then downloads the prebuilt EC100 QEMU system from GitHub Releases.
+First setup needs Internet access and space for dependencies and the system SDK,
+but does not rebuild Linux or Erlang. Reruns reuse the download cache. A different
+existing x86 daemon is not overwritten: remove it explicitly if you want setup to
+install the pinned one.
 Setup neither boots QEMU nor runs tests, and never touches the ARM daemon or EC100 BSP.
 
 ### Prerequisites
@@ -26,7 +27,6 @@ Setup neither boots QEMU nor runs tests, and never touches the ARM daemon or EC1
 - **Linux x86_64**, with unprivileged user/network/mount namespaces and `/dev/net/tun`.
 - **Elixir 1.20 / OTP 29**; `mise install` uses the versions in `mise.toml` if you use mise.
 - **fwup**, available on `PATH`; see its [installation guide](https://github.com/fwup-home/fwup#installing).
-- **Docker**, running and usable by your account without sudo.
 - Git, a C compiler, make, pkg-config, QEMU, **pasta** (the `passt` package), iproute2,
   nftables, socat and util-linux.
 
@@ -36,10 +36,11 @@ For Debian/Ubuntu, the last group can be installed with:
 sudo apt install git build-essential pkg-config qemu-system-x86 passt iproute2 nftables socat util-linux
 ```
 
-Install the toolchain, fwup and Docker separately. `mix setup` reports missing
-tools; it does not install OS packages, start Docker, change permissions or enable
-namespaces. If namespaces are restricted by host policy, use an approved Linux
-development machine rather than running the session as root.
+Install the toolchain and fwup separately. Docker is needed only by maintainers
+building the system from source, not for normal setup, firmware builds or QEMU.
+`mix setup` reports missing tools; it does not install OS packages, change
+permissions or enable namespaces. If namespaces are restricted by host policy,
+use an approved Linux development machine rather than running the session as root.
 
 ## Daily workflow
 
@@ -228,7 +229,7 @@ public inbound port forwards; an enrolled guest can be reached through its own
 Tailscale identity according to tailnet policy.
 
 Images are disposable files, never physical disks. See the
-[system notes](../systems/nerves_system_x86_64/GATEWAY.md) for differences from EC100.
+[system notes](../systems/nerves_system_ec100_qemu/GATEWAY.md) for differences from EC100.
 
 ### Real Internet and Tailscale
 
@@ -322,6 +323,67 @@ configuration; restart the launcher to discover again or choose another device.
 Switching between QEMU and EC100 does not require a forced recompile or build cleanup.
 Host HTTP access never counts as trusted USB access to the device. Use trusted
 networks: development distribution and the UI grant device access.
+
+## Maintaining the QEMU system
+
+The package is `systems/nerves_system_ec100_qemu`; the application target stays
+`x86_64`. Its `VERSION` is independent of the application and upstream system.
+The package's own `CHANGELOG.md` supplies release notes verbatim; upstream history
+is retained separately in `UPSTREAM_CHANGELOG.md`.
+
+For kernel, OTP, Buildroot, toolchain or other system build-input changes:
+
+1. Update the system and bump `VERSION` (initial version: `0.1.0`). Add a dated
+   `## <version> - YYYY-MM-DD` section to its changelog. Use level-three category
+   headings and bullets; keep fenced code examples in the development guide.
+2. Keep the system dependencies aligned between the application and system
+   `mix.lock` files. The release check rejects drift. System dependency locks are
+   included in Nerves' source fingerprint; documentation is not.
+3. Push the changes to `main`. `.github/workflows/ec100-qemu-system.yml` checks
+   whether publication is needed, builds the artifact, creates the
+   `ec100-qemu-v<version>` tag/release, uploads and checks the artifact digest,
+   and verifies a fresh download using Nerves' normal artifact resolver.
+
+The workflow runs only trusted `main` code on a GitHub-hosted Ubuntu 24.04 runner;
+no self-hosted machine is needed for system publication. It installs the pinned
+Elixir/OTP toolchain and host tools, uses Docker for the build, and caches source
+downloads between runs. Builds consume GitHub Actions minutes and must fit hosted
+runner resources; the first complete build still needs CI qualification. The
+repository's `GITHUB_TOKEN` supplies release access. Publication is serialized
+and does not boot QEMU or run full CI. Ordinary gateway code changes do not
+rebuild the system. Documentation-only system changes check
+the release but reuse its artifact.
+
+Published tags/assets are never overwritten. Changed build inputs under an
+already-released version fail with a request to bump `VERSION`. A re-run skips an
+already-published matching release; interrupted draft releases can resume from
+the original workflow commit if existing artifact bytes match. Conflicting draft bytes require explicit maintainer
+cleanup, not an automatic overwrite. Releases are not marked as the application's
+latest release. The first release must finish before clean `mix setup` downloads
+can succeed. A missing artifact fails clearly; setup never silently falls back to
+an hour-long source build.
+
+For deliberate local system development (Docker required):
+
+```sh
+MIX_TARGET=x86_64 MIX_ENV=dev mix deps.get
+MIX_TARGET=x86_64 MIX_ENV=dev mix nerves.artifact.build nerves_system_ec100_qemu
+mix setup
+```
+
+Inspect the exact version, fingerprinted artifact name and changelog notes without
+building or contacting GitHub:
+
+```sh
+MIX_TARGET=x86_64 MIX_ENV=dev elixir -r dev/artifact_release.ex -S mix nerves.artifact.release plan
+```
+
+The workflow also supports manual dispatch on `main` for retries. Do not replace
+this custom system with an upstream x86 artifact: their networking capabilities
+differ. This is real gateway software on virtual x86 hardware, not an EC100
+peripheral simulator. After the artifact is available, restart your `mix dev.qemu`
+session and run `mix test --only system_artifact` to check the guest's system
+version and firmware platform.
 
 ## CI
 

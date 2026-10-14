@@ -6,6 +6,8 @@ path = [
  ".github/CODEOWNERS",
  ".gitignore",
  "CHANGELOG.md",
+ "UPSTREAM_CHANGELOG.md",
+ "README.md",
  "nerves_defconfig",
  "NOTICE",
  "REUSE.toml",
@@ -19,7 +21,7 @@ SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
 path = [
- "README.md"
+ "UPSTREAM_README.md"
 ]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2016 Frank Hunleth"
