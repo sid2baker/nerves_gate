@@ -180,6 +180,7 @@ defmodule Mix.Tasks.Dev.Qemu do
           "none",
           "--udp-ns",
           "none",
+          "--",
           "unshare",
           "--mount",
           "--propagation",

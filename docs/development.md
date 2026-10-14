@@ -24,17 +24,24 @@ Setup neither boots QEMU nor runs tests, and never touches the ARM daemon or EC1
 
 ### Prerequisites
 
-- **Linux x86_64**, with unprivileged user/network/mount namespaces and `/dev/net/tun`.
+- **Linux x86_64 or aarch64**, with unprivileged user/network/mount namespaces and `/dev/net/tun`.
 - **Elixir 1.20 / OTP 29**; `mise install` uses the versions in `mise.toml` if you use mise.
 - **fwup**, available on `PATH`; see its [installation guide](https://github.com/fwup-home/fwup#installing).
 - Git, a C compiler, make, pkg-config, QEMU, **pasta** (the `passt` package), iproute2,
-  nftables, socat and util-linux.
+  nftables, socat, util-linux and inotify-tools.
 
 For Debian/Ubuntu, the last group can be installed with:
 
 ```sh
-sudo apt install git build-essential pkg-config qemu-system-x86 passt iproute2 nftables socat util-linux
+sudo apt install git build-essential pkg-config qemu-system-x86 passt iproute2 nftables socat util-linux inotify-tools
 ```
+
+On an Apple Silicon Mac, use an arm64 Ubuntu [OrbStack](https://orbstack.dev) machine
+(`orb create --arch arm64 ubuntu nerves-gate`) with the packages above and fwup's
+arm64 `.deb`. Clone the repository inside the machine, not under `/Users`, to use
+a case-sensitive filesystem for builds. QEMU emulates the x86 guest there;
+OrbStack forwards the machine's `localhost:4000` to the Mac. Avoid amd64 machines:
+the BEAM JIT fails under Rosetta.
 
 Install the toolchain and fwup separately. Docker is needed only by maintainers
 building the system from source, not for normal setup, firmware builds or QEMU.
