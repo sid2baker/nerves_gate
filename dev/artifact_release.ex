@@ -123,7 +123,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
 
     case release(info.tag) do
       nil ->
-        ensure_pending_tag_matches_head!(info.tag)
+        ensure_pending_sources!(info)
         :new
 
       release ->
@@ -131,7 +131,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
 
         case {release["draft"], asset(release, info)} do
           {true, _} ->
-            ensure_pending_tag_matches_head!(info.tag)
+            ensure_pending_sources!(info)
             :draft
 
           {false, %{"state" => "uploaded", "digest" => "sha256:" <> _}} ->
@@ -175,11 +175,33 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     end
   end
 
-  defp ensure_pending_tag_matches_head!(tag) do
-    # An interrupted publication must resume from its original source commit,
-    # including inputs deleted since then, not attach new bytes to an old tag.
-    if tag_exists?(tag) and git!(["rev-parse", "#{tag}^{commit}"]) != git!(["rev-parse", "HEAD"]),
-      do: Mix.raise("Resume #{tag} from its original workflow commit; do not reuse the tag.")
+  defp ensure_pending_sources!(info) do
+    if tag_exists?(info.tag) do
+      verify_pending_sources!(info.tag, Path.relative_to_cwd(info.package.path))
+    end
+  end
+
+  @doc false
+  def verify_pending_sources!(tag, system_path, repository \\ ".") do
+    # Compare the whole system tree so deletions cannot escape the current Nerves
+    # source list. Unrelated publisher repairs need not move the original tag.
+    sources = [system_path, "mix.lock", "mise.toml"]
+
+    case System.cmd("git", ["diff", "--quiet", "#{tag}^{commit}", "--" | sources],
+           cd: repository,
+           stderr_to_stdout: true
+         ) do
+      {_, 0} ->
+        :ok
+
+      {_, 1} ->
+        Mix.raise(
+          "Pending #{tag} has different system sources, dependency locks or toolchain pins. Bump VERSION; do not reuse the tag."
+        )
+
+      _ ->
+        Mix.raise("Cannot compare pending system inputs with #{tag}.")
+    end
   end
 
   defp publish!(info) do
@@ -211,7 +233,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       ])
     end
 
-    case asset(release(info.tag), info) do
+    case asset(release!(info.tag), info) do
       nil ->
         gh!(["release", "upload", info.tag, archive])
 
@@ -222,8 +244,11 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
         Mix.raise("The draft already contains different artifact bytes. Refusing to overwrite.")
     end
 
-    unless match?(%{"digest" => ^digest, "state" => "uploaded"}, asset(release(info.tag), info)),
-      do: Mix.raise("Uploaded artifact digest does not match the local build.")
+    unless match?(
+             %{"digest" => ^digest, "state" => "uploaded"},
+             asset(release!(info.tag), info)
+           ),
+           do: Mix.raise("Uploaded artifact digest does not match the local build.")
 
     gh!(["release", "edit", info.tag, "--draft=false", "--latest=false"])
     unless release_state!(info) == :published, do: Mix.raise("Release verification failed.")
@@ -245,20 +270,44 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     do: Enum.find(release["assets"], &(&1["name"] == info.download.filename))
 
   defp release(tag) do
-    {body, status} = System.cmd("gh", ["api", "repos/#{@repo}/releases/tags/#{tag}"])
+    # The release-by-tag endpoint excludes drafts, including one just created.
+    System.cmd("gh", ["api", "repos/#{@repo}/releases?per_page=100", "--paginate", "--slurp"],
+      stderr_to_stdout: true
+    )
+    |> release_from_response!(tag)
+  end
 
-    case {status, JSON.decode(body)} do
-      {0, {:ok, %{"tag_name" => ^tag} = data}} ->
-        data
+  defp release!(tag) do
+    release(tag) || Mix.raise("GitHub release #{tag} is missing after creation or upload.")
+  end
 
-      {_, {:ok, %{"status" => "404"}}} ->
-        nil
-
+  @doc false
+  def release_from_response!(response, tag) do
+    with {body, 0} <- response,
+         {:ok, pages} <- JSON.decode(body),
+         true <- is_list(pages) and Enum.all?(pages, &is_list/1),
+         releases = Enum.concat(pages),
+         true <- Enum.all?(releases, &valid_release?/1) do
+      case Enum.filter(releases, &(&1["tag_name"] == tag)) do
+        [] -> nil
+        [release] -> release
+        _ -> Mix.raise("Multiple GitHub releases use #{tag}. Refusing to choose one.")
+      end
+    else
       _ ->
         Mix.raise(
-          "Cannot read GitHub release #{tag}; check authentication and GitHub availability."
+          "Cannot read GitHub releases for #{tag}; check authentication and GitHub availability."
         )
     end
+  end
+
+  defp valid_release?(%{"tag_name" => tag, "draft" => draft, "assets" => assets})
+       when is_binary(tag) and is_boolean(draft) and is_list(assets) do
+    Enum.all?(assets, &match?(%{"name" => name} when is_binary(name), &1))
+  end
+
+  defp valid_release?(_) do
+    false
   end
 
   defp tag_exists?(tag) do

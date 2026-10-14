@@ -362,11 +362,13 @@ the release but reuse its artifact.
 
 Published tags/assets are never overwritten. Changed build inputs under an
 already-released version fail with a request to bump `VERSION`. A re-run skips an
-already-published matching release; interrupted draft releases can resume from
-the original workflow commit if existing artifact bytes match. Conflicting draft bytes require explicit maintainer
-cleanup, not an automatic overwrite. Releases are not marked as the application's
-latest release. The first release must finish before clean `mix setup` downloads
-can succeed. A missing artifact fails clearly; setup never silently falls back to
+already-published matching release. Release discovery includes drafts. An
+interrupted draft can resume from a publisher-repair commit only if the entire
+system directory (including deleted files), root `mix.lock` and `mise.toml` still
+match its tag, and any existing artifact bytes match the new build. The tag is
+never moved. Conflicting draft bytes require explicit maintainer cleanup, not an
+automatic overwrite. Releases are not marked as the application's latest release.
+The first release must finish before clean `mix setup` downloads can succeed. A missing artifact fails clearly; setup never silently falls back to
 an hour-long source build.
 
 For deliberate local system development (Docker required):
@@ -389,7 +391,8 @@ this custom system with an upstream x86 artifact: their networking capabilities
 differ. This is real gateway software on virtual x86 hardware, not an EC100
 peripheral simulator. After the artifact is available, restart your `mix dev.qemu`
 session and run `mix test --only system_artifact` to check the guest's system
-version and firmware platform.
+version and firmware platform, plus release-note, draft-discovery and safe-retry
+contracts.
 
 ## CI
 
