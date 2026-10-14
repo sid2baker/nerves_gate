@@ -12,8 +12,16 @@ defmodule NervesGateWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={get_csrf_token()} />
         <title>Nerves Gate</title>
-        <link rel="stylesheet" href="/assets/app.css" />
-        <script type="module" src="/assets/app.js">
+        <link
+          phx-track-static
+          rel="stylesheet"
+          href={NervesGateWeb.Endpoint.static_path("/assets/css/app.css")}
+        />
+        <script
+          phx-track-static
+          type="module"
+          src={NervesGateWeb.Endpoint.static_path("/assets/js/app.js")}
+        >
         </script>
       </head>
       <body>{@inner_content}</body>

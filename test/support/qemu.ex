@@ -98,6 +98,8 @@ defmodule NervesGate.TestQemu do
     vm = %{dir: dir, socket: socket, daemon: daemon, pid: pid}
     Process.put(:qemu_vm, vm)
     qmp!(vm, "qmp_capabilities", %{})
+    for key <- ~w(wan equipment vm wan_device disk), do: fault(key, nil)
+    fault("receive", if(options[:receive_stall], do: "WAN receive stalled"))
     status = await(vm, "boot", & &1, 100_000)
     assert status.system.target == "x86_64"
     assert status.system.node == @guest
@@ -109,11 +111,16 @@ defmodule NervesGate.TestQemu do
     assert "tx" == qmp!(vm, "qom-get", %{path: "/objects/wan-stall", property: "queue"})
     assert "on" == qmp!(vm, "qom-get", %{path: "/objects/wan-stall", property: "status"})
     qmp!(vm, "qom-set", %{path: "/objects/wan-stall", property: "status", value: "off"})
+    fault("receive", nil)
   end
 
   def start_internet_faults(vm) do
     command!("nft", ["add", "table", "inet", "ng_faults"])
-    on_exit(fn -> command!("nft", ~w"delete table inet ng_faults") end)
+
+    on_exit(fn ->
+      command!("nft", ~w"delete table inet ng_faults")
+      fault("internet", nil)
+    end)
 
     command!("nft", [
       "add",
@@ -128,9 +135,10 @@ defmodule NervesGate.TestQemu do
   end
 
   def delay_internet(vm) do
-    command!("tc", ~w"qdisc add dev ng-uplink root netem delay 200ms")
-    on_exit(:netem, fn -> command!("tc", ~w"qdisc del dev ng-uplink root") end)
+    command!("tc", ~w"qdisc replace dev ng-uplink root netem delay 200ms")
+    on_exit(:netem, fn -> clear_delay(vm) end)
     log(vm.dir, "faults.log", :internet_delayed_200ms)
+    fault("latency", "Uplink delay +200 ms")
   end
 
   def clear_delay(vm) do
@@ -139,6 +147,7 @@ defmodule NervesGate.TestQemu do
     log(vm.dir, "faults.log", stats)
     command!("tc", ~w"qdisc del dev ng-uplink root")
     on_exit(:netem, fn -> :ok end)
+    fault("latency", nil)
   end
 
   def drop_internet(vm) do
@@ -155,6 +164,7 @@ defmodule NervesGate.TestQemu do
     ])
 
     log(vm.dir, "faults.log", :internet_dropped)
+    fault("internet", "Internet outage")
   end
 
   def lose_internet_packets(vm) do
@@ -177,6 +187,7 @@ defmodule NervesGate.TestQemu do
     ])
 
     log(vm.dir, "faults.log", :every_other_uplink_packet_dropped)
+    fault("internet", "Uplink packet loss 50%")
   end
 
   def dropped_packets(vm) do
@@ -199,26 +210,28 @@ defmodule NervesGate.TestQemu do
     log(vm.dir, "faults.log", rules)
     command!("nft", ~w"flush chain inet ng_faults outage")
     log(vm.dir, "faults.log", :internet_restored)
+    fault("internet", nil)
   end
 
   def disconnect_wan(vm) do
-    qmp!(vm, "set_link", %{name: "wan-nic", up: false})
+    set_link(vm, "wan-nic", false)
   end
 
   def reconnect_wan(vm) do
-    qmp!(vm, "set_link", %{name: "wan-nic", up: true})
+    set_link(vm, "wan-nic", true)
   end
 
   def disconnect_equipment(vm) do
-    qmp!(vm, "set_link", %{name: "equipment-nic", up: false})
+    set_link(vm, "equipment-nic", false)
   end
 
   def reconnect_equipment(vm) do
-    qmp!(vm, "set_link", %{name: "equipment-nic", up: true})
+    set_link(vm, "equipment-nic", true)
   end
 
   def unplug_wan(vm) do
     qmp!(vm, "device_del", %{id: "wan-nic"})
+    fault("wan_device", "WAN NIC removed")
   end
 
   def plug_wan(vm) do
@@ -232,6 +245,8 @@ defmodule NervesGate.TestQemu do
         mac: "52:54:00:12:34:56"
       })
     end
+
+    fault("wan_device", nil)
   end
 
   def fail_disk_writes(vm) do
@@ -249,6 +264,7 @@ defmodule NervesGate.TestQemu do
     })
 
     log(vm.dir, "faults.log", :disk_write_eio_enabled)
+    fault("disk", "Disk writes return EIO")
   end
 
   def restore_disk_writes(vm) do
@@ -261,6 +277,7 @@ defmodule NervesGate.TestQemu do
 
     qmp!(vm, "blockdev-del", %{"node-name": "write-fault"})
     log(vm.dir, "faults.log", :disk_write_eio_removed)
+    fault("disk", nil)
   end
 
   def failed_disk_writes(vm) do
@@ -277,10 +294,14 @@ defmodule NervesGate.TestQemu do
 
   def pause(vm) do
     qmp!(vm, "stop", %{})
+    on_exit(:pause, fn -> resume(vm) end)
+    fault("vm", "VM paused")
   end
 
   def resume(vm) do
     qmp!(vm, "cont", %{})
+    on_exit(:pause, fn -> :ok end)
+    fault("vm", nil)
   end
 
   # A hard reset, using the same disk. Management and QMP are never faulted.
@@ -472,6 +493,7 @@ defmodule NervesGate.TestQemu do
           end
       end
 
+    Process.delete(:qemu_cleanup)
     if errors != [], do: raise("Fault cleanup failed: #{inspect(errors)}; restart mix dev.qemu")
   end
 
@@ -543,6 +565,22 @@ defmodule NervesGate.TestQemu do
       "#{System.system_time(:millisecond)} #{inspect(value, limit: :infinity)}\n",
       [:append]
     )
+  end
+
+  defp set_link(vm, name, up) do
+    qmp!(vm, "set_link", %{name: name, up: up})
+    key = if name == "wan-nic", do: "wan", else: "equipment"
+
+    label =
+      if name == "wan-nic", do: "WAN cable disconnected", else: "Equipment cable disconnected"
+
+    on_exit(key, fn -> unless up, do: set_link(vm, name, true) end)
+    fault(key, if(!up, do: label))
+  end
+
+  defp fault(key, label) do
+    if report = Process.get(:qemu_fault), do: report.(key, label)
+    :ok
   end
 
   defp qmp!(vm, command, arguments) do

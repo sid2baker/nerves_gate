@@ -14,21 +14,21 @@ defmodule NervesGateWeb.Endpoint do
     longpoll: false
   )
 
-  plug(Plug.Static, at: "/assets", from: :nerves_gate, only: ~w(app.css app.js))
-  plug(Plug.Static, at: "/vendor/phoenix", from: :phoenix, only: ~w(phoenix.mjs))
-
-  plug(Plug.Static,
-    at: "/vendor/live_view",
-    from: :phoenix_live_view,
-    only: ~w(phoenix_live_view.esm.js)
-  )
-
   if code_reloading? do
     plug(Tidewave)
     socket("/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket)
     plug(Phoenix.LiveReloader)
     plug(Phoenix.CodeReloader)
+    plug(Volt.DevServer, root: "assets")
   end
+
+  # Firmware uses stable filenames; revalidate them across firmware upgrades.
+  plug(Plug.Static,
+    at: "/",
+    from: :nerves_gate,
+    only: ~w(assets),
+    cache_control_for_etags: "public, no-cache"
+  )
 
   plug(Plug.RequestId)
   plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])

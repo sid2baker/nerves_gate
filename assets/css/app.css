@@ -138,7 +138,33 @@ details[open] > summary { margin-bottom: 16px; }
 .ui-details summary, .ui-settings-details summary { color: var(--ui-muted); }
 .ui-disconnected { display: none; }
 .phx-disconnected .ui-disconnected { display: block; }
+.bench { max-width: 1240px; }
+.bench-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; }
+#device-summary .ui-panel-header { padding: 16px 20px 0; }
+#device-summary .ui-panel-body { padding: 16px 20px; gap: 12px; }
+.bench-observation h3 { font-size: 13px; font-weight: 550; margin-bottom: 8px; }
+.bench-faults { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 18px 24px; border: 1px dashed #c7d3d5; border-radius: var(--ui-radius); }
+.bench-faults h2 { font-size: 14px; font-weight: 650; }
+.bench-fault-list { display: flex; flex-wrap: wrap; gap: 10px 20px; margin: 0; padding: 0; list-style: none; }
+.bench-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+.bench-workspace { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr); gap: 24px; align-items: start; }
+.bench-progress { display: block; width: 100%; height: 6px; margin-top: 12px; accent-color: var(--ui-accent); }
+.bench-scenarios { list-style: none; padding: 0 4px 0 0; margin: 0; max-height: 36rem; overflow-y: auto; }
+.bench-scenarios > li { padding: 18px 0; border-top: 1px solid var(--ui-line); }
+.bench-scenario-heading { display: flex; justify-content: space-between; align-items: start; gap: 20px; margin-bottom: 10px; }
+.bench-scenario-heading h3 { font-size: 14px; line-height: 1.6; font-weight: 550; }
+.bench-scenario-heading > .ui-button { flex: none; }
+.bench-destructive { color: var(--ui-warning); }
+.bench-log { list-style: none; padding: 0 4px 0 0; margin: 0; max-height: 36rem; overflow-y: auto; }
+.bench-log li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--ui-line); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.bench-log time { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+@media (max-width: 900px) {
+  .bench-workspace { grid-template-columns: minmax(0, 1fr); }
+  .bench-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 600px) {
+  .bench-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bench-faults { padding: 16px 20px; }
   .ui-header { padding: 20px; flex-direction: column; align-items: flex-start; gap: 20px; }
   .ui-navigation { width: 100%; }
   .ui-navigation .ui-device-link { margin-left: auto; }

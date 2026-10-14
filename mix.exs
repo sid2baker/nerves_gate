@@ -1,6 +1,6 @@
 # Select host tooling before Nerves reads the project, even after firmware builds.
 case List.first(System.argv()) do
-  command when command in ["setup", "dev.ec100", "dev.qemu"] ->
+  command when command in ["setup", "dev.ec100", "dev.qemu", "assets.build"] ->
     Mix.env(:dev)
     Mix.target(:host)
 
@@ -46,11 +46,13 @@ defmodule NervesGate.MixProject do
       ],
       aliases: [
         setup: &setup/1,
+        "assets.build": ["volt.build --tailwind"],
         test: ["qemu.test"],
         "test.qemu": ["qemu.test"],
         ci: [
           "compile --warnings-as-errors",
           "format --check-formatted",
+          "volt.js.check",
           "credo --strict",
           "dialyzer",
           "ex_dna --max-clones 0",
@@ -72,14 +74,16 @@ defmodule NervesGate.MixProject do
         ci: :host,
         "dev.ec100": :host,
         "dev.qemu": :host,
-        "qemu.test": :host
+        "qemu.test": :host,
+        "assets.build": :host
       ],
       preferred_envs: [
         setup: :dev,
         ci: :test,
         "dev.ec100": :dev,
         "dev.qemu": :dev,
-        "qemu.test": :test
+        "qemu.test": :test,
+        "assets.build": :dev
       ]
     ]
   end
@@ -98,6 +102,7 @@ defmodule NervesGate.MixProject do
 
   defp deps do
     [
+      {:volt, "~> 0.23.0", only: [:dev, :test], targets: :host},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},

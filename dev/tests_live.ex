@@ -1,59 +1,337 @@
 defmodule NervesGateWeb.TestsLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  alias NervesGate.QemuTests
+  alias NervesGate.{ManualFaults, QemuTests}
+
+  on_mount({NervesGateWeb.Observations, :status})
 
   def mount(_, _, socket) do
     if connected?(socket), do: QemuTests.subscribe()
-    {:ok, assign(socket, run: QemuTests.snapshot(), error: nil)}
+    {:ok, assign(socket, run: QemuTests.snapshot(), error: nil, confirm_run: nil)}
   end
 
-  def handle_event("run", %{"scenario" => scenario}, socket) do
-    case QemuTests.run(scenario) do
-      {:ok, _} -> {:noreply, assign(socket, run: QemuTests.snapshot(), error: nil)}
-      {:error, message} -> {:noreply, assign(socket, error: message)}
-    end
-  end
+  def handle_event("mode", %{"mode" => mode}, socket),
+    do: command(socket, QemuTests.mode(mode))
+
+  def handle_event("manual", %{"action" => action}, socket),
+    do: command(socket, QemuTests.manual(action))
+
+  def handle_event("prepare_run", %{"scenario" => scenario}, socket),
+    do: {:noreply, assign(socket, confirm_run: scenario, error: nil)}
+
+  def handle_event("cancel_run", _, socket),
+    do: {:noreply, assign(socket, :confirm_run, nil)}
+
+  def handle_event("run", %{"scenario" => scenario}, socket),
+    do: command(socket, QemuTests.run(scenario))
 
   def handle_info({:qemu_tests, run}, socket), do: {:noreply, assign(socket, :run, run)}
 
+  defp command(socket, {:error, message}), do: {:noreply, assign(socket, error: message)}
+
+  defp command(socket, {:ok, _}), do: command(socket, :ok)
+
+  defp command(socket, :ok),
+    do: {:noreply, assign(socket, run: QemuTests.snapshot(), error: nil, confirm_run: nil)}
+
   def render(assigns) do
     ~H"""
-    <main class="ui-main ui-stack" id="tests">
-      <.link href="/" class="ui-text-link">Back to Overview</.link>
+    <main class="ui-main ui-stack bench" id="tests">
+      <.link href="/" class="ui-text-link">← Back to Overview</.link>
       <.page_header
-        title="QEMU scenarios"
-        description="One disposable device. The same scenarios from the page, CLI and CI."
+        eyebrow="Development · owned QEMU only"
+        title="Device test bench"
+        description="Run repeatable scenarios or inject a fault and watch the real device respond."
       />
-      <p>Scenarios change settings and inject faults. Do not edit the device during a run.</p>
-      <p>CLI: <code>mix test --only cable_loss</code> · all: <code>mix test</code></p>
-      <p>
-        Firmware is built at session startup. Restart <code>mix dev.qemu</code> to use new firmware.
-      </p>
-      <.notice :if={@error} tone="warning" role="alert">{@error}</.notice>
-      <button
-        class="ui-button"
-        phx-click="run"
-        phx-value-scenario="all"
-        disabled={@run.status == :running}
-      >Run all</button>
-      <p role="status" aria-live="polite" id="run-status">Run: {@run.status} · {@run.phase}</p>
-      <ul class="ui-stack" id="test-results">
-        <li :for={row <- @run.rows} id={"scenario-#{row.id}"}>
-          <strong>{row.name}</strong>
-          — {row.status}
-          <span :if={row.milliseconds}>({row.milliseconds} ms)</span>
-          <button
-            class="ui-button"
-            phx-click="run"
-            phx-value-scenario={row.id}
-            disabled={@run.status == :running}
-          >Run {row.id}</button>
-          <pre :if={row.detail != ""}>{row.detail}</pre>
-        </li>
-      </ul>
-      <p>Only the latest run is retained. Logs are in <code>_build/qemu-tests/</code>.</p>
+      <div class="ui-disconnected">
+        <.notice tone="warning" role="alert">
+          Connection to the bench lost. Controls and observations may be stale; manual faults remain active.
+        </.notice>
+      </div>
+      <.panel
+        title="Observed device"
+        description="Live device projection, not a test verdict"
+        icon="network"
+        id="device-summary"
+      >
+        <div class="bench-summary">
+          <div
+            :for={item <- summary(@projection)}
+            class="bench-observation"
+            data-observation={item.id}
+          >
+            <h3>{item.name}</h3>
+            <.status tone={item.tone}>{item.label}</.status>
+          </div>
+        </div>
+        <p :if={@run.faults["vm"]} class="ui-help">
+          VM pause is injected. The projection may show its last observation until the connection times out.
+        </p>
+        <p :if={!@projection.backend.available} class="ui-help">
+          Device unavailable; waiting for a fresh projection. Fault controls use the separate QEMU control channel.
+        </p>
+      </.panel>
+
+      <section class="bench-faults" id="active-faults" aria-label="Injected faults">
+        <div>
+          <h2>Injected faults</h2>
+          <p class="ui-help">These are deliberate disruptions, not observed device failures.</p>
+        </div>
+        <p :if={@run.blocked} role="alert">
+          Unknown — last confirmed faults below. Restart the session.
+        </p>
+        <p :if={@run.faults == %{} && !@run.blocked} id="no-faults">None active</p>
+        <ul :if={@run.faults != %{}} class="bench-fault-list">
+          <li :for={{key, label} <- Enum.sort(@run.faults)} id={"fault-#{key}"}>
+            <.status tone="warning">{label}</.status>
+          </li>
+        </ul>
+      </section>
+
+      <.notice :if={@error} tone="warning" role="alert" id="bench-error">{@error}</.notice>
+      <.notice :if={@run.blocked} tone="warning" role="alert">
+        A worker or cleanup failed. Control is blocked because fault state is uncertain.
+        Inspect <code>_build/qemu-tests/</code>, then restart <code>mix dev.qemu</code>.
+      </.notice>
+      <div class="bench-toolbar">
+        <div class="ui-actions" role="group" aria-label="Bench control mode">
+          <.button
+            id="mode-scenarios"
+            variant="secondary"
+            phx-click="mode"
+            phx-value-mode="scenarios"
+            aria-pressed={to_string(@run.mode == :scenarios)}
+            disabled={busy?(@run)}
+          >Scenarios</.button>
+          <.button
+            id="mode-manual"
+            variant="secondary"
+            phx-click="mode"
+            phx-value-mode="manual"
+            aria-pressed={to_string(@run.mode == :manual)}
+            disabled={busy?(@run) || @run.mode == :manual}
+          >Manual</.button>
+        </div>
+        <p class="ui-help" id="control-owner">{owner_label(@run)}</p>
+      </div>
+
+      <div class="bench-workspace">
+        <div class="ui-stack">
+          <.panel title="Execution" icon="clock" id="execution">
+            <p role="status" aria-live="polite" id="run-status">{@run.phase}</p>
+            <div :if={@run.id && @run.mode == :scenarios}>
+              <p class="ui-help">
+                Run #{@run.id} · {@run.status} · {completed(@run)} / {selected(@run)} scenarios finished
+              </p>
+              <progress
+                class="bench-progress"
+                value={completed(@run)}
+                max={max(selected(@run), 1)}
+                aria-label="Scenario progress"
+              />
+            </div>
+          </.panel>
+
+          <.panel
+            :if={@run.mode == :manual}
+            title="Manual controls"
+            description="Reversible faults only; management networking is never faulted"
+            icon="settings"
+            id="manual-controls"
+          >
+            <.notice>
+              Manual control is shared by every browser and blocks UI, CLI and CI scenario runs.
+              Closing this page does not clear faults. Switching to Scenarios clears them and releases control.
+            </.notice>
+            <div class="ui-settings-list">
+              <.setting_row :for={control <- ManualFaults.controls()} label={control.name}>
+                <div class="ui-actions" role="group" aria-label={control.name}>
+                  <.button
+                    :for={{action, label} <- control.choices}
+                    id={"manual-#{action}"}
+                    variant="secondary"
+                    phx-click="manual"
+                    phx-value-action={action}
+                    disabled={busy?(@run)}
+                  >{label}</.button>
+                </div>
+              </.setting_row>
+            </div>
+            <.button
+              id="clear-faults"
+              phx-click="manual"
+              phx-value-action="clear"
+              disabled={busy?(@run)}
+            >
+              Clear all faults
+            </.button>
+            <p class="ui-help">
+              Clear reconnects both cables, restores the uplink, removes delay and resumes the VM.
+              It does not reset the disk, change settings or erase Tailscale enrollment. Recovery may take time.
+              Reboot, power cut and fresh disk are not manual controls.
+            </p>
+          </.panel>
+
+          <.panel
+            :if={@run.mode == :scenarios}
+            title="Scenarios"
+            description="The same Elixir scenarios in the UI, CLI and CI"
+            icon="check"
+            id="scenarios"
+          >
+            <:meta>
+              <.button
+                id="run-all"
+                phx-click="prepare_run"
+                phx-value-scenario="all"
+                disabled={busy?(@run)}
+              >Run all</.button>
+            </:meta>
+            <p class="ui-help">
+              Scenarios change device settings. Fresh-disk scenarios erase enrollment;
+              any failed scenario also replaces the disk. Do not edit the device elsewhere during a run.
+            </p>
+            <.notice :if={@confirm_run} tone="warning" id="confirm-run" role="alert">
+              <p>
+                Start <strong>{@confirm_run}</strong>? Device settings may change and disk replacement erases Tailscale enrollment.
+              </p>
+              <div class="ui-actions">
+                <.button
+                  id="confirm-start"
+                  phx-mounted={Phoenix.LiveView.JS.focus()}
+                  phx-click="run"
+                  phx-value-scenario={@confirm_run}
+                  disabled={busy?(@run)}
+                >Start run</.button>
+                <.button variant="quiet" phx-click="cancel_run">Cancel</.button>
+              </div>
+            </.notice>
+            <ul
+              class="bench-scenarios"
+              id="test-results"
+              tabindex="0"
+              aria-label="Available scenarios"
+            >
+              <li :for={row <- @run.rows} id={"scenario-#{row.id}"}>
+                <div class="bench-scenario-heading">
+                  <div>
+                    <h3>{row.name}</h3>
+                    <p class="ui-help">
+                      <code>{row.id}</code><span :if={row.fresh_disk} class="bench-destructive"> · fresh disk</span>
+                    </p>
+                  </div>
+                  <.button
+                    variant="secondary"
+                    phx-click="prepare_run"
+                    phx-value-scenario={row.id}
+                    disabled={busy?(@run)}
+                    aria-label={"Run #{row.id}"}
+                  >Run</.button>
+                </div>
+                <div class="ui-actions">
+                  <.status tone={result_tone(row.status)}>{row.status}</.status>
+                  <span :if={row.milliseconds} class="ui-help">{duration(row.milliseconds)}</span>
+                </div>
+                <details :if={row.status == :failed && row.detail != ""}>
+                  <summary>Failure details</summary>
+                  <pre class="ui-bus-data">{row.detail}</pre>
+                </details>
+              </li>
+            </ul>
+          </.panel>
+        </div>
+        <.panel
+          title="Action log"
+          description="Last 100 actions and runner events · oldest first · UTC"
+          icon="clock"
+          id="bench-events"
+        >
+          <p :if={@run.events == []} class="ui-help">No actions yet. Choose a mode to begin.</p>
+          <ol
+            class="bench-log"
+            id="event-log"
+            phx-hook="ScrollToBottom"
+            tabindex="0"
+            aria-label="Chronological bench events"
+          >
+            <li :for={event <- @run.events} id={"event-#{event.id}"}>
+              <time datetime={event.at}>{String.slice(event.at, 11, 8)}</time>
+              <span>{event.message}</span>
+            </li>
+          </ol>
+        </.panel>
+      </div>
+      <footer class="ui-help">
+        <p>
+          CLI: <code>mix test --only cable_loss</code>
+          · latest run and 100 events kept in memory · diagnostics: <code>_build/qemu-tests/</code>
+        </p>
+        <p>
+          Firmware is built at session startup. Restart <code>mix dev.qemu</code>
+          for device-code changes; restarting replaces the disposable disk.
+        </p>
+      </footer>
     </main>
     """
   end
+
+  defp busy?(run), do: run.blocked || run.status == :running || run.manual_action != nil
+  defp completed(run), do: Enum.count(run.rows, &(&1.status in [:passed, :failed]))
+  defp selected(run), do: Enum.count(run.rows, &(&1.status != :skipped))
+  defp result_tone(:passed), do: "good"
+  defp result_tone(:failed), do: "warning"
+  defp result_tone(_), do: "neutral"
+  defp duration(ms) when ms < 1000, do: "#{ms} ms"
+  defp duration(ms), do: "#{Float.round(ms / 1000, 1)} s"
+
+  defp owner_label(%{blocked: true}), do: "Control blocked · restart required"
+  defp owner_label(%{mode: :manual}), do: "Manual owns the device · switching modes clears faults"
+  defp owner_label(%{status: :running}), do: "Scenario runner owns the device"
+  defp owner_label(_), do: "Ready · no active controller"
+
+  defp summary(projection) do
+    available = projection.backend.available
+    internet = projection.connections.internet.health
+    remote = projection.remote_access
+
+    [
+      observation(
+        "device",
+        "Device",
+        if(available, do: "Available", else: "Unavailable"),
+        available
+      ),
+      port_observation(projection, "eth0", "WAN · eth0"),
+      port_observation(projection, "eth1", "Equipment · eth1"),
+      observation(
+        "internet",
+        "Internet",
+        if(available, do: String.capitalize(internet), else: "Unknown"),
+        available && internet == "online"
+      ),
+      observation(
+        "tailscale",
+        "Tailscale",
+        if(available, do: NervesGateWeb.RemoteStatus.label(remote), else: "Unknown"),
+        available && remote.available && remote.state == "online"
+      )
+    ]
+  end
+
+  defp port_observation(projection, name, label) do
+    port = Enum.find(projection.connections.ports, &(&1.name == name))
+
+    value =
+      cond do
+        not projection.backend.available or is_nil(port) -> "Unknown"
+        not port.present -> "Not installed"
+        port.link -> "Link up"
+        true -> "Link down"
+      end
+
+    observation(name, label, value, value == "Link up")
+  end
+
+  defp observation(id, name, label, good),
+    do: %{id: id, name: name, label: label, tone: if(good, do: "good", else: "neutral")}
 end

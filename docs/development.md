@@ -10,7 +10,7 @@ mix dev.qemu
 ```
 
 Wait for **QEMU ready**, then open **http://localhost:4000** for the gateway UI or
-**/tests** for scenarios. The proxy opens only after Phoenix answers HTTP requests.
+**/tests** for the device test bench. The proxy opens only after Phoenix answers HTTP requests.
 No EC100, Tailscale login, environment file or manual network setup is needed.
 
 `mix setup` checks the workstation, installs missing Hex/Rebar/Nerves bootstrap,
@@ -45,7 +45,7 @@ development machine rather than running the session as root.
 
 Keep `mix dev.qemu` running in one terminal. It builds current development firmware,
 boots a disposable disk and starts workstation Phoenix with code reload,
-LiveReload and Tidewave. Host UI changes reload; device code changes require
+LiveReload, Volt and Tidewave. Host UI changes reload; device code changes require
 restarting the command to rebuild firmware. Run `mix setup` again after changing
 dependencies or the local Nerves system.
 
@@ -56,9 +56,35 @@ mix test --only cable_loss       # one scenario on the running device
 mix test                        # all scenarios on that same session
 ```
 
-Results also appear at **http://localhost:4000/tests**. Only one run is admitted at
-a time; avoid manual device changes during a run. Some scenarios reboot or replace
-the disposable device. The UI reconnects afterward; do not keep valuable state there.
+Results also appear at **http://localhost:4000/tests**. The bench has two shared modes:
+
+- **Scenarios** runs the same modules as the CLI and CI, with current progress and
+  per-scenario results. Fresh-disk scenarios are labelled; the page asks for
+  confirmation before starting a run. Some scenarios reboot or replace the device,
+  and any failed scenario also replaces its disk, discarding Tailscale enrollment.
+- **Manual** exclusively holds the bench until you switch back to Scenarios.
+  Disconnect/reconnect either Ethernet cable, inject an Internet outage or 50%
+  uplink loss, add/remove 200 ms latency, and pause/resume the VM. Actions are
+  serialized by the backend, not merely disabled in the UI. CLI runs are rejected
+  while manual control is held; manual actions are rejected during scenario runs.
+
+Manual faults survive page reloads and closing the browser. **Clear all faults**
+resumes the VM, reconnects cables, and removes uplink faults; it does not change
+settings, replace the disk or erase enrollment. Switching back to Scenarios performs
+that cleanup before releasing control. Recovery is asynchronous: a cleared fault
+is not proof that Internet or Tailscale has recovered. A control timeout or cleanup
+failure blocks the bench until the session is restarted.
+
+The live device summary uses the same device-owned projection stream as the rest of
+the UI. Injected faults are shown separately from observations; while paused, a VM's
+last observation can remain visible until distribution detects the loss. One shared
+in-memory log retains the last 100 actions, fault changes and runner events across
+both modes. It does not record private login links or distribution credentials.
+
+Only one controller is admitted at a time; avoid editing device settings elsewhere
+during a run. The bench lock coordinates fault controls and scenario runs, not all
+gateway settings pages. The UI reconnects after reboots; do not keep valuable state
+on the disposable device.
 
 For a clean, standalone run, stop your development session first, then run:
 
@@ -72,9 +98,34 @@ Starting/stopping `mix dev.qemu` and running full `mix ci` remain operator actio
 `mix test.qemu` is a compatibility alias for `mix test`.
 
 Commands select the appropriate host dev/test environment even if firmware
-variables remain exported. All browser assets are checked in. Only when changing
-CSS, rebuild with `cd assets && npm ci && npm run build`; Node.js is not needed
-for normal development or firmware compilation.
+variables remain exported.
+
+### Frontend assets
+
+Browser sources live in `assets/css/` and `assets/js/`. [Volt](https://hexdocs.pm/volt/)
+serves them inside the host Phoenix endpoint, watches sources and templates (including
+`dev/`), and updates CSS without a page reload. JavaScript entry changes reload the
+page. No Node.js, npm commands or separate asset watcher are needed. After adding or
+updating host dependencies/configuration, restart your development session.
+
+Before committing asset changes or building firmware, run:
+
+```sh
+mix assets.build                                   # host-only JS bundle + Tailwind CSS
+MIX_TARGET=host MIX_ENV=dev mix volt.js.check        # JS formatting and lint
+```
+
+`mix format` also formats JavaScript on the host. Commit the generated files under
+`priv/static/assets/` with their sources. Firmware serves those files directly;
+it never loads Volt or its native tooling. Stable entry filenames and ETag
+revalidation avoid needing a Volt runtime manifest reader on the device. The
+JavaScript bundle includes Phoenix and LiveView from the locked Mix dependencies,
+not separate npm versions. Rebuild after updating either dependency too.
+
+Volt's first Tailwind build downloads its compiler into the host npm_ex cache.
+Firmware builds need only the checked-in output, not that cache or frontend tooling.
+The host development CSP permits inline styles for Volt's error overlay; firmware
+keeps its strict policy.
 
 ## Which configuration is used?
 
@@ -139,7 +190,12 @@ The runner establishes an eth0 DHCP baseline before each ordinary scenario and
 reuses the booted device. Scenarios requiring a fresh disk declare `boot_options/0`.
 A failed scenario causes a fresh boot before continuing; failed fault cleanup or
 a runner timeout blocks further runs until the session is restarted. Only the
-latest result is kept in memory.
+latest result and the last 100 bench events are kept in memory. The `test_bench`
+scenario exercises runner admission and the real manual fault driver's cleanup,
+including cleanup with a paused VM and combined faults. `mix test --only frontend_assets`
+checks host and firmware CSS/JS delivery, firmware cache revalidation and strict CSP,
+and absence of the Volt runtime on the guest. Restart `mix dev.qemu` after rebuilding
+assets so that this check sees the new files in firmware too.
 
 The page, CLI endpoints, runner and scenarios exist only in host dev/test. The
 runner refuses EC100 or arbitrary VMs; CLI requests use the page's session and
