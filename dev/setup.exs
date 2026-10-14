@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Setup.Qemu do
   @compile {:no_warn_undefined, Req}
   @version "1.104.1"
   @archive_sha256 "108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528"
-  @tools ~w(git make cc pkg-config fwup docker qemu-system-x86_64 pasta unshare mount flock ip nft tc socat)
+  @tools ~w(git make cc pkg-config fwup docker qemu-system-x86_64 pasta unshare mount flock ip nft tc socat inotifywait)
 
   @impl true
   def run([]) do
@@ -32,8 +32,13 @@ defmodule Mix.Tasks.Setup.Qemu do
 
   defp prerequisites! do
     unless :os.type() == {:unix, :linux} and
-             String.starts_with?(to_string(:erlang.system_info(:system_architecture)), "x86_64") do
-      Mix.raise("QEMU development requires Linux x86_64. See docs/development.md#prerequisites.")
+             String.starts_with?(to_string(:erlang.system_info(:system_architecture)), [
+               "x86_64",
+               "aarch64"
+             ]) do
+      Mix.raise(
+        "QEMU development requires Linux x86_64 or aarch64. See docs/development.md#prerequisites."
+      )
     end
 
     unless :erlang.system_info(:otp_release) == ~c"29" do
