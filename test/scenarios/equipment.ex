@@ -7,8 +7,6 @@ defmodule NervesGate.Scenarios.Equipment do
   def name, do: "equipment cable failure leaves Internet and management available"
 
   def run(vm) do
-    Qemu.start_upstream(vm)
-
     network =
       Map.put(settings("eth0"), "eth1", %{
         "role" => "equipment",

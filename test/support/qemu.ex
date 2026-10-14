@@ -3,8 +3,6 @@ defmodule NervesGate.TestQemu do
   import ExUnit.Assertions
 
   @guest :"nerves_gate@192.168.77.2"
-  # VintageNet's default TCP reachability targets, hosted ONLY in the test namespace.
-  @probe_ips ~w(1.1.1.1 8.8.8.8 208.67.222.222 9.9.9.9 156.154.70.5)
 
   def start(options \\ []) do
     isolated!()
@@ -113,12 +111,7 @@ defmodule NervesGate.TestQemu do
     qmp!(vm, "qom-set", %{path: "/objects/wan-stall", property: "status", value: "off"})
   end
 
-  def start_upstream(vm) do
-    for ip <- @probe_ips do
-      command!("ip", ["addr", "add", "#{ip}/32", "dev", "lo"])
-      on_exit(fn -> command!("ip", ["addr", "del", "#{ip}/32", "dev", "lo"]) end)
-    end
-
+  def start_internet_faults(vm) do
     command!("nft", ["add", "table", "inet", "ng_faults"])
     on_exit(fn -> command!("nft", ~w"delete table inet ng_faults") end)
 
@@ -131,68 +124,21 @@ defmodule NervesGate.TestQemu do
       "{ type filter hook output priority 0; policy accept; }"
     ])
 
-    daemon!(
-      :upstream,
-      "socat",
-      ["-d", "-d", "TCP-LISTEN:53,reuseaddr,fork", "EXEC:/bin/true"],
-      vm.dir
-    )
-
-    log(vm.dir, "faults.log", :upstream_started)
+    log(vm.dir, "faults.log", :internet_faults_ready)
   end
 
   def delay_internet(vm) do
-    command!(
-      "tc",
-      ~w"qdisc add dev lo root handle 1: prio bands 3 priomap 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
-    )
-
-    on_exit(:netem, fn -> command!("tc", ~w"qdisc del dev lo root") end)
-    command!("tc", ~w"qdisc add dev lo parent 1:3 handle 30: netem delay 200ms")
-
-    for ip <- @probe_ips do
-      command!("tc", [
-        "filter",
-        "add",
-        "dev",
-        "lo",
-        "protocol",
-        "ip",
-        "parent",
-        "1:",
-        "prio",
-        "1",
-        "u32",
-        "match",
-        "ip",
-        "dst",
-        "#{ip}/32",
-        "match",
-        "ip",
-        "dport",
-        "53",
-        "0xffff",
-        "flowid",
-        "1:3"
-      ])
-    end
-
+    command!("tc", ~w"qdisc add dev ng-uplink root netem delay 200ms")
+    on_exit(:netem, fn -> command!("tc", ~w"qdisc del dev ng-uplink root") end)
     log(vm.dir, "faults.log", :internet_delayed_200ms)
   end
 
   def clear_delay(vm) do
     isolated!()
-    {stats, 0} = System.cmd("tc", ~w"-s qdisc show dev lo")
+    {stats, 0} = System.cmd("tc", ~w"-s qdisc show dev ng-uplink")
     log(vm.dir, "faults.log", stats)
-    command!("tc", ~w"qdisc del dev lo root")
+    command!("tc", ~w"qdisc del dev ng-uplink root")
     on_exit(:netem, fn -> :ok end)
-  end
-
-  def probe_count(vm) do
-    case File.read(Path.join(vm.dir, "upstream.log")) do
-      {:ok, text} -> length(Regex.scan(~r"accepting connection from", text))
-      {:error, :enoent} -> 0
-    end
   end
 
   def drop_internet(vm) do
@@ -202,12 +148,8 @@ defmodule NervesGate.TestQemu do
       "inet",
       "ng_faults",
       "outage",
-      "ip",
-      "daddr",
-      "{ #{Enum.join(@probe_ips, ", ")} }",
-      "tcp",
-      "dport",
-      "53",
+      "oifname",
+      "\"ng-uplink\"",
       "counter",
       "drop"
     ])
@@ -222,12 +164,8 @@ defmodule NervesGate.TestQemu do
       "inet",
       "ng_faults",
       "outage",
-      "ip",
-      "daddr",
-      "{ #{Enum.join(@probe_ips, ", ")} }",
-      "tcp",
-      "dport",
-      "53",
+      "oifname",
+      "\"ng-uplink\"",
       "numgen",
       "inc",
       "mod",
@@ -238,7 +176,7 @@ defmodule NervesGate.TestQemu do
       "drop"
     ])
 
-    log(vm.dir, "faults.log", :every_other_probe_packet_dropped)
+    log(vm.dir, "faults.log", :every_other_uplink_packet_dropped)
   end
 
   def dropped_packets(vm) do
@@ -381,6 +319,69 @@ defmodule NervesGate.TestQemu do
     boot_vm(vm.dir, Path.join(vm.dir, "gateway.img"))
   end
 
+  # Read-only kernel/userspace compatibility check, independent of enrollment.
+  def check_firewall(vm) do
+    isolated!()
+
+    for tool <- ~w(iptables ip6tables), table <- ~w(filter nat mangle) do
+      {output, status} =
+        :erpc.call(
+          @guest,
+          System,
+          :cmd,
+          ["/usr/sbin/#{tool}", ["--wait", "5", "-t", table, "-S"], [stderr_to_stdout: true]],
+          10_000
+        )
+
+      log(vm.dir, "firewall.log", {tool, table, status})
+      assert status == 0, "Guest #{tool} #{table} table unavailable: #{output}"
+      if table == "nat", do: assert(output =~ "-P POSTROUTING ")
+    end
+
+    :ok
+  end
+
+  # Run on the guest, not the workstation. No mock DNS, proxy or TLS bypass.
+  def internet_request(vm, timeout \\ 15_000) do
+    isolated!()
+    ssl = :erpc.call(@guest, :httpc, :ssl_verify_host_options, [true], 2_000)
+
+    result =
+      :erpc.call(
+        @guest,
+        :httpc,
+        :request,
+        [
+          :get,
+          {~c"https://example.com/", [{~c"connection", ~c"close"}]},
+          [
+            timeout: timeout,
+            connect_timeout: timeout,
+            autoredirect: false,
+            ssl: ssl
+          ],
+          [body_format: :binary]
+        ],
+        timeout + 5_000
+      )
+
+    result =
+      case result do
+        {:ok, {{_, status, _}, _, _}} -> {:ok, status}
+        {:error, reason} -> {:error, reason}
+      end
+
+    log(vm.dir, "internet.log", result)
+    result
+  end
+
+  # Never send a private login URL through call/3, assertions or diagnostics.
+  def login_ready? do
+    isolated!()
+
+    match?({:ok, "https://" <> _}, :erpc.call(@guest, NervesGate, :remote_login_url, [], 2_000))
+  end
+
   def call(vm, function, args) do
     isolated!()
     result = :erpc.call(@guest, NervesGate, function, args, 15_000)
@@ -435,7 +436,6 @@ defmodule NervesGate.TestQemu do
       )
 
     {:ok, pid} = Supervisor.start_child(__MODULE__.Supervisor, spec)
-    if id == :upstream, do: on_exit(fn -> stop_supervised(id) end)
     pid
   end
 

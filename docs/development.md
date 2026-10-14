@@ -23,16 +23,17 @@ Setup neither boots QEMU nor runs tests, and never touches the ARM daemon or EC1
 
 ### Prerequisites
 
-- **Linux x86_64**, with unprivileged user/network namespaces and `/dev/net/tun`.
+- **Linux x86_64**, with unprivileged user/network/mount namespaces and `/dev/net/tun`.
 - **Elixir 1.20 / OTP 29**; `mise install` uses the versions in `mise.toml` if you use mise.
 - **fwup**, available on `PATH`; see its [installation guide](https://github.com/fwup-home/fwup#installing).
 - **Docker**, running and usable by your account without sudo.
-- Git, a C compiler, make, pkg-config, QEMU, iproute2, nftables, socat and util-linux.
+- Git, a C compiler, make, pkg-config, QEMU, **pasta** (the `passt` package), iproute2,
+  nftables, socat and util-linux.
 
 For Debian/Ubuntu, the last group can be installed with:
 
 ```sh
-sudo apt install git build-essential pkg-config qemu-system-x86 iproute2 nftables socat util-linux
+sudo apt install git build-essential pkg-config qemu-system-x86 passt iproute2 nftables socat util-linux
 ```
 
 Install the toolchain, fwup and Docker separately. `mix setup` reports missing
@@ -146,16 +147,62 @@ CSRF protection through a private Unix socket.
 
 ### Isolation
 
-Development and CI run inside an empty user/network namespace. The device has
-eth0 (Internet), eth1 (equipment) and eth2 (management, 192.168.77.2). Management is
-never faulted. The controller uses 192.168.77.1 and development cookie `mycookie`.
-A loopback-only socat proxy exposes Phoenix's Unix socket to the workstation.
+Development and CI run inside a user/network namespace created by **pasta**.
+Pasta supplies an outbound IPv4 uplink, `ng-uplink` (192.0.2.2/24), using ordinary
+workstation sockets. QEMU's user-mode Ethernet networks route through it. The
+real guest runs DHCP, DNS, VintageNet connectivity checks and tailscaled; no
+synthetic Internet responders or status overrides are used.
 
-All TAP interfaces, firewall rules, probe fixtures and Erlang distribution stay
-inside the namespace. No workstation routes, firewall rules or VPN are changed.
-The namespace has no public Internet access. Images are disposable files, never
-physical disks. See the [system notes](../systems/nerves_system_x86_64/GATEWAY.md)
-for the x86 platform's differences from EC100.
+The device has eth0 (Internet), eth1 (equipment) and eth2 (management,
+192.168.77.2). Management is never faulted. The controller uses 192.168.77.1 and
+development cookie `mycookie`. A loopback-only socat proxy exposes Phoenix's Unix
+socket to the workstation.
+
+All TAP interfaces, firewall rules and Erlang distribution stay inside the
+namespace. Pasta's automatic port forwarding is explicitly disabled in both
+directions, and its gateway does not map to workstation loopback. DNS alone is
+forwarded through 192.0.2.3 to the workstation resolver, including loopback-only
+resolvers. A private mount of `resolv.conf` makes QEMU use that address without
+changing workstation DNS. No workstation routes, firewall rules or VPN are changed.
+Outbound traffic still follows workstation networking/VPN policy: this is not a
+sandbox against access to reachable LAN/tailnet services. Guest services have no
+public inbound port forwards; an enrolled guest can be reached through its own
+Tailscale identity according to tailnet policy.
+
+Images are disposable files, never physical disks. See the
+[system notes](../systems/nerves_system_x86_64/GATEWAY.md) for differences from EC100.
+
+### Real Internet and Tailscale
+
+After **QEMU ready**, configure eth0 with DHCP in the UI. `/remote` uses the real
+guest tailscaled: connect with a unique device name and follow the private login
+link yourself. No workstation identity or auth key is copied into the guest.
+Use a disposable test tailnet/device; the development UI and distribution are
+privileged, and running scenarios can replace the disk and discard enrollment.
+Remove obsolete QEMU devices from your tailnet after testing.
+
+Focused checks use the same scenarios in the UI, CLI and CI:
+
+```sh
+mix test --only internet          # guest DNS + verified HTTPS, outage, recovery
+mix test --only latency           # HTTPS with 200ms uplink delay
+mix test --only loss              # 50% uplink loss, management and HTTPS recovery
+mix test --only firewall          # guest IPv4/IPv6 filter, NAT and mangle tables
+mix test --only tailscale_login   # fresh guest checks firewall and obtains a private login link
+```
+
+The `firewall` check needs neither Internet nor Tailscale enrollment. It reads
+tables without changing rules and is also a prerequisite in `tailscale_login`.
+The other checks require working public Internet access. `internet`, `latency` and
+`loss` use `https://example.com/` with the guest's CA store and hostname verification.
+Outage/loss rules and latency apply to the real namespace uplink, not management.
+At 50% packet loss, HTTPS may fail; the scenario requires actual packet drops,
+working management during the fault, and successful HTTPS after restoration.
+External DNS/HTTPS/Tailscale service failures are genuine test failures, not skipped
+or replaced with fixtures. `tailscale_login` uses a fresh disposable disk and never
+completes account enrollment or prints the login link; it proves the control-server
+handshake, not authenticated peer traffic. Use the UI login for peer access and
+approved equipment-subnet sharing checks.
 
 ## Coverage and limits
 
@@ -164,9 +211,12 @@ preservation, invalid inputs, cable loss, NIC removal, VM freeze, configuration
 trials, reboot/crash persistence, disk errors, upstream outages, latency and loss.
 The source folder is the authoritative list.
 
-Probe fixtures accept real TCP/53 connections to VintageNet's default probe IPs;
-they do not prove public Internet or Tailscale access. Receive-stall faults delay
-all WAN receive traffic, not just DHCP. Disk faults return real EIO; removing the
+Internet checks originate inside the guest, including DNS and certificate-verified
+HTTPS; Tailscale login uses the real daemon and public control server. The uplink
+is IPv4 and uses userspace translation, not an EC100 PHY or a real ISP router:
+throughput, IPv6 and direct-versus-relayed Tailscale paths need separate qualification.
+Receive-stall faults delay all WAN receive traffic, not just DHCP. Disk faults
+return real EIO; removing the
 fault does not heal a read-only guest filesystem. SIGKILL of QEMU is not physical
 power loss: host disk caches remain intact.
 

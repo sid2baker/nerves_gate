@@ -4,15 +4,17 @@ defmodule NervesGate.Scenarios.Internet do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "upstream outage is detected with Ethernet still connected and recovers"
+  def name, do: "real DNS/HTTPS works, fails during an upstream outage, and recovers"
 
   def run(vm) do
-    Qemu.start_upstream(vm)
+    Qemu.start_internet_faults(vm)
     save(vm, settings("eth0"))
-    Qemu.await(vm, "Internet probe targets reachable", &internet?/1, 60_000)
+    assert {:ok, 200} = Qemu.internet_request(vm)
+    Qemu.await(vm, "public Internet reachable", &internet?/1, 60_000)
 
     try do
       Qemu.drop_internet(vm)
+      assert {:error, _} = Qemu.internet_request(vm, 5_000)
 
       degraded =
         Qemu.await(
@@ -34,6 +36,7 @@ defmodule NervesGate.Scenarios.Internet do
       Qemu.restore_internet(vm)
     end
 
+    assert {:ok, 200} = Qemu.internet_request(vm)
     Qemu.await(vm, "upstream recovered", &internet?/1, 60_000)
   end
 end

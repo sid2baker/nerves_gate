@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Setup.Qemu do
   @compile {:no_warn_undefined, Req}
   @version "1.104.1"
   @archive_sha256 "108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528"
-  @tools ~w(git make cc pkg-config fwup docker qemu-system-x86_64 unshare flock ip nft tc socat)
+  @tools ~w(git make cc pkg-config fwup docker qemu-system-x86_64 pasta unshare mount flock ip nft tc socat)
 
   @impl true
   def run([]) do
@@ -54,8 +54,8 @@ defmodule Mix.Tasks.Setup.Qemu do
 
     check!(
       "unshare",
-      ~w(--user --map-root-user --net ip link set lo up),
-      "Unprivileged user/network namespaces must be enabled. No host networking was changed."
+      ~w(--user --map-root-user --net --mount --propagation private ip link set lo up),
+      "Unprivileged user/network/mount namespaces must be enabled. No host networking was changed."
     )
   end
 

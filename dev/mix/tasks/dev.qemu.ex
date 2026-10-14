@@ -78,6 +78,9 @@ defmodule Mix.Tasks.Dev.Qemu do
     File.rm(socket)
     {:ok, _} = Application.ensure_all_started(:muontrap)
 
+    unless System.find_executable("pasta"),
+      do: Mix.raise("Install pasta (the passt package); see docs/development.md#prerequisites.")
+
     try do
       build_firmware!()
       IO.puts("Starting QEMU; waiting for the device and Phoenix...")
@@ -146,15 +149,41 @@ defmodule Mix.Tasks.Dev.Qemu do
   end
 
   defp isolated(ci?, socket, selection) do
-    # Initialize Nerves before `mix run` replaces System.argv with the script's
-    # empty argument list. Compilation stays incremental; --force is unnecessary.
+    # Pasta owns a new user/network namespace and outbound sockets, never host
+    # routes or port forwards. A private mount namespace gives QEMU its own DNS.
+    # Initialize Nerves before `mix run` replaces System.argv with an empty list.
     {_, status} =
       MuonTrap.cmd(
-        "unshare",
+        "pasta",
         [
-          "--user",
-          "--map-root-user",
-          "--net",
+          "--foreground",
+          "--config-net",
+          "--ipv4-only",
+          "--address",
+          "192.0.2.2",
+          "--netmask",
+          "24",
+          "--gateway",
+          "192.0.2.1",
+          "--ns-ifname",
+          "ng-uplink",
+          "--mtu",
+          "1500",
+          "--dns-forward",
+          "192.0.2.3",
+          "--no-map-gw",
+          "--tcp-ports",
+          "none",
+          "--udp-ports",
+          "none",
+          "--tcp-ns",
+          "none",
+          "--udp-ns",
+          "none",
+          "unshare",
+          "--mount",
+          "--propagation",
+          "private",
           "mix",
           "do",
           "compile",
@@ -169,6 +198,7 @@ defmodule Mix.Tasks.Dev.Qemu do
           {"NERVES_GATE_BACKEND_NODE", "nerves_gate@192.168.77.2"},
           {"NERVES_GATE_DEVICE_NODE", nil},
           {"NERVES_GATE_HOST_NETNS", File.read_link!("/proc/self/ns/net")},
+          {"NERVES_GATE_HOST_MNTNS", File.read_link!("/proc/self/ns/mnt")},
           {"QEMU_HTTP_SOCKET", socket},
           {"QEMU_CI", to_string(ci?)},
           {"QEMU_SCENARIO", selection}

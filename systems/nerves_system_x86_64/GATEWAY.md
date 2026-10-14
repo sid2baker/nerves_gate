@@ -30,6 +30,14 @@ Keep platform-independent settings aligned with `nerves_system_ec100`:
 - Serial IEx through nbtty, clock initialization, crash dumps, shutdown reports,
   and a persistent `/root` (`/data` is the common skeleton's symlink to `/root`).
 
+The kernel fragment explicitly enables `NETFILTER_XTABLES_LEGACY`,
+`IP_NF_IPTABLES_LEGACY` and `IP6_NF_IPTABLES_LEGACY`. Linux 6.17+ requires these
+in addition to the filter/NAT/mangle selections. Without them, Kconfig drops NAT
+before Buildroot's later iptables fixups enable legacy filtering; merely requesting
+`IP_NF_NAT=y` in a fragment is not sufficient. Check the resolved kernel `.config`,
+not just this fragment. The shared `firewall` scenario reads all three tables for
+both address families on the actual guest, without enrollment or rule changes.
+
 The application uses the same VintageNet, Tailscale and Linux equipment adapters
 on both targets. Merely enabling kernel features does not configure routing,
 NAT, DHCP or equipment ports. Missing EC100 peripherals remain unavailable;
