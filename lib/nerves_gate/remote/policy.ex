@@ -55,6 +55,24 @@ defmodule NervesGate.Remote.Policy do
       {:error,
        Error.new("remote_unavailable", "Tailscale is starting or unavailable. Try again shortly.")}
 
+  # Serve needs an enrolled, online DNS identity. One attempt per name prevents
+  # observation updates from replaying failed writes or racing another command.
+  def serve_dns_name(
+        %{
+          available: true,
+          state: "online",
+          auth_state: "authenticated",
+          dns_name: dns_name,
+          operation: nil,
+          error: nil
+        },
+        attempted
+      )
+      when is_binary(dns_name) and dns_name != "" and dns_name != attempted,
+      do: dns_name
+
+  def serve_dns_name(_, _), do: nil
+
   def sanitize(observed) do
     defaults = unavailable()
 

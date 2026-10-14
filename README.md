@@ -31,7 +31,9 @@ all-scenario checks, CI, EC100 development and troubleshooting.
 
 ## Use a gateway
 
-Open `http://<gateway-address>:4000` through LAN, USB or Tailscale.
+Open `http://<gateway-address>:4000` through LAN or USB. After Tailscale enrollment,
+use `https://<gateway-dns-name>/` (requires tailnet MagicDNS and HTTPS). The gateway
+forwards HTTPS port 443 to its local UI; HTTP port 80 is not enabled.
 
 - **Overview** — Internet setup, Tailscale remote access and Erlang distribution.
 - **Equipment** — LAN, RS485 and CAN settings and bounded diagnostics.
@@ -42,10 +44,12 @@ under **Overview → Internet**. First setup through verified USB saves directly
 other changes have a 60-second **Keep changes / Restore previous settings** window.
 USB remains independent for recovery.
 
-**There is no UI sign-in protection.** Anyone who can reach port 4000 can change
-settings. The distribution page also exposes full VM access credentials. Use
-trusted networks and restrictive Tailscale policy; never expose these services to
-the public Internet. CSRF and same-origin checks remain enabled.
+**There is no UI sign-in protection.** Anyone who can reach port 4000 or the
+Tailscale HTTPS endpoint can change settings. The distribution page also exposes
+full VM access credentials. Use trusted networks and restrictive Tailscale policy;
+never expose these services to the public Internet. HTTP CSRF protection and
+session-bound LiveView CSRF validation remain enabled; WebSocket Origin checking
+is disabled.
 
 Tailscale manages the gateway and can share a confirmed equipment IPv4 subnet;
 overlapping networks are unsupported. CAN/RS485 offer bounded captures and

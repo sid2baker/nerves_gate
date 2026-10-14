@@ -266,8 +266,12 @@ working management during the fault, and successful HTTPS after restoration.
 External DNS/HTTPS/Tailscale service failures are genuine test failures, not skipped
 or replaced with fixtures. `tailscale_login` uses a fresh disposable disk and never
 completes account enrollment or prints the login link; it proves the control-server
-handshake, not authenticated peer traffic. Use the UI login for peer access and
-approved equipment-subnet sharing checks.
+handshake and that HTTPS Serve waits for enrollment, not authenticated peer traffic.
+The scenario also checks Serve admission and one-attempt-per-DNS-name rules;
+`frontend_assets` checks that LiveView session validation requires a matching
+cookie and CSRF token, while allowing HTTPS origins over the local HTTP backend.
+Use the UI login for peer access, actual HTTPS/certificate checks and approved
+equipment-subnet sharing checks.
 
 ## Coverage and limits
 

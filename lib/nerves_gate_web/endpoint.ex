@@ -9,8 +9,14 @@ defmodule NervesGateWeb.Endpoint do
     http_only: true
   ]
 
+  # LAN, USB and tailnet hosts vary, and Tailscale terminates HTTPS. Validate
+  # LiveView's session-bound CSRF token instead of rewriting proxy headers.
   socket("/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, session: @session_options], check_origin: :conn],
+    websocket: [
+      connect_info: [:peer_data, session: @session_options],
+      check_origin: false,
+      check_csrf: true
+    ],
     longpoll: false
   )
 

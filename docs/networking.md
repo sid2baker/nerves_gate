@@ -154,7 +154,8 @@ operations do not use Ethernet's rollback timer.
 
 Only one remote operation runs at a time. Acceptance is not completion; check its
 status and error. A timed-out daemon operation may still have completed, so read
-status before retrying. Restart observes the daemon without replaying commands.
+status before retrying. Restart does not replay user commands; the built-in HTTPS
+listener is reconciled separately once the enrolled daemon is online.
 
 The Tailscale OTP application supervises `/usr/sbin/tailscaled` in kernel mode.
 Kernel TUN support is required. Identity and settings stay daemon-owned in
@@ -164,8 +165,8 @@ including advertisements and running intent, still apply at startup. Firmware bu
 preserve existing enrollment rather than resetting preferences.
 
 Connect/rename set `accept_dns: false` so VintageNet retains DNS ownership, while
-preserving omitted preferences, routes and Serve settings. Startup observes an
-existing profile without rewriting it. If a profile enrolled outside this UI has
+preserving omitted preferences and routes. HTTPS Serve is configured separately
+after the DNS identity is available. If a profile enrolled outside this UI has
 Tailscale DNS enabled, disable only that setting from recovery IEx:
 
 ```elixir
@@ -178,8 +179,33 @@ restart; the library's default configuration is not an automatic startup policy.
 
 Daemon health URLs are redacted before publishing status. Private enrollment URLs
 are explicit reads and the UI accepts only HTTPS links to official Tailscale login
-hosts. The UI does not grant tailnet permissions, configure Serve/Funnel or verify
-equipment reachability.
+hosts. The UI does not grant tailnet permissions or verify equipment reachability.
+
+### Gateway HTTPS
+
+Enable MagicDNS and HTTPS in the tailnet, then enroll the gateway. Once online
+with a DNS name, `NervesGate.Remote` uses `tailscale_ex` to configure **HTTPS port
+443 → `http://127.0.0.1:4000`**. Open `https://<gateway-dns-name>/` from an authorized
+tailnet device. There is no HTTP port 80 listener or public Funnel access. Direct
+LAN/USB access on port 4000 remains unchanged.
+
+The same bounded worker used for remote commands applies Serve once per observed
+DNS name, including startup and rename. Rename waits for the new DNS name before
+rebinding. Failed setup is reported in remote status without automatic write
+retries; reconnect or save the unchanged device name to retry. Successful
+configuration readback is not proof that certificate issuance or a browser
+connection works; those still depend on tailnet settings and access policy.
+
+This built-in policy owns the daemon's top-level Serve listeners: it replaces
+custom listeners and clears Funnel, while preserving other preferences, routes
+and separate Tailscale Services. The daemon persists the listener configuration.
+No workstation Tailscale settings are changed.
+
+LiveView uses Phoenix's session-bound CSRF validation instead of WebSocket Origin
+checking, accommodating dynamic LAN/USB/tailnet hosts and HTTPS termination without
+proxy-header rewriting. HTTP CSRF protection and Strict session cookies remain
+enabled. Forwarded headers are not trusted; the actual peer address still controls
+USB access checks. HTTPS does not add UI sign-in protection—restrict tailnet access.
 
 ### Equipment sharing
 

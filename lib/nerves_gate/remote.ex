@@ -15,7 +15,11 @@ defmodule NervesGate.Remote do
   `observe/1` before reading, then reread when properties change.
 
   The optional server argument defaults to this module. The daemon retains
-  identity and preferences across process restarts; commands are not replayed.
+  identity and preferences across process restarts; user commands are not replayed.
+  Once online with a DNS name, an owned worker configures HTTPS Serve on port 443
+  to the gateway UI on port 4000. It runs once per observed DNS name, including
+  startup and rename. A failed setup is not automatically retried; connect or save
+  the same device name to retry. The daemon persists the listener configuration.
 
   `:remote_unavailable` reports daemon loss after a connect request or an active
   authentication/connection observation. An available daemon clears it, including
@@ -91,6 +95,7 @@ defmodule NervesGate.Remote do
       worker: nil,
       operation: nil,
       error: nil,
+      serve_dns_name: nil,
       poll_ms: Keyword.get(opts, :poll_ms, 1000),
       timeout: Keyword.get(opts, :timeout, 40_000)
     }
@@ -110,12 +115,26 @@ defmodule NervesGate.Remote do
   end
 
   def handle_call({:command, operation, params}, _, state) do
-    with :ok <- Policy.available(snapshot(state)),
+    observed = snapshot(state)
+
+    with :ok <- Policy.available(observed),
          {:ok, params} <- Policy.validate(operation, params) do
-      task = Task.async(fn -> Adapter.execute(state.adapter, operation, params) end)
-      timer = Process.send_after(self(), {:timeout, task.ref}, state.timeout)
-      state = %{state | worker: {task, timer}, operation: Atom.to_string(operation), error: nil}
-      {:reply, :ok, publish(state)}
+      state =
+        if operation in [:connect, :configure] do
+          # Retry Serve for an unchanged name, but a rename waits for new DNS.
+          attempted =
+            if params.hostname == observed.hostname do
+              nil
+            else
+              observed.dns_name
+            end
+
+          %{state | serve_dns_name: attempted}
+        else
+          state
+        end
+
+      {:reply, :ok, state |> start_operation(operation, params) |> publish()}
     else
       error -> {:reply, error, state}
     end
@@ -124,17 +143,8 @@ defmodule NervesGate.Remote do
   def handle_call({:sharing, operation, params}, from, state) do
     with :ok <- Policy.available(snapshot(state)),
          :ok <- sharing_allowed(operation, params, snapshot(state)) do
-      task = Task.async(fn -> Adapter.execute(state.adapter, operation, params) end)
-      timer = Process.send_after(self(), {:timeout, task.ref}, state.timeout)
-
-      state = %{
-        state
-        | worker: {task, timer},
-          operation: Atom.to_string(operation),
-          waiting: from,
-          route: params[:route],
-          error: nil
-      }
+      state =
+        %{state | waiting: from, route: params[:route]} |> start_operation(operation, params)
 
       {:noreply, publish(state)}
     else
@@ -187,6 +197,23 @@ defmodule NervesGate.Remote do
   def terminate(_, %{worker: {task, _}}), do: Task.shutdown(task, :brutal_kill)
   def terminate(_, _), do: :ok
 
+  defp start_operation(state, operation, params) do
+    task = Task.async(fn -> Adapter.execute(state.adapter, operation, params) end)
+    timer = Process.send_after(self(), {:timeout, task.ref}, state.timeout)
+    %{state | worker: {task, timer}, operation: Atom.to_string(operation), error: nil}
+  end
+
+  defp maybe_serve(state) do
+    case Policy.serve_dns_name(snapshot(state), state.serve_dns_name) do
+      nil ->
+        state
+
+      dns_name ->
+        %{state | serve_dns_name: dns_name}
+        |> start_operation(:serve, %{dns_name: dns_name})
+    end
+  end
+
   defp complete(state, result) do
     {_, timer} = state.worker
     Process.cancel_timer(timer)
@@ -226,6 +253,7 @@ defmodule NervesGate.Remote do
   end
 
   defp publish(state) do
+    state = maybe_serve(state)
     observed = snapshot(state)
     NervesGate.Distribution.ensure_started(observed)
 

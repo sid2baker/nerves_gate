@@ -1,6 +1,7 @@
 defmodule NervesGate.Remote.Tailscale do
   @moduledoc "Firmware adapter. The daemon owns identity and settings; never copy credentials into gateway config."
   @behaviour NervesGate.Remote.Adapter
+  alias NervesGate.Remote.Policy
 
   @impl true
   def observations(_) do
@@ -58,6 +59,19 @@ defmodule NervesGate.Remote.Tailscale do
 
   def execute(:disconnect, _, _) do
     Tailscale.down()
+  end
+
+  def execute(:serve, %{dns_name: dns_name}, _) do
+    # Recheck inside the worker: the identity may change after admission.
+    case snapshot(nil) |> Policy.sanitize() |> Policy.serve_dns_name(nil) do
+      ^dns_name when is_binary(dns_name) ->
+        Tailscale.update_configuration(%{
+          serve: [%{https: 443, to: "http://127.0.0.1:4000"}]
+        })
+
+      _ ->
+        {:error, :serve_not_ready}
+    end
   end
 
   def execute(operation, params, _)
