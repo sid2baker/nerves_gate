@@ -46,9 +46,13 @@ use an approved Linux development machine rather than running the session as roo
 
 Keep `mix dev.qemu` running in one terminal. It builds current development firmware,
 boots a disposable disk and starts workstation Phoenix with code reload,
-LiveReload, Volt and Tidewave. Host UI changes reload; device code changes require
-restarting the command to rebuild firmware. Run `mix setup` again after changing
-dependencies or the local Nerves system.
+LiveReload, Volt and Tidewave. Tidewave allows non-loopback peers only in this
+QEMU session because the loopback-only workstation proxy connects to Phoenix over
+a Unix socket. Tidewave's Origin checks stay enabled; no workstation listener is
+opened to remote hosts. EC100 development keeps Tidewave's default local-only policy.
+Host UI changes reload; device code changes require restarting the command to
+rebuild firmware. Run `mix setup` again after changing dependencies or the local
+Nerves system.
 
 In another terminal:
 
@@ -195,8 +199,9 @@ latest result and the last 100 bench events are kept in memory. The `test_bench`
 scenario exercises runner admission and the real manual fault driver's cleanup,
 including cleanup with a paused VM and combined faults. `mix test --only frontend_assets`
 checks host and firmware CSS/JS delivery, firmware cache revalidation and strict CSP,
-and absence of the Volt runtime on the guest. Restart `mix dev.qemu` after rebuilding
-assets so that this check sees the new files in firmware too.
+Tidewave access through the development proxy with its Origin guard intact, and
+absence of the Volt and Tidewave runtimes on the guest. Restart `mix dev.qemu`
+after rebuilding assets so that this check sees the new files in firmware too.
 `mix test --only dev_discovery` checks service discovery against the real guest
 and verifies that the EC100 launcher excludes QEMU and rejects ambiguous selections.
 

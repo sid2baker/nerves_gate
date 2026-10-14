@@ -24,6 +24,22 @@ defmodule NervesGate.Scenarios.FrontendAssets do
     assert_assets(host)
     assert_assets(firmware)
 
+    # GET reaches the MCP route (POST-only) through the real Unix-socket proxy.
+    # Test/CI hosts and firmware must not expose Tidewave at all.
+    if Endpoint.config(:code_reloader) do
+      assert Req.get!(host, url: "/tidewave/mcp").status == 405
+
+      assert Req.get!(host,
+               url: "/tidewave/mcp",
+               headers: [origin: "https://untrusted.example"]
+             ).status == 403
+    else
+      assert Req.get!(host, url: "/tidewave/mcp").status == 404
+    end
+
+    assert Req.get!(firmware, url: "/tidewave/mcp").status == 404
+    assert :erpc.call(@guest, :code, :where_is_file, [~c"tidewave.app"]) == :non_existing
+
     page = Req.get!(firmware, url: "/")
     [csp] = Req.Response.get_header(page, "content-security-policy")
     assert csp =~ "style-src 'self';"
