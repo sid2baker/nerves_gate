@@ -87,9 +87,11 @@ mix firmware --overwrite
 All targets share `mix.lock`. Rootfs overlays combine `rootfs_overlay/common` and
 the target directory. Firmware builds never download or replace Tailscale; binaries
 are ignored by Git. Set `SOURCE_DATE_EPOCH` when building a source archive without
-Git history. Set `NERVES_GATE_SSH_KEYS` to authorized public keys at build time;
-SSH is key-only. Keep the Nerves startup guard enabled for Heart initialization
-and firmware validation.
+Git history. On USB IPv4, SSH accepts user `root` with password `nerves_gate`,
+without a key. Ethernet and Tailscale remain key-only. Add/remove public keys at
+**Settings** (`/settings`); optionally seed a new device with build-time
+`NERVES_GATE_SSH_KEYS`. Saved keys survive firmware updates. Keep the Nerves
+startup guard enabled for Heart initialization and firmware validation.
 
 Before updating, verify device identity, firmware platform and a local recovery
 path. Use an in-place firmware update to preserve `/data` and Tailscale identity,

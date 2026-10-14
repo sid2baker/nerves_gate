@@ -101,6 +101,15 @@ defmodule NervesGate do
     end
   end
 
+  @doc "Validate and persist one OpenSSH public key before allowing new SSH logins."
+  @spec ssh_add_key(String.t()) :: command_result()
+  def ssh_add_key(key), do: invoke(fn -> NervesGate.SSH.add_key(key) end) |> result()
+
+  @doc "Persist removal by fingerprint from status.ssh.keys. Existing sessions remain open."
+  @spec ssh_remove_key(String.t()) :: command_result()
+  def ssh_remove_key(fingerprint),
+    do: invoke(fn -> NervesGate.SSH.remove_key(fingerprint) end) |> result()
+
   @doc "Identify with all three LEDs for five seconds, then resume current status patterns."
   @spec identify(keyword()) :: command_result()
   def identify(opts \\ []),
@@ -128,6 +137,7 @@ defmodule NervesGate do
         equipment_status(equipment(opts)),
         indicators_status(indicators(opts)),
         buses_status(buses(opts)),
+        status_input(:ssh),
         status_input(:system)
       )
 
@@ -138,6 +148,13 @@ defmodule NervesGate do
   def status_input(:equipment), do: equipment_status(Equipment)
   def status_input(:indicators), do: indicators_status(Indicators)
   def status_input(:buses), do: buses_status(Buses)
+
+  def status_input(:ssh) do
+    case invoke(fn -> NervesGate.SSH.status() end) do
+      {:error, _} -> NervesGate.SSH.unavailable()
+      status -> status
+    end
+  end
 
   def status_input(:system) do
     %{
@@ -156,7 +173,8 @@ defmodule NervesGate do
          :ok <- observe(Remote, remote(opts)),
          :ok <- observe(Equipment, equipment(opts)),
          :ok <- observe(Indicators, indicators(opts)),
-         do: observe(Buses, buses(opts))
+         :ok <- observe(Buses, buses(opts)),
+         do: NervesGate.SSH.observe()
   end
 
   @doc "Run one explicit ARP-only scan of the confirmed equipment subnet (at most /24 and five seconds)."

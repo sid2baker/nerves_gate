@@ -38,6 +38,7 @@ defmodule NervesGate.MixProject do
           :mix,
           :nerves,
           :muontrap,
+          :ssh,
           :ex_unit,
           :tailscale,
           :vintage_net,
@@ -64,7 +65,8 @@ defmodule NervesGate.MixProject do
     ]
   end
 
-  def application, do: [extra_applications: [:logger, :crypto], mod: {NervesGate.Application, []}]
+  def application,
+    do: [extra_applications: [:logger, :crypto, :ssh], mod: {NervesGate.Application, []}]
 
   def cli do
     [

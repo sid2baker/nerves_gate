@@ -98,7 +98,14 @@ defmodule NervesGate.Recovery.EC100 do
       # Supervisor termination leaves writers stopped but keeps Indicators and
       # its worker alive. Stop logger_backends too, so RingLogger cannot write
       # its periodic snapshot after the data partition is unmounted.
-      children = [NervesGate.Buses, NervesGate.Equipment, NervesGate.Remote, NervesGate.Network]
+      children = [
+        NervesGate.Buses,
+        NervesGate.Equipment,
+        NervesGate.Remote,
+        NervesGate.Network,
+        NervesGate.SSH
+      ]
+
       apps = [:nerves_ssh, :ssh, :tailscale, :vintage_net, :nerves_time, :logger_backends]
 
       with :ok <- stop_all(children, &Supervisor.terminate_child(NervesGate.Supervisor, &1)),

@@ -317,10 +317,25 @@ connection. The kernel must expose `usb0`; application configuration cannot crea
 missing USB gadget hardware. The EC100 system includes the fixed-role USB
 restoration; x86 does not assume a USB gadget exists.
 
-Keep a local recovery path when changing Ethernet or updating firmware. SSH is
-key-only, with build-time `NERVES_GATE_SSH_KEYS`; the HTTP listener's policy does not
-change SSH exposure. USB, serial and real cable/hotplug behavior require hardware
-verification beyond QEMU scenarios.
+Keep a local recovery path when changing Ethernet or updating firmware. Connect
+with `ssh root@<gateway-usb-address>` and password `nerves_gate`; USB IPv4 needs no
+key. Password authentication checks the actual TCP peer against the live kernel
+`usb0` /30, link state and direct return route, rejecting overlapping interfaces,
+gateways and VPN route overrides. Missing or uncertain USB state fails closed.
+It does not grant password access to Ethernet, Tailscale, IPv6 or QEMU management.
+
+Add/remove SSH public keys under **Settings** (`/settings`). Keys grant full device
+access, including IEx, SFTP and firmware uploads. Changes are saved in
+`/data/nerves_gate/ssh_authorized_keys` before taking effect. Build-time
+`NERVES_GATE_SSH_KEYS` and legacy NervesSSH keys seed this store only on first use;
+removed keys do not return after updates or reboots. Use `NervesGate.ssh_add_key/1`
+and `ssh_remove_key/1`, not NervesSSH's separate key APIs. Factory reset erases
+saved keys; configured build-time keys seed the reset device again.
+
+The HTTP listener's policy does not change SSH authentication. The UI is still
+unauthenticated and can grant SSH access, so it must remain on trusted networks.
+USB, serial and real cable/hotplug behavior require hardware verification beyond
+QEMU scenarios.
 
 ## Logs across reboots
 

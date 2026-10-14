@@ -31,12 +31,13 @@ See the [public API](action-api.md) for calling conventions and completion seman
 | Equipment | Neighbor observations, scoped labels and monitoring the Network-owned scan |
 | Indicators | LED/button policy, identification and one bounded recovery worker |
 | Buses | One diagnostic worker, ephemeral opt-in and bounded results |
+| SSH | Public-key validation, serialized durable changes and authentication |
 | PropertyTable | Subsystem properties and ephemeral workflow observations |
 | ProjectionServer | Cached sanitized inputs, coalesced reads and ordered UI operations |
 | Alarmist | Fault timing, severity and subscriptions; not admission or recovery |
 | LiveView | Drafts, presentation, subscriptions and command submission |
 
-The device's `rest_for_one` order is PubSub, workflow PropertyTable, Network,
+The device's `rest_for_one` order is PubSub, workflow PropertyTable, SSH, Network,
 Remote, Equipment, Indicators, Buses, ProjectionServer, then Endpoint. Dependencies
 supervise VintageNet, Tailscale and Alarmist themselves. Host UI instances start
 neither domain processes nor a projection mirror.

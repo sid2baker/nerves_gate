@@ -43,10 +43,9 @@ defmodule NervesGateWeb.Layouts do
         <.link navigate="/" aria-current={if @section == :overview, do: "page"}>Overview</.link>
         <.link navigate="/equipment" aria-current={if @section == :equipment, do: "page"}>Equipment</.link>
         <.link
-          navigate="/device"
-          class="ui-device-link"
-          aria-current={if @section == :device, do: "page"}
-        >Device</.link>
+          navigate="/settings"
+          aria-current={if @section == :settings, do: "page"}
+        >Settings</.link>
         <.link :if={@dev_tests} href="/tests">Tests</.link>
       </nav>
     </header>
@@ -83,6 +82,6 @@ defmodule NervesGateWeb.Layouts do
   end
 
   defp section(action) when action in [:equipment, :lan, :rs485, :can], do: :equipment
-  defp section(:device), do: :device
+  defp section(:settings), do: :settings
   defp section(_), do: :overview
 end

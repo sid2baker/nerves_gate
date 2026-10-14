@@ -45,6 +45,7 @@ defmodule NervesGate.TestQemu do
     File.rm(socket_path)
     boot = System.unique_integer([:positive])
     stall = if options[:receive_stall], do: "on", else: "off"
+    usb = usb_network(options)
 
     daemon =
       daemon!(
@@ -83,7 +84,7 @@ defmodule NervesGate.TestQemu do
           "virtio-net-pci,netdev=management",
           "-object",
           "filter-buffer,id=wan-stall,netdev=wan,queue=tx,interval=3600000000,status=#{stall}"
-        ],
+        ] ++ usb,
         dir
       )
 
@@ -104,6 +105,48 @@ defmodule NervesGate.TestQemu do
     assert status.system.target == "x86_64"
     assert status.system.node == @guest
     vm
+  end
+
+  # A separate real Ethernet path for the USB access scenario. This tests the
+  # kernel boundary, not EC100's physical USB gadget. Never rename/fault eth2.
+  defp usb_network(options) do
+    if options[:usb] do
+      command!("ip", ~w"tuntap add dev ng-usb mode tap")
+      on_exit(fn -> command!("ip", ~w"link delete ng-usb") end)
+      command!("ip", ~w"addr add 172.31.255.2/30 dev ng-usb")
+      command!("ip", ~w"link set ng-usb up")
+
+      [
+        "-netdev",
+        "tap,id=usb,ifname=ng-usb,script=no,downscript=no",
+        "-device",
+        "virtio-net-pci,netdev=usb,id=usb-nic"
+      ]
+    else
+      []
+    end
+  end
+
+  def connect_usb(vm) do
+    isolated!()
+    assert status(vm).system.target == "x86_64"
+    {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", ~w"link set eth3 down"])
+    {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", ~w"link set eth3 name usb0"])
+
+    :ok =
+      :erpc.call(@guest, VintageNet, :configure, [
+        "usb0",
+        %{
+          type: VintageNetEthernet,
+          ipv4: %{method: :static, address: "172.31.255.1", prefix_length: 30}
+        },
+        [persist: false]
+      ])
+
+    await(vm, "USB test Ethernet path", fn status ->
+      status.network.observed.usb.link and
+        Enum.any?(status.network.observed.usb.addresses, &(&1.address == "172.31.255.1"))
+    end)
   end
 
   # QEMU TX is backend-to-guest traffic; turning the filter off flushes its buffer.

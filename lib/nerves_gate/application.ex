@@ -31,6 +31,7 @@ defmodule NervesGate.Application do
 
       [
         {PropertyTable, name: NervesGate.Properties},
+        NervesGate.SSH,
         NervesGate.Network,
         NervesGate.Remote,
         NervesGate.Equipment,

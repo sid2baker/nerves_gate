@@ -68,7 +68,17 @@ config :vintage_net,
   persistence: VintageNet.Persistence.FlatFile,
   config: []
 
-# Recovery SSH is key-only. Supply a public key at firmware build time.
+# Build keys seed the device-owned store once. Settings owns later additions
+# and removals; a firmware update must not restore a removed key.
+config :nerves_gate,
+  ssh_keys: String.split(System.get_env("NERVES_GATE_SSH_KEYS", ""), "\n", trim: true)
+
+# Password recovery is restricted to the kernel-verified direct USB peer.
+# Ethernet, VPN and QEMU management remain key-only.
 config :nerves_ssh,
-  authorized_keys: String.split(System.get_env("NERVES_GATE_SSH_KEYS", ""), "\n", trim: true),
-  iex_opts: [dot_iex: "/etc/iex.exs"]
+  iex_opts: [dot_iex: "/etc/iex.exs"],
+  daemon_option_overrides: [
+    auth_methods: ~c"publickey,password",
+    key_cb: NervesGate.SSH,
+    pwdfun: {NervesGate.SSH.USBPassword, :check, 4}
+  ]

@@ -192,6 +192,26 @@ defmodule NervesGate.Error do
         "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
       )
 
+  def from(:invalid_ssh_key),
+    do:
+      new(
+        "invalid_ssh_key",
+        "Paste one OpenSSH public key (Ed25519, RSA or ECDSA), without key options. Never paste a private key."
+      )
+
+  def from(:ssh_key_limit),
+    do: new("ssh_key_limit", "The 32-key limit has been reached. Remove an unused key first.")
+
+  def from(:ssh_key_not_found),
+    do: new("ssh_key_not_found", "This SSH key is no longer present. Refresh the key list.")
+
+  def from(:ssh_keys_unavailable),
+    do:
+      new(
+        "ssh_keys_unavailable",
+        "SSH keys could not be read or saved. Existing keys have not been replaced."
+      )
+
   def from(:led_unavailable),
     do: new("led_unavailable", "A status LED is unavailable or controlled by a kernel trigger.")
 

@@ -1,8 +1,42 @@
-defmodule NervesGateWeb.DeviceLive do
+defmodule NervesGateWeb.SettingsLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
 
   on_mount({NervesGateWeb.Observations, :status})
+
+  def mount(_, _, socket),
+    do: {:ok, assign(socket, :key_form, to_form(%{"public_key" => ""}, as: :ssh))}
+
+  def handle_event("key-draft", %{"ssh" => params}, socket),
+    do: {:noreply, assign(socket, :key_form, to_form(params, as: :ssh))}
+
+  def handle_event("add-key", %{"ssh" => %{"public_key" => key}}, socket) do
+    socket = clear_flash(socket)
+
+    case NervesGateWeb.Backend.ssh_add_key(key) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:key_form, to_form(%{"public_key" => ""}, as: :ssh))
+         |> put_flash(:info, "SSH key saved.")}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, error.message)}
+    end
+  end
+
+  def handle_event("remove-key", %{"fingerprint" => fingerprint}, socket) do
+    socket = clear_flash(socket)
+
+    case NervesGateWeb.Backend.ssh_remove_key(fingerprint) do
+      :ok ->
+        {:noreply,
+         put_flash(socket, :info, "SSH key removed. Existing SSH sessions remain open.")}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, error.message)}
+    end
+  end
 
   def handle_event("identify", _, socket) do
     result = NervesGateWeb.Backend.identify()
@@ -20,7 +54,76 @@ defmodule NervesGateWeb.DeviceLive do
 
   def render(assigns) do
     ~H"""
-    <.page_header title="Device" description={@projection.remote_access.hostname || "Nerves Gate"} />
+    <.page_header title="Settings" description={@projection.remote_access.hostname || "Nerves Gate"} />
+    <.notice :if={Phoenix.Flash.get(@flash, :error)} tone="warning" role="alert">
+      {Phoenix.Flash.get(@flash, :error)}
+    </.notice>
+    <.notice :if={Phoenix.Flash.get(@flash, :info)} tone="good" role="status">
+      {Phoenix.Flash.get(@flash, :info)}
+    </.notice>
+    <.panel id="ssh-settings" title="SSH access" icon="lock">
+      <p class="ui-help">
+        Over USB IPv4, sign in as <code>root</code> with password <code>nerves_gate</code>; no key is
+        required. Ethernet and Tailscale require an authorized public key.
+        SSH grants full device access, including firmware updates.
+      </p>
+      <.notice :if={@projection.ssh.error} tone="warning" role="alert">
+        {@projection.ssh.error.message}
+      </.notice>
+      <p :if={@projection.ssh.available and @projection.ssh.keys == []} class="ui-help">
+        No SSH keys saved. Add a key to enable SSH over Ethernet or Tailscale.
+      </p>
+      <ul id="ssh-keys" class="ui-ssh-keys">
+        <li :for={key <- @projection.ssh.keys}>
+          <div>
+            <strong>{if key.comment == "", do: key.type, else: key.comment}</strong>
+            <code>{key.fingerprint}</code>
+          </div>
+          <.button
+            variant="quiet"
+            phx-click="remove-key"
+            phx-value-fingerprint={key.fingerprint}
+            data-confirm="Remove this SSH key? New logins using it will be denied. Removing the last key leaves USB password access only."
+            disabled={!@projection.actions["ssh.remove_key"].enabled}
+            aria-label={"Remove SSH key #{key.fingerprint}"}
+          >Remove</.button>
+        </li>
+      </ul>
+      <.form
+        for={@key_form}
+        id="ssh-key-form"
+        class="ui-stack"
+        phx-change="key-draft"
+        phx-submit="add-key"
+      >
+        <div class="ui-field">
+          <label for="ssh_public_key">Public key</label>
+          <textarea
+            id="ssh_public_key"
+            name={@key_form[:public_key].name}
+            rows="3"
+            maxlength="8192"
+            required
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="ssh-ed25519 AAAA… name@computer"
+            aria-describedby="ssh-key-help"
+            disabled={!@projection.actions["ssh.add_key"].enabled}
+          >{@key_form[:public_key].value}</textarea>
+          <p id="ssh-key-help" class="ui-help">
+            Paste one Ed25519, RSA or ECDSA public key (the .pub file), never a private key.
+            Keys are saved on this device and survive reboots and firmware updates.
+          </p>
+        </div>
+        <.button
+          type="submit"
+          phx-disable-with="Saving…"
+          disabled={!@projection.actions["ssh.add_key"].enabled}
+        >
+          Add SSH key
+        </.button>
+      </.form>
+    </.panel>
     <.panel title="Device information" icon="info">
       <.setting_row label="Firmware">{@projection.system.firmware}</.setting_row>
       <.setting_row label="Target">{@projection.system.target}</.setting_row>
@@ -29,9 +132,6 @@ defmodule NervesGateWeb.DeviceLive do
       </.setting_row>
       <.notice :if={@projection.indicators.simulated}>
         Preview mode · simulated button, LEDs and recovery. Workstation hardware is never used.
-      </.notice>
-      <.notice :if={Phoenix.Flash.get(@flash, :error)} tone="warning" role="alert">
-        {Phoenix.Flash.get(@flash, :error)}
       </.notice>
       <.notice :if={@projection.indicators.led.error} tone="warning" role="alert">
         {@projection.indicators.led.error.message}

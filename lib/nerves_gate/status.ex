@@ -12,12 +12,13 @@ defmodule NervesGate.Status do
         equipment,
         indicators,
         buses,
+        ssh,
         system
       ) do
     cellular = cellular_supported?(status)
 
     %{
-      version: 5,
+      version: 6,
       system: system,
       backend: %{available: true, error: nil},
       network: network(status),
@@ -33,7 +34,8 @@ defmodule NervesGate.Status do
       equipment: equipment(status, equipment),
       indicators: indicators,
       buses: buses,
-      actions: actions(status, remote, equipment, indicators, buses)
+      ssh: ssh,
+      actions: actions(status, remote, equipment, indicators, buses, ssh)
     }
   end
 
@@ -49,6 +51,7 @@ defmodule NervesGate.Status do
         Equipment.unavailable(),
         Indicators.unavailable(),
         Buses.unavailable(),
+        NervesGate.SSH.unavailable(),
         system
       )
 
@@ -68,10 +71,11 @@ defmodule NervesGate.Status do
   defp cellular_supported?(_), do: false
 
   # Presentation metadata only. Admission belongs to the domain servers.
-  defp actions(status, remote, equipment, indicators, buses) do
+  defp actions(status, remote, equipment, indicators, buses, ssh) do
     trial = if status && status.trial, do: :ok, else: {:error, :no_matching_trial}
     confirm = if trial == :ok and not status.ready, do: {:error, :not_connected}, else: trial
     remote_ready = Remote.Policy.available(remote)
+    ssh_ready = ssh_available(ssh)
 
     %{
       "network.validate" => action("Review settings", ["network"], :ok),
@@ -100,9 +104,14 @@ defmodule NervesGate.Status do
           ["port", "unit", "function", "address", "count", "authorized"],
           Buses.Policy.available(buses)
         ),
+      "ssh.add_key" => action("Add SSH key", ["public_key"], ssh_ready),
+      "ssh.remove_key" => action("Remove SSH key", ["fingerprint"], ssh_ready),
       "identify" => action("Identify gateway", [], identify_available(indicators))
     }
   end
+
+  defp ssh_available(%{available: true}), do: :ok
+  defp ssh_available(_), do: {:error, :ssh_keys_unavailable}
 
   defp identify_available(%{recovery: %{action: action}}) when not is_nil(action),
     do: {:error, :operation_in_progress}

@@ -250,6 +250,12 @@ mix test --only firewall          # guest IPv4/IPv6 filter, NAT and mangle table
 mix test --only tailscale_login   # fresh guest checks firewall and obtains a private login link
 ```
 
+`mix test --only ssh_access` uses a fresh disposable disk and an extra TAP-backed
+Ethernet path named `usb0` inside the guest. It checks actual SSH password/key
+handshakes, rejection on non-USB management, key persistence/revocation across
+reboots, input validation and failed writes. This qualifies the kernel/authentication
+boundary, not EC100 USB gadget hardware. Management `eth2` is never renamed or faulted.
+
 The `firewall` check needs neither Internet nor Tailscale enrollment. It reads
 tables without changing rules and is also a prerequisite in `tailscale_login`.
 The other checks require working public Internet access. `internet`, `latency` and

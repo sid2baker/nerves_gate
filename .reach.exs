@@ -40,6 +40,7 @@
          "NervesGate.Equipment.Linux.*",
          "NervesGate.Indicators.*",
          "NervesGate.Buses.*",
+         "NervesGate.SSH.*",
          "NervesGate.Linux.*",
          "VintageNet.configure",
          "VintageNet.Persistence.*",

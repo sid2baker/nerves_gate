@@ -10,7 +10,7 @@ defmodule NervesGate.ProjectionServer do
   use GenServer
   alias NervesGate.Projection
 
-  @domains [:network, :remote, :equipment, :indicators, :buses]
+  @domains [:network, :remote, :equipment, :indicators, :buses, :ssh]
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 

@@ -1,6 +1,6 @@
 # UI and equipment
 
-Navigation is **Overview · Equipment**, with a small **Device** link. Open a
+Navigation is **Overview · Equipment · Settings**. Open a
 connection or physical port for settings and diagnostics. All pages use the same
 device-owned projection; local form drafts remain separate from live observations.
 
@@ -16,7 +16,7 @@ device-owned projection; local form drafts remain separate from live observation
 | LAN 1 / 2 | `/equipment/lan/1`, `/equipment/lan/2` | Neighbors, ARP scan, labels and subnet sharing |
 | RS485 1 / 2 | `/equipment/rs485/1`, `/equipment/rs485/2` | Opt-in, passive capture and one-shot Modbus reads |
 | CAN 1 / 2 | `/equipment/can/1`, `/equipment/can/2` | Listen-only configuration, counters and capture |
-| Device | `/device` | Runtime information, identify and button/LED help |
+| Settings | `/settings` | SSH public keys, runtime information, identify and button/LED help |
 
 LAN 1 is always `eth0`, LAN 2 `eth1`. Equipment hides a port assigned solely to
 Internet without renumbering the other port. Unassigned LAN ports and both buses
@@ -27,6 +27,20 @@ First setup and later network changes use the same Internet page. Unconfirmed
 trials stay visible on other pages with a link to keep or restore settings.
 Disconnected views show unavailable rather than continuing to offer stale actions.
 Opening a page never starts scans, route changes, bus traffic or physical I/O.
+
+## SSH settings
+
+Paste one OpenSSH public key (Ed25519, RSA or ECDSA) to grant full SSH access.
+Never paste a private key. Keys are identified by SHA256 fingerprint; adding the
+same key twice does not duplicate it. Up to 32 keys are stored on the device,
+not the workstation. Removal requires confirmation and prevents **new** logins;
+existing SSH sessions stay open. Removing the last key leaves USB password access.
+
+Changes become active only after saving succeeds. The key list follows the shared
+projection; incoming observations do not overwrite a draft. On USB IPv4, use
+`ssh root@<gateway-usb-address>` with password `nerves_gate`. Ethernet and Tailscale
+require keys. The HTTP UI still has no sign-in protection, so anyone who can reach
+it can manage keys: restrict it to trusted networks.
 
 ## Equipment observations
 
@@ -53,7 +67,7 @@ does not change or restore network settings.
   see [equipment sharing](networking.md#equipment-sharing).
 - **Buses:** pages distinguish unsupported targets, missing devices, disabled ports
   and active operations. See [CAN/RS485 limits](buses.md) before enabling diagnostics.
-- **Device:** Identify blinks available status LEDs, then resumes current patterns.
+- **Settings:** Identify blinks available status LEDs, then resumes current patterns.
   There is no web reboot/reset action. See [LEDs and physical gestures](indicators.md).
 
 The workstation is a UI client, not a hardware simulator. QEMU reports unavailable

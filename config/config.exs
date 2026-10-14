@@ -24,7 +24,7 @@ config :nerves_gate,
   dev_tests: config_target() == :host
 
 config :phoenix, :json_library, Jason
-config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret"]
+config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret", "public_key"]
 
 config :nerves_gate, NervesGateWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,

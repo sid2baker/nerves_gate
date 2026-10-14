@@ -3,21 +3,33 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   import ExUnit.Assertions
   alias NervesGate.{Projection, ProjectionServer}
   alias NervesGate.TestQemu, as: Qemu
-  alias NervesGateWeb.{DistributionLive, NetworkForm, NetworkLive, Observations, TailscaleLive}
+
+  alias NervesGateWeb.{
+    DistributionLive,
+    NetworkForm,
+    NetworkLive,
+    Observations,
+    SettingsLive,
+    TailscaleLive
+  }
+
   alias Phoenix.LiveView.{Lifecycle, Socket}
 
   @guest :"nerves_gate@192.168.77.2"
   @server {ProjectionServer, @guest}
 
   def name,
-    do: "Two UI reducers follow the device stream, survive restart and reconnect, and keep drafts"
+    do: "UI reducers follow the device stream, survive restart and reconnect, and keep drafts"
 
   def run(vm) do
     assert Qemu.status(vm).system.node == @guest
     assert_runtime_backend()
     assert_http_pages()
     assert_distribution_cookie_cached()
-    clients = for editor <- [:network, :remote], do: spawn_link(fn -> client(editor) end)
+    assert_settings_commands()
+
+    clients =
+      for editor <- [:network, :remote, :settings], do: spawn_link(fn -> client(editor) end)
 
     try do
       initial = converged(vm, clients)
@@ -108,7 +120,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   # Exercise real static mounts through the development Unix socket too. It is
   # not an IP address and must never count as proof of USB management access.
   defp assert_http_pages do
-    for path <- ["/", "/network", "/remote", "/device", "/distribution", "/tests"] do
+    for path <- ["/", "/network", "/remote", "/settings", "/distribution", "/tests"] do
       response =
         Req.get!("http://localhost#{path}",
           unix_socket: System.fetch_env!("QEMU_HTTP_SOCKET"),
@@ -121,8 +133,10 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert [link] = Regex.run(~r/<a\b[^>]*href="#{destination}"[^>]*>/, response.body)
       refute link =~ "data-phx-link"
 
-      if path == "/device" do
+      if path == "/settings" do
         assert response.body =~ "x86_64"
+        assert response.body =~ "SSH access"
+        assert response.body =~ "ssh-key-form"
       end
     end
   end
@@ -148,6 +162,50 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     |> Task.await()
   end
 
+  defp assert_settings_commands do
+    Task.async(fn ->
+      socket = %Socket{transport_pid: self(), private: %{lifecycle: %Lifecycle{}}}
+      {:cont, socket} = Observations.on_mount(:status, %{}, %{}, socket)
+      {:ok, socket} = SettingsLive.mount(%{}, %{}, socket)
+      socket = Phoenix.Component.assign(socket, :flash, %{})
+      server = socket.assigns.projection_server
+      key = :public_key.generate_key({:namedCurve, :ed25519}) |> :ssh_file.extract_public_key()
+      line = :ssh_file.encode([{key, [comment: ~c"Settings scenario"]}], :auth_keys)
+      fingerprint = to_string(:ssh.hostkey_fingerprint(:sha256, key))
+
+      {:noreply, socket} =
+        SettingsLive.handle_event("key-draft", %{"ssh" => %{"public_key" => "invalid"}}, socket)
+
+      {:noreply, socket} =
+        SettingsLive.handle_event("add-key", %{"ssh" => %{"public_key" => "invalid"}}, socket)
+
+      assert socket.assigns.key_form[:public_key].value == "invalid"
+      assert socket.assigns.flash["error"] =~ "public key"
+
+      {:noreply, socket} =
+        SettingsLive.handle_event("add-key", %{"ssh" => %{"public_key" => line}}, socket)
+
+      assert socket.assigns.key_form[:public_key].value == ""
+      assert_receive {:projection, ^server, {:replace, :ssh, ssh}}, 2000
+
+      {:halt, socket} =
+        Lifecycle.handle_info({:projection, server, {:replace, :ssh, ssh}}, socket)
+
+      assert Enum.any?(socket.assigns.projection.ssh.keys, &(&1.fingerprint == fingerprint))
+
+      {:noreply, socket} =
+        SettingsLive.handle_event("remove-key", %{"fingerprint" => fingerprint}, socket)
+
+      assert_receive {:projection, ^server, {:replace, :ssh, ssh}}, 2000
+
+      {:halt, socket} =
+        Lifecycle.handle_info({:projection, server, {:replace, :ssh, ssh}}, socket)
+
+      refute Enum.any?(socket.assigns.projection.ssh.keys, &(&1.fingerprint == fingerprint))
+    end)
+    |> Task.await(15_000)
+  end
+
   defp converged(vm, clients) do
     Qemu.await(vm, "client reducers equal the device reducer", fn _ ->
       projection = ProjectionServer.snapshot(@server)
@@ -161,7 +219,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     for pid <- clients do
       state = client_state(pid)
       assert state.dirty
-      assert state.draft in ["192.0.2.123", "unsaved-gateway"]
+      assert state.draft in ["192.0.2.123", "unsaved-gateway", "unsaved-public-key"]
       assert state.operations > 0
     end
   end
@@ -172,9 +230,11 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     socket = %Socket{transport_pid: self(), private: %{lifecycle: %Lifecycle{}}}
 
     refresh =
-      if editor == :network,
-        do: &NetworkLive.refresh_observations/2,
-        else: &TailscaleLive.refresh_observations/2
+      case editor do
+        :network -> &NetworkLive.refresh_observations/2
+        :remote -> &TailscaleLive.refresh_observations/2
+        :settings -> &Phoenix.Component.assign(&1, :projection, &2)
+      end
 
     socket = Observations.subscribe(socket, refresh)
     socket = draft(socket, editor)
@@ -196,6 +256,21 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     updated = TailscaleLive.refresh_observations(socket, socket.assigns.projection)
     assert updated.assigns.pending_name == "unsaved-gateway"
     assert updated.assigns.dirty
+  end
+
+  defp assert_pending_reply(_, :settings), do: :ok
+
+  defp draft(socket, :settings) do
+    {:ok, socket} = SettingsLive.mount(%{}, %{}, socket)
+
+    {:noreply, socket} =
+      SettingsLive.handle_event(
+        "key-draft",
+        %{"ssh" => %{"public_key" => "unsaved-public-key"}},
+        socket
+      )
+
+    Phoenix.Component.assign(socket, :dirty, true)
   end
 
   defp draft(socket, :network) do
@@ -230,7 +305,11 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
       {:state, from, ref} ->
         draft =
-          socket.assigns.form.params[if(editor == :network, do: "internet_ip", else: "hostname")]
+          case editor do
+            :network -> socket.assigns.form.params["internet_ip"]
+            :remote -> socket.assigns.form.params["hostname"]
+            :settings -> socket.assigns.key_form.params["public_key"]
+          end
 
         send(
           from,

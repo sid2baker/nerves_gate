@@ -30,6 +30,8 @@ defmodule NervesGateWeb.Backend do
   def remote_disconnect, do: call(:remote_disconnect, [])
   def remote_login_url, do: call(:remote_login_url, [])
   def identify, do: call(:identify, [])
+  def ssh_add_key(key), do: call(:ssh_add_key, [key])
+  def ssh_remove_key(fingerprint), do: call(:ssh_remove_key, [fingerprint])
   def equipment_scan, do: call(:equipment_scan, [])
   def equipment_label(id, label), do: call(:equipment_label, [id, label])
   def equipment_share, do: call(:equipment_share, [])

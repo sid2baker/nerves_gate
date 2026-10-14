@@ -39,6 +39,8 @@ status = NervesGate.status()
 | `equipment_share(opts)` | `:ok` after equipment subnet advertisement readback |
 | `equipment_unshare(opts)` | `:ok` after equipment subnet withdrawal readback |
 | `identify(opts)` | `:ok` once five-second identification starts |
+| `ssh_add_key(public_key)` | `:ok` after validating and saving one OpenSSH public key |
+| `ssh_remove_key(fingerprint)` | `:ok` after saving removal; existing SSH sessions remain open |
 | `bus_configure(port, params, opts)` | `:ok`; CAN configuration accepted or RS485 opt-in changed |
 | `bus_capture(port, opts)` | `:ok`; receive-only capture accepted |
 | `modbus_read(port, params, opts)` | `:ok`; one authorized RTU read accepted |
@@ -108,7 +110,7 @@ See [bus operations and safety](buses.md) for enablement, limits and qualificati
 ## Status
 
 `status/1` reads domains independently, **not an atomic cross-domain snapshot**.
-[`Status`](../lib/nerves_gate/status.ex) derives the JSON-encodable v5 map:
+[`Status`](../lib/nerves_gate/status.ex) derives the JSON-encodable v6 map:
 
 - `version`, `system`: shape version and firmware/runtime information.
 - `network`: saved settings, trial, observations, readiness, recovery and errors.
@@ -120,6 +122,7 @@ See [bus operations and safety](buses.md) for enablement, limits and qualificati
 - `equipment`: scoped neighbors, labels and scan status.
 - `indicators`: availability, button state, LED patterns, identification and recovery.
 - `buses`: support, ports, configuration/observations, operation, result and errors.
+- `ssh`: availability, public-key fingerprints/types/comments and persistence errors.
 - `capabilities`, `actions`: presentation-only availability, labels and reasons.
 
 Unknown routes are `nil`, not assumed empty. Advertisements prove neither approval
@@ -154,5 +157,6 @@ opts = [network: network_server, remote: remote_server]
 status = NervesGate.status(opts)
 ```
 
-Other server options are `:equipment`, `:indicators` and `:buses`. See the
+Other server options are `:equipment`, `:indicators` and `:buses`.
+[SSH](../lib/nerves_gate/ssh.ex) is a single device-owned store, not an instance-selectable service. See the
 [QEMU scenarios](../test/scenarios) for real-device API examples.
