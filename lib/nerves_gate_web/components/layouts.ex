@@ -1,7 +1,7 @@
 defmodule NervesGateWeb.Layouts do
   use Phoenix.Component
   import Phoenix.Controller, only: [get_csrf_token: 0]
-  import NervesGateWeb.CoreComponents, only: [icon: 1, notice: 1]
+  import NervesGateWeb.CoreComponents, only: [icon: 1, notice: 1, notifications: 1]
 
   def root(assigns) do
     ~H"""
@@ -75,6 +75,7 @@ defmodule NervesGateWeb.Layouts do
       </.notice>
       {@inner_content}
     </main>
+    <.notifications flash={@flash} />
     """
   end
 

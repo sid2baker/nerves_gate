@@ -28,6 +28,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert_distribution_cookie_cached()
     assert_network_forms(vm)
     assert_settings_commands()
+    assert_remote_ui()
 
     clients =
       for editor <- [:network, :lan, :ports, :remote, :settings],
@@ -96,6 +97,176 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       state = :erpc.call(@guest, :sys, :get_state, [ProjectionServer])
       Enum.all?(clients, &(not Map.has_key?(state.clients, &1)))
     end)
+  end
+
+  @doc false
+  def assert_remote_ui do
+    socket = remote_socket()
+    projection = socket.assigns.projection
+
+    projection = %{
+      projection
+      | remote_access: %{
+          projection.remote_access
+          | state: "offline",
+            available: true,
+            auth_state: "needs_login",
+            operation: nil,
+            error: nil
+        }
+    }
+
+    socket = Phoenix.Component.assign(socket, projection: projection, request: :connect)
+    page = remote_page(socket)
+    assert [_] = Floki.find(page, "#tailscale-save[disabled][aria-busy='true'] .ui-spinner")
+
+    socket = Phoenix.Component.assign(socket, request: nil)
+
+    {:noreply, keyed} =
+      TailscaleLive.handle_event("method", %{"remote" => %{"method" => "auth_key"}}, socket)
+
+    page = remote_page(keyed)
+    assert [_] = Floki.find(page, "input[type='password'][name='remote[auth_key]'][value='']")
+
+    assert [] =
+             Floki.find(page, "#tailscale-form[phx-change], input[type='password'][phx-change]")
+
+    # Stale submission is rejected without a domain write, and never retains a key.
+    stale = Phoenix.Component.assign(keyed, base: "not-the-current-hostname")
+    secret = "tskey-auth-ui-test-only"
+
+    {:noreply, rejected} =
+      TailscaleLive.handle_event(
+        "save",
+        %{"remote" => %{"hostname" => "gateway", "auth_key" => secret}},
+        stale
+      )
+
+    assert rejected.assigns.key_revision == keyed.assigns.key_revision + 1
+    refute inspect(rejected.assigns) =~ secret
+    refute inspect(Phoenix.Logger.filter_values(%{"remote" => %{"auth_key" => secret}})) =~ secret
+    assert Phoenix.Flash.get(rejected.assigns.flash, :error)
+
+    waiting = Phoenix.Component.assign(socket, request: :connect, login_requested: true)
+
+    starting = %{
+      projection
+      | remote_access: %{projection.remote_access | operation: "connect", auth_state: "stopped"}
+    }
+
+    starting = TailscaleLive.refresh_observations(waiting, starting)
+    assert starting.assigns.login_requested
+    assert starting.assigns.request == :connect
+
+    failed = put_in(projection.remote_access.auth_state, "error")
+    failed = TailscaleLive.refresh_observations(waiting, failed)
+    assert failed.assigns.request == nil
+    refute failed.assigns.login_requested
+    assert Phoenix.Flash.get(failed.assigns.flash, :error)
+
+    notifications =
+      NervesGateWeb.CoreComponents.notifications(%{__changed__: nil, flash: failed.assigns.flash})
+      |> Phoenix.HTML.Safe.to_iodata()
+      |> IO.iodata_to_binary()
+      |> Floki.parse_document!()
+
+    assert [_] =
+             Floki.find(
+               notifications,
+               "#notification-error[role='alert'] button[phx-click='lv:clear-flash']"
+             )
+
+    saving = Phoenix.Component.assign(socket, request: :configure, pending_name: "gateway")
+
+    configuring = %{
+      projection
+      | remote_access: %{
+          projection.remote_access
+          | state: "online",
+            hostname: "gateway",
+            operation: "configure"
+        }
+    }
+
+    saving = TailscaleLive.refresh_observations(saving, configuring)
+    assert saving.assigns.request == :configure
+    saved = put_in(configuring.remote_access.operation, nil)
+    saved = TailscaleLive.refresh_observations(saving, saved)
+    assert saved.assigns.request == nil
+    assert Phoenix.Flash.get(saved.assigns.flash, :info) == "Device name saved."
+  end
+
+  # Called by the real, unenrolled Tailscale scenario after its private URL is ready.
+  @doc false
+  def assert_remote_sign_in do
+    observer = remote_socket()
+    projection = observer.assigns.projection
+    previous = put_in(projection.remote_access.operation, "connect")
+
+    requester =
+      Phoenix.Component.assign(observer,
+        projection: previous,
+        request: :connect,
+        login_requested: true
+      )
+
+    ready = TailscaleLive.refresh_observations(requester, projection)
+    url = ready.assigns.login_url
+
+    # Only assert booleans here: failed assertions must not print the private URL/HTML.
+    available = is_binary(url) and ready.assigns.login_open and ready.assigns.request == nil
+    assert available
+    page = remote_page(ready)
+    link = Floki.find(page, "#tailscale-login-dialog[role='dialog'] #tailscale-login-link")
+    linked = Floki.attribute(link, "href") == [url] and Floki.text(link) == url
+    assert linked
+
+    safe =
+      :binary.match(
+        :erlang.term_to_binary(Map.take(ready.assigns, [:projection, :flash, :form])),
+        url
+      ) == :nomatch
+
+    assert safe
+
+    {:noreply, closed} = TailscaleLive.handle_event("close-login", %{}, ready)
+    # Another changed observation rechecks the same URL without reopening the popup.
+    changed = put_in(projection.remote_access.version, "changed-observation")
+    closed = TailscaleLive.refresh_observations(closed, changed)
+    refute closed.assigns.login_open
+    {:noreply, reopened} = TailscaleLive.handle_event("show-login", %{}, closed)
+    assert reopened.assigns.login_open
+
+    observer = TailscaleLive.refresh_observations(observer, changed)
+    assert observer.assigns.login_url == nil
+    refute observer.assigns.login_open
+
+    online = %{
+      projection
+      | remote_access: %{projection.remote_access | state: "online", auth_state: "authenticated"}
+    }
+
+    connected = TailscaleLive.refresh_observations(reopened, online)
+    assert connected.assigns.login_url == nil
+    refute connected.assigns.login_open
+    assert Phoenix.Flash.get(connected.assigns.flash, :info) == "Connected to Tailscale."
+  end
+
+  defp remote_socket do
+    socket =
+      %Socket{private: %{lifecycle: %Lifecycle{}, live_temp: %{}}}
+      |> Phoenix.LiveView.clear_flash()
+
+    {:ok, socket} = TailscaleLive.mount(%{}, %{}, socket)
+    socket
+  end
+
+  defp remote_page(socket) do
+    socket.assigns
+    |> TailscaleLive.render()
+    |> Phoenix.HTML.Safe.to_iodata()
+    |> IO.iodata_to_binary()
+    |> Floki.parse_document!()
   end
 
   defp assert_runtime_backend do
@@ -177,6 +348,14 @@ defmodule NervesGate.Scenarios.ProjectionStream do
         page = Floki.parse_document!(response.body)
         assert [_] = Floki.find(page, "#equipment-network-form")
         assert [] = Floki.find(page, "[name='network[internet_port]']")
+      end
+
+      if path == "/remote" do
+        page = Floki.parse_document!(response.body)
+        assert [_] = Floki.find(page, "#gateway-remote-access ~ #tailscale-settings")
+        assert [_] = Floki.find(page, "#gateway-remote-access #tailscale-details")
+        assert [] = Floki.find(page, "details#tailscale-details, #tailscale-login-popup")
+        assert [_] = Floki.find(page, "#remote-method option[value='auth_key']")
       end
 
       if path == "/settings" do
@@ -390,7 +569,9 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   # Real UI subscription hooks and editor callbacks against the real QEMU.
   # Only the browser transport is omitted; no hardware or domain is simulated.
   defp client(editor) do
-    socket = %Socket{transport_pid: self(), private: %{lifecycle: %Lifecycle{}}}
+    socket =
+      %Socket{transport_pid: self(), private: %{lifecycle: %Lifecycle{}, live_temp: %{}}}
+      |> Phoenix.LiveView.clear_flash()
 
     refresh =
       case editor do
@@ -465,6 +646,8 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       base: socket.assigns.projection.remote_access.hostname,
       dirty: true,
       pending_name: nil,
+      request: nil,
+      login_open: false,
       login_url: nil,
       login_requested: false
     )

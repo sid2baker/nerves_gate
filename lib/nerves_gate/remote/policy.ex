@@ -22,6 +22,19 @@ defmodule NervesGate.Remote.Policy do
     }
   end
 
+  def validate(:connect, %{"hostname" => name, "auth_key" => key} = params)
+      when map_size(params) == 2 do
+    with {:ok, params} <- validate(:connect, %{"hostname" => name}) do
+      if is_binary(key) and byte_size(key) in 1..4096 and String.valid?(key) and
+           String.trim(key) != "" do
+        {:ok, Map.put(params, :auth_key, key)}
+      else
+        {:error,
+         Error.new("invalid_parameters", "Enter a Tailscale auth key (up to 4096 bytes).")}
+      end
+    end
+  end
+
   def validate(operation, params) when operation in [:connect, :configure] do
     case params do
       %{"hostname" => name} when map_size(params) == 1 and is_binary(name) ->
@@ -80,7 +93,9 @@ defmodule NervesGate.Remote.Policy do
     |> Map.merge(Map.take(observed, Map.keys(defaults)))
     |> Map.update!(:health, fn warnings ->
       for warning <- List.wrap(warnings), is_binary(warning) do
-        String.replace(warning, ~r/https?:\/\/[^\s<>"']+/i, "[private URL]")
+        warning
+        |> String.replace(~r/https?:\/\/[^\s<>"']+/i, "[private URL]")
+        |> String.replace(~r/tskey-[A-Za-z0-9_-]+/, "[private key]")
       end
     end)
   end

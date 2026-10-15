@@ -157,10 +157,18 @@ for implementation details.
 
 ## Tailscale
 
-In **Overview → Remote access**, enter a device name, select **Connect Tailscale**, then
-follow the private sign-in link. Return to see connection or machine-approval
-status. No auth key is needed. The same page shows gateway addresses, rename and
-disconnect. The equipment LAN page controls sharing its IPv4 subnet. Disconnect
+In **Overview → Remote access**, connection details stay visible above the settings.
+Enter a device name and choose **Sign-in link** or **Auth key**, then **Connect Tailscale**.
+The button stays disabled with a spinner while the request runs. Browser enrollment
+opens a private popup with the clickable sign-in URL, only in the requesting view;
+close and reopen it without starting another connection. Connection outcomes appear
+as dismissible notifications. Auth keys are masked, cleared after every submission,
+never saved or included in public status, and filtered from request logs. Key login
+waits for authentication or machine approval within the remote operation deadline;
+acceptance alone is not successful enrollment.
+
+The same page supports rename and disconnect. The equipment LAN page controls
+sharing its IPv4 subnet. Disconnect
 uses `Tailscale.down/0`, preserving enrollment and preferences. Reconnect uses
 `up/0` for an enrolled profile, or login when enrollment is needed. Disconnecting
 may interrupt a browser using that VPN; USB and LAN remain available. These
@@ -191,7 +199,7 @@ Do not reset all preferences to fix DNS. Tailscale cannot manage `/etc/resolv.co
 on the read-only rootfs. Settings made before enrollment may not survive a daemon
 restart; the library's default configuration is not an automatic startup policy.
 
-Daemon health URLs are redacted before publishing status. Private enrollment URLs
+Daemon health URLs and Tailscale key tokens are redacted before publishing status. Private enrollment URLs
 are explicit reads and the UI accepts only HTTPS links to official Tailscale login
 hosts. The UI does not grant tailnet permissions or verify equipment reachability.
 

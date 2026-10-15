@@ -44,13 +44,9 @@ defmodule NervesGate.Remote.Tailscale do
   end
 
   @impl true
-  def execute(:connect, %{hostname: hostname}, _) do
+  def execute(:connect, %{hostname: hostname} = params, _) do
     with :ok <- Tailscale.update_configuration(%{hostname: hostname, accept_dns: false}) do
-      if Tailscale.get(["auth", "state"]) in [:authenticated, :stopped, :needs_approval] do
-        Tailscale.up()
-      else
-        Tailscale.login(timeout: 30_000)
-      end
+      connect(params)
     end
   end
 
@@ -97,6 +93,39 @@ defmodule NervesGate.Remote.Tailscale do
   @impl true
   def login_url(_) do
     if :ets.whereis(Tailscale.Properties) != :undefined, do: Tailscale.get(["auth", "url"])
+  end
+
+  defp connect(%{auth_key: key}) do
+    # Subscribe only to the state, never credential-bearing auth properties.
+    :ok = Tailscale.subscribe(["auth", "state"])
+    with :ok <- Tailscale.login(auth_key: key), do: await_key_login()
+  end
+
+  defp connect(_) do
+    if Tailscale.get(["auth", "state"]) in [:authenticated, :stopped, :needs_approval],
+      do: Tailscale.up(),
+      else: Tailscale.login(timeout: 30_000)
+  end
+
+  # Remote owns the worker's overall deadline and cancellation.
+  defp await_key_login do
+    case Tailscale.get(["auth", "state"]) do
+      :authenticated ->
+        :ok
+
+      :needs_approval ->
+        {:error, :needs_approval}
+
+      :error ->
+        {:error, :authentication_failed}
+
+      _ ->
+        receive do
+          %PropertyTable.Event{} -> await_key_login()
+        after
+          1000 -> await_key_login()
+        end
+    end
   end
 
   defp ip(nil), do: nil

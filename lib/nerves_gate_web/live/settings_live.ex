@@ -56,12 +56,6 @@ defmodule NervesGateWeb.SettingsLive do
   def render(assigns) do
     ~H"""
     <.page_header title="Settings" description={@projection.remote_access.hostname || "Nerves Gate"} />
-    <.notice :if={Phoenix.Flash.get(@flash, :error)} tone="warning" role="alert">
-      {Phoenix.Flash.get(@flash, :error)}
-    </.notice>
-    <.notice :if={Phoenix.Flash.get(@flash, :info)} tone="good" role="status">
-      {Phoenix.Flash.get(@flash, :info)}
-    </.notice>
     <.live_component
       module={NervesGateWeb.NetworkEditor}
       id="lan-ports-editor"

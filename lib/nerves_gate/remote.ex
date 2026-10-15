@@ -35,10 +35,20 @@ defmodule NervesGate.Remote do
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
-  @doc "Request connection or enrollment. Hostnames are 1–63 letters, numbers or hyphens."
-  @spec connect(String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def connect(hostname, server \\ __MODULE__),
-    do: command(:connect, %{"hostname" => hostname}, server)
+  @doc "Request connection or enrollment. Optional `auth_key:` is transient, never persisted."
+  @spec connect(String.t(), GenServer.server(), keyword()) :: :ok | {:error, term()}
+  def connect(hostname, server \\ __MODULE__, opts \\ []) do
+    params = %{"hostname" => hostname}
+
+    params =
+      if Keyword.has_key?(opts, :auth_key) do
+        Map.put(params, "auth_key", opts[:auth_key])
+      else
+        params
+      end
+
+    command(:connect, params, server)
+  end
 
   @doc "Request a hostname change without changing connection intent; preserves omitted preferences."
   @spec configure(String.t(), GenServer.server()) :: :ok | {:error, term()}
@@ -197,11 +207,26 @@ defmodule NervesGate.Remote do
   def terminate(_, %{worker: {task, _}}), do: Task.shutdown(task, :brutal_kill)
   def terminate(_, _), do: :ok
 
+  # A failed command's mailbox message can contain an enrollment key.
+  @impl true
+  def format_status(status), do: Map.put(status, :message, :redacted)
+
   defp start_operation(state, operation, params) do
-    task = Task.async(fn -> Adapter.execute(state.adapter, operation, params) end)
+    task = Task.async(fn -> execute(state.adapter, operation, params) end)
     timer = Process.send_after(self(), {:timeout, task.ref}, state.timeout)
     %{state | worker: {task, timer}, operation: Atom.to_string(operation), error: nil}
   end
+
+  # Do not let task crash reports include credential-bearing arguments or errors.
+  defp execute(adapter, :connect, %{auth_key: _} = params) do
+    Adapter.execute(adapter, :connect, params)
+  rescue
+    _ -> {:error, :outcome_unknown}
+  catch
+    _, _ -> {:error, :outcome_unknown}
+  end
+
+  defp execute(adapter, operation, params), do: Adapter.execute(adapter, operation, params)
 
   defp maybe_serve(state) do
     case Policy.serve_dns_name(snapshot(state), state.serve_dns_name) do

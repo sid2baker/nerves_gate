@@ -5,7 +5,6 @@ defmodule NervesGateWeb.RemoteStatus do
 
   attr(:remote, :map, required: true)
   attr(:title, :string, default: "This gateway")
-  slot(:inner_block)
 
   def connection(assigns) do
     ~H"""
@@ -15,39 +14,50 @@ defmodule NervesGateWeb.RemoteStatus do
           {label(@remote)}
         </.status>
       </:meta>
-      <p :if={!@remote.available}>
-        Tailscale is starting or unavailable. Check that the daemon is installed and the gateway has Internet access.
-      </p>
+      <p :if={!@remote.available}>Tailscale is starting or unavailable.</p>
       <p :if={@remote.auth_state == "needs_approval"} role="status">
-        Approve this gateway in your Tailscale admin console. This page updates automatically.
+        Approve this gateway in your Tailscale admin console.
       </p>
       <p :if={@remote.operation} role="status">{operation(@remote.operation)}</p>
       <.notice :if={@remote.error} tone="warning" role="alert">{@remote.error.message}</.notice>
       <.notice :if={@remote.auth_state == "error" && @remote.error == nil} tone="warning" role="alert">
-        Tailscale sign-in failed. Check your Internet connection and try connecting again.
+        Tailscale sign-in failed. Check your connection or auth key and try again.
       </.notice>
-      <div :if={@remote.available && @remote.state == "online"} class="ui-settings-list">
-        <.setting_row label="Tailscale address">
-          <code>{@remote.ipv4 || "Waiting for an address"}</code>
+      <div id="tailscale-details" class="ui-settings-list">
+        <.setting_row label="Device name">
+          <code>{if @remote.hostname in [nil, ""], do: "Not set", else: @remote.hostname}</code>
         </.setting_row>
-        <.setting_row :if={@remote.dns_name} label="DNS name">
-          <code>{@remote.dns_name}</code>
+        <.setting_row label="Tailscale address">
+          <code>{@remote.ipv4 || "Not assigned"}</code>
+        </.setting_row>
+        <.setting_row label="DNS name">
+          <code>{@remote.dns_name || "Not assigned"}</code>
+        </.setting_row>
+        <.setting_row label="Tailscale version">{@remote.version || "Unknown"}</.setting_row>
+        <.setting_row label="Advertised routes">
+          {case @remote.advertised_routes do
+            nil -> "Unknown"
+            [] -> "None"
+            routes -> Enum.join(routes, ", ")
+          end}
         </.setting_row>
       </div>
       <p :for={warning <- @remote.health} class="ui-help">{warning}</p>
-      {render_slot(@inner_block)}
     </.panel>
     """
   end
 
   def label(%{available: false}), do: "Unavailable"
   def label(%{state: "online"}), do: "Connected"
+  def label(%{operation: "connect"}), do: "Connecting"
   def label(%{auth_state: "needs_approval"}), do: "Waiting for approval"
+  def label(%{auth_state: "error"}), do: "Sign-in failed"
   def label(%{auth_state: "authenticating"}), do: "Waiting for sign-in"
   def label(_), do: "Not connected"
 
   defp operation("connect"), do: "Connecting to Tailscale…"
   defp operation("disconnect"), do: "Disconnecting…"
+  defp operation("serve"), do: "Setting up HTTPS…"
 
   defp operation(operation)
        when operation in ["sharing_enable", "sharing_disable", "sharing_sync"],

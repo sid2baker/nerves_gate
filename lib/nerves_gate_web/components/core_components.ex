@@ -92,7 +92,9 @@ defmodule NervesGateWeb.CoreComponents do
   attr(:type, :string, default: "button")
   attr(:variant, :string, values: ["primary", "secondary", "quiet"], default: "primary")
   attr(:icon, :string, default: nil)
-  attr(:rest, :global, include: ~w(disabled form name value target rel referrerpolicy))
+  attr(:loading, :boolean, default: false)
+  attr(:disabled, :boolean, default: false)
+  attr(:rest, :global, include: ~w(form name value target rel referrerpolicy))
   slot(:inner_block, required: true)
 
   def button(assigns) do
@@ -100,7 +102,15 @@ defmodule NervesGateWeb.CoreComponents do
     <a :if={@href} href={@href} class={["ui-button", "ui-button--#{@variant}"]} {@rest}>
       {render_slot(@inner_block)}<.icon :if={@icon} name={@icon} />
     </a>
-    <button :if={!@href} type={@type} class={["ui-button", "ui-button--#{@variant}"]} {@rest}>
+    <button
+      :if={!@href}
+      type={@type}
+      class={["ui-button", "ui-button--#{@variant}"]}
+      disabled={@disabled or @loading}
+      aria-busy={@loading && "true"}
+      {@rest}
+    >
+      <span class="ui-spinner" aria-hidden="true"></span>
       {render_slot(@inner_block)}<.icon :if={@icon} name={@icon} />
     </button>
     """
@@ -128,6 +138,32 @@ defmodule NervesGateWeb.CoreComponents do
     <div class={["ui-notice", "ui-notice--#{@tone}"]} {@rest}>
       <.icon name={@icon} /><div>
         <strong :if={@title}>{@title}</strong><div>{render_slot(@inner_block)}</div>
+      </div>
+    </div>
+    """
+  end
+
+  attr(:flash, :map, required: true)
+
+  def notifications(assigns) do
+    ~H"""
+    <div id="notifications" class="ui-notifications" aria-label="Notifications">
+      <div
+        :for={kind <- [:info, :error]}
+        :if={Phoenix.Flash.get(@flash, kind)}
+        id={"notification-#{kind}"}
+        class={["ui-toast", "ui-toast--#{kind}"]}
+        role={if kind == :error, do: "alert", else: "status"}
+        aria-atomic="true"
+      >
+        <p>{Phoenix.Flash.get(@flash, kind)}</p>
+        <button
+          type="button"
+          class="ui-button ui-button--quiet"
+          aria-label="Dismiss notification"
+          phx-click="lv:clear-flash"
+          phx-value-key={kind}
+        >Dismiss</button>
       </div>
     </div>
     """

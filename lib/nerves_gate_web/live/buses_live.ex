@@ -127,12 +127,6 @@ defmodule NervesGateWeb.BusesLive do
     <.notice :if={!@buses.available} tone="warning">
       Bus diagnostics are unsupported on this target or unavailable.
     </.notice>
-    <.notice :if={Phoenix.Flash.get(@flash, :info)} role="status">
-      {Phoenix.Flash.get(@flash, :info)}
-    </.notice>
-    <.notice :if={Phoenix.Flash.get(@flash, :error)} tone="warning" role="alert">
-      {Phoenix.Flash.get(@flash, :error)}
-    </.notice>
     <.notice :if={@buses.error} tone="warning" role="alert">{@buses.error.message}</.notice>
     <.notice :if={@buses.operation} id="bus-operation" role="status">
       Working: {@buses.operation.kind} on {@buses.operation.port}. Other bus operations are unavailable until it finishes.

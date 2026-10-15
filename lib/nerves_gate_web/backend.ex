@@ -25,7 +25,7 @@ defmodule NervesGateWeb.Backend do
   def distribution_cookie, do: call(:distribution_cookie, [])
   def network_confirm(id), do: call(:network_confirm, [id])
   def network_cancel(id), do: call(:network_cancel, [id])
-  def remote_connect(name), do: call(:remote_connect, [name])
+  def remote_connect(name, opts \\ []), do: call(:remote_connect, [name, opts])
   def remote_configure(name), do: call(:remote_configure, [name])
   def remote_disconnect, do: call(:remote_disconnect, [])
   def remote_login_url, do: call(:remote_login_url, [])

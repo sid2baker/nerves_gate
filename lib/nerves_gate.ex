@@ -87,10 +87,12 @@ defmodule NervesGate do
     end
   end
 
-  @doc "Request Tailscale connection/enrollment under this hostname. Returns acceptance."
+  @doc "Request Tailscale connection/enrollment; optional `auth_key:` is used once, never saved. Returns acceptance."
   @spec remote_connect(String.t(), keyword()) :: command_result()
   def remote_connect(hostname, opts \\ []),
-    do: invoke(fn -> Remote.connect(hostname, remote(opts)) end) |> result()
+    do:
+      invoke(fn -> Remote.connect(hostname, remote(opts), Keyword.take(opts, [:auth_key])) end)
+      |> result()
 
   @doc "Request a Tailscale hostname change without replacing other daemon preferences."
   @spec remote_configure(String.t(), keyword()) :: command_result()

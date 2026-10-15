@@ -51,6 +51,12 @@ status = NervesGate.status()
 keys; hostname and trial ID are direct strings. Failures return
 `{:error, %{code: code, message: message}}`, never raw adapter errors.
 
+`remote_connect(hostname, auth_key: key)` optionally enrolls with an auth key
+instead of a browser sign-in link. The key is validated, used only by the bounded
+remote worker, and never persisted or included in status/events. Do not log it or
+place it in application configuration. Read remote operation, authentication state
+and error for completion; `:ok` means only that the request was accepted.
+
 Cellular configuration adds `"internet" => %{"mode" => "cellular", "apn" => "..."}`
 without an Ethernet Internet role, or uses `"mode" => "backup"` with Ethernet.
 Omitting it preserves Ethernet-only behavior. Validation checks shape, not driver
