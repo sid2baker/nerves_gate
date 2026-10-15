@@ -164,10 +164,14 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   defp assert_settings_commands do
     Task.async(fn ->
-      socket = %Socket{transport_pid: self(), private: %{lifecycle: %Lifecycle{}}}
+      socket = %Socket{
+        transport_pid: self(),
+        private: %{lifecycle: %Lifecycle{}, live_temp: %{}}
+      }
+
       {:cont, socket} = Observations.on_mount(:status, %{}, %{}, socket)
       {:ok, socket} = SettingsLive.mount(%{}, %{}, socket)
-      socket = Phoenix.Component.assign(socket, :flash, %{})
+      socket = Phoenix.LiveView.clear_flash(socket)
       server = socket.assigns.projection_server
       key = :public_key.generate_key({:namedCurve, :ed25519}) |> :ssh_file.extract_public_key()
       line = :ssh_file.encode([{key, [comment: ~c"Settings scenario"]}], :auth_keys)
