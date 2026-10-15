@@ -56,7 +56,10 @@ boots a disposable disk and starts workstation Phoenix with code reload,
 LiveReload, Volt and Tidewave. Tidewave allows non-loopback peers only in this
 QEMU session because the loopback-only workstation proxy connects to Phoenix over
 a Unix socket. Tidewave's Origin checks stay enabled; no workstation listener is
-opened to remote hosts. EC100 development keeps Tidewave's default local-only policy.
+opened to remote hosts. Configure Tidewave MCP clients with
+`http://localhost:4000/tidewave/mcp` (adjust the port when using `--port`). Its
+metadata is at `/tidewave/config`; the root `/config` and `/mcp` paths are not
+Tidewave routes. EC100 development keeps Tidewave's default local-only policy.
 Host UI changes reload; device code changes require restarting the command to
 rebuild firmware. Run `mix setup` again after changing dependencies or the local
 Nerves system.

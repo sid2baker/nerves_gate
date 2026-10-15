@@ -28,19 +28,44 @@ defmodule NervesGate.Scenarios.FrontendAssets do
     assert_assets(host)
     assert_assets(firmware)
 
-    # GET reaches the MCP route (POST-only) through the real Unix-socket proxy.
+    # Root discovery must not advertise a different MCP server to bridge clients.
+    assert Req.get!(host, url: "/config", redirect: false).status == 404
+
+    # Tidewave owns its JSON parser; the gateway only accepts form bodies.
     # Test/CI hosts and firmware must not expose Tidewave at all.
     if Endpoint.config(:code_reloader) do
+      assert Req.get!(host, url: "/tidewave/config").body["framework_type"] == "phoenix"
       assert Req.get!(host, url: "/tidewave/mcp").status == 405
+
+      initialized =
+        Req.post!(host,
+          url: "/tidewave/mcp",
+          json: %{
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: %{
+              protocolVersion: "2025-03-26",
+              capabilities: %{},
+              clientInfo: %{name: "frontend_assets", version: "1.0"}
+            }
+          }
+        )
+
+      assert initialized.status == 200
+      assert initialized.body["id"] == 1
+      assert is_map(initialized.body["result"]["serverInfo"])
 
       assert Req.get!(host,
                url: "/tidewave/mcp",
                headers: [origin: "https://untrusted.example"]
              ).status == 403
     else
+      assert Req.get!(host, url: "/tidewave/config").status == 404
       assert Req.get!(host, url: "/tidewave/mcp").status == 404
     end
 
+    assert Req.get!(firmware, url: "/config").status == 404
     assert Req.get!(firmware, url: "/tidewave/mcp").status == 404
     assert :erpc.call(@guest, :code, :where_is_file, [~c"tidewave.app"]) == :non_existing
 
