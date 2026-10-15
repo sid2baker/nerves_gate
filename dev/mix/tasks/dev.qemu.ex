@@ -159,6 +159,8 @@ defmodule Mix.Tasks.Dev.Qemu do
     # Pasta owns a new user/network namespace and outbound sockets, never host
     # routes or port forwards. A private mount namespace gives QEMU its own DNS.
     # Initialize Nerves before `mix run` replaces System.argv with an empty list.
+    # MuonTrap stops only pasta, which does not stop its command; the parent-death
+    # signal makes the session BEAM shut down its children instead of outliving pasta.
     {_, status} =
       MuonTrap.cmd(
         "pasta",
@@ -188,6 +190,9 @@ defmodule Mix.Tasks.Dev.Qemu do
           "--udp-ns",
           "none",
           "--",
+          "setpriv",
+          "--pdeathsig",
+          "TERM",
           "unshare",
           "--mount",
           "--propagation",

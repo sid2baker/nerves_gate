@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Setup.Qemu do
   @compile {:no_warn_undefined, Req}
   @version "1.104.1"
   @archive_sha256 "108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528"
-  @tools ~w(git make cc pkg-config fwup qemu-system-x86_64 pasta dnsmasq unshare mount flock ip nft tc socat inotifywait)
+  @tools ~w(git make cc pkg-config fwup qemu-system-x86_64 pasta dnsmasq setpriv unshare mount flock ip nft tc socat inotifywait)
 
   @impl true
   def run([]) do
