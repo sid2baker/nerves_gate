@@ -301,7 +301,9 @@ return real EIO; removing the
 fault does not heal a read-only guest filesystem. SIGKILL of QEMU is not physical
 power loss: host disk caches remain intact.
 
-Boot waits are bounded at 100 seconds, ordinary recovery at 30 seconds and Internet
+Boot waits are bounded at 180 seconds to accommodate fresh-disk initialization
+under software emulation; the launcher allows 240 seconds for the guest and host
+HTTP endpoint together. Ordinary recovery is bounded at 30 seconds and Internet
 detection at up to 90 seconds. A scenario has a five-minute outer limit. Guest
 observations and timers are not mocked.
 

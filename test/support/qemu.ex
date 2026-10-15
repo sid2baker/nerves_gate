@@ -101,7 +101,9 @@ defmodule NervesGate.TestQemu do
     qmp!(vm, "qmp_capabilities", %{})
     for key <- ~w(wan equipment vm wan_device disk), do: fault(key, nil)
     fault("receive", if(options[:receive_stall], do: "WAN receive stalled"))
-    status = await(vm, "boot", & &1, 100_000)
+    # Fresh-disk initialization runs under software emulation, including on
+    # aarch64 hosts. Leave room for formatting and OTP startup under host load.
+    status = await(vm, "boot", & &1, 180_000)
     assert status.system.target == "x86_64"
     assert status.system.node == @guest
     vm

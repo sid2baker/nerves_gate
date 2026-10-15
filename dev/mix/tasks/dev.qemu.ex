@@ -110,7 +110,8 @@ defmodule Mix.Tasks.Dev.Qemu do
     task = Task.async(fn -> isolated(false, socket, "all") end)
 
     try do
-      await_http(task, socket, System.monotonic_time(:millisecond) + 180_000)
+      # Allow the guest's 180-second boot budget plus workstation Phoenix startup.
+      await_http(task, socket, System.monotonic_time(:millisecond) + 240_000)
       proxy = proxy!(port, socket)
 
       try do
