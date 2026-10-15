@@ -24,6 +24,29 @@ defmodule NervesGate.Scenarios.Churn do
       assert saved == save(vm, saved)
     end
 
+    assert_port_arrangements(vm, saved)
     assert addressed?(Qemu.status(vm))
+  end
+
+  defp assert_port_arrangements(vm, saved) do
+    joined = %{"mode" => "shared", "equipment" => saved["eth0"]["address"]}
+
+    trial = propose(vm, joined)
+    assert :ok = Qemu.call(vm, :network_cancel, [trial])
+
+    Qemu.await(
+      vm,
+      "joining cancelled",
+      &(&1.network.pending == nil and &1.network.desired == saved and not &1.network.recovering)
+    )
+
+    assert joined == save(vm, joined)
+    observed = Qemu.status(vm).network.observed
+    # Saving checks topology, not a DHCP lease or Internet access.
+    assert %{present: true, state: :configured} = observed.bridge
+    assert Enum.all?(observed.ports, &(&1.master == "br0"))
+    separate = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
+    assert separate == save(vm, separate)
+    assert saved == save(vm, saved)
   end
 end

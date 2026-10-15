@@ -9,22 +9,23 @@ device-owned projection; local form drafts remain separate from live observation
 | Page | Route | Purpose |
 | --- | --- | --- |
 | Overview | `/` | Internet, Remote access and Erlang distribution cards |
-| Internet | `/network` | Port roles, addressing, cellular source, backup and APN |
+| Internet | `/network` | Internet port/address, cellular source, backup and APN |
 | Remote access | `/remote` | Tailscale enrollment, private sign-in, hostname and disconnect |
 | Erlang distribution | `/distribution` | Node, cookie and connection instructions |
 | Equipment | `/equipment` | Physical ports ordered LAN, RS485, CAN |
-| LAN 1 / 2 | `/equipment/lan/1`, `/equipment/lan/2` | Neighbors, ARP scan, labels and subnet sharing |
+| LAN 1 / 2 | `/equipment/lan/1`, `/equipment/lan/2` | Equipment address, neighbors, ARP scan, labels and subnet sharing |
 | RS485 1 / 2 | `/equipment/rs485/1`, `/equipment/rs485/2` | Opt-in, passive capture and one-shot Modbus reads |
 | CAN 1 / 2 | `/equipment/can/1`, `/equipment/can/2` | Listen-only configuration, counters and capture |
-| Settings | `/settings` | SSH public keys, runtime information, identify and button/LED help |
+| Settings | `/settings` | Separate/joined LAN ports, joined-network address, SSH keys and device information |
 
 LAN 1 is always `eth0`, LAN 2 `eth1`. Equipment hides a port assigned solely to
 Internet without renumbering the other port. Unassigned LAN ports and both buses
 of each type remain visible, including disabled or unavailable ports. Route IDs
 use a fixed allowlist, never arbitrary device names.
 
-First setup and later network changes use the same Internet page. Unconfirmed
-trials stay visible on other pages with a link to keep or restore settings.
+Internet, equipment addressing and LAN port arrangement use separate editors
+with the same save/undo flow. Unconfirmed trials stay visible on other pages
+with a link to keep or restore settings.
 Disconnected views show unavailable rather than continuing to offer stale actions.
 Opening a page never starts scans, route changes, bus traffic or physical I/O.
 

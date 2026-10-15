@@ -7,13 +7,20 @@ defmodule NervesGateWeb.NetworkForm do
     internet = Config.internet(network)
 
     %{
-      "mode" => if(network && network["mode"] == "shared", do: "shared", else: "ports"),
       "internet_mode" => internet["mode"],
       "cellular_apn" => internet["apn"] || "",
       "internet_port" => if(fresh, do: "auto", else: Config.role_port(network, "internet") || "")
     }
     |> put_address("internet", Config.role_address(network, "internet"))
-    |> put_address("shared", network && network["equipment"])
+  end
+
+  def from_settings(network, :ports) do
+    address =
+      (network && network["equipment"]) || Config.role_address(network, "internet") ||
+        Config.role_address(network, "equipment")
+
+    %{"mode" => if(network && network["mode"] == "shared", do: "shared", else: "ports")}
+    |> put_address("shared", address)
   end
 
   def from_settings(network, {:equipment, name}) do
@@ -28,11 +35,10 @@ defmodule NervesGateWeb.NetworkForm do
     }
   end
 
-  def equipment_reason(_, :internet), do: nil
+  def equipment_reason(_, editor) when editor in [:internet, :ports], do: nil
 
   def equipment_reason(%{"mode" => "shared"}, {:equipment, _}),
-    do:
-      "Both LAN ports share one network. Change the shared network under Internet before configuring a separate equipment port."
+    do: "LAN ports are joined. Separate them in Settings to configure this port."
 
   def equipment_reason(network, {:equipment, name}) do
     cond do
@@ -51,11 +57,11 @@ defmodule NervesGateWeb.NetworkForm do
   def internet_port(%{"internet_port" => "auto"}, ports), do: Discovery.internet_port(ports)
   def internet_port(params, _), do: blank(params["internet_port"])
 
-  def to_network(%{"mode" => "shared"} = params, _ports, _base, :internet) do
-    validate(%{"mode" => "shared", "equipment" => address(params, "shared")}, params)
+  def to_network(params, _ports, %{"mode" => "shared"} = base, :internet) do
+    validate(Map.delete(base, "internet"), params)
   end
 
-  def to_network(%{"mode" => "ports"} = params, ports, base, :internet) do
+  def to_network(params, ports, base, :internet) when is_map(base) do
     internet = internet_port(params, ports)
     equipment = Config.role_port(base, "equipment")
 
@@ -82,6 +88,18 @@ defmodule NervesGateWeb.NetworkForm do
     end
   end
 
+  def to_network(%{"mode" => mode} = params, _ports, base, :ports)
+      when mode in ["ports", "shared"] and is_map(base) do
+    network =
+      case {mode, base["mode"]} do
+        {"shared", _} -> %{"mode" => "shared", "equipment" => address(params, "shared")}
+        {"ports", "ports"} -> base
+        {"ports", _} -> %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
+      end
+
+    network |> Map.merge(Map.take(base, ["internet"])) |> Config.validate_network()
+  end
+
   def to_network(%{"enabled" => enabled} = params, _ports, base, {:equipment, name})
       when enabled in ["true", "false"] and name in ["eth0", "eth1"] and is_map(base) do
     case equipment_reason(base, {:equipment, name}) do
@@ -104,12 +122,13 @@ defmodule NervesGateWeb.NetworkForm do
 
   def to_network(_, _, _, _), do: {:error, "Choose valid network settings."}
 
-  def defaults_for_change(params, previous, :internet, observed) do
-    Enum.reduce(["internet", "shared"], params, fn prefix, acc ->
-      if previous["#{prefix}_method"] != "static" and acc["#{prefix}_method"] == "static",
-        do: static_defaults(acc, prefix, observed),
-        else: acc
-    end)
+  def defaults_for_change(params, previous, editor, observed)
+      when editor in [:internet, :ports] do
+    prefix = if editor == :internet, do: "internet", else: "shared"
+
+    if previous["#{prefix}_method"] != "static" and params["#{prefix}_method"] == "static",
+      do: static_defaults(params, prefix, observed),
+      else: params
   end
 
   def defaults_for_change(params, previous, {:equipment, name}, observed) do

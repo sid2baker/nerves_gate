@@ -114,11 +114,14 @@ qualify a cellular modem, carrier registration or modem power.
 ## Saving and rollback
 
 Internet and equipment use one Network owner and one coordinated configuration,
-with separate UI drafts. Both pages show the same active trial and confirmation
-timer. Saving a draft checks its original saved configuration inside the Network
+with separate UI drafts. Internet, LAN detail and Settings pages show the same
+active trial and confirmation timer. Saving a draft checks its original saved configuration inside the Network
 process; stale drafts are rejected before application and must be reloaded.
-Shared-network mode remains under Internet → Advanced because it replaces both
-port assignments and their separate addressing.
+**Settings → LAN ports** selects Separate or Joined and configures the joined
+network’s address. Joining replaces both port assignments. Separating clears the
+shared address and leaves both ports unassigned; it does not guess their roles.
+Internet source/APN settings are preserved and must remain valid for the chosen
+arrangement (4G-only cannot use joined ports; 4G backup needs an Ethernet uplink).
 
 VintageNet stores interface settings; the current trial exists only in memory.
 Unreadable saved settings fail closed. The [public API](action-api.md) describes

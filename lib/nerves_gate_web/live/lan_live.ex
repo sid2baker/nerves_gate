@@ -205,8 +205,12 @@ defmodule NervesGateWeb.LanLive do
             A cable or gateway address does not prove that equipment is reachable.
           </p>
       <% end %>
-      <.link :if={@port.role in ["internet", "shared"]} navigate="/network" class="ui-text-link">
-        {if @port.role == "shared", do: "Configure shared network", else: "Configure Internet"}
+      <.link
+        :if={@port.role in ["internet", "shared"]}
+        navigate={if @port.role == "shared", do: "/settings#lan-ports-editor", else: "/network"}
+        class="ui-text-link"
+      >
+        {if @port.role == "shared", do: "Configure LAN ports", else: "Configure Internet"}
       </.link>
     </.panel>
     <.live_component

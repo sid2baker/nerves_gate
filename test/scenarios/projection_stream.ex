@@ -30,7 +30,8 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert_settings_commands()
 
     clients =
-      for editor <- [:network, :lan, :remote, :settings], do: spawn_link(fn -> client(editor) end)
+      for editor <- [:network, :lan, :ports, :remote, :settings],
+          do: spawn_link(fn -> client(editor) end)
 
     try do
       initial = converged(vm, clients)
@@ -160,6 +161,12 @@ defmodule NervesGate.Scenarios.ProjectionStream do
         assert [] =
                  Floki.find(
                    page,
+                   "#advanced-network, [name='network[mode]'], [name='network[shared_ip]']"
+                 )
+
+        assert [] =
+                 Floki.find(
+                   page,
                    "[name='network[equipment_port]'], [name='network[equipment_ip]']"
                  )
 
@@ -173,6 +180,10 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       end
 
       if path == "/settings" do
+        page = Floki.parse_document!(response.body)
+        assert [_] = Floki.find(page, "#lan-ports-form")
+        assert [_, _] = Floki.find(page, "#lan-ports-form [name='network[mode]']")
+        assert [] = Floki.find(page, "#lan-ports-form [name='network[internet_port]']")
         assert response.body =~ "x86_64"
         assert response.body =~ "SSH access"
         assert response.body =~ "ssh-key-form"
@@ -217,10 +228,12 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert without_equipment["eth1"] == nil
     assert without_equipment["eth0"] == base["eth0"]
     assert without_equipment["internet"] == cellular["internet"]
+    assert_port_forms(with_equipment, ports)
 
     for {editor, field, value, foreign_field} <- [
           {:internet, "internet_ip", "192.0.2.123", "equipment_ip"},
-          {equipment, "equipment_ip", "10.44.0.123", "internet_port"}
+          {equipment, "equipment_ip", "10.44.0.123", "internet_port"},
+          {:ports, "mode", "shared", "internet_port"}
         ] do
       assigns = %{id: "draft-check", editor: editor, projection: status, access: %{}}
       assert {:ok, socket} = NetworkEditor.update(assigns, %Socket{})
@@ -237,6 +250,46 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       refute Map.has_key?(socket.assigns.form.params, foreign_field)
       assert socket.assigns.dirty
     end
+  end
+
+  defp assert_port_forms(base, ports) do
+    params = NetworkForm.from_settings(base, :ports)
+    assert {:ok, ^base} = NetworkForm.to_network(params, ports, base, :ports)
+    refute Map.has_key?(params, "internet_mode")
+
+    params = Map.put(params, "mode", "shared")
+    assert {:ok, shared} = NetworkForm.to_network(params, ports, base, :ports)
+    assert shared["mode"] == "shared"
+    assert shared["equipment"] == base["eth0"]["address"]
+    assert shared["internet"] == base["internet"]
+
+    # Internet cannot change the arrangement or the joined-network address.
+    internet = NetworkForm.from_settings(shared, :internet)
+    refute Map.has_key?(internet, "mode")
+    refute Map.has_key?(internet, "shared_ip")
+    forged = Map.merge(internet, %{"mode" => "ports", "shared_ip" => "192.0.2.123"})
+    assert {:ok, ^shared} = NetworkForm.to_network(forged, ports, shared, :internet)
+
+    backup = Map.merge(internet, %{"internet_mode" => "backup", "cellular_apn" => "test.apn"})
+    assert {:ok, with_backup} = NetworkForm.to_network(backup, ports, shared, :internet)
+    assert with_backup["equipment"] == shared["equipment"]
+    assert with_backup["internet"] == %{"mode" => "backup", "apn" => "test.apn"}
+    assert {:ok, ^with_backup} = NetworkForm.to_network(params, ports, with_backup, :ports)
+    assert {:ok, ^shared} = NetworkForm.to_network(internet, ports, with_backup, :internet)
+
+    separate = Map.put(params, "mode", "ports")
+    assert {:ok, unassigned} = NetworkForm.to_network(separate, ports, shared, :ports)
+    assert unassigned == %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
+    assert {:error, _} = NetworkForm.to_network(separate, ports, with_backup, :ports)
+
+    cellular = %{
+      "mode" => "ports",
+      "eth0" => nil,
+      "eth1" => base["eth1"],
+      "internet" => %{"mode" => "cellular", "apn" => "test.apn"}
+    }
+
+    assert {:error, _} = NetworkForm.to_network(params, ports, cellular, :ports)
   end
 
   defp assert_distribution_cookie_cached do
@@ -325,6 +378,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert state.draft in [
                "192.0.2.123",
                "10.44.0.123",
+               "shared",
                "unsaved-gateway",
                "unsaved-public-key"
              ]
@@ -340,7 +394,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
     refresh =
       case editor do
-        editor when editor in [:network, :lan] -> &NetworkEditor.refresh_observations/2
+        editor when editor in [:network, :lan, :ports] -> &NetworkEditor.refresh_observations/2
         :remote -> &TailscaleLive.refresh_observations/2
         :settings -> &Phoenix.Component.assign(&1, :projection, &2)
       end
@@ -353,7 +407,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   # An unrelated operation queued before a command reply must not complete or
   # abandon the editor's pending save against an unchanged domain snapshot.
-  defp assert_pending_reply(socket, editor) when editor in [:network, :lan] do
+  defp assert_pending_reply(socket, editor) when editor in [:network, :lan, :ports] do
     socket = Phoenix.Component.assign(socket, own_save: true, saving_network: socket.assigns.base)
     updated = NetworkEditor.refresh_observations(socket, socket.assigns.projection)
     assert updated.assigns.own_save
@@ -382,31 +436,21 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     Phoenix.Component.assign(socket, :dirty, true)
   end
 
-  defp draft(socket, :network) do
+  defp draft(socket, editor) when editor in [:network, :lan, :ports] do
     settings = socket.assigns.projection.network.desired
 
-    params =
-      NetworkForm.from_settings(settings, :internet) |> Map.put("internet_ip", "192.0.2.123")
+    {editor, field, value} =
+      case editor do
+        :network -> {:internet, "internet_ip", "192.0.2.123"}
+        :lan -> {{:equipment, "eth1"}, "equipment_ip", "10.44.0.123"}
+        :ports -> {:ports, "mode", "shared"}
+      end
+
+    params = NetworkForm.from_settings(settings, editor) |> Map.put(field, value)
 
     Phoenix.Component.assign(socket,
-      editor: :internet,
+      editor: editor,
       form: Phoenix.Component.to_form(params, as: :network),
-      base: settings,
-      dirty: true,
-      own_save: false,
-      saving_network: nil,
-      initial: false
-    )
-  end
-
-  defp draft(socket, :lan) do
-    settings = socket.assigns.projection.network.desired
-    params = NetworkForm.from_settings(settings, {:equipment, "eth1"})
-
-    Phoenix.Component.assign(socket,
-      editor: {:equipment, "eth1"},
-      form:
-        Phoenix.Component.to_form(Map.put(params, "equipment_ip", "10.44.0.123"), as: :network),
       base: settings,
       dirty: true,
       own_save: false,
@@ -432,13 +476,16 @@ defmodule NervesGate.Scenarios.ProjectionStream do
         :ok
 
       {:state, from, ref} ->
-        draft =
-          case editor do
-            :network -> socket.assigns.form.params["internet_ip"]
-            :lan -> socket.assigns.form.params["equipment_ip"]
-            :remote -> socket.assigns.form.params["hostname"]
-            :settings -> socket.assigns.key_form.params["public_key"]
-          end
+        fields = %{
+          network: "internet_ip",
+          lan: "equipment_ip",
+          ports: "mode",
+          remote: "hostname",
+          settings: "public_key"
+        }
+
+        form = if editor == :settings, do: socket.assigns.key_form, else: socket.assigns.form
+        draft = form.params[Map.fetch!(fields, editor)]
 
         send(
           from,

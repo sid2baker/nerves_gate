@@ -249,155 +249,165 @@ defmodule NervesGateWeb.NetworkEditor do
           </.notice>
           <.form
             for={@form}
-            id={if @editor == :internet, do: "network-form", else: "equipment-network-form"}
+            id={
+              case @editor do
+                :internet -> "network-form"
+                :ports -> "lan-ports-form"
+                _ -> "equipment-network-form"
+              end
+            }
             phx-target={@myself}
             phx-change="change"
             phx-submit="save"
             class="ui-stack"
           >
-            <%= if @editor == :internet do %>
-              <.panel title="Internet source" icon="internet">
-                <.choice_group field={@form[:internet_mode]} label="Connect using">
-                  <:option
-                    value="ethernet"
-                    title="Ethernet"
-                    description="Use a LAN port for Internet."
-                  />
-                  <:option
-                    value="cellular"
-                    title="4G modem"
-                    description="Use cellular only; keep equipment separate."
-                  />
-                  <:option
-                    value="backup"
-                    title="Ethernet with 4G backup"
-                    description="Prefer Ethernet; use 4G when Ethernet has no Internet."
-                  />
-                </.choice_group>
-                <.notice :if={!@projection.capabilities.mobile}>
-                  This firmware has no qualified cellular setup. Identify the modem and configure its driver and dedicated interface before enabling 4G.
-                </.notice>
-                <div :if={@form.params["internet_mode"] in ["cellular", "backup"]}>
-                  <.field
-                    field={@form[:cellular_apn]}
-                    label="Cellular APN"
-                    help="Use the APN supplied by your mobile operator."
-                    required
-                    autocomplete="off"
-                  />
-                  <p class="ui-help">
-                    SIM must already be unlocked. PIN and account-password setup are not supported yet.
-                  </p>
-                  <p :if={@form.params["internet_mode"] == "backup"} class="ui-help">
-                    4G stays connected on standby. Connectivity checks can use mobile data. Existing connections may briefly interrupt during a switch.
-                  </p>
-                </div>
-              </.panel>
-              <%= if @form.params["mode"] == "ports" do %>
-                <.panel
-                  :if={@form.params["internet_mode"] != "cellular"}
-                  title="Ethernet Internet"
-                  icon="internet"
-                >
-                  <p id="internet-summary">
-                    <strong>{if @internet, do: port_label(@internet) <> " · "}{@internet_status}</strong>
-                  </p>
-                  <p :if={!@internet} class="ui-help">
-                    You can finish offline and add Internet later.
-                  </p>
-                  <.button
-                    variant="secondary"
-                    phx-target={@myself}
-                    phx-click="edit-internet"
-                    aria-expanded={to_string(@editing_internet)}
-                    aria-controls="internet-options"
-                  >{if @editing_internet,
-                    do: "Hide Internet settings",
-                    else: "Change Internet connection"}</.button>
-                  <div :if={@editing_internet} id="internet-options">
-                    <.choice_group field={@form[:internet_port]} label="Internet port">
-                      <:option
-                        :if={@initial}
-                        value="auto"
-                        title="Automatic"
-                        description="Use the detected connection."
-                      />
-                      <:option
-                        value="eth0"
-                        title="LAN 1"
-                        description={internet_status("eth0", @projection.connections.ports)}
-                      />
-                      <:option
-                        value="eth1"
-                        title="LAN 2"
-                        description={internet_status("eth1", @projection.connections.ports)}
-                      />
-                      <:option value="" title="Not now" />
-                    </.choice_group>
-                    <.address_fields
-                      :if={@form.params["internet_port"] != ""}
-                      form={@form}
-                      prefix="internet"
+            <%= cond do %>
+              <% @editor == :ports -> %>
+                <.panel title="LAN ports" icon="port">
+                  <.choice_group field={@form[:mode]} label="Port arrangement">
+                    <:option
+                      value="ports"
+                      title="Separate"
+                      description="Use each port independently."
                     />
+                    <:option
+                      value="shared"
+                      title="Joined"
+                      description="Use both ports as one network."
+                    />
+                  </.choice_group>
+                  <%= if @form.params["mode"] == "shared" do %>
+                    <.notice tone="warning">
+                      Only join ports on the same trusted network. Separate port assignments are replaced.
+                    </.notice>
+                    <.address_fields form={@form} prefix="shared" />
+                  <% else %>
+                    <.notice :if={@base["mode"] == "shared"} tone="warning">
+                      Separating removes the shared address and leaves both ports unassigned.
+                    </.notice>
+                  <% end %>
+                </.panel>
+              <% @editor == :internet -> %>
+                <.panel title="Internet source" icon="internet">
+                  <.choice_group field={@form[:internet_mode]} label="Connect using">
+                    <:option
+                      value="ethernet"
+                      title="Ethernet"
+                      description="Use a LAN port for Internet."
+                    />
+                    <:option
+                      value="cellular"
+                      title="4G modem"
+                      description="Use cellular only; keep equipment separate."
+                    />
+                    <:option
+                      value="backup"
+                      title="Ethernet with 4G backup"
+                      description="Prefer Ethernet; use 4G when Ethernet has no Internet."
+                    />
+                  </.choice_group>
+                  <.notice :if={!@projection.capabilities.mobile}>
+                    This firmware has no qualified cellular setup. Identify the modem and configure its driver and dedicated interface before enabling 4G.
+                  </.notice>
+                  <div :if={@form.params["internet_mode"] in ["cellular", "backup"]}>
+                    <.field
+                      field={@form[:cellular_apn]}
+                      label="Cellular APN"
+                      help="Use the APN supplied by your mobile operator."
+                      required
+                      autocomplete="off"
+                    />
+                    <p class="ui-help">
+                      SIM must already be unlocked. PIN and account-password setup are not supported yet.
+                    </p>
+                    <p :if={@form.params["internet_mode"] == "backup"} class="ui-help">
+                      4G stays connected on standby. Connectivity checks can use mobile data. Existing connections may briefly interrupt during a switch.
+                    </p>
                   </div>
                 </.panel>
-              <% else %>
-                <.panel title="Shared network" icon="network">
-                  <.notice tone="warning">
-                    Both Ethernet ports will be joined, replacing their separate assignments. Only use this for one trusted network, never two different networks.
-                  </.notice>
-                  <.address_fields form={@form} prefix="shared" />
+                <%= if @base["mode"] != "shared" do %>
+                  <.panel
+                    :if={@form.params["internet_mode"] != "cellular"}
+                    title="Ethernet Internet"
+                    icon="internet"
+                  >
+                    <p id="internet-summary">
+                      <strong>{if @internet, do: port_label(@internet) <> " · "}{@internet_status}</strong>
+                    </p>
+                    <p :if={!@internet} class="ui-help">
+                      You can finish offline and add Internet later.
+                    </p>
+                    <.button
+                      variant="secondary"
+                      phx-target={@myself}
+                      phx-click="edit-internet"
+                      aria-expanded={to_string(@editing_internet)}
+                      aria-controls="internet-options"
+                    >{if @editing_internet,
+                      do: "Hide Internet settings",
+                      else: "Change Internet connection"}</.button>
+                    <div :if={@editing_internet} id="internet-options">
+                      <.choice_group field={@form[:internet_port]} label="Internet port">
+                        <:option
+                          :if={@initial}
+                          value="auto"
+                          title="Automatic"
+                          description="Use the detected connection."
+                        />
+                        <:option
+                          value="eth0"
+                          title="LAN 1"
+                          description={internet_status("eth0", @projection.connections.ports)}
+                        />
+                        <:option
+                          value="eth1"
+                          title="LAN 2"
+                          description={internet_status("eth1", @projection.connections.ports)}
+                        />
+                        <:option value="" title="Not now" />
+                      </.choice_group>
+                      <.address_fields
+                        :if={@form.params["internet_port"] != ""}
+                        form={@form}
+                        prefix="internet"
+                      />
+                    </div>
+                  </.panel>
+                <% end %>
+              <% true -> %>
+                <.panel title="Equipment network" icon="equipment">
+                  <.choice_group field={@form[:enabled]} label="Use this LAN port">
+                    <:option
+                      value="true"
+                      title="Equipment"
+                      description="Assign an address on your equipment’s network."
+                    />
+                    <:option
+                      value="false"
+                      title="Not configured"
+                      description="Leave this port unused."
+                    />
+                  </.choice_group>
+                  <div :if={@form.params["enabled"] == "true"} class="ui-field-grid">
+                    <.field
+                      field={@form[:equipment_ip]}
+                      label="Gateway address on the equipment network"
+                      help="Use an unused address in your equipment’s subnet."
+                      placeholder="192.168.10.2"
+                      required
+                      autocomplete="off"
+                    />
+                    <.field
+                      field={@form[:equipment_mask]}
+                      label="Subnet mask"
+                      required
+                      autocomplete="off"
+                    />
+                  </div>
+                  <p class="ui-help">
+                    Check the address before saving. Equipment keeps its own addresses; Internet settings are preserved.
+                  </p>
                 </.panel>
-              <% end %>
-              <details
-                id="advanced-network"
-                open={@form.params["mode"] == "shared"}
-                phx-mounted={Phoenix.LiveView.JS.ignore_attributes("open")}
-              >
-                <summary>Advanced: shared network</summary>
-                <.choice_group field={@form[:mode]} label="Port arrangement">
-                  <:option
-                    value="ports"
-                    title="Separate ports"
-                    description="Internet and equipment stay separate."
-                  />
-                  <:option
-                    value="shared"
-                    title="One shared network"
-                    description="Explicitly join both Ethernet ports."
-                  />
-                </.choice_group>
-              </details>
-            <% else %>
-              <.panel title="Equipment network" icon="equipment">
-                <.choice_group field={@form[:enabled]} label="Use this LAN port">
-                  <:option
-                    value="true"
-                    title="Equipment"
-                    description="Assign an address on your equipment’s network."
-                  />
-                  <:option value="false" title="Not configured" description="Leave this port unused." />
-                </.choice_group>
-                <div :if={@form.params["enabled"] == "true"} class="ui-field-grid">
-                  <.field
-                    field={@form[:equipment_ip]}
-                    label="Gateway address on the equipment network"
-                    help="Use an unused address in your equipment’s subnet."
-                    placeholder="192.168.10.2"
-                    required
-                    autocomplete="off"
-                  />
-                  <.field
-                    field={@form[:equipment_mask]}
-                    label="Subnet mask"
-                    required
-                    autocomplete="off"
-                  />
-                </div>
-                <p class="ui-help">
-                  Check the address before saving. Equipment keeps its own addresses; Internet settings are preserved.
-                </p>
-              </.panel>
             <% end %>
             <.notice :if={@initial and @usb} icon="usb">
               You’re connected through USB. Settings save directly; USB stays available.

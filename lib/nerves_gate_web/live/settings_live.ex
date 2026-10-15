@@ -3,6 +3,7 @@ defmodule NervesGateWeb.SettingsLive do
   import NervesGateWeb.CoreComponents
 
   on_mount({NervesGateWeb.Observations, :status})
+  on_mount({NervesGateWeb.Access, :network})
 
   def mount(_, _, socket),
     do: {:ok, assign(socket, :key_form, to_form(%{"public_key" => ""}, as: :ssh))}
@@ -61,6 +62,13 @@ defmodule NervesGateWeb.SettingsLive do
     <.notice :if={Phoenix.Flash.get(@flash, :info)} tone="good" role="status">
       {Phoenix.Flash.get(@flash, :info)}
     </.notice>
+    <.live_component
+      module={NervesGateWeb.NetworkEditor}
+      id="lan-ports-editor"
+      editor={:ports}
+      projection={@projection}
+      access={@access}
+    />
     <.panel id="ssh-settings" title="SSH access" icon="lock">
       <p class="ui-help">
         Over USB IPv4, sign in as <code>root</code> with password <code>nerves_gate</code>; no key is

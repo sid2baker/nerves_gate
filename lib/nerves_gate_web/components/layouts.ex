@@ -66,7 +66,7 @@ defmodule NervesGateWeb.Layouts do
         Unconfirmed network changes restore automatically on the device.
       </.notice>
       <.notice
-        :if={@projection.network.pending && @live_action != :network}
+        :if={@projection.network.pending && @live_action not in [:network, :lan, :settings]}
         tone="warning"
         icon="clock"
         id="pending-network-notice"
