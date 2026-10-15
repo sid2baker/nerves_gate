@@ -10,8 +10,12 @@ require a choice.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change automatically when a cable disappears or moves.
-Use **Overview → Internet** to change them. Neither setup nor discovery bridges
-networks, enables cellular backup or assigns an equipment address behind your back.
+Use **Overview → Internet** for the uplink and **Equipment → LAN 1 / LAN 2** for
+equipment addressing. Each editor preserves the other’s saved settings; a port
+already used for Internet cannot be reassigned from Equipment. Remove an existing
+equipment assignment on its LAN page before assigning the other port.
+Neither setup nor discovery bridges networks, enables cellular backup or assigns
+an equipment address behind your back.
 
 - **Separate ports:** at most one Internet port (DHCP or static IPv4), optionally
   one equipment port (static IPv4, no default route or DNS). Either may be omitted.
@@ -108,6 +112,13 @@ rollback, DNS, VPN traffic and blocked direct cellular HTTP access. The QEMU sui
 qualify a cellular modem, carrier registration or modem power.
 
 ## Saving and rollback
+
+Internet and equipment use one Network owner and one coordinated configuration,
+with separate UI drafts. Both pages show the same active trial and confirmation
+timer. Saving a draft checks its original saved configuration inside the Network
+process; stale drafts are rejected before application and must be reloaded.
+Shared-network mode remains under Internet → Advanced because it replaces both
+port assignments and their separate addressing.
 
 VintageNet stores interface settings; the current trial exists only in memory.
 Unreadable saved settings fail closed. The [public API](action-api.md) describes

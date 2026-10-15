@@ -17,6 +17,13 @@ defmodule NervesGate.Error do
     do:
       new("invalid_saved_config", "Saved settings could not be read. Use recovery SSH or serial.")
 
+  def from(:stale_network),
+    do:
+      new(
+        "stale_network",
+        "Network settings changed in another session. Reload saved settings before editing."
+      )
+
   def from(:trial_in_progress),
     do: new("trial_in_progress", "Another client already started a trial.")
 

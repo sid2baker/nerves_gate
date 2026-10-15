@@ -40,6 +40,8 @@ defmodule NervesGate do
 
     * `:access` — trusted server-observed USB access for `network_propose/2` only.
       Never populate it from user parameters or forwarded headers.
+    * `:expected` — saved network settings the proposal was based on. When supplied,
+      the Network process rejects stale drafts before applying any changes.
     * `:network`, `:remote`, `:equipment`, `:indicators`, `:buses` — domain servers for tests or independent instances.
       No client object or extra process is required.
   """
@@ -57,7 +59,15 @@ defmodule NervesGate do
   @spec network_propose(map(), keyword()) :: result(String.t())
   def network_propose(settings, opts \\ []) do
     with {:ok, settings} <- network_validate(settings) do
-      invoke(fn -> Network.propose(settings, network(opts), opts[:access]) end) |> result()
+      invoke(fn ->
+        Network.propose(
+          settings,
+          network(opts),
+          opts[:access],
+          Keyword.get(opts, :expected, :any)
+        )
+      end)
+      |> result()
     end
   end
 

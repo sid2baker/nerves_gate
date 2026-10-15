@@ -4,7 +4,7 @@ defmodule NervesGate.Network do
 
   ## Commands
 
-  `propose/3` applies settings temporarily and returns `{:ok, trial_id}`.
+  `propose/4` applies settings temporarily and returns `{:ok, trial_id}`.
   `confirm/2` saves that trial; `cancel/2` restores saved settings. Both return
   `:ok` after completion. Rejected or failed commands return `{:error, reason}`.
   Manual trials expire after 60 seconds. First setup through verified USB may
@@ -38,10 +38,12 @@ defmodule NervesGate.Network do
   Immediately-ready first USB setup waits for auto-save before replying. If still
   settling, it returns a pending trial. `access` must come from trusted server
   observations of both socket endpoints, never user input; omit it for manual setup.
+  Supply `expected` to reject a draft if the saved network settings have changed.
   """
-  @spec propose(map(), GenServer.server(), map() | nil) :: {:ok, String.t()} | {:error, term()}
-  def propose(network, server \\ __MODULE__, access \\ nil),
-    do: GenServer.call(server, {:propose, network, access}, 15_000)
+  @spec propose(map(), GenServer.server(), map() | nil, map() | :any) ::
+          {:ok, String.t()} | {:error, term()}
+  def propose(network, server \\ __MODULE__, access \\ nil, expected \\ :any),
+    do: GenServer.call(server, {:propose, network, access, expected}, 15_000)
 
   @doc "Save the matching, unexpired trial after checking current readiness. Replies after saving."
   @spec confirm(String.t(), GenServer.server()) :: :ok | {:error, term()}
@@ -150,8 +152,8 @@ defmodule NervesGate.Network do
     end
   end
 
-  def handle_call({:propose, network, access}, from, state) do
-    state |> refresh() |> propose(network, access, from) |> respond()
+  def handle_call({:propose, network, access, expected}, from, state) do
+    state |> refresh() |> propose(network, access, expected, from) |> respond()
   end
 
   def handle_call({operation, id}, from, state) when operation in [:confirm, :cancel] do
@@ -161,8 +163,9 @@ defmodule NervesGate.Network do
   defp respond({:pending, state}), do: {:noreply, publish(state)}
   defp respond({result, state}), do: {:reply, result, publish(state)}
 
-  defp propose(state, input, access, from) do
+  defp propose(state, input, access, expected, from) do
     with :ok <- Policy.available(public(state)),
+         :ok <- check_expected(state, expected),
          {:ok, network} <- Config.validate_network(input),
          :ok <- Policy.supported(state.observed, network),
          :ok <- lan_change(state) do
@@ -189,6 +192,12 @@ defmodule NervesGate.Network do
     else
       error -> {error, state}
     end
+  end
+
+  defp check_expected(_state, :any), do: :ok
+
+  defp check_expected(state, expected) do
+    if state.config["network"] == expected, do: :ok, else: {:error, :stale_network}
   end
 
   defp execute_trial(_, _, _, %{worker: worker} = state) when not is_nil(worker),

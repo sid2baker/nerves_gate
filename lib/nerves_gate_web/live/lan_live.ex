@@ -7,6 +7,8 @@ defmodule NervesGateWeb.LanLive do
 
   on_mount({NervesGateWeb.Observations, :status})
 
+  on_mount({NervesGateWeb.Access, :network})
+
   def handle_params(%{"id" => id}, _, socket) do
     case Enum.find(lan_ports(socket.assigns.projection), &(&1.id == id)) do
       nil ->
@@ -172,9 +174,6 @@ defmodule NervesGateWeb.LanLive do
     <.notice :if={@projection.network.observed && @projection.network.observed.simulated}>
       Preview mode · simulated connections
     </.notice>
-    <.notice :if={@projection.network.error} tone="warning" role="alert">
-      {@projection.network.error.message}
-    </.notice>
     <.notice :for={problem <- @projection.connections.problems} tone="warning">{problem}</.notice>
     <.notice :if={@message} tone={@message.tone} role="status">{@message.text}</.notice>
     <.panel title="Ethernet connection" icon="port" id="equipment-connection">
@@ -206,8 +205,17 @@ defmodule NervesGateWeb.LanLive do
             A cable or gateway address does not prove that equipment is reachable.
           </p>
       <% end %>
-      <.link navigate="/network" class="ui-text-link">Configure network</.link>
+      <.link :if={@port.role in ["internet", "shared"]} navigate="/network" class="ui-text-link">
+        {if @port.role == "shared", do: "Configure shared network", else: "Configure Internet"}
+      </.link>
     </.panel>
+    <.live_component
+      module={NervesGateWeb.NetworkEditor}
+      id={"equipment-network-#{@name}"}
+      editor={{:equipment, @name}}
+      projection={@projection}
+      access={@access}
+    />
     <.panel :if={@equipment_port} title="Ethernet devices" icon="equipment" id="equipment-discovery">
       <:meta>
         <.status>{length(@projection.equipment.entries)} observed</.status>

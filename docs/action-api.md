@@ -58,6 +58,19 @@ availability; proposals require a [qualified modem](networking.md#modem-qualific
 
 ## Completion and safety
 
+Editors should pass the saved configuration they started from:
+
+```elixir
+base = NervesGate.status().network.desired
+# Build a candidate that preserves settings outside this editor's scope.
+{:ok, id} = NervesGate.network_propose(candidate, expected: base)
+```
+
+The Network process compares `:expected` with its current saved configuration
+before applying anything. A mismatch returns `stale_network`; reload settings
+rather than replaying the old candidate. Omitting `:expected` retains explicit
+whole-configuration replacement for console callers.
+
 Console proposals require confirmation with the **exact current trial ID**. Only
 trusted server code may supply `:access` to verify first setup through USB; never
 derive it from request parameters or forwarded headers. Immediately-ready USB

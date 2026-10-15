@@ -1,6 +1,12 @@
 defmodule NervesGateWeb.Access do
   @moduledoc false
 
+  def on_mount(:network, _params, session, socket) do
+    peer = Phoenix.LiveView.get_connect_info(socket, :peer_data)
+    access = %{local: session["local_address"], peer: peer && peer.address}
+    {:cont, Phoenix.Component.assign(socket, :access, access)}
+  end
+
   # Phoenix signs this session into the LiveView token. Host/forwarded headers
   # are deliberately ignored; USB exemption also checks the live socket peer.
   def session(conn) do

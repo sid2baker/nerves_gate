@@ -6,8 +6,8 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   alias NervesGateWeb.{
     DistributionLive,
+    NetworkEditor,
     NetworkForm,
-    NetworkLive,
     Observations,
     SettingsLive,
     TailscaleLive
@@ -26,10 +26,11 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert_runtime_backend()
     assert_http_pages()
     assert_distribution_cookie_cached()
+    assert_network_forms(vm)
     assert_settings_commands()
 
     clients =
-      for editor <- [:network, :remote, :settings], do: spawn_link(fn -> client(editor) end)
+      for editor <- [:network, :lan, :remote, :settings], do: spawn_link(fn -> client(editor) end)
 
     try do
       initial = converged(vm, clients)
@@ -120,7 +121,16 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   # Exercise real static mounts through the development Unix socket too. It is
   # not an IP address and must never count as proof of USB management access.
   defp assert_http_pages do
-    for path <- ["/", "/network", "/remote", "/settings", "/distribution", "/tests"] do
+    for path <- [
+          "/",
+          "/network",
+          "/equipment/lan/1",
+          "/equipment/lan/2",
+          "/remote",
+          "/settings",
+          "/distribution",
+          "/tests"
+        ] do
       response =
         Req.get!("http://localhost#{path}",
           unix_socket: System.fetch_env!("QEMU_HTTP_SOCKET"),
@@ -133,11 +143,96 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert [link] = Regex.run(~r/<a\b[^>]*href="#{destination}"[^>]*>/, response.body)
       refute link =~ "data-phx-link"
 
+      if path == "/network" do
+        page = Floki.parse_document!(response.body)
+
+        assert [_] =
+                 Floki.find(
+                   page,
+                   "#main-content > #network-connections ~ #internet-editor #network-form"
+                 )
+
+        assert [] = Floki.find(page, "details #network-connections")
+
+        assert [] =
+                 Floki.find(
+                   page,
+                   "[name='network[equipment_port]'], [name='network[equipment_ip]']"
+                 )
+
+        assert Floki.find(page, "#network-connections h2") |> Floki.text() == "Your connections"
+      end
+
+      if path == "/equipment/lan/2" do
+        page = Floki.parse_document!(response.body)
+        assert [_] = Floki.find(page, "#equipment-network-form")
+        assert [] = Floki.find(page, "[name='network[internet_port]']")
+      end
+
       if path == "/settings" do
         assert response.body =~ "x86_64"
         assert response.body =~ "SSH access"
         assert response.body =~ "ssh-key-form"
       end
+    end
+  end
+
+  @doc false
+  def assert_network_forms(vm) do
+    status = Qemu.status(vm)
+    base = status.network.desired
+    ports = status.connections.ports
+    equipment = {:equipment, "eth1"}
+    params = NetworkForm.from_settings(base, equipment)
+    params = Map.merge(params, %{"enabled" => "true", "equipment_ip" => "10.44.0.1"})
+    assert {:ok, with_equipment} = NetworkForm.to_network(params, ports, base, equipment)
+    assert with_equipment["eth0"] == base["eth0"]
+    assert with_equipment["internet"] == base["internet"]
+    assert with_equipment["eth1"]["role"] == "equipment"
+
+    internet = NetworkForm.from_settings(with_equipment, :internet)
+    refute Map.has_key?(internet, "equipment_ip")
+    assert {:ok, unchanged} = NetworkForm.to_network(internet, ports, with_equipment, :internet)
+    assert unchanged == with_equipment
+
+    assert {:error, _} =
+             NetworkForm.to_network(
+               Map.put(internet, "internet_port", "eth1"),
+               ports,
+               with_equipment,
+               :internet
+             )
+
+    assert {:error, _} = NetworkForm.to_network(params, ports, base, {:equipment, "eth0"})
+    assert {:error, _} = NetworkForm.to_network(params, ports, %{"mode" => "shared"}, equipment)
+
+    cellular = Map.put(with_equipment, "internet", %{"mode" => "backup", "apn" => "test.apn"})
+
+    assert {:ok, without_equipment} =
+             NetworkForm.to_network(%{"enabled" => "false"}, ports, cellular, equipment)
+
+    assert without_equipment["eth1"] == nil
+    assert without_equipment["eth0"] == base["eth0"]
+    assert without_equipment["internet"] == cellular["internet"]
+
+    for {editor, field, value, foreign_field} <- [
+          {:internet, "internet_ip", "192.0.2.123", "equipment_ip"},
+          {equipment, "equipment_ip", "10.44.0.123", "internet_port"}
+        ] do
+      assigns = %{id: "draft-check", editor: editor, projection: status, access: %{}}
+      assert {:ok, socket} = NetworkEditor.update(assigns, %Socket{})
+
+      assert {:noreply, socket} =
+               NetworkEditor.handle_event(
+                 "change",
+                 %{"network" => %{field => value, foreign_field => "must-not-be-accepted"}},
+                 socket
+               )
+
+      assert {:ok, socket} = NetworkEditor.update(assigns, socket)
+      assert socket.assigns.form.params[field] == value
+      refute Map.has_key?(socket.assigns.form.params, foreign_field)
+      assert socket.assigns.dirty
     end
   end
 
@@ -223,7 +318,14 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     for pid <- clients do
       state = client_state(pid)
       assert state.dirty
-      assert state.draft in ["192.0.2.123", "unsaved-gateway", "unsaved-public-key"]
+
+      assert state.draft in [
+               "192.0.2.123",
+               "10.44.0.123",
+               "unsaved-gateway",
+               "unsaved-public-key"
+             ]
+
       assert state.operations > 0
     end
   end
@@ -235,7 +337,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
     refresh =
       case editor do
-        :network -> &NetworkLive.refresh_observations/2
+        editor when editor in [:network, :lan] -> &NetworkEditor.refresh_observations/2
         :remote -> &TailscaleLive.refresh_observations/2
         :settings -> &Phoenix.Component.assign(&1, :projection, &2)
       end
@@ -248,9 +350,9 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   # An unrelated operation queued before a command reply must not complete or
   # abandon the editor's pending save against an unchanged domain snapshot.
-  defp assert_pending_reply(socket, :network) do
+  defp assert_pending_reply(socket, editor) when editor in [:network, :lan] do
     socket = Phoenix.Component.assign(socket, own_save: true, saving_network: socket.assigns.base)
-    updated = NetworkLive.refresh_observations(socket, socket.assigns.projection)
+    updated = NetworkEditor.refresh_observations(socket, socket.assigns.projection)
     assert updated.assigns.own_save
     assert updated.assigns.dirty
   end
@@ -279,10 +381,29 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   defp draft(socket, :network) do
     settings = socket.assigns.projection.network.desired
-    params = NetworkForm.from_settings(settings) |> Map.put("internet_ip", "192.0.2.123")
+
+    params =
+      NetworkForm.from_settings(settings, :internet) |> Map.put("internet_ip", "192.0.2.123")
 
     Phoenix.Component.assign(socket,
+      editor: :internet,
       form: Phoenix.Component.to_form(params, as: :network),
+      base: settings,
+      dirty: true,
+      own_save: false,
+      saving_network: nil,
+      initial: false
+    )
+  end
+
+  defp draft(socket, :lan) do
+    settings = socket.assigns.projection.network.desired
+    params = NetworkForm.from_settings(settings, {:equipment, "eth1"})
+
+    Phoenix.Component.assign(socket,
+      editor: {:equipment, "eth1"},
+      form:
+        Phoenix.Component.to_form(Map.put(params, "equipment_ip", "10.44.0.123"), as: :network),
       base: settings,
       dirty: true,
       own_save: false,
@@ -311,6 +432,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
         draft =
           case editor do
             :network -> socket.assigns.form.params["internet_ip"]
+            :lan -> socket.assigns.form.params["equipment_ip"]
             :remote -> socket.assigns.form.params["hostname"]
             :settings -> socket.assigns.key_form.params["public_key"]
           end

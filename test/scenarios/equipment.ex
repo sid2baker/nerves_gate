@@ -7,6 +7,8 @@ defmodule NervesGate.Scenarios.Equipment do
   def name, do: "equipment cable failure leaves Internet and management available"
 
   def run(vm) do
+    before = Qemu.status(vm).network.desired
+
     network =
       Map.put(settings("eth0"), "eth1", %{
         "role" => "equipment",
@@ -19,6 +21,13 @@ defmodule NervesGate.Scenarios.Equipment do
       })
 
     save(vm, network)
+
+    # The other editor must not silently replace settings saved since its draft began.
+    assert {:error, %{code: "stale_network"}} =
+             Qemu.call(vm, :network_propose, [before, [expected: before]])
+
+    assert Qemu.status(vm).network.desired == network
+    assert Qemu.status(vm).network.pending == nil
     Qemu.await(vm, "Internet reachable before equipment failure", &internet?/1, 60_000)
 
     try do

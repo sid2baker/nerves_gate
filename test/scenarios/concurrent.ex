@@ -8,7 +8,9 @@ defmodule NervesGate.Scenarios.Concurrent do
 
   def run(vm) do
     desired = settings("eth0")
-    trial = propose(vm, desired)
+    before = Qemu.status(vm).network.desired
+    assert {:ok, trial} = Qemu.call(vm, :network_propose, [desired, [expected: before]])
+    Qemu.await(vm, "configuration ready to save", & &1.actions["network.confirm"].enabled)
     owner = self()
 
     callers =
