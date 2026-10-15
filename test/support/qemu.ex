@@ -1,6 +1,7 @@
 defmodule NervesGate.TestQemu do
   @moduledoc "Test-only controls for an owned QEMU, never a physical device."
   import ExUnit.Assertions
+  alias NervesGate.TestNetwork
 
   @guest :"nerves_gate@192.168.77.2"
 
@@ -18,6 +19,16 @@ defmodule NervesGate.TestQemu do
     on_exit(fn -> command!("ip", ~w"link delete ng-test") end)
     command!("ip", ~w"addr add 192.168.77.1/24 dev ng-test")
     command!("ip", ~w"link set ng-test up")
+
+    TestNetwork.setup(dir)
+    router = daemon!(:router, "dnsmasq", TestNetwork.router_args(), dir)
+
+    poll(dir, "virtual router", deadline(5_000), fn ->
+      unless Process.alive?(router),
+        do: raise("Virtual router exited; inspect #{dir}/router.log")
+
+      TestNetwork.router_ready?()
+    end)
 
     create_image(image)
 
@@ -71,19 +82,19 @@ defmodule NervesGate.TestQemu do
           "-device",
           "virtio-blk-pci,drive=disk,werror=report,rerror=report",
           "-netdev",
-          "user,id=wan",
+          "tap,id=lan1,ifname=ng-lan1,script=no,downscript=no",
           "-device",
-          "virtio-net-pci,netdev=wan,id=wan-nic,mac=52:54:00:12:34:56",
+          "virtio-net-pci,netdev=lan1,id=lan1-nic,mac=52:54:00:12:34:56",
           "-netdev",
-          "user,id=equipment,net=10.0.3.0/24",
+          "tap,id=lan2,ifname=ng-lan2,script=no,downscript=no",
           "-device",
-          "virtio-net-pci,netdev=equipment,id=equipment-nic",
+          "virtio-net-pci,netdev=lan2,id=lan2-nic,mac=52:54:00:12:34:57",
           "-netdev",
           "tap,id=management,ifname=ng-test,script=no,downscript=no",
           "-device",
-          "virtio-net-pci,netdev=management",
+          "virtio-net-pci,netdev=management,mac=52:54:00:12:34:58",
           "-object",
-          "filter-buffer,id=wan-stall,netdev=wan,queue=tx,interval=3600000000,status=#{stall}"
+          "filter-buffer,id=lan1-stall,netdev=lan1,queue=tx,interval=3600000000,status=#{stall}"
         ] ++ usb,
         dir
       )
@@ -99,8 +110,16 @@ defmodule NervesGate.TestQemu do
     vm = %{dir: dir, socket: socket, daemon: daemon, pid: pid}
     Process.put(:qemu_vm, vm)
     qmp!(vm, "qmp_capabilities", %{})
-    for key <- ~w(wan equipment vm wan_device disk), do: fault(key, nil)
-    fault("receive", if(options[:receive_stall], do: "WAN receive stalled"))
+    for key <- ~w(vm lan1_device disk), do: fault(key, nil)
+
+    # Cable state belongs to the external TAPs and survives VM power cycles.
+    for {port, up} <- TestNetwork.cables() do
+      link(vm, port, up)
+      cable_fault(port, up)
+    end
+
+    fault("receive", if(options[:receive_stall], do: "LAN1 receive stalled"))
+    report_topology()
     # Fresh-disk initialization runs under software emulation, including on
     # aarch64 hosts. Leave room for formatting and OTP startup under host load.
     status = await(vm, "boot", & &1, 180_000)
@@ -152,10 +171,10 @@ defmodule NervesGate.TestQemu do
   end
 
   # QEMU TX is backend-to-guest traffic; turning the filter off flushes its buffer.
-  def release_wan_receive(vm) do
-    assert "tx" == qmp!(vm, "qom-get", %{path: "/objects/wan-stall", property: "queue"})
-    assert "on" == qmp!(vm, "qom-get", %{path: "/objects/wan-stall", property: "status"})
-    qmp!(vm, "qom-set", %{path: "/objects/wan-stall", property: "status", value: "off"})
+  def release_lan1_receive(vm) do
+    assert "tx" == qmp!(vm, "qom-get", %{path: "/objects/lan1-stall", property: "queue"})
+    assert "on" == qmp!(vm, "qom-get", %{path: "/objects/lan1-stall", property: "status"})
+    qmp!(vm, "qom-set", %{path: "/objects/lan1-stall", property: "status", value: "off"})
     fault("receive", nil)
   end
 
@@ -167,14 +186,21 @@ defmodule NervesGate.TestQemu do
       fault("internet", nil)
     end)
 
-    command!("nft", [
-      "add",
-      "chain",
-      "inet",
-      "ng_faults",
-      "outage",
-      "{ type filter hook output priority 0; policy accept; }"
-    ])
+    command!("nft", ~w"add chain inet ng_faults outage")
+
+    # Guest forwarding and the router's own DNS requests share the real uplink.
+    for hook <- ~w(forward output) do
+      command!("nft", [
+        "add",
+        "chain",
+        "inet",
+        "ng_faults",
+        hook,
+        "{ type filter hook #{hook} priority -10; policy accept; }"
+      ])
+
+      command!("nft", ["add", "rule", "inet", "ng_faults", hook, "jump", "outage"])
+    end
 
     log(vm.dir, "faults.log", :internet_faults_ready)
   end
@@ -258,40 +284,75 @@ defmodule NervesGate.TestQemu do
     fault("internet", nil)
   end
 
-  def disconnect_wan(vm) do
-    set_link(vm, "wan-nic", false)
+  def topology, do: TestNetwork.snapshot()
+
+  def router_pid do
+    {:router, pid, _, _} =
+      Enum.find(Supervisor.which_children(__MODULE__.Supervisor), &(elem(&1, 0) == :router))
+
+    true = is_pid(pid)
+    pid
   end
 
-  def reconnect_wan(vm) do
-    set_link(vm, "wan-nic", true)
+  def restore_connections(vm) do
+    connect_internet(vm, :lan1)
+    for port <- [:lan1, :lan2], do: set_cable(vm, port, true)
+    :ok
   end
 
-  def disconnect_equipment(vm) do
-    set_link(vm, "equipment-nic", false)
+  def connect_internet(vm, port) when port in [:lan1, :lan2, :off] do
+    # Register restoration before the first effect, including partially failed moves.
+    on_exit(:topology, fn -> restore_connections(current() || vm) end)
+    cables = TestNetwork.cables()
+
+    if topology() != TestNetwork.connections(port) do
+      for name <- [:lan1, :lan2], do: link(vm, name, false)
+      TestNetwork.connect(port)
+
+      # A running guest must acknowledge carrier loss before DHCP restarts.
+      # A paused CPU cannot observe intermediate changes.
+      if qmp!(vm, "query-status", %{})["running"] do
+        await(
+          vm,
+          "Cables unplugged for topology change",
+          fn status ->
+            Enum.all?(status.connections.ports, &(!&1.link))
+          end,
+          5_000
+        )
+      end
+    end
+
+    for {name, up} <- cables, do: link(vm, name, up)
+    report_topology()
   end
 
-  def reconnect_equipment(vm) do
-    set_link(vm, "equipment-nic", true)
+  def set_cable(vm, port, up) when port in [:lan1, :lan2] and is_boolean(up) do
+    on_exit(port, fn -> set_cable(current() || vm, port, true) end)
+    TestNetwork.set_cable(port, up)
+    link(vm, port, up)
+    cable_fault(port, up)
   end
 
-  def unplug_wan(vm) do
-    qmp!(vm, "device_del", %{id: "wan-nic"})
-    fault("wan_device", "WAN NIC removed")
+  def remove_lan1(vm) do
+    qmp!(vm, "device_del", %{id: "lan1-nic"})
+    fault("lan1_device", "LAN1 NIC removed")
   end
 
-  def plug_wan(vm) do
+  def insert_lan1(vm) do
     devices = qmp!(vm, "qom-list", %{path: "/machine/peripheral"})
 
-    unless Enum.any?(devices, &(&1["name"] == "wan-nic")) do
+    unless Enum.any?(devices, &(&1["name"] == "lan1-nic")) do
       qmp!(vm, "device_add", %{
         driver: "virtio-net-pci",
-        netdev: "wan",
-        id: "wan-nic",
+        netdev: "lan1",
+        id: "lan1-nic",
         mac: "52:54:00:12:34:56"
       })
     end
 
-    fault("wan_device", nil)
+    link(vm, :lan1, TestNetwork.cables().lan1)
+    fault("lan1_device", nil)
   end
 
   def fail_disk_writes(vm) do
@@ -339,7 +400,7 @@ defmodule NervesGate.TestQemu do
 
   def pause(vm) do
     qmp!(vm, "stop", %{})
-    on_exit(:pause, fn -> resume(vm) end)
+    on_exit(:pause, fn -> resume(current() || vm) end)
     fault("vm", "VM paused")
   end
 
@@ -521,11 +582,16 @@ defmodule NervesGate.TestQemu do
     image = Path.join(vm.dir, "gateway.img")
     File.rm!(image)
     create_image(image)
+    TestNetwork.reset()
     boot_vm(vm.dir, image, options)
   end
 
   def cleanup do
-    callbacks = Process.delete(:qemu_cleanup) || []
+    # Resume first even if another fault was injected after Pause. Restoration
+    # may need the guest to acknowledge a cable transition.
+    callbacks =
+      (Process.delete(:qemu_cleanup) || [])
+      |> Enum.sort_by(fn {id, _} -> if id == :pause, do: 0, else: 1 end)
 
     errors =
       for {_, callback} <- callbacks, reduce: [] do
@@ -612,15 +678,16 @@ defmodule NervesGate.TestQemu do
     )
   end
 
-  defp set_link(vm, name, up) do
-    qmp!(vm, "set_link", %{name: name, up: up})
-    key = if name == "wan-nic", do: "wan", else: "equipment"
+  defp link(vm, port, up), do: qmp!(vm, "set_link", %{name: "#{port}-nic", up: up})
 
-    label =
-      if name == "wan-nic", do: "WAN cable disconnected", else: "Equipment cable disconnected"
+  defp cable_fault(port, up) do
+    fault(to_string(port), if(!up, do: "#{String.upcase(to_string(port))} cable disconnected"))
+  end
 
-    on_exit(key, fn -> unless up, do: set_link(vm, name, true) end)
-    fault(key, if(!up, do: label))
+  defp report_topology do
+    topology = topology()
+    if report = Process.get(:qemu_topology), do: report.(topology)
+    topology
   end
 
   defp fault(key, label) do

@@ -25,6 +25,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert Qemu.status(vm).system.node == @guest
     assert_runtime_backend()
     assert_remote_events()
+    assert_discovery_observations()
     assert_http_pages()
     assert_distribution_cookie_cached()
     assert_network_forms(vm)
@@ -42,7 +43,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert {:ok, _} = Jason.encode(initial.status)
       assert Process.whereis(ProjectionServer) == nil
 
-      Qemu.disconnect_wan(vm)
+      NervesGate.TestQemu.set_cable(vm, :lan1, false)
 
       Qemu.await(vm, "both projections observe cable loss", fn _ ->
         Enum.all?(clients, fn pid ->
@@ -56,7 +57,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       end)
 
       converged(vm, clients)
-      Qemu.reconnect_wan(vm)
+      NervesGate.TestQemu.set_cable(vm, :lan1, true)
       Qemu.await(vm, "cable restored", &NervesGate.ScenarioHelpers.addressed?/1)
       converged(vm, clients)
       assert_drafts(clients)
@@ -90,7 +91,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       converged(vm, clients)
       assert_drafts(clients)
     after
-      Qemu.reconnect_wan(vm)
+      NervesGate.TestQemu.set_cable(vm, :lan1, true)
       for pid <- clients, do: send(pid, :stop)
     end
 
@@ -98,6 +99,93 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       state = :erpc.call(@guest, :sys, :get_state, [ProjectionServer])
       Enum.all?(clients, &(not Map.has_key?(state.clients, &1)))
     end)
+  end
+
+  defp assert_discovery_observations do
+    projection = ProjectionServer.snapshot(@server)
+    network = projection.inputs.network
+
+    # Pure interpretation regression: two observed uplinks are online even when
+    # discovery correctly refuses to suggest one role. No device state is changed.
+    ports =
+      Enum.map(network.observed.ports, fn port ->
+        address = if port.name == "eth0", do: "192.0.2.15", else: "198.51.100.15"
+
+        %{
+          port
+          | present: true,
+            link: true,
+            connection: :internet,
+            addresses: [%{address: address, prefix_length: 24}]
+        }
+      end)
+
+    network = %{
+      network
+      | config: NervesGate.Config.defaults(),
+        trial: nil,
+        observed: %{network.observed | ports: ports}
+    }
+
+    status = Projection.apply(projection, {:replace, :network, network}).status
+    assert status.connections.internet.health == "online"
+    assert status.connections.internet.link
+    assert status.connections.internet.addressed
+    assert status.connections.internet.selected == nil
+    assert status.connections.suggested_internet_port == nil
+
+    page =
+      %{__changed__: nil, projection: status}
+      |> NervesGateWeb.DashboardLive.render()
+      |> Phoenix.HTML.Safe.to_iodata()
+      |> IO.iodata_to_binary()
+      |> Floki.parse_document!()
+
+    card = page |> Floki.find("#connection-internet") |> Floki.text()
+    assert card =~ "Online"
+    refute card =~ "Not connected"
+
+    [lan1, lan2] = ports
+
+    waiting = [
+      %{lan1 | link: false, connection: :disconnected, addresses: []},
+      %{lan2 | connection: :unknown, addresses: []}
+    ]
+
+    network = %{network | observed: %{network.observed | ports: waiting}}
+    status = Projection.apply(projection, {:replace, :network, network}).status
+    assert status.connections.internet.link
+    refute status.connections.internet.addressed
+    assert status.connections.internet.health == "unverified"
+  end
+
+  @doc false
+  def assert_bench_controls do
+    run = %{NervesGate.QemuTests.snapshot() | mode: :manual}
+
+    page =
+      %{
+        __changed__: nil,
+        projection: ProjectionServer.snapshot(@server).status,
+        run: run,
+        error: nil,
+        confirm_run: nil
+      }
+      |> NervesGateWeb.TestsLive.render()
+      |> Phoenix.HTML.Safe.to_iodata()
+      |> IO.iodata_to_binary()
+      |> Floki.parse_document!()
+
+    for id <- ~w(connect_lan1 connect_lan2 connect_off lan1_down lan2_down) do
+      assert [_] = Floki.find(page, "#manual-#{id}")
+    end
+
+    for {port, network} <- run.topology do
+      text = page |> Floki.find("#bench-#{port}-network") |> Floki.text()
+
+      assert text ==
+               if(network == :internet, do: "Internet router", else: "Isolated equipment network")
+    end
   end
 
   @doc false

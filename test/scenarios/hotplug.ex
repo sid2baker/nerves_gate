@@ -3,19 +3,19 @@ defmodule NervesGate.Scenarios.Hotplug do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "WAN NIC removal and replacement recover without losing management"
+  def name, do: "LAN1 NIC removal and replacement recover without losing management"
 
   def run(vm) do
     try do
-      Qemu.unplug_wan(vm)
+      NervesGate.TestQemu.remove_lan1(vm)
 
-      Qemu.await(vm, "WAN device removed", fn status ->
+      Qemu.await(vm, "LAN1 device removed", fn status ->
         not Enum.any?(status.connections.ports, &match?(%{name: "eth0", present: true}, &1))
       end)
     after
-      Qemu.plug_wan(vm)
+      NervesGate.TestQemu.insert_lan1(vm)
     end
 
-    Qemu.await(vm, "WAN device returned with address", &addressed?/1)
+    Qemu.await(vm, "LAN1 device returned with address", &addressed?/1)
   end
 end

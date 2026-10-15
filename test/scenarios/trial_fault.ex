@@ -9,10 +9,11 @@ defmodule NervesGate.Scenarios.TrialFault do
   def run(vm) do
     saved = settings("eth0")
     save(vm, saved)
+    Qemu.connect_internet(vm, :lan2)
     trial = propose(vm, settings("eth1"))
 
     try do
-      Qemu.disconnect_equipment(vm)
+      NervesGate.TestQemu.set_cable(vm, :lan2, false)
 
       Qemu.await(vm, "trial lost its selected Ethernet link", fn status ->
         Enum.any?(status.connections.ports, &match?(%{name: "eth1", link: false}, &1))
@@ -25,7 +26,7 @@ defmodule NervesGate.Scenarios.TrialFault do
           status.network.desired == settings("eth1") && status.network.setup_completed
       end)
     after
-      Qemu.reconnect_equipment(vm)
+      NervesGate.TestQemu.set_cable(vm, :lan2, true)
     end
 
     Qemu.await(vm, "saved offline port acquired an address", fn status ->

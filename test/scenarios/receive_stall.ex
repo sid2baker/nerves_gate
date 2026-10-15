@@ -4,7 +4,7 @@ defmodule NervesGate.Scenarios.ReceiveStall do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "WAN receive stall leaves carrier up and DHCP recovers when released"
+  def name, do: "LAN1 receive stall leaves carrier up and DHCP recovers when released"
   def boot_options, do: [receive_stall: true]
 
   def run(vm) do
@@ -29,7 +29,7 @@ defmodule NervesGate.Scenarios.ReceiveStall do
         refute status.connections.internet.health == "online"
       end
     after
-      Qemu.release_wan_receive(vm)
+      NervesGate.TestQemu.release_lan1_receive(vm)
     end
 
     Qemu.await(vm, "DHCP recovered after receive buffer released", &addressed?/1, 60_000)

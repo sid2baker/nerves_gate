@@ -126,6 +126,30 @@ survive producer restarts. LEDs consume these severities rather than maintaining
 another debounce/history layer. Alarms are last-known reports, never proof of
 readiness or a trigger for automatic remedies. See [LED policy](indicators.md#leds).
 
+## QEMU bench
+
+The bench separates fixed virtual hardware from its external connections.
+`TestQemu` owns the VM and QMP operations; `TestNetwork` creates the session's
+TAPs, bridges, real DHCP/DNS router and default-deny forwarding rules. Moving a
+cable changes bridge membership, never firmware settings or NIC identities.
+TAP administrative state records cable faults and is mirrored to QEMU carrier;
+external connections survive VM process replacement. Netlink provides readback,
+not an independent simulated status store.
+The isolated namespace owns network-resource lifetime; the existing supervisor
+owns QEMU and the router process. Router readiness is checked before QEMU starts,
+and the controller monitors its lifetime: an unexpected exit blocks the bench.
+Leases are in-memory; no workstation files or security policy are modified.
+
+`QemuTests` remains the single admission/controller process. Manual controls and
+ordinary Elixir scenarios use the same drivers, bounded operations and restoration
+callbacks. It publishes confirmed topology separately from injected faults and
+observed gateway state. Cleanup resumes a paused VM first and restores baseline
+connections; failure blocks the bench. Initial network creation is a session-start
+operation, not a hot upgrade of an existing bench.
+
+New protocol peers or fault types can be added to these real networks and drivers
+as needed. There is no scenario DSL, plugin registry or second simulator framework.
+
 ## Validation
 
 `.reach.exs` enforces public API boundaries and pure status/policy code. The shared

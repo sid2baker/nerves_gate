@@ -28,12 +28,12 @@ Setup neither boots QEMU nor runs tests, and never touches the ARM daemon or EC1
 - **Elixir 1.20 / OTP 29**; `mise install` uses the versions in `mise.toml` if you use mise.
 - **fwup**, available on `PATH`; see its [installation guide](https://github.com/fwup-home/fwup#installing).
 - Git, a C compiler, make, pkg-config, QEMU, **pasta** (the `passt` package), iproute2,
-  nftables, socat, util-linux and inotify-tools.
+  nftables, dnsmasq, socat, util-linux and inotify-tools.
 
 For Debian/Ubuntu, the last group can be installed with:
 
 ```sh
-sudo apt install git build-essential pkg-config qemu-system-x86 passt iproute2 nftables socat util-linux inotify-tools
+sudo apt install git build-essential pkg-config qemu-system-x86 passt iproute2 nftables dnsmasq-base socat util-linux inotify-tools
 ```
 
 On an Apple Silicon Mac, use an arm64 Ubuntu [OrbStack](https://orbstack.dev) machine
@@ -42,6 +42,15 @@ arm64 `.deb`. Clone the repository inside the machine, not under `/Users`, to us
 a case-sensitive filesystem for builds. QEMU emulates the x86 guest there;
 OrbStack forwards the machine's `localhost:4000` to the Mac. Avoid amd64 machines:
 the BEAM JIT fails under Rosetta.
+
+`dnsmasq-base` supplies the executable without installing a workstation DHCP service.
+The bench starts its own foreground DHCP/DNS process inside its private namespace.
+It uses dnsmasq's `--no-daemon` test/debug mode to avoid privilege switching:
+rootless user namespaces forbid `setgroups`, even when the requested group is root.
+Leases stay in that process's memory and no PID/lease files are written, including
+on AppArmor-confined hosts. No workstation security policy is changed. Startup
+requires a successful local `router.test` DNS response before booting QEMU; it
+does not require public Internet. A later router-process exit blocks the bench.
 
 Install the toolchain and fwup separately. Docker is needed only by maintainers
 building the system from source, not for normal setup, firmware builds or QEMU.
@@ -78,14 +87,17 @@ Results also appear at **http://localhost:4000/tests**. The bench has two shared
   confirmation before starting a run. Some scenarios reboot or replace the device,
   and any failed scenario also replaces its disk, discarding Tailscale enrollment.
 - **Manual** exclusively holds the bench until you switch back to Scenarios.
-  Disconnect/reconnect either Ethernet cable, inject an Internet outage or 50%
-  uplink loss, add/remove 200 ms latency, and pause/resume the VM. Actions are
+  Connect the Internet router to LAN1, LAN2, or neither; disconnect/reconnect
+  either cable; inject an Internet outage or 50% uplink loss; add/remove 200 ms
+  latency; and pause/resume the VM. Moving the router preserves cable faults and
+  never changes gateway settings, NIC identities, the disk or enrollment. Actions are
   serialized by the backend, not merely disabled in the UI. CLI runs are rejected
   while manual control is held; manual actions are rejected during scenario runs.
 
-Manual faults survive page reloads and closing the browser. **Clear all faults**
-resumes the VM, reconnects cables, and removes uplink faults; it does not change
-settings, replace the disk or erase enrollment. Switching back to Scenarios performs
+Connections and manual faults survive page reloads and closing the browser.
+**Clear all faults** resumes the VM, puts Internet on LAN1, reconnects both cables,
+and removes uplink faults; it does not change gateway settings, replace the disk
+or erase enrollment. Switching back to Scenarios performs
 that cleanup before releasing control. Recovery is asynchronous: a cleared fault
 is not proof that Internet or Tailscale has recovered. A control timeout or cleanup
 failure blocks the bench until the session is restarted.
@@ -201,8 +213,9 @@ explicit firmware builds.
 `run/1`, using ExUnit assertions against the public device API and QEMU fault
 controls. UI, CLI and CI use these same modules; there is no hardware-mock suite.
 
-The runner establishes an eth0 DHCP baseline before each ordinary scenario and
-reuses the booted device. Scenarios requiring a fresh disk declare `boot_options/0`.
+The runner restores the physical baseline (Internet on LAN1, LAN2 on equipment,
+both cables connected), establishes an eth0 DHCP configuration before each ordinary
+scenario, and reuses the booted device. Scenarios requiring a fresh disk declare `boot_options/0`.
 A failed scenario causes a fresh boot before continuing; failed fault cleanup or
 a runner timeout blocks further runs until the session is restarted. Only the
 latest result and the last 100 bench events are kept in memory. The `test_bench`
@@ -215,6 +228,14 @@ after rebuilding assets so that this check sees the new files in firmware too.
 `mix test --only dev_discovery` checks service discovery against the real guest
 and verifies that the EC100 launcher excludes QEMU and rejects ambiguous selections.
 
+`mix test --only topology` moves the real Internet connection between stable NICs,
+checks HTTPS and unchanged settings/identities, removes Internet entirely, and
+verifies that even explicit routes cannot forward through equipment or management.
+`test_bench` also covers moving the Internet cable while another cable fault is
+active and restoring topology during cleanup. `power_saved` checks that external
+connections and cable faults survive a VM process replacement. `projection_stream` checks that
+ambiguous discovery does not misreport two online interfaces as disconnected.
+
 The page, CLI endpoints, runner and scenarios exist only in host dev/test. The
 runner refuses EC100 or arbitrary VMs; CLI requests use the page's session and
 CSRF protection through a private Unix socket.
@@ -223,21 +244,42 @@ CSRF protection through a private Unix socket.
 
 Development and CI run inside a user/network namespace created by **pasta**.
 Pasta supplies an outbound IPv4 uplink, `ng-uplink` (192.0.2.2/24), using ordinary
-workstation sockets. QEMU's user-mode Ethernet networks route through it. The
-real guest runs DHCP, DNS, VintageNet connectivity checks and tailscaled; no
-synthetic Internet responders or status overrides are used.
+workstation sockets. The real guest runs DHCP, DNS, VintageNet connectivity checks
+and tailscaled; no synthetic Internet responders or status overrides are used.
 
-The device has eth0 (Internet), eth1 (equipment) and eth2 (management,
-192.168.77.2). Management is never faulted. The controller uses 192.168.77.1 and
+The device has stable eth0 (LAN1), eth1 (LAN2) and eth2 (management, 192.168.77.2).
+LAN NICs use TAP interfaces, not independent QEMU user-mode NAT networks:
+
+```text
+LAN1 / ng-lan1 ──┐     ng-internet (10.0.2.2): DHCP, DNS, NAT → ng-uplink → pasta
+                 ├── one selected LAN on Internet; the other on equipment
+LAN2 / ng-lan2 ──┘     ng-equipment (10.0.3.2): isolated LAN, no DHCP/DNS or forwarding
+Management ────────── ng-test (192.168.77.1): control only
+```
+
+The default connects LAN1 to the Internet router and LAN2 to equipment. Off puts
+both LANs on the isolated equipment network. Cable faults independently control
+carrier. A running guest acknowledges the unplug before reconnection; a paused
+CPU cannot observe intermediate cable transitions. Linux bridge membership is
+read back through netlink before reporting a completed topology change. Cable
+state is the TAP's administrative state, mirrored to QEMU carrier; it and bridge
+attachments survive a VM power cycle. Fresh-disk setup restores the bench baseline.
+NIC names, MAC addresses and guest settings do not change when cables move.
+
+Namespace firewall rules deny forwarding by default (including IPv6). Only the
+Internet bridge can use the upstream, with return traffic restricted to that path.
+Equipment and management cannot supply an alternative route, even with a manually
+configured gateway. Router DHCP/DNS is accessible only from its Internet LAN.
+Management is never faulted. The controller uses 192.168.77.1 and
 development cookie `mycookie`. A loopback-only socat proxy exposes Phoenix's Unix
 socket to the workstation.
 
 All TAP interfaces, firewall rules and Erlang distribution stay inside the
 namespace. Pasta's automatic port forwarding is explicitly disabled in both
-directions, and its gateway does not map to workstation loopback. DNS alone is
-forwarded through 192.0.2.3 to the workstation resolver, including loopback-only
-resolvers. A private mount of `resolv.conf` makes QEMU use that address without
-changing workstation DNS. No workstation routes, firewall rules or VPN are changed.
+directions, and its gateway does not map to workstation loopback. Pasta forwards DNS through 192.0.2.3 to the workstation resolver, including
+loopback-only resolvers. The virtual router uses that address as its upstream DNS;
+a private mount of `resolv.conf` does the same for host tools inside the namespace,
+without changing workstation DNS. No workstation routes, firewall rules or VPN are changed.
 Outbound traffic still follows workstation networking/VPN policy: this is not a
 sandbox against access to reachable LAN/tailnet services. Guest services have no
 public inbound port forwards; an enrolled guest can be reached through its own
@@ -258,6 +300,7 @@ Remove obsolete QEMU devices from your tailnet after testing.
 Focused checks use the same scenarios in the UI, CLI and CI:
 
 ```sh
+mix test --only topology          # move Internet, stable NICs, no alternate uplinks
 mix test --only internet          # guest DNS + verified HTTPS, outage, recovery
 mix test --only latency           # HTTPS with 200ms uplink delay
 mix test --only loss              # 50% uplink loss, management and HTTPS recovery
@@ -275,7 +318,8 @@ The `firewall` check needs neither Internet nor Tailscale enrollment. It reads
 tables without changing rules and is also a prerequisite in `tailscale_login`.
 The other checks require working public Internet access. `internet`, `latency` and
 `loss` use `https://example.com/` with the guest's CA store and hostname verification.
-Outage/loss rules and latency apply to the real namespace uplink, not management.
+Outage/loss rules cover both guest forwarding and the router's DNS requests.
+Latency applies to the real namespace uplink, not management.
 At 50% packet loss, HTTPS may fail; the scenario requires actual packet drops,
 working management during the fault, and successful HTTPS after restoration.
 External DNS/HTTPS/Tailscale service failures are genuine test failures, not skipped
@@ -299,7 +343,7 @@ Internet checks originate inside the guest, including DNS and certificate-verifi
 HTTPS; Tailscale login uses the real daemon and public control server. The uplink
 is IPv4 and uses userspace translation, not an EC100 PHY or a real ISP router:
 throughput, IPv6 and direct-versus-relayed Tailscale paths need separate qualification.
-Receive-stall faults delay all WAN receive traffic, not just DHCP. Disk faults
+Receive-stall faults delay all LAN1 receive traffic, not just DHCP. Disk faults
 return real EIO; removing the
 fault does not heal a read-only guest filesystem. SIGKILL of QEMU is not physical
 power loss: host disk caches remain intact.

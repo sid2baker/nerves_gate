@@ -31,7 +31,7 @@ defmodule NervesGate.Scenarios.Equipment do
     Qemu.await(vm, "Internet reachable before equipment failure", &internet?/1, 60_000)
 
     try do
-      Qemu.disconnect_equipment(vm)
+      NervesGate.TestQemu.set_cable(vm, :lan2, false)
 
       failed =
         Qemu.await(vm, "equipment cable disconnected", fn status ->
@@ -42,7 +42,7 @@ defmodule NervesGate.Scenarios.Equipment do
       assert failed.network.desired == network
       assert failed.backend.available
     after
-      Qemu.reconnect_equipment(vm)
+      NervesGate.TestQemu.set_cable(vm, :lan2, true)
     end
 
     Qemu.await(vm, "equipment and Internet recovered", fn status ->

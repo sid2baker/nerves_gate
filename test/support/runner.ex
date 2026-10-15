@@ -39,8 +39,11 @@ defmodule NervesGate.QemuTests do
         }
       end)
 
+    vm = Application.get_env(:nerves_gate, :qemu_vm)
+
     view = %{
       id: nil,
+      topology: if(vm, do: Qemu.topology()),
       status: :idle,
       rows: rows,
       phase: "Ready",
@@ -54,7 +57,8 @@ defmodule NervesGate.QemuTests do
     {:ok,
      %{
        view: view,
-       vm: Application.get_env(:nerves_gate, :qemu_vm),
+       vm: vm,
+       router_monitor: if(vm, do: Process.monitor(Qemu.router_pid())),
        worker: nil,
        timer: nil,
        completed: false
@@ -183,6 +187,14 @@ defmodule NervesGate.QemuTests do
     {:noreply, publish(%{state | view: view})}
   end
 
+  def handle_info({:topology, pid, topology}, %{worker: {pid, _}} = state) do
+    view =
+      %{state.view | topology: topology}
+      |> event("Connections: LAN1 → #{topology.lan1}, LAN2 → #{topology.lan2}")
+
+    {:noreply, publish(%{state | view: view})}
+  end
+
   def handle_info({:manual_ready, pid}, %{worker: {pid, _}} = state),
     do: {:noreply, manual_idle(state, "Manual control ready")}
 
@@ -210,9 +222,25 @@ defmodule NervesGate.QemuTests do
     {:noreply, state}
   end
 
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{router_monitor: ref} = state) do
+    cancel_timer(state)
+    if state.worker, do: Process.exit(elem(state.worker, 0), :kill)
+
+    view =
+      state.view
+      |> finish(true)
+      |> event("Virtual router stopped. Inspect router.log and restart mix dev.qemu.")
+
+    {:noreply, publish(%{state | view: view, timer: nil})}
+  end
+
   def handle_info({:DOWN, ref, :process, pid, reason}, %{worker: {pid, ref}} = state) do
     cancel_timer(state)
-    blocked = reason != :normal or not state.completed or state.view.faults != %{}
+
+    blocked =
+      state.view.blocked or reason != :normal or not state.completed or state.view.faults != %{} or
+        state.view.topology != NervesGate.TestNetwork.baseline()
+
     view = finish(state.view, blocked)
     {:noreply, publish(%{state | worker: nil, timer: nil, view: view})}
   end
@@ -311,6 +339,7 @@ defmodule NervesGate.QemuTests do
   defp report_to(owner) do
     pid = self()
     Process.put(:qemu_fault, fn key, label -> send(owner, {:fault, pid, key, label}) end)
+    Process.put(:qemu_topology, fn topology -> send(owner, {:topology, pid, topology}) end)
   end
 
   defp execute(owner, run_id, vm, scenarios) do
@@ -363,9 +392,8 @@ defmodule NervesGate.QemuTests do
 
   defp baseline(vm) do
     Qemu.resume(vm)
-    Qemu.plug_wan(vm)
-    Qemu.reconnect_wan(vm)
-    Qemu.reconnect_equipment(vm)
+    Qemu.insert_lan1(vm)
+    Qemu.restore_connections(vm)
     status = Qemu.await(vm, "Waiting for device", & &1)
     if status.network.pending, do: Qemu.call(vm, :network_cancel, [status.network.pending.id])
     NervesGate.ScenarioHelpers.save(vm, NervesGate.ScenarioHelpers.settings("eth0"))

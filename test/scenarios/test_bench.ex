@@ -9,11 +9,19 @@ defmodule NervesGate.Scenarios.TestBench do
   def run(vm) do
     assert {:error, _} = QemuTests.run("firewall")
     assert {:error, _} = QemuTests.mode("manual")
-    assert {:error, _} = QemuTests.manual("wan_down")
+    assert {:error, _} = QemuTests.manual("lan1_down")
     before = Qemu.status(vm)
     assert Enum.map(before.connections.ports, & &1.name) |> Enum.sort() == ["eth0", "eth1"]
+    assert Qemu.topology() == NervesGate.TestNetwork.baseline()
+    assert NervesGate.TestNetwork.router_ready?()
+    router = Qemu.router_pid()
+    assert Process.alive?(router)
+    {:monitors, monitors} = Process.info(Process.whereis(QemuTests), :monitors)
+    assert {:process, router} in monitors
+    NervesGate.Scenarios.ProjectionStream.assert_bench_controls()
     owner = self()
     report = Process.get(:qemu_fault)
+    topology = Process.get(:qemu_topology)
 
     # Exercise the same long-lived manual driver on this runner's owned device.
     # The runner retains scenario ownership; no second runner or VM is created.
@@ -21,6 +29,7 @@ defmodule NervesGate.Scenarios.TestBench do
       :erlang.spawn_opt(
         fn ->
           Process.put(:qemu_fault, report)
+          Process.put(:qemu_topology, topology)
           ManualFaults.execute(owner, vm)
         end,
         [:link, :monitor]
@@ -50,7 +59,13 @@ defmodule NervesGate.Scenarios.TestBench do
   end
 
   defp faults(pid, vm) do
-    for action <- ~w(wan_down equipment_down latency_on latency_on internet_loss internet_down),
+    action(pid, "lan1_down")
+    action(pid, "connect_lan2")
+    assert Qemu.topology() == %{lan1: :equipment, lan2: :internet}
+    assert QemuTests.snapshot().faults["lan1"]
+    NervesGate.Scenarios.ProjectionStream.assert_bench_controls()
+
+    for action <- ~w(lan1_down lan2_down latency_on latency_on internet_loss internet_down),
         do: action(pid, action)
 
     Qemu.await(vm, "manual cables are disconnected", fn status ->
@@ -60,13 +75,13 @@ defmodule NervesGate.Scenarios.TestBench do
     action(pid, "pause")
     assert Qemu.status(vm) == nil
     faults = QemuTests.snapshot().faults
-    assert Enum.sort(Map.keys(faults)) == ~w(equipment internet latency vm wan)
+    assert Enum.sort(Map.keys(faults)) == ~w(internet lan1 lan2 latency vm)
     assert faults["internet"] == "Internet outage"
   end
 
   defp action(pid, action) do
     send(pid, {:manual_action, action})
-    assert_receive {:manual_done, ^pid, ^action}, 5_000
+    assert_receive {:manual_done, ^pid, ^action}, 10_000
   end
 
   defp recovered(vm, before) do
@@ -77,6 +92,8 @@ defmodule NervesGate.Scenarios.TestBench do
           status.remote_access.ipv4 == before.remote_access.ipv4
       end)
 
+    assert Qemu.topology() == NervesGate.TestNetwork.baseline()
+    assert QemuTests.snapshot().topology == NervesGate.TestNetwork.baseline()
     assert status.network.desired == before.network.desired
     assert status.remote_access.auth_state == before.remote_access.auth_state
     assert status.remote_access.ipv4 == before.remote_access.ipv4

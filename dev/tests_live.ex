@@ -45,7 +45,7 @@ defmodule NervesGateWeb.TestsLive do
       />
       <div class="ui-disconnected">
         <.notice tone="warning" role="alert">
-          Connection to the bench lost. Controls and observations may be stale; manual faults remain active.
+          Connection to the bench lost. Controls and observations may be stale; connections and faults remain active.
         </.notice>
       </div>
       <.panel
@@ -70,6 +70,19 @@ defmodule NervesGateWeb.TestsLive do
         <p :if={!@projection.backend.available} class="ui-help">
           Device unavailable; waiting for a fresh projection. Fault controls use the separate QEMU control channel.
         </p>
+      </.panel>
+
+      <.panel
+        :if={@run.topology}
+        title="Bench connections"
+        description={if @run.blocked, do: "Last confirmed; current connections unknown"}
+        icon="network"
+        id="bench-connections"
+      >
+        <.setting_row :for={port <- [:lan1, :lan2]} label={String.upcase(to_string(port))}>
+          <span id={"bench-#{port}-network"}>{network_label(@run.topology[port])}</span>
+        </.setting_row>
+        <.setting_row label="Management">Local control only · no Internet forwarding</.setting_row>
       </.panel>
 
       <section class="bench-faults" id="active-faults" aria-label="Injected faults">
@@ -166,8 +179,8 @@ defmodule NervesGateWeb.TestsLive do
               Clear all faults
             </.button>
             <p class="ui-help">
-              Clear reconnects both cables, restores the uplink, removes delay and resumes the VM.
-              It does not reset the disk, change settings or erase Tailscale enrollment. Recovery may take time.
+              Clear puts Internet on LAN1, reconnects both cables, removes faults and resumes the VM.
+              Moving a cable does not change gateway settings. The disk and enrollment are preserved.
               Reboot, power cut and fresh disk are not manual controls.
             </p>
           </.panel>
@@ -274,6 +287,9 @@ defmodule NervesGateWeb.TestsLive do
     </main>
     """
   end
+
+  defp network_label(:internet), do: "Internet router"
+  defp network_label(:equipment), do: "Isolated equipment network"
 
   defp busy?(run), do: run.blocked || run.status == :running || run.manual_action != nil
   defp completed(run), do: Enum.count(run.rows, &(&1.status in [:passed, :failed]))

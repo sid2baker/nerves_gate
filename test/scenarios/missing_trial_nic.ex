@@ -12,7 +12,7 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
     trial = propose(vm, settings("eth0"))
 
     try do
-      Qemu.unplug_wan(vm)
+      NervesGate.TestQemu.remove_lan1(vm)
 
       Qemu.await(vm, "required trial NIC removed", fn status ->
         Enum.any?(status.connections.ports, &match?(%{name: "eth0", present: false}, &1)) &&
@@ -27,7 +27,7 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
           status.network.desired == saved
       end)
     after
-      Qemu.plug_wan(vm)
+      NervesGate.TestQemu.insert_lan1(vm)
     end
 
     Qemu.await(vm, "removed NIC returned without changing settings", fn status ->

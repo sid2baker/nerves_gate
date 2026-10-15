@@ -78,8 +78,7 @@ defmodule Mix.Tasks.Dev.Qemu do
     File.rm(socket)
     {:ok, _} = Application.ensure_all_started(:muontrap)
 
-    unless System.find_executable("pasta"),
-      do: Mix.raise("Install pasta (the passt package); see docs/development.md#prerequisites.")
+    check_tools!()
 
     try do
       build_firmware!()
@@ -95,6 +94,13 @@ defmodule Mix.Tasks.Dev.Qemu do
       if status != 0, do: Mix.raise("Isolated QEMU session failed (exit #{status})")
     after
       File.rm(socket)
+    end
+  end
+
+  defp check_tools! do
+    for tool <- ["pasta", "dnsmasq"] do
+      unless System.find_executable(tool),
+        do: Mix.raise("Install #{tool}; see docs/development.md#prerequisites.")
     end
   end
 

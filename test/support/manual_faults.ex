@@ -5,14 +5,23 @@ defmodule NervesGate.ManualFaults do
   def controls do
     [
       %{
-        id: "wan",
-        name: "WAN Ethernet · eth0",
-        choices: [{"wan_down", "Disconnect"}, {"wan_up", "Reconnect"}]
+        id: "connection",
+        name: "Internet cable",
+        choices: [
+          {"connect_lan1", "LAN1"},
+          {"connect_lan2", "LAN2"},
+          {"connect_off", "Off"}
+        ]
       },
       %{
-        id: "equipment",
-        name: "Equipment Ethernet · eth1",
-        choices: [{"equipment_down", "Disconnect"}, {"equipment_up", "Reconnect"}]
+        id: "lan1",
+        name: "LAN1 · eth0",
+        choices: [{"lan1_down", "Disconnect"}, {"lan1_up", "Reconnect"}]
+      },
+      %{
+        id: "lan2",
+        name: "LAN2 · eth1",
+        choices: [{"lan2_down", "Disconnect"}, {"lan2_up", "Reconnect"}]
       },
       %{
         id: "internet",
@@ -36,10 +45,12 @@ defmodule NervesGate.ManualFaults do
     do: ["clear", "release" | for(control <- controls(), {id, _} <- control.choices, do: id)]
 
   def execute(owner, vm) do
+    Qemu.adopt(vm)
+
     try do
       Qemu.start_internet_faults(vm)
       send(owner, {:manual_ready, self()})
-      loop(owner, vm, false)
+      loop(owner, vm, initial())
     after
       Qemu.cleanup()
     end
@@ -47,38 +58,45 @@ defmodule NervesGate.ManualFaults do
     send(owner, {:manual_released, self()})
   end
 
-  defp loop(owner, vm, delayed) do
+  defp initial, do: %{delayed: false}
+
+  defp loop(owner, vm, state) do
     receive do
       {:manual_action, "release"} ->
         :ok
 
       {:manual_action, action} ->
-        delayed = apply_action(vm, action, delayed)
+        state = apply_action(vm, action, state)
         send(owner, {:manual_done, self(), action})
-        loop(owner, vm, delayed)
+        loop(owner, vm, state)
     end
   end
 
-  defp apply_action(vm, "latency_on", _) do
+  defp apply_action(vm, "connect_" <> destination, state) do
+    port = Map.fetch!(%{"lan1" => :lan1, "lan2" => :lan2, "off" => :off}, destination)
+    Qemu.connect_internet(vm, port)
+    state
+  end
+
+  defp apply_action(vm, "latency_on", state) do
     Qemu.delay_internet(vm)
-    true
+    %{state | delayed: true}
   end
 
-  defp apply_action(vm, "latency_off", delayed) do
-    if delayed, do: Qemu.clear_delay(vm)
-    false
+  defp apply_action(vm, "latency_off", state) do
+    if state.delayed, do: Qemu.clear_delay(vm)
+    %{state | delayed: false}
   end
 
-  defp apply_action(vm, "clear", delayed) do
+  defp apply_action(vm, "clear", state) do
     Qemu.resume(vm)
-    Qemu.reconnect_wan(vm)
-    Qemu.reconnect_equipment(vm)
+    Qemu.restore_connections(vm)
     Qemu.restore_internet(vm)
-    if delayed, do: Qemu.clear_delay(vm)
-    false
+    if state.delayed, do: Qemu.clear_delay(vm)
+    initial()
   end
 
-  defp apply_action(vm, action, delayed)
+  defp apply_action(vm, action, state)
        when action in ["internet_down", "internet_loss", "internet_up"] do
     Qemu.restore_internet(vm)
 
@@ -88,30 +106,27 @@ defmodule NervesGate.ManualFaults do
       "internet_up" -> :ok
     end
 
-    delayed
+    state
   end
 
-  defp apply_action(vm, action, delayed) do
-    case action do
-      "wan_down" ->
-        Qemu.disconnect_wan(vm)
+  defp apply_action(vm, "pause", state) do
+    Qemu.pause(vm)
+    state
+  end
 
-      "wan_up" ->
-        Qemu.reconnect_wan(vm)
+  defp apply_action(vm, "resume", state) do
+    Qemu.resume(vm)
+    state
+  end
 
-      "equipment_down" ->
-        Qemu.disconnect_equipment(vm)
+  defp apply_action(vm, action, state) do
+    {port, up} =
+      case action do
+        "lan1_" <> direction -> {:lan1, direction == "up"}
+        "lan2_" <> direction -> {:lan2, direction == "up"}
+      end
 
-      "equipment_up" ->
-        Qemu.reconnect_equipment(vm)
-
-      "pause" ->
-        Qemu.pause(vm)
-
-      "resume" ->
-        Qemu.resume(vm)
-    end
-
-    delayed
+    Qemu.set_cable(vm, port, up)
+    state
   end
 end
