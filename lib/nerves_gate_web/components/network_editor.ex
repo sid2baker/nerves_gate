@@ -368,9 +368,6 @@ defmodule NervesGateWeb.NetworkEditor do
                   />
                 </.choice_group>
               </details>
-              <p class="ui-help">
-                Configure equipment addressing under <.link navigate="/equipment" class="ui-text-link">Equipment</.link>.
-              </p>
             <% else %>
               <.panel title="Equipment network" icon="equipment">
                 <.choice_group field={@form[:enabled]} label="Use this LAN port">
@@ -405,9 +402,6 @@ defmodule NervesGateWeb.NetworkEditor do
             <.notice :if={@initial and @usb} icon="usb">
               You’re connected through USB. Settings save directly; USB stays available.
             </.notice>
-            <p :if={!@initial or !@usb} class="ui-help">
-              Network changes have a 60-second undo window. Keep them when ready, or they restore automatically.
-            </p>
             <.notice :if={!@projection.actions["network.propose"].enabled} tone="warning">
               {@projection.actions["network.propose"].reason.message}
             </.notice>

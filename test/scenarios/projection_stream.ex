@@ -139,6 +139,9 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
       assert response.status == 200
       assert response.body =~ "data-phx-main"
+      refute response.body =~ "Use a trusted network."
+      refute response.body =~ "Network changes have a 60-second undo window."
+      refute response.body =~ "Configure equipment addressing under"
       destination = if path == "/tests", do: "/", else: "/tests"
       assert [link] = Regex.run(~r/<a\b[^>]*href="#{destination}"[^>]*>/, response.body)
       refute link =~ "data-phx-link"

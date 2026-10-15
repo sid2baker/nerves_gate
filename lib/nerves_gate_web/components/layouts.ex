@@ -75,9 +75,6 @@ defmodule NervesGateWeb.Layouts do
       </.notice>
       {@inner_content}
     </main>
-    <footer class="ui-app-footer">
-      Use a trusted network. This interface has no sign-in protection.
-    </footer>
     """
   end
 

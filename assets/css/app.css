@@ -50,7 +50,6 @@ code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; fo
 .ui-subnav a { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 7px; color: var(--ui-muted); font-size: 14px; }
 .ui-subnav a:hover { background: #edf1f1; color: var(--ui-ink); }
 .ui-subnav a[aria-current="page"] { background: #e5eeeb; color: var(--ui-accent-dark); font-weight: 600; }
-.ui-app-footer { max-width: 880px; margin: 0 auto; padding: 0 32px 32px; font-size: 12px; color: var(--ui-muted); }
 .ui-page-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 8px; }
 .ui-page-header h1 { font-size: 32px; line-height: 1.2; font-weight: 650; letter-spacing: -1px; }
 .ui-page-description { color: var(--ui-muted); margin-top: 8px; }
@@ -173,7 +172,6 @@ details[open] > summary { margin-bottom: 16px; }
   .ui-navigation { width: 100%; }
   .ui-navigation a { padding: 10px 4px; font-size: 13px; text-align: center; }
   .ui-main { margin-top: 12px; padding: 0 20px 32px; }
-  .ui-app-footer { padding: 0 20px 24px; }
   .ui-page-header h1 { font-size: 28px; }
   .ui-panel-header { padding: 20px 20px 0; flex-wrap: wrap; }
   .ui-panel-body { padding: 20px; }
