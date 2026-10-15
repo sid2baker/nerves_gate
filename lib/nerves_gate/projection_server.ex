@@ -77,7 +77,7 @@ defmodule NervesGate.ProjectionServer do
   end
 
   defp domains(VintageNet, _), do: [:network]
-  defp domains(Tailscale.Properties, _), do: [:remote, :network]
+  defp domains(Tailscaled, _), do: [:remote, :network]
   defp domains(_, _), do: []
 
   defp dirty(state, []), do: state

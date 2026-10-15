@@ -1,7 +1,7 @@
 defmodule NervesGate.Observations do
   @moduledoc """
   Ephemeral workflow properties. Firmware subsystem readings stay in VintageNet
-  and Tailscale's own tables. Subscriptions belong to the
+  and Tailscaled's own tables. Subscriptions belong to the
   calling process and PropertyTable's Registry removes them on process death.
   """
   @table NervesGate.Properties

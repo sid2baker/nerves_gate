@@ -24,6 +24,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   def run(vm) do
     assert Qemu.status(vm).system.node == @guest
     assert_runtime_backend()
+    assert_remote_events()
     assert_http_pages()
     assert_distribution_cookie_cached()
     assert_network_forms(vm)
@@ -97,6 +98,19 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       state = :erpc.call(@guest, :sys, :get_state, [ProjectionServer])
       Enum.all?(clients, &(not Map.has_key?(state.clients, &1)))
     end)
+  end
+
+  @doc false
+  def assert_remote_events do
+    # A dirty domain avoids scheduling a timer in this protocol-routing check.
+    state = %{dirty: MapSet.new([:system])}
+
+    event =
+      {Tailscaled, ["auth", "state"], :needs_login, :authenticating,
+       %{old_timestamp: 1, new_timestamp: 2}}
+
+    assert {:noreply, updated} = ProjectionServer.handle_info(event, state)
+    assert updated.dirty == MapSet.new([:system, :remote, :network])
   end
 
   @doc false
@@ -273,6 +287,8 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert NervesGateWeb.Backend.status().system.node == @guest
     assert Process.whereis(NervesGate.Network) == nil
     assert Process.whereis(ProjectionServer) == nil
+    assert Process.whereis(Tailscaled.Supervisor) == nil
+    refute :tailscaled_ex in Application.spec(:nerves_gate, :applications)
     backend = Application.fetch_env!(:nerves_gate, :backend_node)
 
     try do

@@ -107,8 +107,9 @@ defmodule NervesGate.Indicators do
   def handle_info(%PropertyTable.Event{}, state),
     do: {:noreply, state |> observations() |> render()}
 
-  def handle_info({VintageNet, _, _, _, _}, state),
-    do: {:noreply, state |> observations() |> render()}
+  def handle_info({source, _, _, _, _}, state) when source in [VintageNet, Tailscaled] do
+    {:noreply, render(observations(state))}
+  end
 
   def handle_info(%Alarmist.Event{}, state), do: {:noreply, state |> observations() |> render()}
 

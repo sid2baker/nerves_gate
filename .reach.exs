@@ -48,7 +48,7 @@
          "NervesGate.Linux.*",
          "VintageNet.configure",
          "VintageNet.Persistence.*",
-         "Tailscale.*"
+         "Tailscaled.*"
        ]},
       {["NervesGate.Network.Policy", "NervesGate.Status", "NervesGate.Projection"],
        [
@@ -64,7 +64,7 @@
          "NervesGate.Remote.Adapter.*",
          "VintageNet.configure",
          "VintageNet.Persistence.*",
-         "Tailscale.*"
+         "Tailscaled.*"
        ]}
     ]
   ]

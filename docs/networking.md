@@ -169,7 +169,7 @@ acceptance alone is not successful enrollment.
 
 The same page supports rename and disconnect. The equipment LAN page controls
 sharing its IPv4 subnet. Disconnect
-uses `Tailscale.down/0`, preserving enrollment and preferences. Reconnect uses
+uses `Tailscaled.down/0`, preserving enrollment and preferences. Reconnect uses
 `up/0` for an enrolled profile, or login when enrollment is needed. Disconnecting
 may interrupt a browser using that VPN; USB and LAN remain available. These
 operations do not use Ethernet's rollback timer.
@@ -179,9 +179,9 @@ status and error. A timed-out daemon operation may still have completed, so read
 status before retrying. Restart does not replay user commands; the built-in HTTPS
 listener is reconciled separately once the enrolled daemon is online.
 
-The Tailscale OTP application supervises `/usr/sbin/tailscaled` in kernel mode.
+The `tailscaled_ex` OTP application supervises `/usr/sbin/tailscaled` in kernel mode.
 Kernel TUN support is required. Identity and settings stay daemon-owned in
-`/data/tailscale_ex`; the socket is `/run/tailscale/tailscaled.sock`. Starting the
+`/data/tailscaled_ex`; the socket is `/run/tailscale/tailscaled.sock`. Starting the
 daemon does not enroll it or add equipment routes. Existing daemon preferences,
 including advertisements and running intent, still apply at startup. Firmware builds
 preserve existing enrollment rather than resetting preferences.
@@ -192,7 +192,7 @@ after the DNS identity is available. If a profile enrolled outside this UI has
 Tailscale DNS enabled, disable only that setting from recovery IEx:
 
 ```elixir
-Tailscale.update_configuration(%{accept_dns: false})
+Tailscaled.update_configuration(%{accept_dns: false})
 ```
 
 Do not reset all preferences to fix DNS. Tailscale cannot manage `/etc/resolv.conf`
@@ -206,7 +206,7 @@ hosts. The UI does not grant tailnet permissions or verify equipment reachabilit
 ### Gateway HTTPS
 
 Enable MagicDNS and HTTPS in the tailnet, then enroll the gateway. Once online
-with a DNS name, `NervesGate.Remote` uses `tailscale_ex` to configure **HTTPS port
+with a DNS name, `NervesGate.Remote` uses `tailscaled_ex` to configure **HTTPS port
 443 → `http://127.0.0.1:4000`**. Open `https://<gateway-dns-name>/` from an authorized
 tailnet device. There is no HTTP port 80 listener or public Funnel access. Direct
 LAN/USB access on port 4000 remains unchanged.
@@ -279,9 +279,9 @@ LAN changes. Inspect them under **Overview → Remote access → Connection deta
 From recovery IEx, remove only the exact unwanted route, preserving the others:
 
 ```elixir
-routes = Tailscale.get_configuration().advertise_routes
+routes = Tailscaled.get_configuration().advertise_routes
 # Replace this string with the exact old route you intend to withdraw.
-Tailscale.update_configuration(%{advertise_routes: List.delete(routes, "old-route/CIDR")})
+Tailscaled.update_configuration(%{advertise_routes: List.delete(routes, "old-route/CIDR")})
 ```
 
 Do not reset all daemon preferences or delete routes belonging to other services.

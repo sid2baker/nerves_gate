@@ -39,7 +39,7 @@ See the [public API](action-api.md) for calling conventions and completion seman
 
 The device's `rest_for_one` order is PubSub, workflow PropertyTable, SSH, Network,
 Remote, Equipment, Indicators, Buses, ProjectionServer, then Endpoint. Dependencies
-supervise VintageNet, Tailscale and Alarmist themselves. Host UI instances start
+supervise VintageNet, `tailscaled_ex` and Alarmist themselves. Host UI instances start
 neither domain processes nor a projection mirror.
 
 Workers are linked and bounded. Owners stop and join them before restoration or

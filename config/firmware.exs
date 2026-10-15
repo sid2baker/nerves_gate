@@ -6,7 +6,7 @@ config :nerves_gate,
   # Disabled until the real modem is identified; QEMU does not emulate one.
   cellular: nil,
   network_adapter: {NervesGate.Network.Vintage, nil},
-  remote_adapter: {NervesGate.Remote.Tailscale, nil},
+  remote_adapter: {NervesGate.Remote.Tailscaled, nil},
   equipment_adapter: {NervesGate.Equipment.Linux, nil}
 
 # Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
@@ -53,10 +53,9 @@ config :nerves, :firmware,
   rootfs_type: {:squashfs, ["-no-xattrs", "-quiet"]}
 
 # The dependency's OTP application supervises tailscaled and retries when offline.
-# Keep identity on the data partition and the LocalAPI socket in volatile storage.
-config :tailscale,
+config :tailscaled_ex,
   daemon_path: "/usr/sbin/tailscaled",
-  data_dir: "/data/tailscale_ex",
+  data_dir: "/data/tailscaled_ex",
   socket: "/run/tailscale/tailscaled.sock",
   manage_daemon: true,
   tun: :kernel

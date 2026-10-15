@@ -31,9 +31,10 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
         45_000
       )
 
-    refute rejected.remote_access.auth_state == "authenticated"
+    assert rejected.remote_access.auth_state == "error"
+    assert rejected.remote_access.error.code == "remote_failed"
     refute Jason.encode!(rejected) =~ key
-    refute inspect(:erpc.call(@guest, Tailscale, :get_configuration, [], 5_000)) =~ key
+    refute inspect(:erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000)) =~ key
     assert :ok = Qemu.call(vm, :remote_connect, ["nerves-gate-qemu"])
 
     status =
@@ -51,19 +52,21 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
     NervesGate.Scenarios.ProjectionStream.assert_remote_sign_in()
 
     # Real unenrolled daemon: no listener is written before a usable identity.
-    before = :erpc.call(@guest, Tailscale, :get_configuration, [], 5_000)
+    before = :erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000)
     assert before.serve == []
+    assert :ok = :erpc.call(@guest, Tailscaled, :refresh_configuration, [], 5_000)
+    assert :erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000) == before
 
     assert {:error, :serve_not_ready} =
              :erpc.call(
                @guest,
-               NervesGate.Remote.Tailscale,
+               NervesGate.Remote.Tailscaled,
                :execute,
                [:serve, %{dns_name: "not-enrolled.example.ts.net"}, nil],
                5_000
              )
 
-    assert :erpc.call(@guest, Tailscale, :get_configuration, [], 5_000) == before
+    assert :erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000) == before
     assert :ok = Qemu.call(vm, :remote_disconnect, [])
     Qemu.await(vm, "Tailscale disconnect completed", &is_nil(&1.remote_access.operation))
   end

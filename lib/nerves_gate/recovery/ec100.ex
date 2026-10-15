@@ -106,7 +106,7 @@ defmodule NervesGate.Recovery.EC100 do
         NervesGate.SSH
       ]
 
-      apps = [:nerves_ssh, :ssh, :tailscale, :vintage_net, :nerves_time, :logger_backends]
+      apps = [:nerves_ssh, :ssh, :tailscaled_ex, :vintage_net, :nerves_time, :logger_backends]
 
       with :ok <- stop_all(children, &Supervisor.terminate_child(NervesGate.Supervisor, &1)),
            :ok <- stop_all(apps, &stop_application/1),

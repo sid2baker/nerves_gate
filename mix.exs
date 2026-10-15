@@ -40,7 +40,7 @@ defmodule NervesGate.MixProject do
           :muontrap,
           :ssh,
           :ex_unit,
-          :tailscale,
+          :tailscaled_ex,
           :vintage_net,
           :vintage_net_bridge,
           :vintage_net_ethernet
@@ -127,10 +127,7 @@ defmodule NervesGate.MixProject do
       {:circuits_uart, "~> 1.6"},
       {:input_event, "~> 1.4"},
       # Host tooling must never start the workstation VPN.
-      {:tailscale,
-       github: "sid2baker/tailscale_ex",
-       ref: "ad64feb5d999a07c1a4ded4a04c99adb374a7b07",
-       runtime: Mix.target() != :host},
+      {:tailscaled_ex, "~> 0.2.0", runtime: Mix.target() != :host},
       {:nerves_runtime, "~> 0.13", targets: @targets},
       {:nerves_motd, "~> 0.1", targets: @targets},
       {:ring_logger, "~> 0.11", targets: @targets},

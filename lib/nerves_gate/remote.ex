@@ -198,8 +198,13 @@ defmodule NervesGate.Remote do
     {:noreply, publish(state)}
   end
 
-  def handle_info(%PropertyTable.Event{}, state),
-    do: {:noreply, publish(state)}
+  def handle_info(%PropertyTable.Event{}, state) do
+    {:noreply, publish(state)}
+  end
+
+  def handle_info({Tailscaled, _, _, _, _}, state) do
+    {:noreply, publish(state)}
+  end
 
   def handle_info(_, state), do: {:noreply, state}
 
