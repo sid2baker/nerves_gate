@@ -20,6 +20,7 @@ endpoint = Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)
 endpoint =
   Keyword.merge(endpoint,
     server: true,
+    url: [host: "localhost", port: String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))],
     http: [ip: {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}, port: 0]
   )
 

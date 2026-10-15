@@ -87,7 +87,7 @@ defmodule Mix.Tasks.Dev.Qemu do
 
       status =
         if ci? do
-          isolated(true, socket, options[:only] || "all")
+          isolated(true, socket, options[:only] || "all", port)
         else
           serve(port, socket)
         end
@@ -107,7 +107,7 @@ defmodule Mix.Tasks.Dev.Qemu do
 
   defp serve(port, socket) do
     {:ok, _} = Application.ensure_all_started(:req)
-    task = Task.async(fn -> isolated(false, socket, "all") end)
+    task = Task.async(fn -> isolated(false, socket, "all", port) end)
 
     try do
       # Allow the guest's 180-second boot budget plus workstation Phoenix startup.
@@ -149,7 +149,7 @@ defmodule Mix.Tasks.Dev.Qemu do
     end
   end
 
-  defp isolated(ci?, socket, selection) do
+  defp isolated(ci?, socket, selection, port) do
     # Pasta owns a new user/network namespace and outbound sockets, never host
     # routes or port forwards. A private mount namespace gives QEMU its own DNS.
     # Initialize Nerves before `mix run` replaces System.argv with an empty list.
@@ -202,6 +202,7 @@ defmodule Mix.Tasks.Dev.Qemu do
           {"NERVES_GATE_HOST_NETNS", File.read_link!("/proc/self/ns/net")},
           {"NERVES_GATE_HOST_MNTNS", File.read_link!("/proc/self/ns/mnt")},
           {"QEMU_HTTP_SOCKET", socket},
+          {"QEMU_HTTP_PORT", Integer.to_string(port)},
           {"QEMU_CI", to_string(ci?)},
           {"QEMU_SCENARIO", selection}
         ],

@@ -20,6 +20,10 @@ defmodule NervesGate.Scenarios.FrontendAssets do
         retry: false
       )
 
+    port = String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
+    assert %URI{scheme: "http", host: "localhost", port: ^port} = URI.parse(Endpoint.url())
+    assert Endpoint.config(:http)[:ip] == {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}
+
     firmware = Req.new(base_url: "http://192.168.77.2:4000", retry: false)
     assert_assets(host)
     assert_assets(firmware)
