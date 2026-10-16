@@ -16,15 +16,18 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
     status = Qemu.await(vm, "trial DHCP address before removal", &addressed?/1)
     port = Enum.find(status.connections.ports, &(&1.name == "eth0"))
     manager = :erpc.call(vm.node, Process, :whereis, [VintageNet.RouteManager])
+    assert is_pid(manager)
 
     try do
-      NervesGate.TestQemu.remove_lan1(vm)
+      Qemu.remove_lan1(vm)
 
-      Qemu.await(vm, "required trial NIC removed", fn status ->
-        Enum.any?(status.connections.ports, &match?(%{name: "eth0", present: false}, &1)) &&
-          not status.actions["network.confirm"].enabled
-      end)
+      # Unplug can race an already-running kernel route command. Exercise that
+      # supervisor recovery deterministically, not only when CI happens to hit it.
+      assert :erpc.call(vm.node, Process, :exit, [manager, :kill])
 
+      await_recovery(vm, trial, manager)
+
+      manager = :erpc.call(vm.node, Process, :whereis, [VintageNet.RouteManager])
       assert_late_route_ignored(vm, port)
       assert ^manager = :erpc.call(vm.node, Process, :whereis, [VintageNet.RouteManager])
       assert {:error, %{code: "not_connected"}} = Qemu.call(vm, :network_confirm, [trial])
@@ -41,6 +44,25 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
     Qemu.await(vm, "removed NIC returned without changing settings", fn status ->
       status.network.desired == saved &&
         Enum.any?(status.connections.ports, &match?(%{name: "eth0", present: true}, &1))
+    end)
+  end
+
+  defp await_recovery(vm, trial, manager) do
+    Qemu.await(vm, "same trial after interface-manager recovery", fn status ->
+      observed = status.network.observed
+      removed = Enum.find(observed.ports, &(&1.name == "eth0"))
+
+      remaining = [
+        observed.bridge,
+        observed.usb | Enum.reject(observed.ports, &(&1.name == "eth0"))
+      ]
+
+      current = :erpc.call(vm.node, Process, :whereis, [VintageNet.RouteManager])
+
+      is_pid(current) && current != manager && match?(%{id: ^trial}, status.network.pending) &&
+        match?(%{present: false, state: :retrying}, removed) &&
+        Enum.all?(remaining, &(&1.state == :configured)) &&
+        not status.actions["network.confirm"].enabled
     end)
   end
 
