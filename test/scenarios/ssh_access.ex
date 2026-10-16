@@ -1,9 +1,9 @@
 defmodule NervesGate.Scenarios.SshAccess do
   @moduledoc false
   import ExUnit.Assertions
+  import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  @behaviour :ssh_client_key_api
   @guest NervesGate.TestQemu.guest()
 
   def name,
@@ -14,10 +14,7 @@ defmodule NervesGate.Scenarios.SshAccess do
   def run(vm) do
     assert Qemu.status(vm).system.target == "x86_64"
     await_ssh()
-    key = :public_key.generate_key({:namedCurve, :ed25519})
-    decoded = :ssh_file.extract_public_key(key)
-    line = :ssh_file.encode([{decoded, [comment: ~c"QEMU SSH scenario"]}], :auth_keys)
-    fingerprint = to_string(:ssh.hostkey_fingerprint(:sha256, decoded))
+    {key, line, fingerprint} = ssh_key()
 
     assert {:error, _} = password(Qemu.current().forwards.ssh, ~c"root", ~c"nerves_gate")
     assert {:error, _} = public_key(key)
@@ -120,50 +117,13 @@ defmodule NervesGate.Scenarios.SshAccess do
     end
   end
 
-  defp await_ssh do
-    # This call waits behind NervesSSH's host-key generation and daemon startup.
-    assert {:ok, _info} =
-             :erpc.call(@guest, GenServer, :call, [NervesSSH, :info, 60_000], 65_000)
-  end
-
   defp assert_key_works(key) do
     assert {:ok, connection} = public_key(key)
     :ok = :ssh.close(connection)
   end
 
   defp password(port, user, password),
-    do: connect(port, user: user, password: password, auth_methods: ~c"password")
+    do: ssh_connect(port, user: user, password: password, auth_methods: ~c"password")
 
-  defp public_key(key),
-    do:
-      connect(Qemu.current().forwards.ssh,
-        user: ~c"root",
-        key_cb: {__MODULE__, key: key},
-        auth_methods: ~c"publickey",
-        preferred_algorithms: [public_key: [:"ssh-ed25519"]]
-      )
-
-  defp connect(port, options) do
-    :ssh.connect(
-      {127, 0, 0, 1},
-      port,
-      options ++
-        [
-          silently_accept_hosts: true,
-          save_accepted_host: false,
-          user_interaction: false,
-          connect_timeout: 3000
-        ],
-      5000
-    )
-  end
-
-  # Ephemeral generated credentials for this owned guest only. No workstation keys.
-  @impl true
-  def user_key(:"ssh-ed25519", options), do: {:ok, options[:key_cb_private][:key]}
-  def user_key(_, _), do: {:error, :not_found}
-  @impl true
-  def is_host_key(_, _, _, _, _), do: true
-  @impl true
-  def add_host_key(_, _, _, _), do: :ok
+  defp public_key(key), do: ssh_public_key(Qemu.current(), key)
 end

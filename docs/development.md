@@ -355,6 +355,16 @@ handshakes, rejection on non-USB management, key persistence/revocation across
 reboots, input validation and failed writes. This qualifies the kernel/authentication
 boundary, not EC100 USB gadget hardware. Management `eth2` is never renamed or faulted.
 
+`mix test --only firmware_upgrade` starts a fresh disk, authorizes an ephemeral
+SSH key and saves network settings. It streams the current `.fw` through the
+normal SSH `fwup` subsystem twice, letting its normal success callback reboot
+A → B → A on the same disk. It checks the mounted root slot, next-boot slot,
+preserved settings and real SSH authentication. No alternate firmware build or
+bench-forced reboot is used. This covers successful same-image upgrades, not
+cross-version migrations, interrupted updates or automatic failed-boot rollback;
+the QEMU GRUB configuration does not implement EC100's U-Boot rollback policy.
+Restart `mix dev.qemu` after adding a scenario so the bench lists it.
+
 The `firewall` check needs neither Internet nor Tailscale enrollment. It reads
 tables without changing rules and is also a prerequisite in `tailscale_login`.
 The other checks require working public Internet access. `internet`, `latency` and
@@ -379,7 +389,8 @@ equipment-subnet sharing checks.
 
 Scenarios cover public status, projection clients, server restart/reconnect, draft
 preservation, invalid inputs, cable loss, NIC removal, VM freeze, configuration
-trials, reboot/crash persistence, disk errors, upstream outages, latency and loss.
+trials, reboot/crash persistence, successful A/B upgrades, disk errors, upstream
+outages, latency and loss.
 The source folder is the authoritative list.
 
 Internet checks originate inside the guest, including DNS and certificate-verified
