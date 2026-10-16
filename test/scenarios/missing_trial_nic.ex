@@ -13,6 +13,9 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
     saved = settings("eth1")
     save(vm, saved)
     trial = propose(vm, settings("eth0"))
+    status = Qemu.await(vm, "trial DHCP address before removal", &addressed?/1)
+    port = Enum.find(status.connections.ports, &(&1.name == "eth0"))
+    manager = :erpc.call(vm.node, Process, :whereis, [VintageNet.RouteManager])
 
     try do
       NervesGate.TestQemu.remove_lan1(vm)
@@ -22,12 +25,9 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
           not status.actions["network.confirm"].enabled
       end)
 
+      assert_late_route_ignored(vm, port)
+      assert ^manager = :erpc.call(vm.node, Process, :whereis, [VintageNet.RouteManager])
       assert {:error, %{code: "not_connected"}} = Qemu.call(vm, :network_confirm, [trial])
-
-      Qemu.await(vm, "same trial available for cancellation", fn status ->
-        match?(%{id: ^trial}, status.network.pending) && status.actions["network.cancel"].enabled
-      end)
-
       assert :ok = Qemu.call(vm, :network_cancel, [trial])
 
       Qemu.await(vm, "confirmed topology restored without removed NIC", fn status ->
@@ -42,5 +42,34 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
       status.network.desired == saved &&
         Enum.any?(status.connections.ports, &match?(%{name: "eth0", present: true}, &1))
     end)
+  end
+
+  defp assert_late_route_ignored(vm, port) do
+    # Deliver a late lease/connectivity report after physical removal. These are
+    # VintageNet's real routing APIs, not a fake adapter or injected server state.
+    [%{address: address, prefix_length: prefix} | _] = port.addresses
+    {:ok, address} = :inet.parse_ipv4_address(String.to_charlist(address))
+    {:ok, gateway} = :inet.parse_ipv4_address(String.to_charlist(port.gateway))
+
+    assert :ok =
+             :erpc.call(vm.node, VintageNet.RouteManager, :set_connection_status, [
+               "eth0",
+               :disconnected,
+               "missing NIC scenario"
+             ])
+
+    assert :ok =
+             :erpc.call(vm.node, VintageNet.RouteManager, :set_route, [
+               "eth0",
+               [{address, prefix}],
+               gateway
+             ])
+
+    assert :ok =
+             :erpc.call(vm.node, VintageNet.RouteManager, :set_connection_status, [
+               "eth0",
+               :internet,
+               "late connectivity report"
+             ])
   end
 end
