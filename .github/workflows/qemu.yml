@@ -74,7 +74,7 @@ jobs:
           gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
           printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
           sudo apt-get update
-          sudo apt-get install --yes build-essential pkg-config qemu-system-x86 util-linux inotify-tools squashfs-tools "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
+          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools squashfs-tools "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
       - name: Install Mix tooling outside the project
         run: |
           # shellcheck disable=SC2016

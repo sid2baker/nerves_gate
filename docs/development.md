@@ -31,13 +31,14 @@ Setup neither boots QEMU nor runs tests, and never touches the ARM daemon or EC1
 - **Linux x86_64 or aarch64**. No host TAP device, network namespace or elevated privilege is needed.
 - **Elixir 1.20 / OTP 29**; `mise install` uses the versions in `mise.toml` if you use mise.
 - **fwup**, available on `PATH`; see its [installation guide](https://github.com/fwup-home/fwup#installing).
-- Git, a C compiler, make, pkg-config, **QEMU 8.2+ with user and stream networking**,
+- Git, a C compiler, make, pkg-config, libmnl/libnl development headers (for host
+  VintageNet compilation), **QEMU 8.2+ with user and stream networking**,
   util-linux (`flock`) and inotify-tools.
 
 For Debian/Ubuntu, the last group can be installed with:
 
 ```sh
-sudo apt install git build-essential pkg-config qemu-system-x86 util-linux inotify-tools
+sudo apt install git build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools
 ```
 
 On an Apple Silicon Mac, use an arm64 Ubuntu [OrbStack](https://orbstack.dev) machine
