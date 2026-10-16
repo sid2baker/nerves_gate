@@ -25,7 +25,7 @@ defmodule NervesGate.Scenarios.Churn do
     end
 
     assert_port_arrangements(vm, saved)
-    assert addressed?(Qemu.status(vm))
+    Qemu.await(vm, "DHCP address after port churn", &addressed?/1)
   end
 
   defp assert_port_arrangements(vm, saved) do
