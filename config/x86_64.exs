@@ -8,8 +8,9 @@ config :nerves_gate,
   recovery_adapter: nil,
   indicators_adapter: nil
 
-# Distribution stays inside the isolated QEMU namespace, without Tailscale login.
-node = System.get_env("NERVES_GATE_DEVICE_NODE") || "nerves_gate@192.168.77.2"
+# Controller-visible identity through the loopback-only management forward.
+# The actual NIC remains 192.168.77.2; no Tailscale login is needed.
+node = System.get_env("NERVES_GATE_DEVICE_NODE") || "nerves_gate@127.0.0.1"
 config :nerves_gate, development_node: String.to_atom(node)
 
 # Management is separate from eth0/eth1; LAN trials cannot remove this address.

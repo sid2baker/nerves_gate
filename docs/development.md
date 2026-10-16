@@ -10,7 +10,7 @@ mix dev.qemu
 ```
 
 Wait for **QEMU ready**, then open **http://localhost:4000** for the gateway UI or
-**/tests** for the device test bench. The proxy opens only after Phoenix answers HTTP requests.
+**/tests** for the device test bench. Readiness requires both the private CLI socket and the loopback HTTP listener.
 No EC100, Tailscale login, environment file or manual network setup is needed.
 
 `mix setup` checks the workstation, installs missing Hex/Rebar/Nerves bootstrap,
@@ -24,16 +24,16 @@ Setup neither boots QEMU nor runs tests, and never touches the ARM daemon or EC1
 
 ### Prerequisites
 
-- **Linux x86_64 or aarch64**, with unprivileged user/network/mount namespaces and `/dev/net/tun`.
+- **Linux x86_64 or aarch64**. No host TAP device, network namespace or elevated privilege is needed.
 - **Elixir 1.20 / OTP 29**; `mise install` uses the versions in `mise.toml` if you use mise.
 - **fwup**, available on `PATH`; see its [installation guide](https://github.com/fwup-home/fwup#installing).
-- Git, a C compiler, make, pkg-config, QEMU, **pasta** (the `passt` package), iproute2,
-  nftables, dnsmasq, socat, util-linux and inotify-tools.
+- Git, a C compiler, make, pkg-config, **QEMU 8.2+ with user and stream networking**,
+  util-linux (`flock`) and inotify-tools.
 
 For Debian/Ubuntu, the last group can be installed with:
 
 ```sh
-sudo apt install git build-essential pkg-config qemu-system-x86 passt iproute2 nftables dnsmasq-base socat util-linux inotify-tools
+sudo apt install git build-essential pkg-config qemu-system-x86 util-linux inotify-tools
 ```
 
 On an Apple Silicon Mac, use an arm64 Ubuntu [OrbStack](https://orbstack.dev) machine
@@ -43,29 +43,22 @@ a case-sensitive filesystem for builds. QEMU emulates the x86 guest there;
 OrbStack forwards the machine's `localhost:4000` to the Mac. Avoid amd64 machines:
 the BEAM JIT fails under Rosetta.
 
-`dnsmasq-base` supplies the executable without installing a workstation DHCP service.
-The bench starts its own foreground DHCP/DNS process inside its private namespace.
-It uses dnsmasq's `--no-daemon` test/debug mode to avoid privilege switching:
-rootless user namespaces forbid `setgroups`, even when the requested group is root.
-Leases stay in that process's memory and no PID/lease files are written, including
-on AppArmor-confined hosts. No workstation security policy is changed. Startup
-requires a successful local `router.test` DNS response before booting QEMU; it
-does not require public Internet. A later router-process exit blocks the bench.
-
+QEMU's libslirp supplies DHCP, DNS forwarding and outbound Internet. An Elixir
+process forwards real Ethernet frames over private Unix sockets and applies cable
+and packet faults. There is no external DHCP daemon or host network setup.
 Install the toolchain and fwup separately. Docker is needed only by maintainers
 building the system from source, not for normal setup, firmware builds or QEMU.
-`mix setup` reports missing tools; it does not install OS packages, change
-permissions or enable namespaces. If namespaces are restricted by host policy,
-use an approved Linux development machine rather than running the session as root.
+`mix setup` checks QEMU capabilities and reports missing tools; it does not install
+OS packages or change workstation security policy.
 
 ## Daily workflow
 
 Keep `mix dev.qemu` running in one terminal. It builds current development firmware,
 boots a disposable disk and starts workstation Phoenix with code reload,
-LiveReload, Volt and Tidewave. Tidewave allows non-loopback peers only in this
-QEMU session because the loopback-only workstation proxy connects to Phoenix over
-a Unix socket. Tidewave's Origin checks stay enabled; no workstation listener is
-opened to remote hosts. Configure Tidewave MCP clients with
+LiveReload, Volt and Tidewave. Phoenix serves the same Endpoint on a private Unix
+socket for CLI clients and a loopback-only Bandit listener for the browser.
+Tidewave accepts Unix-socket peers in this session; its Origin checks stay enabled
+and no workstation listener is opened to remote hosts. Configure Tidewave MCP clients with
 `http://localhost:4000/tidewave/mcp` (adjust the port when using `--port`). Its
 metadata is at `/tidewave/config`; the root `/config` and `/mcp` paths are not
 Tidewave routes. EC100 development keeps Tidewave's default local-only policy.
@@ -204,6 +197,9 @@ explicit firmware builds.
 
 - **Port 4000 in use:** run `mix dev.qemu --port 4001`.
 - **CLI cannot reach a session:** start `mix dev.qemu`; tests use its private Unix socket.
+- **Distribution port 9100 in use:** the QEMU management forward requires that
+  loopback port. Resolve the conflict yourself; the launcher never stops another
+  process. EPMD, guest HTTP and SSH use session-selected loopback ports.
 - **Session already running:** stop the owning session before restarting. The kernel
   releases its lock on exit, including after a crash. The `session.lock` file stays
   on disk and is reused; never delete it. Stale HTTP sockets are removed on startup.
@@ -248,51 +244,90 @@ CSRF protection through a private Unix socket.
 
 ### Isolation
 
-Development and CI run inside a user/network namespace created by **pasta**.
-Pasta supplies an outbound IPv4 uplink, `ng-uplink` (192.0.2.2/24), using ordinary
-workstation sockets. The real guest runs DHCP, DNS, VintageNet connectivity checks
-and tailscaled; no synthetic Internet responders or status overrides are used.
-
-The device has stable eth0 (LAN1), eth1 (LAN2) and eth2 (management, 192.168.77.2).
-LAN NICs use TAP interfaces, not independent QEMU user-mode NAT networks:
+One owned QEMU process supplies the virtual hardware and libslirp network stacks.
+One Elixir `TestNetwork` process forwards actual Ethernet frames over private Unix
+sockets. No workstation interfaces, routes, DNS files, firewall rules or VPN are
+changed. The guest runs real DHCP, DNS, VintageNet checks, HTTPS and tailscaled;
+there are no synthetic Internet responders or device-status overrides.
 
 ```text
-LAN1 / ng-lan1 ──┐     ng-internet (10.0.2.2): DHCP, DNS, NAT → ng-uplink → pasta
-                 ├── one selected LAN on Internet; the other on equipment
-LAN2 / ng-lan2 ──┘     ng-equipment (10.0.3.2): isolated LAN, no DHCP/DNS or forwarding
-Management ────────── ng-test (192.168.77.1): control only
+eth0 / LAN1 ──┐     Elixir relay ── QEMU hub + libslirp ── Internet
+              ├── one selected LAN; the other on isolated equipment
+eth1 / LAN2 ──┘
+eth2 ────────────── fixed management gate ── restricted libslirp ── loopback forwards
 ```
 
-The default connects LAN1 to the Internet router and LAN2 to equipment. Off puts
-both LANs on the isolated equipment network. Cable faults independently control
-carrier. A running guest acknowledges the unplug before reconnection; a paused
-CPU cannot observe intermediate cable transitions. Linux bridge membership is
-read back through netlink before reporting a completed topology change. Cable
-state is the TAP's administrative state, mirrored to QEMU carrier; it and bridge
-attachments survive a VM power cycle. Fresh-disk setup restores the bench baseline.
-NIC names, MAC addresses and guest settings do not change when cables move.
+The Internet backend has gateway `10.0.2.2` and DNS `10.0.2.3`. Default wiring is
+LAN1 → Internet, LAN2 → equipment; Off puts both ports on equipment. Equipment
+is a real isolated Ethernet segment without an IP/DHCP/DNS server. Management
+stays `192.168.77.2/24`, with virtual host `192.168.77.1`, and is never faulted.
 
-Namespace firewall rules deny forwarding by default (including IPv6). Only the
-Internet bridge can use the upstream, with return traffic restricted to that path.
-Equipment and management cannot supply an alternative route, even with a manually
-configured gateway. Router DHCP/DNS is accessible only from its Internet LAN.
-Management is never faulted. The controller uses 192.168.77.1 and
-development cookie `mycookie`. A loopback-only socat proxy exposes Phoenix's Unix
-socket to the workstation.
+The relay owns actual attachments, cable settings and packet queues. QMP mirrors
+cable state into guest carrier. A running guest acknowledges unplug before a
+move; a paused CPU cannot observe intermediate transitions. NIC IDs, MACs and
+settings never change when cables move. QEMU starts paused: streams and saved
+carrier states are applied before firmware runs. Topology, cable and uplink fault
+settings survive VM replacement in Elixir; queued packets and libslirp's live
+DHCP/NAT state do not. A fresh disk restores the baseline.
 
-All TAP interfaces, firewall rules and Erlang distribution stay inside the
-namespace. Pasta's automatic port forwarding is explicitly disabled in both
-directions, and its gateway does not map to workstation loopback. Pasta forwards DNS through 192.0.2.3 to the workstation resolver, including
-loopback-only resolvers. The virtual router uses that address as its upstream DNS;
-a private mount of `resolv.conf` does the same for host tools inside the namespace,
-without changing workstation DNS. No workstation routes, firewall rules or VPN are changed.
-Outbound traffic still follows workstation networking/VPN policy: this is not a
-sandbox against access to reachable LAN/tailnet services. Guest services have no
-public inbound port forwards; an enrolled guest can be reached through its own
-Tailscale identity according to tailnet policy.
+The routed frame gate denies unsupported encapsulation, IPv6, source-routed IPv4,
+spoofed source networks and virtual-host/loopback access, with explicit ARP, DHCP
+and DNS allowances. Equipment never forwards to the Internet socket; management
+also uses libslirp `restrict=on`. `topology` supplies an explicit route **and a
+neighbor entry** to prove forbidden IP frames are rejected, rather than merely
+failing ARP. The gate does not implement networking protocols or TCP state.
 
-Images are disposable files, never physical disks. See the
-[system notes](../systems/nerves_system_ec100_qemu/GATEWAY.md) for differences from EC100.
+The QEMU-only node identity is `nerves_gate@127.0.0.1`, reached through the owned
+loopback forward to guest distribution port 9100. EPMD, guest HTTP and SSH have
+explicit loopback forwards on session-selected ports. The launcher sets
+`ERL_EPMD_PORT` **before the controller BEAM starts**. The controller initiates
+authenticated distribution connections and listens for none; it neither starts
+nor replaces workstation EPMD. Projection
+notifications use that bidirectional connection. Physical EC100 discovery is unchanged.
+
+All socket files and disposable disks belong to a private session directory.
+Relay loss has no bypass: the controller blocks admission and stops its owned VM.
+QMP and power-cut operations validate the supervised process's ownership.
+Raw packets are excluded from OTP status/crash reports and event logs.
+
+This is **network isolation, not an OS or hostile-local-user sandbox**. Like the
+existing privileged localhost UI, the loopback management forwards trust local
+workstation users. Ordinary outbound LAN/tailnet access still follows workstation
+routing/VPN policy. DNS forwarding to the workstation resolver is intentional;
+arbitrary workstation-loopback services are not available through the Internet
+backend. An enrolled guest remains reachable through its own Tailscale identity
+according to tailnet policy. Images are files, never physical disks; see the
+[system notes](../systems/nerves_system_ec100_qemu/GATEWAY.md).
+
+### Network control API
+
+Scenarios and manual controls use the same partial-map operation on the runner's
+owned VM handle. Omitted fields are preserved; unknown keys and invalid values
+are rejected before changing forwarding. There is no generic topology DSL.
+
+```elixir
+alias NervesGate.TestQemu, as: Qemu
+
+Qemu.network(vm, %{internet: :lan2})
+Qemu.network(vm, %{cables: %{lan1: false}})
+Qemu.network(vm, %{uplink: %{delay_ms: 200, loss: :alternate}})
+Qemu.network(vm)        # current configuration
+Qemu.network_stats()   # actual forwarding, drops, queue delays and overflow
+Qemu.network(vm, NervesGate.TestNetwork.defaults())
+```
+
+`internet` is `:lan1 | :lan2 | :off`; each cable is a boolean. `delay_ms` is
+0–5000 and `loss` is `:none | :alternate | :all`. Loss is deterministic: every
+other eligible outgoing packet, not a random probability. Outage/loss precede
+delay, while local ARP/DHCP and management bypass Internet faults. Each delayed
+frame gets a monotonic deadline; this is not QEMU's periodic buffer filter.
+Queues are bounded to 4096 frames/4 MiB, sockets use demand-limited reads, and
+stale/overflow drops are counted separately. Changing settings discards pending
+impaired packets rather than flushing a surprise burst onto a new connection.
+
+These drivers do not replace runner admission. Cleanup resumes the VM before
+restoring the default map; uncertainty blocks the bench. The UI's choices are
+ordinary data mapping action names to these same patches.
 
 ### Real Internet and Tailscale
 
@@ -314,8 +349,8 @@ mix test --only firewall          # guest IPv4/IPv6 filter, NAT and mangle table
 mix test --only tailscale_login   # fresh guest checks firewall and obtains a private login link
 ```
 
-`mix test --only ssh_access` uses a fresh disposable disk and an extra TAP-backed
-Ethernet path named `usb0` inside the guest. It checks actual SSH password/key
+`mix test --only ssh_access` uses a fresh disposable disk and an extra restricted
+libslirp Ethernet path named `usb0` inside the guest, with its own loopback SSH forward. It checks actual SSH password/key
 handshakes, rejection on non-USB management, key persistence/revocation across
 reboots, input validation and failed writes. This qualifies the kernel/authentication
 boundary, not EC100 USB gadget hardware. Management `eth2` is never renamed or faulted.
@@ -324,9 +359,11 @@ The `firewall` check needs neither Internet nor Tailscale enrollment. It reads
 tables without changing rules and is also a prerequisite in `tailscale_login`.
 The other checks require working public Internet access. `internet`, `latency` and
 `loss` use `https://example.com/` with the guest's CA store and hostname verification.
-Outage/loss rules cover both guest forwarding and the router's DNS requests.
-Latency applies to the real namespace uplink, not management.
-At 50% packet loss, HTTPS may fail; the scenario requires actual packet drops,
+Outage/loss/delay act on eligible guest-to-libslirp Ethernet traffic, including
+DNS requests, not on management. This is not wire-for-wire equivalent to a
+post-routing ISP link: DNS caching, fragmentation and TCP proxy buffering differ.
+The latency scenario checks actual per-frame queue residence time as well as HTTPS.
+At 50% packet loss, HTTPS may fail; the scenario checks counted alternating drops,
 working management during the fault, and successful HTTPS after restoration.
 External DNS/HTTPS/Tailscale service failures are genuine test failures, not skipped
 or replaced with fixtures. `tailscale_login` uses a fresh disposable disk and never

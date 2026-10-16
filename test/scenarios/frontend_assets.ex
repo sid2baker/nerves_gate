@@ -5,7 +5,7 @@ defmodule NervesGate.Scenarios.FrontendAssets do
   alias NervesGateWeb.Endpoint
   alias Phoenix.Socket.Transport
 
-  @guest :"nerves_gate@192.168.77.2"
+  @guest NervesGate.TestQemu.guest()
 
   def name, do: "Host and firmware serve the frontend; firmware needs no Volt runtime"
 
@@ -24,9 +24,23 @@ defmodule NervesGate.Scenarios.FrontendAssets do
     assert %URI{scheme: "http", host: "localhost", port: ^port} = URI.parse(Endpoint.url())
     assert Endpoint.config(:http)[:ip] == {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}
 
-    firmware = Req.new(base_url: "http://192.168.77.2:4000", retry: false)
+    firmware = Req.new(base_url: "http://127.0.0.1:#{vm.forwards.http}", retry: false)
     assert_assets(host)
     assert_assets(firmware)
+
+    if System.get_env("QEMU_CI") != "true" do
+      browser = Req.new(base_url: "http://127.0.0.1:#{port}", retry: false)
+      assert_assets(browser)
+
+      if Endpoint.config(:code_reloader) do
+        assert Req.get!(browser, url: "/tidewave/config").body["framework_type"] == "phoenix"
+
+        assert Req.get!(browser,
+                 url: "/tidewave/mcp",
+                 headers: [origin: "https://untrusted.example"]
+               ).status == 403
+      end
+    end
 
     # Root discovery must not advertise a different MCP server to bridge clients.
     assert Req.get!(host, url: "/config", redirect: false).status == 404

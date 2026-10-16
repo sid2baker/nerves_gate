@@ -8,7 +8,7 @@ defmodule NervesGate.Scenarios.PublicStatus do
   def run(vm) do
     status = Qemu.status(vm)
     assert status.system.target == "x86_64"
-    assert status.system.node == :"nerves_gate@192.168.77.2"
+    assert status.system.node == Qemu.guest()
     assert status.backend.available
     guest = status.system.node
     version = :erpc.call(guest, Application, :spec, [:tailscaled_ex, :vsn])

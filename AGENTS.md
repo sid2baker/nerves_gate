@@ -23,7 +23,7 @@
 
 ## Safety
 
-- Tests operate only on disposable, owned QEMU instances inside the isolated test namespace.
+- Tests operate only on disposable, supervised QEMU instances on the bench's private socket-based networks. Never attach the drivers to an arbitrary VM or alter workstation networking.
 - Never flash physical devices, modify workstation networking/VPN, or stop unrelated processes without explicit authorization.
 - Keep private login URLs, distribution cookies and other secrets out of projections, notifications and logs.
 

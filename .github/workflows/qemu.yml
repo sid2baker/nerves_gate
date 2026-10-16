@@ -1,6 +1,6 @@
 name: QEMU regressions
 
-# Deliberately opt-in: this uses a trusted runner with Docker and user namespaces.
+# Deliberately opt-in: this uses a trusted runner with QEMU user/stream networking.
 # Do not run untrusted pull-request code on this runner.
 on:
   workflow_dispatch:

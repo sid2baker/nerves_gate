@@ -15,7 +15,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   alias Phoenix.LiveView.{Lifecycle, Socket}
 
-  @guest :"nerves_gate@192.168.77.2"
+  @guest NervesGate.TestQemu.guest()
   @server {ProjectionServer, @guest}
 
   def name,
@@ -43,7 +43,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert {:ok, _} = Jason.encode(initial.status)
       assert Process.whereis(ProjectionServer) == nil
 
-      NervesGate.TestQemu.set_cable(vm, :lan1, false)
+      Qemu.network(vm, %{cables: %{lan1: false}})
 
       Qemu.await(vm, "both projections observe cable loss", fn _ ->
         Enum.all?(clients, fn pid ->
@@ -57,7 +57,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       end)
 
       converged(vm, clients)
-      NervesGate.TestQemu.set_cable(vm, :lan1, true)
+      Qemu.network(vm, %{cables: %{lan1: true}})
       Qemu.await(vm, "cable restored", &NervesGate.ScenarioHelpers.addressed?/1)
       converged(vm, clients)
       assert_drafts(clients)
@@ -91,7 +91,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       converged(vm, clients)
       assert_drafts(clients)
     after
-      NervesGate.TestQemu.set_cable(vm, :lan1, true)
+      Qemu.network(vm, %{cables: %{lan1: true}})
       for pid <- clients, do: send(pid, :stop)
     end
 

@@ -10,11 +10,16 @@ defmodule NervesGate.Scenarios.Latency do
     Qemu.await(vm, "public Internet reachable", &internet?/1, 60_000)
 
     try do
-      Qemu.delay_internet(vm)
+      Qemu.network(vm, %{uplink: %{delay_ms: 200}})
+      before = Qemu.network_stats()
       assert {:ok, 200} = Qemu.internet_request(vm)
       assert addressed?(Qemu.status(vm))
+      stats = Qemu.network_stats()
+      assert stats.delayed > 0
+      assert stats.min_delay_ms >= 200
+      assert stats.overflow == before.overflow
     after
-      Qemu.clear_delay(vm)
+      Qemu.network(vm, %{uplink: %{delay_ms: 0}})
     end
 
     Qemu.await(vm, "normal upstream restored", &internet?/1, 60_000)

@@ -58,7 +58,7 @@ defmodule NervesGate.QemuTests do
      %{
        view: view,
        vm: vm,
-       router_monitor: if(vm, do: Process.monitor(Qemu.router_pid())),
+       network_monitor: if(vm, do: Process.monitor(Process.whereis(NervesGate.TestNetwork))),
        worker: nil,
        timer: nil,
        completed: false
@@ -222,14 +222,15 @@ defmodule NervesGate.QemuTests do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{router_monitor: ref} = state) do
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{network_monitor: ref} = state) do
     cancel_timer(state)
     if state.worker, do: Process.exit(elem(state.worker, 0), :kill)
+    Qemu.stop_owned()
 
     view =
       state.view
       |> finish(true)
-      |> event("Virtual router stopped. Inspect router.log and restart mix dev.qemu.")
+      |> event("Ethernet relay stopped; the owned VM was stopped. Restart mix dev.qemu.")
 
     {:noreply, publish(%{state | view: view, timer: nil})}
   end
@@ -393,7 +394,7 @@ defmodule NervesGate.QemuTests do
   defp baseline(vm) do
     Qemu.resume(vm)
     Qemu.insert_lan1(vm)
-    Qemu.restore_connections(vm)
+    :ok = Qemu.network(vm, NervesGate.TestNetwork.defaults())
     status = Qemu.await(vm, "Waiting for device", & &1)
     if status.network.pending, do: Qemu.call(vm, :network_cancel, [status.network.pending.id])
     NervesGate.ScenarioHelpers.save(vm, NervesGate.ScenarioHelpers.settings("eth0"))

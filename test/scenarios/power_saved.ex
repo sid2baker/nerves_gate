@@ -9,18 +9,24 @@ defmodule NervesGate.Scenarios.PowerSaved do
   def run(vm) do
     saved = settings("eth0")
     save(vm, saved)
-    Qemu.connect_internet(vm, :lan2)
-    Qemu.set_cable(vm, :lan1, false)
+
+    Qemu.network(vm, %{
+      internet: :lan2,
+      cables: %{lan1: false},
+      uplink: %{delay_ms: 200, loss: :alternate}
+    })
+
+    network = Qemu.network(vm)
     restarted = Qemu.power_cycle(vm)
 
     assert Qemu.topology() == %{lan1: :equipment, lan2: :internet}
-    assert NervesGate.TestNetwork.cables() == %{lan1: false, lan2: true}
+    assert Qemu.network(restarted) == network
 
     Qemu.await(restarted, "external cable fault survives VM process crash", fn status ->
       Enum.any?(status.connections.ports, &match?(%{name: "eth0", link: false}, &1))
     end)
 
-    Qemu.restore_connections(restarted)
+    Qemu.network(restarted, NervesGate.TestNetwork.defaults())
 
     restored =
       Qemu.await(restarted, "saved settings after VM process crash", fn status ->

@@ -4,8 +4,8 @@ defmodule NervesGate.Scenarios.DevDiscovery do
   alias NervesGate.DevDiscovery
   alias NervesGate.TestQemu, as: Qemu
 
-  @guest :"nerves_gate@192.168.77.2"
-  @guest_ip {192, 168, 77, 2}
+  @guest NervesGate.TestQemu.guest()
+  @guest_ip {127, 0, 0, 1}
 
   def name,
     do: "Development discovery authenticates gateways and selects only the requested target"
@@ -17,9 +17,14 @@ defmodule NervesGate.Scenarios.DevDiscovery do
     assert :error = DevDiscovery.node_address("nerves_gate@999.168.77.2")
     assert :error = DevDiscovery.node_address("nerves_gate@ec100.example.ts.net")
 
-    # Probe only the owned namespace: the real guest and its controller, which
-    # runs distribution but does not register the nerves_gate service in EPMD.
-    assert [gateway] = DevDiscovery.discover([@guest_ip, {192, 168, 77, 1}, @guest_ip])
+    # OTP consumes the port at BEAM startup, not when distribution starts.
+    assert :init.get_argument(:epmd_port) == {:ok, [[Integer.to_charlist(vm.forwards.epmd)]]}
+    assert {:port, 9100, _} = :erl_epmd.port_please(~c"nerves_gate", @guest_ip, 2000)
+
+    # The session's EPMD forward reaches the real guest, not workstation EPMD.
+    # The outbound-only controller does not register a service there.
+    assert :noport = :erl_epmd.port_please(~c"gateway_test", @guest_ip, 2000)
+    assert [gateway] = DevDiscovery.discover([@guest_ip, @guest_ip])
     assert gateway == %{node: @guest, target: :x86_64}
     assert {:ok, @guest} = DevDiscovery.select([gateway], :x86_64)
     assert {:error, :not_found} = DevDiscovery.select([gateway], :ec100)
@@ -27,10 +32,10 @@ defmodule NervesGate.Scenarios.DevDiscovery do
     assert {:ok, @guest} = DevDiscovery.select([gateway, gateway], :x86_64)
 
     # Selection is pure: verify ambiguity without inventing a second device or
-    # probing anything outside the disposable namespace.
+    # probing any unrelated service.
     other = %{gateway | node: node()}
     assert {:error, {:multiple, nodes}} = DevDiscovery.select([gateway, other], :x86_64)
     assert nodes == Enum.sort([@guest, node()])
-    assert @guest in Node.list()
+    assert @guest in Node.list(:connected)
   end
 end

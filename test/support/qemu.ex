@@ -3,66 +3,55 @@ defmodule NervesGate.TestQemu do
   import ExUnit.Assertions
   alias NervesGate.TestNetwork
 
-  @guest :"nerves_gate@192.168.77.2"
+  @guest :"nerves_gate@127.0.0.1"
+
+  def guest, do: @guest
 
   def start(options \\ []) do
-    isolated!()
+    System.fetch_env!("QEMU_HTTP_SOCKET")
+
+    if Node.alive?() do
+      raise "The bench requires its own controller VM"
+    end
+
     {:ok, _} = Supervisor.start_link([], strategy: :one_for_one, name: __MODULE__.Supervisor)
     dir = Path.join("_build/qemu-tests", "#{System.system_time(:millisecond)}-#{System.pid()}")
     File.mkdir_p!(dir)
     File.chmod!(dir, 448)
     IO.puts("QEMU diagnostics: #{dir}")
+    {:ok, _} = Supervisor.start_child(__MODULE__.Supervisor, {TestNetwork, dir})
     image = Path.join(dir, "gateway.img")
     on_exit(fn -> File.rm(image) end)
-    command!("ip", ~w"link set lo up")
-    command!("ip", ~w"tuntap add dev ng-test mode tap")
-    on_exit(fn -> command!("ip", ~w"link delete ng-test") end)
-    command!("ip", ~w"addr add 192.168.77.1/24 dev ng-test")
-    command!("ip", ~w"link set ng-test up")
-
-    TestNetwork.setup(dir)
-    router = daemon!(:router, "dnsmasq", TestNetwork.router_args(), dir)
-
-    poll(dir, "virtual router", deadline(5_000), fn ->
-      unless Process.alive?(router),
-        do: raise("Virtual router exited; inspect #{dir}/router.log")
-
-      TestNetwork.router_ready?()
-    end)
-
-    create_image(image)
-
-    daemon!(:epmd, "epmd", [], dir)
-
-    poll(dir, "epmd", deadline(5000), fn ->
-      case :gen_tcp.connect({127, 0, 0, 1}, 4369, [:binary, active: false], 500) do
-        {:ok, socket} ->
-          :gen_tcp.close(socket)
-          true
-
-        _ ->
-          false
-      end
-    end)
-
-    {:ok, _} = Node.start(:"gateway_test@192.168.77.1", name_domain: :longnames)
+    forwards = forward_ports!()
+    {:ok, _} = Node.start(:"gateway_test@127.0.0.1", name_domain: :longnames, dist_listen: false)
     Node.set_cookie(:mycookie)
     on_exit(fn -> Node.stop() end)
-    boot_vm(dir, image, options)
+    create_image(image)
+    boot_vm(dir, image, forwards, options)
   end
 
-  defp boot_vm(dir, image, options \\ []) do
+  defp boot_vm(dir, image, forwards, options) do
     socket_path = Path.join(dir, "qmp.sock")
-    File.rm(socket_path)
+
+    for socket <- Path.wildcard(Path.join(dir, "*.sock")) do
+      File.rm!(socket)
+    end
+
     boot = System.unique_integer([:positive])
-    stall = if options[:receive_stall], do: "on", else: "off"
-    usb = usb_network(options)
+
+    stall =
+      if options[:receive_stall] do
+        "on"
+      else
+        "off"
+      end
 
     daemon =
       daemon!(
         :qemu,
         "qemu-system-x86_64",
         [
+          "-S",
           "-m",
           "1024",
           "-display",
@@ -80,76 +69,99 @@ defmodule NervesGate.TestQemu do
           "-blockdev",
           "driver=raw,node-name=disk,file=storage",
           "-device",
-          "virtio-blk-pci,drive=disk,werror=report,rerror=report",
-          "-netdev",
-          "tap,id=lan1,ifname=ng-lan1,script=no,downscript=no",
-          "-device",
-          "virtio-net-pci,netdev=lan1,id=lan1-nic,mac=52:54:00:12:34:56",
-          "-netdev",
-          "tap,id=lan2,ifname=ng-lan2,script=no,downscript=no",
-          "-device",
-          "virtio-net-pci,netdev=lan2,id=lan2-nic,mac=52:54:00:12:34:57",
-          "-netdev",
-          "tap,id=management,ifname=ng-test,script=no,downscript=no",
-          "-device",
-          "virtio-net-pci,netdev=management,mac=52:54:00:12:34:58",
-          "-object",
-          "filter-buffer,id=lan1-stall,netdev=lan1,queue=tx,interval=3600000000,status=#{stall}"
-        ] ++ usb,
+          "virtio-blk-pci,drive=disk,werror=report,rerror=report"
+        ] ++
+          TestNetwork.arguments(dir, forwards, options[:usb] || false) ++
+          [
+            "-object",
+            "filter-buffer,id=lan1-stall,netdev=lan1,queue=tx,interval=3600000000,status=#{stall}"
+          ],
         dir
       )
 
-    poll(dir, "QMP socket", deadline(10_000), fn -> File.exists?(socket_path) end)
+    poll(dir, "QMP socket", deadline(10_000), fn ->
+      unless Process.alive?(daemon) do
+        raise "QEMU exited; inspect #{dir}/qemu.log"
+      end
+
+      File.exists?(socket_path)
+    end)
 
     {:ok, socket} =
-      :gen_tcp.connect({:local, socket_path}, 0, [:binary, packet: :line, active: false], 2_000)
+      :gen_tcp.connect({:local, socket_path}, 0, [:binary, packet: :line, active: false], 2000)
 
-    {:ok, greeting} = :gen_tcp.recv(socket, 0, 2_000)
+    {:ok, greeting} = :gen_tcp.recv(socket, 0, 2000)
     assert Map.has_key?(Jason.decode!(greeting), "QMP")
     pid = dir |> Path.join("qemu.pid") |> File.read!() |> String.trim() |> String.to_integer()
-    vm = %{dir: dir, socket: socket, daemon: daemon, pid: pid}
+
+    vm = %{
+      dir: dir,
+      socket: socket,
+      daemon: daemon,
+      pid: pid,
+      forwards: forwards,
+      options: options
+    }
+
     Process.put(:qemu_vm, vm)
     qmp!(vm, "qmp_capabilities", %{})
-    for key <- ~w(vm lan1_device disk), do: fault(key, nil)
+    :ok = TestNetwork.attach()
+    apply_cables(vm, network(vm).cables)
+    :ok = TestNetwork.release()
 
-    # Cable state belongs to the external TAPs and survives VM power cycles.
-    for {port, up} <- TestNetwork.cables() do
-      link(vm, port, up)
-      cable_fault(port, up)
+    for key <- ~w(vm lan1_device disk) do
+      fault(key, nil)
     end
 
-    fault("receive", if(options[:receive_stall], do: "LAN1 receive stalled"))
-    report_topology()
-    # Fresh-disk initialization runs under software emulation, including on
-    # aarch64 hosts. Leave room for formatting and OTP startup under host load.
+    fault(
+      "receive",
+      if options[:receive_stall] do
+        "LAN1 receive stalled"
+      end
+    )
+
+    report_network()
+    qmp!(vm, "cont", %{})
     status = await(vm, "boot", & &1, 180_000)
     assert status.system.target == "x86_64"
     assert status.system.node == @guest
     vm
   end
 
-  # A separate real Ethernet path for the USB access scenario. This tests the
-  # kernel boundary, not EC100's physical USB gadget. Never rename/fault eth2.
-  defp usb_network(options) do
-    if options[:usb] do
-      command!("ip", ~w"tuntap add dev ng-usb mode tap")
-      on_exit(fn -> command!("ip", ~w"link delete ng-usb") end)
-      command!("ip", ~w"addr add 172.31.255.2/30 dev ng-usb")
-      command!("ip", ~w"link set ng-usb up")
+  # Keep all ports reserved while choosing them. QEMU's actual bind remains
+  # authoritative; a race fails startup rather than touching another listener.
+  defp forward_ports! do
+    epmd_port = System.fetch_env!("ERL_EPMD_PORT") |> String.to_integer()
 
-      [
-        "-netdev",
-        "tap,id=usb,ifname=ng-usb,script=no,downscript=no",
-        "-device",
-        "virtio-net-pci,netdev=usb,id=usb-nic"
-      ]
-    else
-      []
+    unless :init.get_argument(:epmd_port) == {:ok, [[Integer.to_charlist(epmd_port)]]} do
+      raise "The controller must start with its session EPMD port. Use mix dev.qemu."
+    end
+
+    sockets =
+      for {name, port} <- [distribution: 9100, epmd: epmd_port, http: 0, ssh: 0, usb: 0] do
+        case :gen_tcp.listen(port, ip: {127, 0, 0, 1}, reuseaddr: true) do
+          {:ok, socket} ->
+            {name, socket}
+
+          {:error, reason} ->
+            raise "Cannot reserve QEMU loopback TCP port #{port}: #{inspect(reason)}"
+        end
+      end
+
+    try do
+      Map.new(sockets, fn {name, socket} ->
+        {:ok, port} = :inet.port(socket)
+        {name, port}
+      end)
+    after
+      for {_, socket} <- sockets do
+        :gen_tcp.close(socket)
+      end
     end
   end
 
   def connect_usb(vm) do
-    isolated!()
+    owned!()
     assert status(vm).system.target == "x86_64"
     {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", ~w"link set eth3 down"])
     {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", ~w"link set eth3 name usb0"])
@@ -178,160 +190,54 @@ defmodule NervesGate.TestQemu do
     fault("receive", nil)
   end
 
-  def start_internet_faults(vm) do
-    command!("nft", ["add", "table", "inet", "ng_faults"])
+  def network(_vm), do: TestNetwork.snapshot().config
+  def topology, do: TestNetwork.connections(TestNetwork.snapshot().config.internet)
+  def network_stats, do: TestNetwork.snapshot().stats
 
-    on_exit(fn ->
-      command!("nft", ~w"delete table inet ng_faults")
-      fault("internet", nil)
-    end)
+  @doc "Apply a partial network map. Omitted cables and uplink settings are preserved."
+  def network(vm, patch) do
+    owned!()
+    on_exit(:network, fn -> network(current() || vm, TestNetwork.defaults()) end)
 
-    command!("nft", ~w"add chain inet ng_faults outage")
+    case TestNetwork.configure(patch) do
+      {:error, reason} ->
+        {:error, reason}
 
-    # Guest forwarding and the router's own DNS requests share the real uplink.
-    for hook <- ~w(forward output) do
-      command!("nft", [
-        "add",
-        "chain",
-        "inet",
-        "ng_faults",
-        hook,
-        "{ type filter hook #{hook} priority -10; policy accept; }"
-      ])
+      {:ok, previous, config} ->
+        if previous.internet != config.internet do
+          unplug(vm)
+        end
 
-      command!("nft", ["add", "rule", "inet", "ng_faults", hook, "jump", "outage"])
+        if previous.cables != config.cables or not TestNetwork.snapshot().ready do
+          apply_cables(vm, config.cables)
+        end
+
+        :ok = TestNetwork.release()
+        report_network()
+        log(vm.dir, "faults.log", {:network, config, network_stats()})
+        :ok
+    end
+  end
+
+  defp unplug(vm) do
+    for port <- [:lan1, :lan2] do
+      link(vm, port, false)
     end
 
-    log(vm.dir, "faults.log", :internet_faults_ready)
-  end
-
-  def delay_internet(vm) do
-    command!("tc", ~w"qdisc replace dev ng-uplink root netem delay 200ms")
-    on_exit(:netem, fn -> clear_delay(vm) end)
-    log(vm.dir, "faults.log", :internet_delayed_200ms)
-    fault("latency", "Uplink delay +200 ms")
-  end
-
-  def clear_delay(vm) do
-    isolated!()
-    {stats, 0} = System.cmd("tc", ~w"-s qdisc show dev ng-uplink")
-    log(vm.dir, "faults.log", stats)
-    command!("tc", ~w"qdisc del dev ng-uplink root")
-    on_exit(:netem, fn -> :ok end)
-    fault("latency", nil)
-  end
-
-  def drop_internet(vm) do
-    command!("nft", [
-      "add",
-      "rule",
-      "inet",
-      "ng_faults",
-      "outage",
-      "oifname",
-      "\"ng-uplink\"",
-      "counter",
-      "drop"
-    ])
-
-    log(vm.dir, "faults.log", :internet_dropped)
-    fault("internet", "Internet outage")
-  end
-
-  def lose_internet_packets(vm) do
-    command!("nft", [
-      "add",
-      "rule",
-      "inet",
-      "ng_faults",
-      "outage",
-      "oifname",
-      "\"ng-uplink\"",
-      "numgen",
-      "inc",
-      "mod",
-      "2",
-      "==",
-      "0",
-      "counter",
-      "drop"
-    ])
-
-    log(vm.dir, "faults.log", :every_other_uplink_packet_dropped)
-    fault("internet", "Uplink packet loss 50%")
-  end
-
-  def dropped_packets(vm) do
-    %{"nftables" => entries} = Jason.decode!(command!("nft", ~w"-j list table inet ng_faults"))
-
-    total =
-      for %{"rule" => %{"expr" => expressions}} <- entries,
-          %{"counter" => %{"packets" => packets}} <- expressions,
-          reduce: 0 do
-        total -> total + packets
-      end
-
-    log(vm.dir, "faults.log", {:dropped_packets, total})
-    total
-  end
-
-  def restore_internet(vm) do
-    isolated!()
-    {rules, 0} = System.cmd("nft", ~w"list table inet ng_faults")
-    log(vm.dir, "faults.log", rules)
-    command!("nft", ~w"flush chain inet ng_faults outage")
-    log(vm.dir, "faults.log", :internet_restored)
-    fault("internet", nil)
-  end
-
-  def topology, do: TestNetwork.snapshot()
-
-  def router_pid do
-    {:router, pid, _, _} =
-      Enum.find(Supervisor.which_children(__MODULE__.Supervisor), &(elem(&1, 0) == :router))
-
-    true = is_pid(pid)
-    pid
-  end
-
-  def restore_connections(vm) do
-    connect_internet(vm, :lan1)
-    for port <- [:lan1, :lan2], do: set_cable(vm, port, true)
-    :ok
-  end
-
-  def connect_internet(vm, port) when port in [:lan1, :lan2, :off] do
-    # Register restoration before the first effect, including partially failed moves.
-    on_exit(:topology, fn -> restore_connections(current() || vm) end)
-    cables = TestNetwork.cables()
-
-    if topology() != TestNetwork.connections(port) do
-      for name <- [:lan1, :lan2], do: link(vm, name, false)
-      TestNetwork.connect(port)
-
-      # A running guest must acknowledge carrier loss before DHCP restarts.
-      # A paused CPU cannot observe intermediate changes.
-      if qmp!(vm, "query-status", %{})["running"] do
-        await(
-          vm,
-          "Cables unplugged for topology change",
-          fn status ->
-            Enum.all?(status.connections.ports, &(!&1.link))
-          end,
-          5_000
-        )
-      end
+    if qmp!(vm, "query-status", %{})["running"] do
+      await(
+        vm,
+        "Cables unplugged for topology change",
+        fn status -> Enum.all?(status.connections.ports, &(!&1.link)) end,
+        5000
+      )
     end
-
-    for {name, up} <- cables, do: link(vm, name, up)
-    report_topology()
   end
 
-  def set_cable(vm, port, up) when port in [:lan1, :lan2] and is_boolean(up) do
-    on_exit(port, fn -> set_cable(current() || vm, port, true) end)
-    TestNetwork.set_cable(port, up)
-    link(vm, port, up)
-    cable_fault(port, up)
+  # Used only after the relay's monitor reports failure. No new traffic can pass
+  # a dead relay, and we also stop the VM rather than leave a partial bench alive.
+  def stop_owned do
+    Supervisor.terminate_child(__MODULE__.Supervisor, :qemu)
   end
 
   def remove_lan1(vm) do
@@ -351,7 +257,7 @@ defmodule NervesGate.TestQemu do
       })
     end
 
-    link(vm, :lan1, TestNetwork.cables().lan1)
+    link(vm, :lan1, network(vm).cables.lan1)
     fault("lan1_device", nil)
   end
 
@@ -374,7 +280,7 @@ defmodule NervesGate.TestQemu do
   end
 
   def restore_disk_writes(vm) do
-    isolated!()
+    owned!()
     log(vm.dir, "faults.log", qmp!(vm, "query-blockstats", %{}))
 
     qmp!(vm, "blockdev-reopen", %{
@@ -419,7 +325,8 @@ defmodule NervesGate.TestQemu do
   end
 
   def power_cycle(vm) do
-    isolated!()
+    owned_vm!(vm)
+    :ok = TestNetwork.detach()
     IO.puts("QEMU fault injection: intentional SIGKILL (power cycle)")
     log(vm.dir, "faults.log", :qemu_power_cut_requested)
     ref = Process.monitor(vm.daemon)
@@ -443,12 +350,12 @@ defmodule NervesGate.TestQemu do
     Node.disconnect(@guest)
     assert status(vm) == nil
     log(vm.dir, "faults.log", :qemu_process_killed)
-    boot_vm(vm.dir, Path.join(vm.dir, "gateway.img"))
+    boot_vm(vm.dir, Path.join(vm.dir, "gateway.img"), vm.forwards, vm.options)
   end
 
   # Read-only kernel/userspace compatibility check, independent of enrollment.
   def check_firewall(vm) do
-    isolated!()
+    owned!()
 
     for tool <- ~w(iptables ip6tables), table <- ~w(filter nat mangle) do
       {output, status} =
@@ -470,8 +377,8 @@ defmodule NervesGate.TestQemu do
 
   # Run on the guest, not the workstation. No mock DNS, proxy or TLS bypass.
   def internet_request(vm, timeout \\ 15_000) do
-    isolated!()
-    ssl = :erpc.call(@guest, :httpc, :ssl_verify_host_options, [true], 2_000)
+    owned!()
+    # httpc verifies TLS by default and loads the guest's CA store locally.
 
     result =
       :erpc.call(
@@ -484,8 +391,7 @@ defmodule NervesGate.TestQemu do
           [
             timeout: timeout,
             connect_timeout: timeout,
-            autoredirect: false,
-            ssl: ssl
+            autoredirect: false
           ],
           [body_format: :binary]
         ],
@@ -504,13 +410,13 @@ defmodule NervesGate.TestQemu do
 
   # Never send a private login URL through call/3, assertions or diagnostics.
   def login_ready? do
-    isolated!()
+    owned!()
 
     match?({:ok, "https://" <> _}, :erpc.call(@guest, NervesGate, :remote_login_url, [], 2_000))
   end
 
   def call(vm, function, args) do
-    isolated!()
+    owned!()
     result = :erpc.call(@guest, NervesGate, function, args, 15_000)
     log(vm.dir, "api.log", {function, result})
 
@@ -522,7 +428,7 @@ defmodule NervesGate.TestQemu do
   end
 
   def status(vm) do
-    isolated!()
+    owned!()
     status = :erpc.call(@guest, NervesGate, :status, [], 2_000)
     log(vm.dir, "snapshots.log", status)
     status
@@ -570,7 +476,8 @@ defmodule NervesGate.TestQemu do
   def adopt(vm), do: Process.put(:qemu_vm, vm)
 
   def fresh(vm, options \\ []) do
-    isolated!()
+    owned_vm!(vm)
+    :ok = TestNetwork.detach()
     stop_supervised(:qemu)
     # The daemon exits before its OS child finishes releasing the image and PID file.
     poll(vm.dir, "QEMU stopped", deadline(5_000), fn ->
@@ -582,8 +489,8 @@ defmodule NervesGate.TestQemu do
     image = Path.join(vm.dir, "gateway.img")
     File.rm!(image)
     create_image(image)
-    TestNetwork.reset()
-    boot_vm(vm.dir, image, options)
+    {:ok, _, _} = TestNetwork.configure(TestNetwork.defaults())
+    boot_vm(vm.dir, image, vm.forwards, options)
   end
 
   def cleanup do
@@ -608,7 +515,9 @@ defmodule NervesGate.TestQemu do
     if errors != [], do: raise("Fault cleanup failed: #{inspect(errors)}; restart mix dev.qemu")
   end
 
-  defp on_exit(callback), do: on_exit(make_ref(), callback)
+  defp on_exit(callback) do
+    on_exit(make_ref(), callback)
+  end
 
   defp on_exit(id, callback) do
     callbacks = Process.get(:qemu_cleanup, [])
@@ -633,13 +542,26 @@ defmodule NervesGate.TestQemu do
     ])
   end
 
-  defp isolated! do
-    if File.read_link!("/proc/self/ns/net") == System.fetch_env!("NERVES_GATE_HOST_NETNS"),
-      do: raise("Refusing to fault networking in the workstation namespace")
+  defp owned! do
+    unless Process.whereis(__MODULE__.Supervisor) && Process.whereis(TestNetwork),
+      do: raise("No owned QEMU session")
+  end
+
+  defp owned_vm!(vm) do
+    owned!()
+
+    assert Enum.any?(Supervisor.which_children(__MODULE__.Supervisor), fn
+             {:qemu, pid, _, _} -> pid == vm.daemon
+             _ -> false
+           end)
+
+    wrapper = MuonTrap.Daemon.os_pid(vm.daemon)
+    status = File.read!("/proc/#{vm.pid}/status")
+    assert Regex.match?(~r/^PPid:\s+#{wrapper}$/m, status), "QEMU process ownership changed"
   end
 
   defp command!(executable, args) do
-    isolated!()
+    owned!()
     {output, status} = System.cmd(executable, args, stderr_to_stdout: true)
     assert status == 0, "#{executable} failed: #{output}"
     output
@@ -651,7 +573,9 @@ defmodule NervesGate.TestQemu do
     kind, reason -> log(vm.dir, "guest.log", {kind, reason})
   end
 
-  defp deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
+  defp deadline(timeout) do
+    System.monotonic_time(:millisecond) + timeout
+  end
 
   defp poll(dir, phase, deadline, check) do
     value = check.()
@@ -678,30 +602,59 @@ defmodule NervesGate.TestQemu do
     )
   end
 
-  defp link(vm, port, up), do: qmp!(vm, "set_link", %{name: "#{port}-nic", up: up})
-
-  defp cable_fault(port, up) do
-    fault(to_string(port), if(!up, do: "#{String.upcase(to_string(port))} cable disconnected"))
+  defp apply_cables(vm, cables) do
+    for {port, up} <- cables do
+      link(vm, port, up)
+    end
   end
 
-  defp report_topology do
-    topology = topology()
-    if report = Process.get(:qemu_topology), do: report.(topology)
-    topology
+  defp link(vm, port, up) do
+    qmp!(vm, "set_link", %{name: "#{port}-nic", up: up})
+  end
+
+  defp cable_fault(port, up) do
+    fault(
+      to_string(port),
+      if !up do
+        "#{String.upcase(to_string(port))} cable disconnected"
+      end
+    )
+  end
+
+  defp report_network do
+    config = TestNetwork.snapshot().config
+    for {port, up} <- config.cables, do: cable_fault(port, up)
+
+    fault(
+      "latency",
+      if(config.uplink.delay_ms > 0, do: "Uplink delay +#{config.uplink.delay_ms} ms")
+    )
+
+    fault(
+      "internet",
+      %{none: nil, alternate: "Uplink packet loss 50%", all: "Internet outage"}[
+        config.uplink.loss
+      ]
+    )
+
+    if report = Process.get(:qemu_topology), do: report.(topology())
   end
 
   defp fault(key, label) do
-    if report = Process.get(:qemu_fault), do: report.(key, label)
+    if report = Process.get(:qemu_fault) do
+      report.(key, label)
+    end
+
     :ok
   end
 
   defp qmp!(vm, command, arguments) do
-    isolated!()
+    owned_vm!(vm)
     id = System.unique_integer([:positive])
     request = Jason.encode!(%{execute: command, arguments: arguments, id: id})
     log(vm.dir, "qmp.log", {:send, request})
     :ok = :gen_tcp.send(vm.socket, request <> "\r\n")
-    reply!(vm, id, deadline(3_000))
+    reply!(vm, id, deadline(3000))
   end
 
   defp reply!(vm, id, deadline) do

@@ -4,7 +4,7 @@ defmodule NervesGate.Scenarios.SystemArtifact do
   alias Mix.Tasks.Nerves.Artifact.Release, as: Release
   alias NervesGate.TestQemu, as: Qemu
 
-  @guest :"nerves_gate@192.168.77.2"
+  @guest NervesGate.TestQemu.guest()
   @system Path.expand("../../systems/nerves_system_ec100_qemu", __DIR__)
 
   def name, do: "QEMU runs the versioned system and artifact publication stays safe"

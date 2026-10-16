@@ -32,13 +32,13 @@ defmodule NervesGate.ScenarioHelpers do
 
   def cable_cycle(vm) do
     try do
-      NervesGate.TestQemu.set_cable(vm, :lan1, false)
+      Qemu.network(vm, %{cables: %{lan1: false}})
 
       Qemu.await(vm, "cable disconnected", fn status ->
         Enum.any?(status.connections.ports, &match?(%{name: "eth0", link: false}, &1))
       end)
     after
-      NervesGate.TestQemu.set_cable(vm, :lan1, true)
+      Qemu.network(vm, %{cables: %{lan1: true}})
     end
 
     Qemu.await(vm, "link and address recovered", &addressed?/1)

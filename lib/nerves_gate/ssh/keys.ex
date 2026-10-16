@@ -60,14 +60,32 @@ defmodule NervesGate.SSH.Keys do
 
   def save(keys) do
     data = Enum.map_join(keys, &(&1.line <> "\n"))
+    directory = Path.dirname(@path)
 
-    with :ok <- File.mkdir_p(Path.dirname(@path)),
-         :ok <- File.write(@path <> ".new", data, [:sync]),
+    # Flush even an empty key file, then the rename and initial directory entry.
+    # O_SYNC on writes alone does not make revocation durable across a hard reset.
+    with :ok <- File.mkdir_p(directory),
+         :ok <- File.write(@path <> ".new", data),
          :ok <- File.chmod(@path <> ".new", 0o600),
-         :ok <- File.rename(@path <> ".new", @path) do
+         {:ok, :ok} <- File.open(@path <> ".new", [:read, :raw], &:file.sync/1),
+         :ok <- File.rename(@path <> ".new", @path),
+         :ok <- sync_directory(directory),
+         :ok <- sync_directory(Path.dirname(directory)) do
       :ok
     else
       _ -> {:error, :ssh_keys_unavailable}
+    end
+  end
+
+  defp sync_directory(directory) do
+    # Directory descriptors are supported by OTP's primitive file driver, but
+    # are not part of the File.open/:file.open contract.
+    with {:ok, file} <- :prim_file.open(String.to_charlist(directory), [:read, :directory]) do
+      try do
+        :prim_file.sync(file)
+      after
+        :prim_file.close(file)
+      end
     end
   end
 

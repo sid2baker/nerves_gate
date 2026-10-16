@@ -15,15 +15,10 @@ defmodule NervesGate.SSH do
   def unavailable,
     do: %{available: false, keys: [], error: Error.from(:ssh_keys_unavailable)}
 
-  # NervesSSH supplies its persisted host keys to custom callbacks. Only user
-  # authorization is ours; the console, SFTP and firmware subsystem stay unchanged.
+  # NervesSSH creates the host-key files; let OTP load their supported format.
+  # Only user authorization is ours, not host-key generation or storage.
   @impl :ssh_server_key_api
-  def host_key(algorithm, options) do
-    case options[:key_cb_private][:host_keys] do
-      %{^algorithm => key} -> {:ok, key}
-      _ -> {:error, :enoent}
-    end
-  end
+  defdelegate host_key(algorithm, options), to: :ssh_file
 
   @impl :ssh_server_key_api
   def is_auth_key(key, _user, _options) do

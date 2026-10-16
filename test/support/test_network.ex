@@ -1,179 +1,380 @@
 defmodule NervesGate.TestNetwork do
-  @moduledoc "Real networks for the owned bench. The session namespace owns their lifetime."
+  @moduledoc """
+  The owned bench's real Ethernet switch. QEMU supplies the network protocols.
 
-  @ports %{lan1: "ng-lan1", lan2: "ng-lan2"}
-  @networks %{internet: "ng-internet", equipment: "ng-equipment"}
+  Configuration is a partial map; omitted values stay unchanged:
 
+      %{internet: :lan2, cables: %{lan1: false}, uplink: %{delay_ms: 200, loss: :alternate}}
+
+  Loss is :none, :alternate or :all. Management is not configurable.
+  """
+  use GenServer, restart: :temporary
+  alias __MODULE__.Ethernet
+
+  @ports [:lan1, :lan2, :internet, :management, :control]
+  @max_bytes 4 * 1024 * 1024
+  @max_frames 4096
+  @defaults %{
+    internet: :lan1,
+    cables: %{lan1: true, lan2: true},
+    uplink: %{delay_ms: 0, loss: :none}
+  }
+
+  def defaults, do: @defaults
   def baseline, do: connections(:lan1)
 
-  def connections(port) when port in [:lan1, :lan2, :off] do
-    Map.new(@ports, fn {name, _} ->
-      {name, if(name == port, do: :internet, else: :equipment)}
-    end)
+  def connections(internet),
+    do: Map.new([:lan1, :lan2], &{&1, if(&1 == internet, do: :internet, else: :equipment)})
+
+  def start_link(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
+  def snapshot, do: GenServer.call(__MODULE__, :snapshot)
+  def configure(patch), do: GenServer.call(__MODULE__, {:configure, patch})
+  def attach, do: GenServer.call(__MODULE__, :attach, 15_000)
+  def detach, do: GenServer.call(__MODULE__, :detach)
+  def release, do: GenServer.call(__MODULE__, :release)
+
+  # A fixed graph: only frame forwarding changes, never a realized NIC's netdev.
+  def arguments(dir, forwards, usb?) do
+    streams =
+      Enum.flat_map(@ports, fn port ->
+        [
+          "-netdev",
+          "stream,id=#{port},server=on,addr.type=unix,addr.path=#{socket_path(dir, port)}"
+        ]
+      end)
+
+    nics =
+      Enum.flat_map([lan1: "56", lan2: "57", management: "58"], fn {port, suffix} ->
+        ["-device", "virtio-net-pci,netdev=#{port},id=#{port}-nic,mac=52:54:00:12:34:#{suffix}"]
+      end)
+
+    internet = router(0, :internet, "user,id=wan,net=10.0.2.0/24,ipv6=off", "wan")
+
+    management =
+      "user,id=mgmt,net=192.168.77.0/24,host=192.168.77.1,ipv6=off,restrict=on" <>
+        forward(forwards.epmd, "192.168.77.2", 4369) <>
+        forward(forwards.distribution, "192.168.77.2", 9100) <>
+        forward(forwards.http, "192.168.77.2", 4000) <>
+        forward(forwards.ssh, "192.168.77.2", 22)
+
+    usb =
+      if usb? do
+        [
+          "-netdev",
+          "user,id=usb,net=172.31.255.0/24,ipv6=off,restrict=on" <>
+            forward(forwards.usb, "172.31.255.1", 22),
+          "-device",
+          "virtio-net-pci,netdev=usb,id=usb-nic,mac=52:54:00:12:34:59"
+        ]
+      else
+        []
+      end
+
+    streams ++ nics ++ internet ++ router(1, :control, management, "mgmt") ++ usb
   end
 
-  def setup(dir) do
-    isolated!()
-
-    for {network, bridge} <- @networks do
-      mac = if network == :internet, do: "02:00:00:00:02:02", else: "02:00:00:00:03:02"
-      command!("ip", ["link", "add", bridge, "address", mac, "type", "bridge"])
-      command!("ip", ["link", "set", bridge, "up"])
-    end
-
-    command!("ip", ~w"addr add 10.0.2.2/24 dev ng-internet")
-    command!("ip", ~w"addr add 10.0.3.2/24 dev ng-equipment")
-
-    for tap <- Map.values(@ports) do
-      command!("ip", ["tuntap", "add", "dev", tap, "mode", "tap"])
-      command!("ip", ["link", "set", tap, "up"])
-    end
-
-    # Default-deny forwarding also covers IPv6, management and equipment. Never
-    # accept established traffic generically: a moved cable must lose its old path.
-    rules = Path.join(dir, "topology.nft")
-
-    File.write!(rules, """
-    table inet ng_topology {
-      chain input {
-        type filter hook input priority 0; policy accept;
-        iifname "lo" accept
-        iifname "ng-internet" udp dport { 53, 67 } accept
-        iifname "ng-internet" tcp dport 53 accept
-        iifname { "ng-internet", "ng-equipment" } ip protocol icmp accept
-        iifname { "ng-internet", "ng-equipment" } drop
-        iifname != "ng-internet" ip daddr 10.0.2.2 drop
-      }
-      chain forward {
-        type filter hook forward priority 0; policy drop;
-        iifname "ng-internet" oifname "ng-internet" accept
-        iifname "ng-equipment" oifname "ng-equipment" accept
-        iifname "ng-internet" oifname "ng-uplink" ip saddr 10.0.2.0/24 accept
-        iifname "ng-uplink" oifname "ng-internet" ip daddr 10.0.2.0/24 ct state established,related accept
-        counter drop
-      }
-      chain nat {
-        type nat hook postrouting priority srcnat; policy accept;
-        oifname "ng-uplink" ip saddr 10.0.2.0/24 masquerade
-      }
-    }
-    """)
-
-    command!("nft", ["-f", rules])
-    File.write!("/proc/sys/net/ipv4/ip_forward", "1\n")
-    connect(:lan1)
-  end
-
-  def reset do
-    connect(:lan1)
-    for port <- Map.keys(@ports), do: set_cable(port, true)
-  end
-
-  def cables do
-    Map.new(@ports, fn {port, tap} -> {port, "UP" in interface(tap)["flags"]} end)
-  end
-
-  def set_cable(port, up) when port in [:lan1, :lan2] and is_boolean(up) do
-    command!("ip", ["link", "set", Map.fetch!(@ports, port), if(up, do: "up", else: "down")])
-    ^up = Map.fetch!(cables(), port)
-    :ok
-  end
-
-  def router_args do
+  defp router(id, stream, user, backend) do
     [
-      # This rootless test namespace disallows setgroups. Debug foreground mode
-      # skips dnsmasq's privilege switching; it does not grant host privileges.
-      "--no-daemon",
-      "--conf-file=/dev/null",
-      "--bind-interfaces",
-      "--interface=ng-internet",
-      "--except-interface=lo",
-      "--no-resolv",
-      "--no-hosts",
-      "--host-record=router.test,10.0.2.2",
-      "--server=192.0.2.3",
-      "--dhcp-authoritative",
-      "--dhcp-range=10.0.2.15,10.0.2.200,255.255.255.0,1h",
-      "--dhcp-option=option:router,10.0.2.2",
-      "--dhcp-option=option:dns-server,10.0.2.2",
-      "--leasefile-ro",
-      "--log-facility=-"
+      "-netdev",
+      user,
+      "-netdev",
+      "hubport,id=hub#{id}-socket,hubid=#{id},netdev=#{stream}",
+      "-netdev",
+      "hubport,id=hub#{id}-router,hubid=#{id},netdev=#{backend}"
     ]
   end
 
-  def router_ready? do
-    isolated!()
+  defp forward(port, address, target), do: ",hostfwd=tcp:127.0.0.1:#{port}-#{address}:#{target}"
+  defp socket_path(dir, port), do: Path.join(dir, "#{port}.sock")
 
-    :inet_res.lookup(
-      ~c"router.test",
-      :in,
-      :a,
-      [nameservers: [{{10, 0, 2, 2}, 53}], retry: 1, timeout: 250],
-      500
-    ) == [{10, 0, 2, 2}]
+  @impl true
+  def init(dir) do
+    {:ok,
+     %{
+       dir: dir,
+       config: @defaults,
+       sockets: %{},
+       held: true,
+       queue: :queue.new(),
+       bytes: 0,
+       timer: nil,
+       sequence: 0,
+       stats: %{
+         forwarded: 0,
+         denied: 0,
+         rejected: %{lan1: 0, lan2: 0, management: 0},
+         dropped: 0,
+         candidates: 0,
+         overflow: 0,
+         discarded: 0,
+         delayed: 0,
+         min_delay_ms: nil
+       }
+     }}
   end
 
-  # Only cable attachment changes. Guest NICs, MAC addresses and settings stay put.
-  def connect(port) when port in [:lan1, :lan2, :off] do
-    isolated!()
+  # Raw management frames can contain distribution credentials and private UI
+  # data. Neither OTP crash reports nor sys.get_status may expose packet buffers.
+  @impl true
+  def format_status(%{state: state} = status) do
+    status
+    |> Map.replace(:state, %{
+      config: state.config,
+      connected: Map.keys(state.sockets),
+      stats: state.stats
+    })
+    |> Map.replace(:message, :redacted)
+    |> Map.replace(:reason, :network_failure)
+    |> Map.replace(:log, [])
+  end
 
-    # Detach both before attaching either: never briefly join the two networks.
-    for tap <- Map.values(@ports), do: command!("ip", ["link", "set", tap, "nomaster"])
+  @impl true
+  def handle_call(:snapshot, _, state) do
+    view = %{
+      config: state.config,
+      connected: Map.keys(state.sockets) |> Enum.sort(),
+      ready: map_size(state.sockets) == length(@ports) and not state.held,
+      stats: state.stats
+    }
 
-    for {name, tap} <- @ports do
-      network = if name == port, do: :internet, else: :equipment
-      command!("ip", ["link", "set", tap, "master", Map.fetch!(@networks, network)])
+    {:reply, view, state}
+  end
+
+  def handle_call({:configure, patch}, _, state) do
+    case merge(state.config, patch) do
+      {:ok, config} ->
+        changed = config.internet != state.config.internet or config.cables != state.config.cables
+        state = if config != state.config, do: discard(state), else: state
+
+        stats =
+          if config.uplink.delay_ms != state.config.uplink.delay_ms,
+            do: %{state.stats | delayed: 0, min_delay_ms: nil},
+            else: state.stats
+
+        sequence = if config.uplink.loss != state.config.uplink.loss, do: 0, else: state.sequence
+
+        {:reply, {:ok, state.config, config},
+         %{state | config: config, held: state.held or changed, stats: stats, sequence: sequence}}
+
+      :error ->
+        {:reply, {:error, :invalid_network}, state}
     end
-
-    expected = connections(port)
-    ^expected = snapshot()
-    expected
   end
 
-  def snapshot do
-    isolated!()
+  def handle_call(:attach, _, %{sockets: sockets} = state) when map_size(sockets) == 0 do
+    sockets =
+      Map.new(@ports, fn port ->
+        {:ok, socket} =
+          :gen_tcp.connect(
+            {:local, socket_path(state.dir, port)},
+            0,
+            [
+              :binary,
+              packet: 4,
+              packet_size: 65_536,
+              active: :once,
+              send_timeout: 1000,
+              send_timeout_close: true,
+              buffer: 65_536
+            ],
+            2000
+          )
 
-    Map.new(@ports, fn {port, tap} -> {port, network(tap)} end)
+        {port, socket}
+      end)
+
+    {:reply, :ok, %{state | sockets: sockets, held: true}}
   end
 
-  defp network(tap) do
-    # Netlink observes this network namespace; an inherited /sys mount may not.
-    case interface(tap)["master"] do
+  def handle_call(:detach, _, state) do
+    for socket <- Map.values(state.sockets), do: :gen_tcp.close(socket)
+    {:reply, :ok, %{discard(state) | sockets: %{}, held: true}}
+  end
+
+  def handle_call(:release, _, state) when map_size(state.sockets) == length(@ports),
+    do: {:reply, :ok, %{state | held: false}}
+
+  def handle_call(:release, _, state), do: {:reply, {:error, :disconnected}, state}
+
+  @impl true
+  def handle_info({:tcp, socket, frame}, state) do
+    case Enum.find(state.sockets, fn {_, peer} -> peer == socket end) do
+      {port, _} ->
+        state = route(port, frame, state)
+        :ok = :inet.setopts(socket, active: :once)
+        {:noreply, state}
+
       nil ->
-        :disconnected
-
-      bridge ->
-        {network, ^bridge} = Enum.find(@networks, fn {_, name} -> name == bridge end)
-        network
+        {:noreply, state}
     end
   end
 
-  defp interface(tap) do
-    [link] = command!("ip", ["-j", "link", "show", "dev", tap]) |> Jason.decode!()
-    link
+  def handle_info({:tcp_closed, socket}, state) do
+    disconnected(socket, state)
   end
 
-  def forwarding_drops do
-    rules = command!("nft", ~w"-j list chain inet ng_topology forward") |> Jason.decode!()
+  def handle_info({:tcp_error, socket, _}, state), do: disconnected(socket, state)
 
-    for %{"rule" => %{"expr" => expressions}} <- rules["nftables"],
-        %{"counter" => %{"packets" => packets}} <- expressions,
-        reduce: 0 do
-      count -> count + packets
+  def handle_info({:flush, token}, %{timer: {_, token}} = state),
+    do: {:noreply, flush(%{state | timer: nil})}
+
+  def handle_info(_, state), do: {:noreply, state}
+
+  defp disconnected(socket, state) do
+    if socket in Map.values(state.sockets),
+      do: {:stop, :network_disconnected, state},
+      else: {:noreply, state}
+  end
+
+  # Management never passes through the LAN fault queue.
+  defp route(:control, frame, state), do: deliver(state, :management, frame)
+
+  defp route(:management, frame, state),
+    do: admit(state, :management, :control, frame, :management)
+
+  defp route(_, _, %{held: true} = state), do: count(state, :discarded)
+
+  defp route(:internet, frame, state) do
+    port = state.config.internet
+    if state.config.cables[port], do: deliver(state, port, frame), else: count(state, :discarded)
+  end
+
+  defp route(port, frame, state) when port in [:lan1, :lan2] do
+    cond do
+      not state.config.cables[port] -> count(state, :discarded)
+      state.config.internet == port -> admit(state, port, :internet, frame, :internet)
+      true -> equipment(state, port, frame)
     end
   end
 
-  defp command!(executable, args) do
-    isolated!()
+  defp equipment(state, port, frame) do
+    state =
+      case frame do
+        <<_::96, 2048::16, _::binary>> -> reject(state, port)
+        _ -> state
+      end
 
-    case System.cmd(executable, args, stderr_to_stdout: true) do
-      {output, 0} -> output
-      {output, status} -> raise "Bench #{executable} failed (#{status}): #{output}"
+    Enum.reduce([:lan1, :lan2] -- [port, state.config.internet], state, fn peer, acc ->
+      if state.config.cables[peer] do
+        deliver(acc, peer, frame)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp admit(state, port, target, frame, network) do
+    case Ethernet.classify(frame, network) do
+      :local -> deliver(state, target, frame)
+      :uplink -> impair(state, frame)
+      :deny -> reject(state, port)
     end
   end
 
-  defp isolated! do
-    if File.read_link!("/proc/self/ns/net") == System.fetch_env!("NERVES_GATE_HOST_NETNS"),
-      do: raise("Refusing to configure bench networks in the workstation namespace")
+  defp reject(state, port) do
+    state |> count(:denied) |> update_in([:stats, :rejected, port], &(&1 + 1))
   end
+
+  defp impair(state, frame) do
+    %{loss: loss, delay_ms: delay} = state.config.uplink
+    drop? = loss == :all or (loss == :alternate and rem(state.sequence, 2) == 0)
+    state = %{count(state, :candidates) | sequence: state.sequence + 1}
+
+    cond do
+      drop? ->
+        count(state, :dropped)
+
+      delay == 0 ->
+        deliver(state, :internet, frame)
+
+      state.bytes + byte_size(frame) > @max_bytes or :queue.len(state.queue) >= @max_frames ->
+        count(state, :overflow)
+
+      true ->
+        now = System.monotonic_time(:millisecond)
+        queue = :queue.in({now + delay, now, frame}, state.queue)
+        schedule(%{state | queue: queue, bytes: state.bytes + byte_size(frame)})
+    end
+  end
+
+  defp flush(state) do
+    now = System.monotonic_time(:millisecond)
+
+    case :queue.out(state.queue) do
+      {{:value, {due, entered, frame}}, rest} when due <= now ->
+        elapsed = now - entered
+        minimum = min(state.stats.min_delay_ms || elapsed, elapsed)
+        state = deliver(state, :internet, frame)
+
+        state = %{
+          state
+          | queue: rest,
+            bytes: state.bytes - byte_size(frame),
+            stats: %{state.stats | delayed: state.stats.delayed + 1, min_delay_ms: minimum}
+        }
+
+        flush(state)
+
+      _ ->
+        schedule(state)
+    end
+  end
+
+  defp schedule(%{timer: nil} = state) do
+    case :queue.peek(state.queue) do
+      {:value, {due, _, _}} ->
+        token = make_ref()
+
+        timer =
+          Process.send_after(
+            self(),
+            {:flush, token},
+            max(due - System.monotonic_time(:millisecond), 0)
+          )
+
+        %{state | timer: {timer, token}}
+
+      :empty ->
+        state
+    end
+  end
+
+  defp schedule(state), do: state
+
+  defp discard(state) do
+    if state.timer, do: Process.cancel_timer(elem(state.timer, 0))
+    stats = %{state.stats | discarded: state.stats.discarded + :queue.len(state.queue)}
+    %{state | queue: :queue.new(), bytes: 0, timer: nil, stats: stats}
+  end
+
+  defp deliver(state, port, frame) do
+    :ok = :gen_tcp.send(Map.fetch!(state.sockets, port), frame)
+    count(state, :forwarded)
+  end
+
+  defp count(state, key), do: update_in(state, [:stats, key], &(&1 + 1))
+
+  defp merge(config, patch) when is_map(patch) do
+    with true <- Enum.all?(Map.keys(patch), &(&1 in [:internet, :cables, :uplink])),
+         cables when is_map(cables) <- Map.get(patch, :cables, %{}),
+         uplink when is_map(uplink) <- Map.get(patch, :uplink, %{}),
+         true <-
+           Enum.all?(cables, fn {key, value} -> key in [:lan1, :lan2] and is_boolean(value) end),
+         true <- Enum.all?(Map.keys(uplink), &(&1 in [:delay_ms, :loss])) do
+      next = %{
+        internet: Map.get(patch, :internet, config.internet),
+        cables: Map.merge(config.cables, cables),
+        uplink: Map.merge(config.uplink, uplink)
+      }
+
+      if next.internet in [:lan1, :lan2, :off] and next.uplink.loss in [:none, :alternate, :all] and
+           is_integer(next.uplink.delay_ms) and next.uplink.delay_ms in 0..5000,
+         do: {:ok, next},
+         else: :error
+    else
+      _ -> :error
+    end
+  end
+
+  defp merge(_, _), do: :error
 end

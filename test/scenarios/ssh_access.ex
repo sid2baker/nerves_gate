@@ -4,9 +4,7 @@ defmodule NervesGate.Scenarios.SshAccess do
   alias NervesGate.TestQemu, as: Qemu
 
   @behaviour :ssh_client_key_api
-  @guest :"nerves_gate@192.168.77.2"
-  @management {192, 168, 77, 2}
-  @usb {172, 31, 255, 1}
+  @guest NervesGate.TestQemu.guest()
 
   def name,
     do: "USB-only SSH password; validated keys persist, revoke and fail closed on write errors"
@@ -15,12 +13,13 @@ defmodule NervesGate.Scenarios.SshAccess do
 
   def run(vm) do
     assert Qemu.status(vm).system.target == "x86_64"
+    await_ssh()
     key = :public_key.generate_key({:namedCurve, :ed25519})
     decoded = :ssh_file.extract_public_key(key)
     line = :ssh_file.encode([{decoded, [comment: ~c"QEMU SSH scenario"]}], :auth_keys)
     fingerprint = to_string(:ssh.hostkey_fingerprint(:sha256, decoded))
 
-    assert {:error, _} = password(@management, ~c"root", ~c"nerves_gate")
+    assert {:error, _} = password(Qemu.current().forwards.ssh, ~c"root", ~c"nerves_gate")
     assert {:error, _} = public_key(key)
     reject_invalid(vm, line)
     assert :ok = Qemu.call(vm, :ssh_add_key, [line])
@@ -29,21 +28,25 @@ defmodule NervesGate.Scenarios.SshAccess do
     assert_key_works(key)
 
     Qemu.reboot(vm)
+    await_ssh()
     assert_key_works(key)
     assert :ok = Qemu.call(vm, :ssh_remove_key, [fingerprint])
     assert {:error, _} = public_key(key)
+    path = :erpc.call(@guest, NervesGate.SSH.Keys, :path, [])
+    assert {:ok, %{size: 0}} = :erpc.call(@guest, File, :stat, [path])
     Qemu.reboot(vm)
+    await_ssh()
     refute Enum.any?(Qemu.status(vm).ssh.keys, &(&1.fingerprint == fingerprint))
     assert {:error, _} = public_key(key)
     reject_failed_save(vm, line, key)
 
     Qemu.connect_usb(vm)
-    assert {:ok, connection} = password(@usb, ~c"root", ~c"nerves_gate")
+    assert {:ok, connection} = password(vm.forwards.usb, ~c"root", ~c"nerves_gate")
     :ok = :ssh.close(connection)
-    assert {:error, _} = password(@usb, ~c"root", ~c"wrong")
-    assert {:error, _} = password(@usb, ~c"other", ~c"nerves_gate")
-    assert {:error, _} = password(@management, ~c"root", ~c"nerves_gate")
-    assert {:error, _} = password(@usb, ~c"root", ~c"")
+    assert {:error, _} = password(vm.forwards.usb, ~c"root", ~c"wrong")
+    assert {:error, _} = password(vm.forwards.usb, ~c"other", ~c"nerves_gate")
+    assert {:error, _} = password(vm.forwards.ssh, ~c"root", ~c"nerves_gate")
+    assert {:error, _} = password(vm.forwards.usb, ~c"root", ~c"")
     reject_conflicting_paths()
 
     # Removing the actual kernel path immediately revokes password eligibility.
@@ -79,7 +82,7 @@ defmodule NervesGate.Scenarios.SshAccess do
       end
     end
 
-    assert {:ok, connection} = password(@usb, ~c"root", ~c"nerves_gate")
+    assert {:ok, connection} = password(Qemu.current().forwards.usb, ~c"root", ~c"nerves_gate")
     :ok = :ssh.close(connection)
   end
 
@@ -117,27 +120,33 @@ defmodule NervesGate.Scenarios.SshAccess do
     end
   end
 
+  defp await_ssh do
+    # This call waits behind NervesSSH's host-key generation and daemon startup.
+    assert {:ok, _info} =
+             :erpc.call(@guest, GenServer, :call, [NervesSSH, :info, 60_000], 65_000)
+  end
+
   defp assert_key_works(key) do
     assert {:ok, connection} = public_key(key)
     :ok = :ssh.close(connection)
   end
 
-  defp password(ip, user, password),
-    do: connect(ip, user: user, password: password, auth_methods: ~c"password")
+  defp password(port, user, password),
+    do: connect(port, user: user, password: password, auth_methods: ~c"password")
 
   defp public_key(key),
     do:
-      connect(@management,
+      connect(Qemu.current().forwards.ssh,
         user: ~c"root",
         key_cb: {__MODULE__, key: key},
         auth_methods: ~c"publickey",
         preferred_algorithms: [public_key: [:"ssh-ed25519"]]
       )
 
-  defp connect(ip, options) do
+  defp connect(port, options) do
     :ssh.connect(
-      ip,
-      22,
+      {127, 0, 0, 1},
+      port,
       options ++
         [
           silently_accept_hosts: true,

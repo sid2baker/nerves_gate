@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Setup.Qemu do
   @compile {:no_warn_undefined, Req}
   @version "1.104.1"
   @archive_sha256 "108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528"
-  @tools ~w(git make cc pkg-config fwup qemu-system-x86_64 pasta dnsmasq unshare mount flock ip nft tc socat inotifywait)
+  @tools ~w(git make cc pkg-config fwup qemu-system-x86_64 flock inotifywait)
 
   @impl true
   def run([]) do
@@ -50,18 +50,22 @@ defmodule Mix.Tasks.Setup.Qemu do
       )
     end
 
-    unless File.exists?("/dev/net/tun"), do: Mix.raise("QEMU requires /dev/net/tun on the host.")
+    version = check!("qemu-system-x86_64", ["--version"], "Cannot inspect QEMU version.")
+    [_, number] = Regex.run(~r/version (\d+\.\d+\.\d+)/, version)
+    unless Version.match?(number, ">= 8.2.0"), do: Mix.raise("QEMU 8.2 or newer is required.")
 
-    check!(
-      "unshare",
-      ~w(--user --map-root-user --net --mount --propagation private ip link set lo up),
-      "Unprivileged user/network/mount namespaces must be enabled. No host networking was changed."
-    )
+    backends =
+      check!("qemu-system-x86_64", ["-netdev", "help"], "Cannot inspect QEMU networking.")
+
+    for backend <- ["user", "stream"] do
+      unless backend in String.split(backends),
+        do: Mix.raise("QEMU needs the #{backend} network backend.")
+    end
   end
 
   defp check!(command, args, message) do
     case System.cmd(command, args, stderr_to_stdout: true) do
-      {_, 0} -> :ok
+      {output, 0} -> output
       {output, _} -> Mix.raise("#{message}\n#{output}")
     end
   end

@@ -293,7 +293,8 @@ report an online IPv4 address. The node is named `nerves_gate@<Tailscale-IPv4>`,
 example `nerves_gate@100.88.166.70`. Neither the tailnet nor node name needs to be
 known at build time; MagicDNS is not required. Before enrollment/connection, distribution
 waits without blocking startup, HTTP or recovery. Development launchers instead
-start distribution explicitly; QEMU keeps it inside the isolated test namespace.
+start distribution explicitly; QEMU uses its fixed management network and
+loopback-only EPMD/distribution forwards (see [the bench](development.md#isolation)).
 
 The existing Remote status updates call `Node.start/2` once the address is known.
 OTP owns the distribution processes and EPMD; there is no extra watcher, manager or

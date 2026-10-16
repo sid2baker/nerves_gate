@@ -129,22 +129,33 @@ readiness or a trigger for automatic remedies. See [LED policy](indicators.md#le
 ## QEMU bench
 
 The bench separates fixed virtual hardware from its external connections.
-`TestQemu` owns the VM and QMP operations; `TestNetwork` creates the session's
-TAPs, bridges, real DHCP/DNS router and default-deny forwarding rules. Moving a
-cable changes bridge membership, never firmware settings or NIC identities.
-TAP administrative state records cable faults and is mirrored to QEMU carrier;
-external connections survive VM process replacement. Netlink provides readback,
-not an independent simulated status store.
-The isolated namespace owns network-resource lifetime; the existing supervisor
-owns QEMU and the router process. Router readiness is checked before QEMU starts,
-and the controller monitors its lifetime: an unexpected exit blocks the bench.
-Leases are in-memory; no workstation files or security policy are modified.
+`TestQemu` owns the supervised VM and QMP operations. One `TestNetwork` GenServer
+forwards real Ethernet frames between private Unix sockets; QEMU/libslirp supplies
+DHCP, DNS and outbound connectivity. A fixed management path uses a restricted
+backend and explicit loopback forwards for ordinary Erlang distribution, HTTP
+and SSH. The controller initiates distribution and has no inbound listener.
+No workstation networking, namespaces, resolver files or firewall rules are configured.
+
+The network API is a partial map of `internet`, `cables` and `uplink` settings.
+That same owner validates updates, switches actual forwarding and bounds packet
+queues. QMP mirrors cable state into carrier; topology changes never change NIC
+identities or firmware settings. Published settings come from the forwarding
+owner, not a second simulated status store. Guest health is still device-owned.
+An IPv4 admission gate prevents virtual-host loopback mapping and cross-segment
+escapes; it implements no network protocols. Equipment has no IP server.
+
+QEMU starts paused until streams and saved carrier states are installed. Wiring
+and fault selections survive VM replacement; queued traffic and libslirp live
+state do not. The runner monitors the relay: loss blocks admission and stops the
+owned VM, with no bypass or silent baseline restart. Raw packet data is excluded
+from status/crash reports and notifications. Loopback services, like the local UI,
+trust workstation users; this is not an OS sandbox.
 
 `QemuTests` remains the single admission/controller process. Manual controls and
 ordinary Elixir scenarios use the same drivers, bounded operations and restoration
 callbacks. It publishes confirmed topology separately from injected faults and
-observed gateway state. Cleanup resumes a paused VM first and restores baseline
-connections; failure blocks the bench. Initial network creation is a session-start
+observed gateway state. Cleanup resumes a paused VM first and restores the default
+network map; failure blocks the bench. Initial network creation is a session-start
 operation, not a hot upgrade of an existing bench.
 
 New protocol peers or fault types can be added to these real networks and drivers

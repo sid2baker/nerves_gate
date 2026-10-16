@@ -13,11 +13,29 @@ defmodule NervesGate.Scenarios.TestBench do
     before = Qemu.status(vm)
     assert Enum.map(before.connections.ports, & &1.name) |> Enum.sort() == ["eth0", "eth1"]
     assert Qemu.topology() == NervesGate.TestNetwork.baseline()
-    assert NervesGate.TestNetwork.router_ready?()
-    router = Qemu.router_pid()
-    assert Process.alive?(router)
+    assert NervesGate.TestNetwork.snapshot().ready
+    relay = Process.whereis(NervesGate.TestNetwork)
+    assert Process.alive?(relay)
     {:monitors, monitors} = Process.info(Process.whereis(QemuTests), :monitors)
-    assert {:process, router} in monitors
+    assert {:process, relay} in monitors
+    config = Qemu.network(vm)
+
+    for patch <- [
+          nil,
+          %{management: false},
+          %{cables: nil},
+          %{cables: %{lan1: "false"}},
+          %{cables: %{eth2: false}},
+          %{internet: :unknown},
+          %{uplink: %{loss: 50}},
+          %{uplink: %{delay_ms: -1}},
+          %{uplink: %{delay_ms: 5001}},
+          %{uplink: %{delay_ms: 1.5}}
+        ] do
+      assert {:error, :invalid_network} = Qemu.network(vm, patch)
+      assert Qemu.network(vm) == config
+    end
+
     NervesGate.Scenarios.ProjectionStream.assert_bench_controls()
     owner = self()
     report = Process.get(:qemu_fault)

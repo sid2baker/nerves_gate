@@ -86,19 +86,19 @@ defmodule Mix.Tasks.Dev.Qemu do
 
       status =
         if ci? do
-          isolated(true, socket, options[:only] || "all", port)
+          run_session(true, socket, options[:only] || "all", port)
         else
           serve(port, socket)
         end
 
-      if status != 0, do: Mix.raise("Isolated QEMU session failed (exit #{status})")
+      if status != 0, do: Mix.raise("QEMU session failed (exit #{status})")
     after
       File.rm(socket)
     end
   end
 
   defp check_tools! do
-    for tool <- ["pasta", "dnsmasq"] do
+    for tool <- ["qemu-system-x86_64", "fwup"] do
       unless System.find_executable(tool),
         do: Mix.raise("Install #{tool}; see docs/development.md#prerequisites.")
     end
@@ -113,100 +113,65 @@ defmodule Mix.Tasks.Dev.Qemu do
 
   defp serve(port, socket) do
     {:ok, _} = Application.ensure_all_started(:req)
-    task = Task.async(fn -> isolated(false, socket, "all", port) end)
+    task = Task.async(fn -> run_session(false, socket, "all", port) end)
 
     try do
-      # Allow the guest's 180-second boot budget plus workstation Phoenix startup.
-      await_http(task, socket, System.monotonic_time(:millisecond) + 240_000)
-      proxy = proxy!(port, socket)
-
-      try do
-        IO.puts("QEMU ready: http://localhost:#{port}/tests")
-        Task.await(task, :infinity)
-      after
-        GenServer.stop(proxy, :normal)
-      end
+      await_http(task, socket, port, System.monotonic_time(:millisecond) + 240_000)
+      IO.puts("QEMU ready: http://localhost:#{port}/tests")
+      Task.await(task, :infinity)
     after
       Task.shutdown(task, :brutal_kill)
     end
   end
 
-  defp await_http(task, socket, deadline) do
+  defp await_http(task, socket, port, deadline) do
     case Task.yield(task, 100) do
       {:ok, status} -> Mix.raise("QEMU exited before HTTP was ready (exit #{status})")
       nil -> :ok
     end
 
-    case Req.get("http://localhost/tests/state",
-           unix_socket: socket,
-           retry: false,
-           redirect: false,
-           connect_options: [timeout: 200],
-           receive_timeout: 500
-         ) do
-      {:ok, %{status: 200}} ->
-        :ok
+    options = [
+      retry: false,
+      redirect: false,
+      connect_options: [timeout: 200],
+      receive_timeout: 500
+    ]
 
+    with {:ok, %{status: 200}} <-
+           Req.get("http://localhost/tests/state", [unix_socket: socket] ++ options),
+         {:ok, %{status: 200}} <- Req.get("http://127.0.0.1:#{port}/tests/state", options) do
+      :ok
+    else
       _ ->
-        if System.monotonic_time(:millisecond) >= deadline,
-          do: Mix.raise("Timed out waiting for QEMU HTTP readiness")
+        if System.monotonic_time(:millisecond) >= deadline do
+          Mix.raise("Timed out waiting for QEMU HTTP readiness")
+        end
 
-        await_http(task, socket, deadline)
+        await_http(task, socket, port, deadline)
     end
   end
 
-  defp isolated(ci?, socket, selection, port) do
-    # Pasta owns a new user/network namespace and outbound sockets, never host
-    # routes or port forwards. A private mount namespace gives QEMU its own DNS.
-    # Initialize Nerves before `mix run` replaces System.argv with an empty list.
+  defp run_session(ci?, socket, selection, port) do
+    # erl reads ERL_EPMD_PORT into -epmd_port at VM startup, not at Node.start.
+    # Reserve a candidate here; the child checks it again before QEMU binds it.
+    {:ok, reservation} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, epmd_port} = :inet.port(reservation)
+    :gen_tcp.close(reservation)
+
+    # Nerves initialization needs argv before mix run consumes it.
     {_, status} =
-      MuonTrap.cmd(
-        "pasta",
-        [
-          "--foreground",
-          "--config-net",
-          "--ipv4-only",
-          "--address",
-          "192.0.2.2",
-          "--netmask",
-          "24",
-          "--gateway",
-          "192.0.2.1",
-          "--ns-ifname",
-          "ng-uplink",
-          "--mtu",
-          "1500",
-          "--dns-forward",
-          "192.0.2.3",
-          "--no-map-gw",
-          "--tcp-ports",
-          "none",
-          "--udp-ports",
-          "none",
-          "--tcp-ns",
-          "none",
-          "--udp-ns",
-          "none",
-          "--",
-          "unshare",
-          "--mount",
-          "--propagation",
-          "private",
-          "mix",
-          "do",
-          "compile",
-          "+",
-          "run",
-          "--no-start",
-          "dev/qemu_session.exs"
-        ],
+      MuonTrap.cmd("mix", ["do", "compile", "+", "run", "--no-start", "dev/qemu_session.exs"],
         env: [
           {"MIX_TARGET", "host"},
-          {"MIX_ENV", if(ci?, do: "test", else: "dev")},
-          {"NERVES_GATE_BACKEND_NODE", "nerves_gate@192.168.77.2"},
+          {"MIX_ENV",
+           if ci? do
+             "test"
+           else
+             "dev"
+           end},
+          {"ERL_EPMD_PORT", Integer.to_string(epmd_port)},
+          {"NERVES_GATE_BACKEND_NODE", to_string(NervesGate.TestQemu.guest())},
           {"NERVES_GATE_DEVICE_NODE", nil},
-          {"NERVES_GATE_HOST_NETNS", File.read_link!("/proc/self/ns/net")},
-          {"NERVES_GATE_HOST_MNTNS", File.read_link!("/proc/self/ns/mnt")},
           {"QEMU_HTTP_SOCKET", socket},
           {"QEMU_HTTP_PORT", Integer.to_string(port)},
           {"QEMU_CI", to_string(ci?)},
@@ -220,8 +185,7 @@ defmodule Mix.Tasks.Dev.Qemu do
   end
 
   defp check_port!(port) do
-    # Match socat's reuseaddr: closed connections in TIME_WAIT are not a running
-    # server. An active listener still fails with :eaddrinuse.
+    # Closed connections in TIME_WAIT are not a running server.
     case :gen_tcp.listen(port, ip: {127, 0, 0, 1}, reuseaddr: true) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
@@ -231,16 +195,6 @@ defmodule Mix.Tasks.Dev.Qemu do
           "Port #{port} unavailable: #{inspect(reason)}. Stop the existing server or use --port."
         )
     end
-  end
-
-  defp proxy!(port, socket) do
-    {:ok, pid} =
-      MuonTrap.Daemon.start_link("socat", [
-        "TCP-LISTEN:#{port},bind=127.0.0.1,reuseaddr,fork",
-        "UNIX-CONNECT:#{socket}"
-      ])
-
-    pid
   end
 
   defp build_firmware! do

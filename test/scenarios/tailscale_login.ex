@@ -5,7 +5,7 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
   alias NervesGate.Remote.Policy
   alias NervesGate.TestQemu, as: Qemu
 
-  @guest :"nerves_gate@192.168.77.2"
+  @guest NervesGate.TestQemu.guest()
 
   def name, do: "Tailscale obtains a private login link and defers HTTPS until enrollment"
   def boot_options, do: []

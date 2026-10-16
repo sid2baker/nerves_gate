@@ -4,7 +4,7 @@ if config_target() == :host do
   # Launchers choose a device without changing the shared host compilation.
   backend_node =
     System.get_env("NERVES_GATE_BACKEND_NODE") ||
-      if(config_env() == :test, do: "nerves_gate@192.168.77.2")
+      if(config_env() == :test, do: "nerves_gate@127.0.0.1")
 
   config :nerves_gate, backend_node: if(backend_node, do: String.to_atom(backend_node))
 end
