@@ -190,6 +190,12 @@ remote `backend_node`. **That node selects the connection destination**, not
 - `MIX_TARGET=ec100 mix firmware` builds EC100 firmware; it does not connect to or
   flash a device.
 
+The EC100 system is pinned to a GitHub release tag in `mix.exs`. Run
+`MIX_TARGET=ec100 mix deps.get` to fetch its sources; firmware builds download the
+matching prebuilt system automatically. No local BSP checkout or system rebuild
+is needed. The matching GitHub release must be published for Nerves' tag-based
+artifact downloads; a draft release is not sufficient.
+
 Do not globally export a target for everyday development. The launchers and test
 command select their targets automatically; use per-command `MIX_TARGET=...` for
 explicit firmware builds.

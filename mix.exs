@@ -142,9 +142,7 @@ defmodule NervesGate.MixProject do
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", targets: @targets},
       {:nerves_system_ec100,
-       path: "/home/n0gg1n/Development/Work/ism/dev/nerves_system_ec100",
-       runtime: false,
-       targets: :ec100},
+       github: "sid2baker/nerves_system_ec100", tag: "v0.2.0", runtime: false, targets: :ec100},
       {:nerves_system_ec100_qemu,
        path: "systems/nerves_system_ec100_qemu", runtime: false, targets: :x86_64}
     ]
