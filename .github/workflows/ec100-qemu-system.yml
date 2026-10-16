@@ -2,16 +2,10 @@ name: EC100 QEMU system
 
 # Only trusted main-branch code may publish. Never use pull_request_target
 # or run fork code here with release credentials.
+# Simulator CI calls this only for system-directory changes on main, and waits
+# for publication before downloading the system. Manual dispatch permits retries.
 on:
-  push:
-    branches: [main]
-    paths:
-      - systems/nerves_system_ec100_qemu/**
-      - mix.exs
-      - mix.lock
-      - mise.toml
-      - dev/artifact_release.ex
-      - .github/workflows/ec100-qemu-system.yml
+  workflow_call:
   workflow_dispatch:
 
 permissions:

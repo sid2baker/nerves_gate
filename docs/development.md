@@ -559,7 +559,9 @@ For kernel, OTP, Buildroot, toolchain or other system build-input changes:
 3. Push the changes to `main`. `.github/workflows/ec100-qemu-system.yml` checks
    whether publication is needed, builds the artifact, creates the
    `ec100-qemu-v<version>` tag/release, uploads and checks the artifact digest,
-   and verifies a fresh download using Nerves' normal artifact resolver.
+   and verifies a fresh download using Nerves' normal artifact resolver. Simulator
+   CI calls this publisher only when the system directory changes, then waits for
+   successful publication before downloading the new artifact and testing firmware.
 
 The workflow runs only trusted `main` code on a GitHub-hosted Ubuntu 24.04 runner;
 no self-hosted machine is needed for system publication. It installs the pinned
@@ -568,8 +570,10 @@ downloads between runs. Builds consume GitHub Actions minutes and must fit hoste
 runner resources; the first complete build still needs CI qualification. The
 repository's `GITHUB_TOKEN` supplies release access. Publication is serialized
 and does not boot QEMU or run full CI. Ordinary gateway code changes do not
-rebuild the system. Documentation-only system changes check
-the release but reuse its artifact.
+run the publisher or rebuild the system. Documentation-only system changes check
+the release but reuse its artifact. Application lockfile drift does not invalidate
+an already-published system; locks must align before a new or unfinished release
+can be built.
 
 Published tags/assets are never overwritten. Changed build inputs under an
 already-released version fail with a request to bump `VERSION`. A re-run skips an
@@ -607,8 +611,25 @@ contracts.
 
 ## CI
 
-`.github/workflows/qemu.yml` is opt-in (`workflow_dispatch`) on a trusted Linux x64
-runner labelled `nerves-gate-qemu`. The runner needs the same prerequisites as a
-workstation. It runs `mix setup`, then `mix ci`, and uploads diagnostic logs, never
-disks. It does not run untrusted PR code. Runner registration and GitHub execution
-remain operator setup.
+`.github/workflows/qemu.yml` runs on pushes to `main`, pull requests and manual
+`workflow_dispatch`, using disposable GitHub-hosted Ubuntu 24.04 x64 runners.
+No self-hosted runner or workstation session is used. It installs the pinned
+Elixir/OTP toolchain and simulator prerequisites, runs `mix setup` to download the
+prebuilt system, then runs `mix ci`: static quality gates followed by the same
+scenarios as the UI and CLI. The simulator builds application firmware once,
+bootstraps both default devices through USB SSH/fwup, and shuts down after testing.
+Regular CI does not build Linux, Erlang or the Nerves system SDK.
+
+On a main-branch push changing `systems/nerves_system_ec100_qemu/`, CI first calls
+`.github/workflows/ec100-qemu-system.yml` and waits for its release check/build
+and fresh-download verification. Only that trusted publication job has write
+permission; the simulator job and PR jobs have read-only permission. PRs cannot
+publish systems: a PR requiring an unpublished system artifact fails setup rather
+than silently rebuilding the system or testing an older artifact. System
+publication can also be dispatched manually on `main` for retries; publisher-only
+changes do not automatically build a system.
+
+CI caches download archives, never VM disks, and uploads only diagnostic `.log`
+files for 14 days. Internet/Tailscale scenarios still depend on real public
+services. A first hosted simulator run and the full `mix ci` remain operator
+validation; agents run only focused checks against the operator's existing session.

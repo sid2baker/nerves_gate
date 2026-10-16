@@ -64,7 +64,6 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     package = Enum.find(Nerves.build_plan().packages, &(&1.app == @app))
     unless package, do: Mix.raise("EC100 QEMU system is missing from the Nerves build plan.")
     [download] = package.downloads
-    check_locks!(package.path)
     notes = release_notes!(File.read!(Path.join(package.path, "CHANGELOG.md")), package.version)
 
     %{
@@ -176,6 +175,10 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   end
 
   defp ensure_pending_sources!(info) do
+    # Application-only dependency updates do not invalidate a published system.
+    # Lock alignment matters only when building a new or unfinished release.
+    check_locks!(info.package.path)
+
     if tag_exists?(info.tag) do
       verify_pending_sources!(info.tag, Path.relative_to_cwd(info.package.path))
     end

@@ -1,37 +1,109 @@
-name: QEMU regressions
+name: Simulator CI
 
-# Deliberately opt-in: this uses a trusted runner with QEMU user/stream networking.
-# Do not run untrusted pull-request code on this runner.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: qemu-regressions
-  cancel-in-progress: false
+  group: simulator-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  qemu:
-    runs-on: [self-hosted, linux, x64, nerves-gate-qemu]
-    timeout-minutes: 180
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      system: ${{ steps.changes.outputs.system }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install Elixir and OTP
-        run: mise install
-      - name: Set up development and test dependencies
+        with:
+          fetch-depth: 0
+      - name: Detect QEMU system changes
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request) base="$PR_BASE_SHA" ;;
+            push) base="$PUSH_BASE_SHA" ;;
+            *) base=HEAD ;;
+          esac
+          if [ "$base" = 0000000000000000000000000000000000000000 ]; then
+            echo 'system=true' >> "$GITHUB_OUTPUT"
+          else
+            git diff --name-only "$base" HEAD -- systems/nerves_system_ec100_qemu/ > "$RUNNER_TEMP/system-changes"
+            if [ -s "$RUNNER_TEMP/system-changes" ]; then
+              echo 'system=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'system=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+  system:
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.system == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/ec100-qemu-system.yml
+
+  qemu:
+    needs: [changes, system]
+    if: >-
+      always() && !cancelled() && needs.changes.result == 'success' &&
+      (needs.system.result == 'success' || needs.system.result == 'skipped')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      MIX_TARGET: host
+      MIX_ENV: test
+      NERVES_SYSTEM: ''
+      NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v3
+      - name: Install simulator host tools
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
+          sudo apt-get update
+          sudo apt-get install --yes build-essential pkg-config qemu-system-x86 util-linux inotify-tools squashfs-tools "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
+      - name: Install Mix tooling outside the project
+        run: |
+          # shellcheck disable=SC2016
+          mise exec -- sh -eu -c '
+            cd "$RUNNER_TEMP"
+            mix local.hex --force --if-missing
+            mix local.rebar --force --if-missing
+            mix archive.install hex nerves_bootstrap "~> 1.17" --force
+          '
+      - name: Cache verified downloads (never VM disks)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.NERVES_DL_DIR }}
+            _build/setup
+          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'dev/setup.exs') }}
+          restore-keys: simulator-downloads-${{ runner.os }}-
+      - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
-      - name: Quality gate and isolated QEMU scenarios
+      - name: Quality gate and two-device simulator scenarios
         run: |
           mkdir -p _build/qemu-tests
           set -o pipefail
-          mise exec -- env -u NERVES_GATE_BACKEND_NODE mix ci 2>&1 | tee _build/qemu-tests/suite.log
+          mise exec -- env -u NERVES_GATE_BACKEND_NODE -u NERVES_GATE_DEVICE_NODE mix ci 2>&1 | tee _build/qemu-tests/suite.log
       - name: Retain diagnostics (never VM disks)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qemu-diagnostics-${{ github.run_id }}
+          name: simulator-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: _build/qemu-tests/**/*.log
           if-no-files-found: ignore
           retention-days: 14
