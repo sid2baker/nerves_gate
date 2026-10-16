@@ -23,6 +23,11 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
       end)
 
       assert {:error, %{code: "not_connected"}} = Qemu.call(vm, :network_confirm, [trial])
+
+      Qemu.await(vm, "same trial available for cancellation", fn status ->
+        match?(%{id: ^trial}, status.network.pending) && status.actions["network.cancel"].enabled
+      end)
+
       assert :ok = Qemu.call(vm, :network_cancel, [trial])
 
       Qemu.await(vm, "confirmed topology restored without removed NIC", fn status ->

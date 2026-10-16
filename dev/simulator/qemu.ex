@@ -142,6 +142,15 @@ defmodule NervesGate.Simulator.Qemu do
 
   def remove_lan1(vm) do
     qmp(vm, "device_del", %{id: "lan1-nic"})
+
+    # QMP acknowledges the request before the guest finishes removing the NIC.
+    # Wait until insertion can no longer mistake the old device for its replacement.
+    poll(vm, "LAN1 NIC removal", 10_000, fn ->
+      vm
+      |> qmp("qom-list", %{path: "/machine/peripheral"})
+      |> Enum.all?(&(&1["name"] != "lan1-nic"))
+    end)
+
     :ok
   end
 
