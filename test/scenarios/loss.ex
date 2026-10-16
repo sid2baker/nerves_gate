@@ -4,15 +4,15 @@ defmodule NervesGate.Scenarios.Loss do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "severe upstream packet loss preserves management and HTTPS recovers"
+  def spec, do: %{:name => "severe upstream packet loss preserves management and HTTPS recovers"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     Qemu.network(vm, %{uplink: %{loss: :none}})
     Qemu.await(vm, "public Internet reachable", &internet?/1, 60_000)
 
     try do
       Qemu.network(vm, %{uplink: %{loss: :alternate}})
-      before = Qemu.network_stats()
+      before = NervesGate.TestQemu.network_stats(vm)
       # Losing half the uplink packets may legitimately prevent a TLS handshake.
       # Exercise real traffic, then require management and recovery, not success
       # within an arbitrary retransmission budget while the fault is active.
@@ -20,7 +20,7 @@ defmodule NervesGate.Scenarios.Loss do
       status = Qemu.status(vm)
       assert status.backend.available
       assert addressed?(status)
-      stats = Qemu.network_stats()
+      stats = NervesGate.TestQemu.network_stats(vm)
       dropped = stats.dropped - before.dropped
       attempted = stats.candidates - before.candidates
       assert dropped > 0

@@ -4,10 +4,14 @@ defmodule NervesGate.Scenarios.ReceiveStall do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "LAN1 receive stall leaves carrier up and DHCP recovers when released"
-  def boot_options, do: [receive_stall: true]
+  def spec,
+    do: %{
+      :name => "LAN1 receive stall leaves carrier up and DHCP recovers when released",
+      :fresh_disk => true,
+      :boot => [receive_stall: true]
+    }
 
-  def run(vm) do
+  def run(%{device: vm}) do
     try do
       Qemu.await(vm, "carrier without an address", fn status ->
         Enum.any?(

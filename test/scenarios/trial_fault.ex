@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.TrialFault do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "cable loss does not prevent saving a valid offline configuration"
+  def spec, do: %{:name => "cable loss does not prevent saving a valid offline configuration"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     saved = settings("eth0")
     save(vm, saved)
     Qemu.network(vm, %{internet: :lan2})

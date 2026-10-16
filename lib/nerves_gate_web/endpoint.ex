@@ -28,10 +28,12 @@ defmodule NervesGateWeb.Endpoint do
     plug(Volt.DevServer, root: "assets")
 
     defp tidewave(conn, _opts) do
-      # QEMU's loopback-only proxy reaches Phoenix over a Unix socket. The VM
+      # QEMU's private CLI reaches Phoenix over a Unix socket. The simulator
       # marker is runtime state: host compilation is shared with dev.ec100.
       opts =
-        Tidewave.init(allow_remote_access: Application.get_env(:nerves_gate, :qemu_vm) != nil)
+        Tidewave.init(
+          allow_remote_access: Application.get_env(:nerves_gate, :simulator_node) != nil
+        )
 
       Tidewave.call(conn, opts)
     end

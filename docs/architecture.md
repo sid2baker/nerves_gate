@@ -128,13 +128,29 @@ readiness or a trigger for automatic remedies. See [LED policy](indicators.md#le
 
 ## QEMU bench
 
-The bench separates fixed virtual hardware from its external connections.
-`TestQemu` owns the supervised VM and QMP operations. One `TestNetwork` GenServer
-forwards real Ethernet frames between private Unix sockets; QEMU/libslirp supplies
-DHCP, DNS and outbound connectivity. A fixed management path uses a restricted
-backend and explicit loopback forwards for ordinary Erlang distribution, HTTP
-and SSH. The controller initiates distribution and has no inbound listener.
-No workstation networking, namespaces, resolver files or firewall rules are configured.
+`mix dev` starts Phoenix and an empty host-only `Simulator` BEAM under MuonTrap.
+Its lifecycle GenServer owns asynchronous build/start/stop/reset work and progress.
+No firmware is built and no device boots until Start is admitted. Stop powers off
+and preserves disks; Reset explicitly erases them without restarting. A new Start
+builds and bootstraps; Start after Stop resumes the preserved disks. Phoenix stays
+available through device failures. Each `Simulator.Device` owns its
+QEMU process, disk, QMP socket and `Simulator.Network` Ethernet relay. UI and
+scenario workers are distribution clients, not hardware owners. `TestQemu` only
+adds scenario assertions and cleanup. `dev/` is compiled only on the host;
+QEMU boot initialization lives separately in `firmware/x86_64/`.
+
+Every new or reset device starts from the configured factory artifact, boots real
+VintageNetDirect on USB Ethernet, and receives current firmware over the normal
+SSH/fwup subsystem. Firmware triggers the A/B reboot. Optional provisioning uses
+public commands over SSH, never injected state files or fabricated USB trust.
+All devices share one firmware build; serial numbers burned into their separate
+disks determine runtime node identities.
+
+QEMU/libslirp supplies DHCP, DNS and outbound connectivity. Each device has private
+Unix sockets and a restricted management backend with its own loopback address
+for native Erlang distribution, HTTP and SSH. The UI initiates distribution;
+the simulator uses a session-owned EPMD. No workstation networking, namespaces,
+resolver files or firewall rules are configured.
 
 The network API is a partial map of `internet`, `cables` and `uplink` settings.
 That same owner validates updates, switches actual forwarding and bounds packet
@@ -146,17 +162,25 @@ escapes; it implements no network protocols. Equipment has no IP server.
 
 QEMU starts paused until streams and saved carrier states are installed. Wiring
 and fault selections survive VM replacement; queued traffic and libslirp live
-state do not. The runner monitors the relay: loss blocks admission and stops the
-owned VM, with no bypass or silent baseline restart. Raw packet data is excluded
+state do not. Device transport failure stops the device supervision tree while
+the simulator lifecycle owner and UI remain available. Admission stays blocked
+until explicit Reset; interrupted bootstrap cannot be resumed blindly. The runner
+also monitors the simulator BEAM; loss requires a session restart. There is no
+bypass or silent hardware restart. Raw packet data is excluded
 from status/crash reports and notifications. Loopback services, like the local UI,
 trust workstation users; this is not an OS sandbox.
 
-`QemuTests` remains the single admission/controller process. Manual controls and
-ordinary Elixir scenarios use the same drivers, bounded operations and restoration
-callbacks. It publishes confirmed topology separately from injected faults and
-observed gateway state. Cleanup resumes a paused VM first and restores the default
-network map; failure blocks the bench. Initial network creation is a session-start
-operation, not a hot upgrade of an existing bench.
+`QemuTests` remains the single UI/CLI admission/controller process for lifecycle,
+manual controls and scenarios. It keeps the UI backend disconnected until all
+devices are ready and rejects lifecycle operations during scenario/manual ownership.
+Manual controls and ordinary Elixir scenarios use the same drivers, bounded operations and restoration
+callbacks. Scenarios declare data with `spec/0` and receive `%{device: primary,
+devices: devices}` in `run/1`. The UI and manual controls stay attached to the
+primary device; multi-device scenarios address explicit handles. The runner
+publishes confirmed primary topology separately from injected faults and observed
+gateway state. Cleanup resumes a paused VM first and restores the default
+network map; failure blocks the bench until Reset. Initial network creation is a
+Start operation, not a hot upgrade of an existing bench.
 
 New protocol peers or fault types can be added to these real networks and drivers
 as needed. There is no scenario DSL, plugin registry or second simulator framework.

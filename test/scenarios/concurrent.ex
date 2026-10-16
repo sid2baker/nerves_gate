@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.Concurrent do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "simultaneous confirmations admit a trial only once"
+  def spec, do: %{:name => "simultaneous confirmations admit a trial only once"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     desired = settings("eth0")
     before = Qemu.status(vm).network.desired
     assert {:ok, trial} = Qemu.call(vm, :network_propose, [desired, [expected: before]])

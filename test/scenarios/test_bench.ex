@@ -4,20 +4,26 @@ defmodule NervesGate.Scenarios.TestBench do
   alias NervesGate.{ManualFaults, QemuTests}
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "bench ownership, reversible manual faults and cleanup preserve device settings"
+  def spec,
+    do: %{
+      :name => "bench ownership, reversible manual faults and cleanup preserve device settings"
+    }
 
-  def run(vm) do
+  def run(%{device: vm}) do
     assert {:error, _} = QemuTests.run("firewall")
     assert {:error, _} = QemuTests.mode("manual")
     assert {:error, _} = QemuTests.manual("lan1_down")
+    assert QemuTests.snapshot().lifecycle.status == :ready
+    for action <- ~w(start stop reset), do: assert({:error, _} = QemuTests.lifecycle(action))
     before = Qemu.status(vm)
     assert Enum.map(before.connections.ports, & &1.name) |> Enum.sort() == ["eth0", "eth1"]
-    assert Qemu.topology() == NervesGate.TestNetwork.baseline()
-    assert NervesGate.TestNetwork.snapshot().ready
-    relay = Process.whereis(NervesGate.TestNetwork)
-    assert Process.alive?(relay)
+    assert NervesGate.TestQemu.topology(vm) == NervesGate.Simulator.Network.baseline()
+    assert NervesGate.Simulator.observe(vm).ready
+    simulator = Application.fetch_env!(:nerves_gate, :simulator_node)
+    assert node(vm.owner) == simulator
+    refute node(vm.owner) == node()
     {:monitors, monitors} = Process.info(Process.whereis(QemuTests), :monitors)
-    assert {:process, relay} in monitors
+    assert {:process, {NervesGate.Simulator, simulator}} in monitors
     config = Qemu.network(vm)
 
     for patch <- [
@@ -36,7 +42,7 @@ defmodule NervesGate.Scenarios.TestBench do
       assert Qemu.network(vm) == config
     end
 
-    NervesGate.Scenarios.ProjectionStream.assert_bench_controls()
+    NervesGate.Scenarios.ProjectionStream.assert_bench_controls(vm)
     owner = self()
     report = Process.get(:qemu_fault)
     topology = Process.get(:qemu_topology)
@@ -79,9 +85,9 @@ defmodule NervesGate.Scenarios.TestBench do
   defp faults(pid, vm) do
     action(pid, "lan1_down")
     action(pid, "connect_lan2")
-    assert Qemu.topology() == %{lan1: :equipment, lan2: :internet}
+    assert NervesGate.TestQemu.topology(vm) == %{lan1: :equipment, lan2: :internet}
     assert QemuTests.snapshot().faults["lan1"]
-    NervesGate.Scenarios.ProjectionStream.assert_bench_controls()
+    NervesGate.Scenarios.ProjectionStream.assert_bench_controls(vm)
 
     for action <- ~w(lan1_down lan2_down latency_on latency_on internet_loss internet_down),
         do: action(pid, action)
@@ -110,8 +116,8 @@ defmodule NervesGate.Scenarios.TestBench do
           status.remote_access.ipv4 == before.remote_access.ipv4
       end)
 
-    assert Qemu.topology() == NervesGate.TestNetwork.baseline()
-    assert QemuTests.snapshot().topology == NervesGate.TestNetwork.baseline()
+    assert NervesGate.TestQemu.topology(vm) == NervesGate.Simulator.Network.baseline()
+    assert QemuTests.snapshot().topology == NervesGate.Simulator.Network.baseline()
     assert status.network.desired == before.network.desired
     assert status.remote_access.auth_state == before.remote_access.auth_state
     assert status.remote_access.ipv4 == before.remote_access.ipv4

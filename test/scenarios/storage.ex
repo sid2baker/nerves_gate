@@ -4,10 +4,13 @@ defmodule NervesGate.Scenarios.Storage do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "disk write errors are reported instead of confirming unsaved settings"
-  def boot_options, do: []
+  def spec,
+    do: %{
+      name: "disk write errors are reported instead of confirming unsaved settings",
+      fresh_disk: true
+    }
 
-  def run(vm) do
+  def run(%{device: vm}) do
     save(vm, settings("eth0"))
     trial = propose(vm, settings("eth1"))
 

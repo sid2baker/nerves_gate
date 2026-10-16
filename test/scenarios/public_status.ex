@@ -3,12 +3,12 @@ defmodule NervesGate.Scenarios.PublicStatus do
   import ExUnit.Assertions
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "Public status describes the QEMU device and is JSON encodable"
+  def spec, do: %{:name => "Public status describes the QEMU device and is JSON encodable"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     status = Qemu.status(vm)
     assert status.system.target == "x86_64"
-    assert status.system.node == Qemu.guest()
+    assert status.system.node == vm.node
     assert status.backend.available
     guest = status.system.node
     version = :erpc.call(guest, Application, :spec, [:tailscaled_ex, :vsn])

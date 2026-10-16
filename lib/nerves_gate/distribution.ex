@@ -1,18 +1,17 @@
 defmodule NervesGate.Distribution do
   @moduledoc """
   Starts native OTP distribution when the existing Tailscale observations provide an address.
-  An explicit compile-time development node bypasses Tailscale naming.
+  An explicit development node bypasses Tailscale naming.
   No separate connection process, discovery or cookie store.
   """
   require Logger
 
-  @development_node Application.compile_env(:nerves_gate, :development_node)
   @cookie Application.compile_env(:nerves_gate, :distribution_cookie)
 
   def ensure_started(remote) do
     # Only the Nerves backend chooses its node; the development command names the UI.
     if NervesGate.target() in [:ec100, :x86_64] do
-      case @development_node || node_name(remote) do
+      case Application.get_env(:nerves_gate, :development_node) || node_name(remote) do
         nil -> :ok
         name when name == node() -> :ok
         name -> start(name)

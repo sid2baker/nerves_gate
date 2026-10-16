@@ -1,6 +1,7 @@
 defmodule NervesGate.ManualFaults do
   @moduledoc "Reversible bench controls. One long-lived worker owns cleanup."
-  alias NervesGate.{TestNetwork, TestQemu}
+  alias NervesGate.Simulator.Network
+  alias NervesGate.TestQemu
 
   @controls [
     {"connection", "Internet cable",
@@ -45,8 +46,6 @@ defmodule NervesGate.ManualFaults do
   def actions, do: ["clear", "release" | Map.keys(@actions)]
 
   def execute(owner, vm) do
-    TestQemu.adopt(vm)
-
     try do
       :ok = TestQemu.network(vm, %{})
       send(owner, {:manual_ready, self()})
@@ -72,7 +71,7 @@ defmodule NervesGate.ManualFaults do
 
   defp apply_action(vm, "clear") do
     TestQemu.resume(vm)
-    :ok = TestQemu.network(vm, TestNetwork.defaults())
+    :ok = TestQemu.network(vm, Network.defaults())
   end
 
   defp apply_action(vm, action) do

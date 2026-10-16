@@ -4,83 +4,89 @@ defmodule NervesGate.Scenarios.SshAccess do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  @guest NervesGate.TestQemu.guest()
+  def spec do
+    %{
+      name: "VintageNetDirect USB-only SSH; keys persist, revoke and fail closed on write errors",
+      fresh_disk: true
+    }
+  end
 
-  def name,
-    do: "USB-only SSH password; validated keys persist, revoke and fail closed on write errors"
-
-  def boot_options, do: [usb: true]
-
-  def run(vm) do
+  def run(%{device: vm}) do
     assert Qemu.status(vm).system.target == "x86_64"
-    await_ssh()
+    await_ssh(vm)
     {key, line, fingerprint} = ssh_key()
 
-    assert {:error, _} = password(Qemu.current().forwards.ssh, ~c"root", ~c"nerves_gate")
-    assert {:error, _} = public_key(key)
+    assert {:error, _} = password(vm, vm.forwards.ssh, ~c"root", ~c"nerves_gate")
+    assert {:error, _} = ssh_public_key(vm, key)
     reject_invalid(vm, line)
     assert :ok = Qemu.call(vm, :ssh_add_key, [line])
     assert :ok = Qemu.call(vm, :ssh_add_key, [String.trim(line) <> " another comment"])
     assert Enum.count(Qemu.status(vm).ssh.keys, &(&1.fingerprint == fingerprint)) == 1
-    assert_key_works(key)
+    assert_key_works(vm, key)
 
     Qemu.reboot(vm)
-    await_ssh()
-    assert_key_works(key)
+    await_ssh(vm)
+    assert_key_works(vm, key)
     assert :ok = Qemu.call(vm, :ssh_remove_key, [fingerprint])
-    assert {:error, _} = public_key(key)
-    path = :erpc.call(@guest, NervesGate.SSH.Keys, :path, [])
-    assert {:ok, %{size: 0}} = :erpc.call(@guest, File, :stat, [path])
+    assert {:error, _} = ssh_public_key(vm, key)
+    path = :erpc.call(vm.node, NervesGate.SSH.Keys, :path, [])
+    assert {:ok, %{size: 0}} = :erpc.call(vm.node, File, :stat, [path])
     Qemu.reboot(vm)
-    await_ssh()
+    await_ssh(vm)
     refute Enum.any?(Qemu.status(vm).ssh.keys, &(&1.fingerprint == fingerprint))
-    assert {:error, _} = public_key(key)
+    assert {:error, _} = ssh_public_key(vm, key)
     reject_failed_save(vm, line, key)
 
     Qemu.connect_usb(vm)
-    assert {:ok, connection} = password(vm.forwards.usb, ~c"root", ~c"nerves_gate")
+
+    assert %{type: VintageNetDirect} =
+             :erpc.call(vm.node, VintageNet, :get_configuration, ["usb0"])
+
+    assert {:ok, connection} = password(vm, vm.forwards.usb, ~c"root", ~c"nerves_gate")
     :ok = :ssh.close(connection)
-    assert {:error, _} = password(vm.forwards.usb, ~c"root", ~c"wrong")
-    assert {:error, _} = password(vm.forwards.usb, ~c"other", ~c"nerves_gate")
-    assert {:error, _} = password(vm.forwards.ssh, ~c"root", ~c"nerves_gate")
-    assert {:error, _} = password(vm.forwards.usb, ~c"root", ~c"")
-    reject_conflicting_paths()
+    assert {:error, _} = password(vm, vm.forwards.usb, ~c"root", ~c"wrong")
+    assert {:error, _} = password(vm, vm.forwards.usb, ~c"other", ~c"nerves_gate")
+    assert {:error, _} = password(vm, vm.forwards.ssh, ~c"root", ~c"nerves_gate")
+    assert {:error, _} = password(vm, vm.forwards.usb, ~c"root", ~c"")
+    reject_conflicting_paths(vm)
 
     # Removing the actual kernel path immediately revokes password eligibility.
-    {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", ~w"link set usb0 down"])
-
-    assert {false, 1} =
-             :erpc.call(@guest, NervesGate.SSH.USBPassword, :check, [
-               ~c"root",
-               ~c"nerves_gate",
-               {{172, 31, 255, 2}, 12_345},
-               0
-             ])
+    {_, 0} = :erpc.call(vm.node, System, :cmd, ["ip", ~w"link set usb0 down"])
+    refute_password(vm)
   end
 
-  defp reject_conflicting_paths do
+  defp reject_conflicting_paths(vm) do
+    {:ok, {a, b, c, d}} = :inet.parse_address(String.to_charlist(vm.usb.peer))
+    overlap = "#{a}.#{b}.#{c}.#{Bitwise.bxor(d, 4)}/29"
+
     for {add, remove} <- [
-          {~w"addr add 172.31.255.5/29 dev eth1", ~w"addr del 172.31.255.5/29 dev eth1"},
-          {~w"route add 172.31.255.2/32 via 192.168.77.1 dev eth2",
-           ~w"route del 172.31.255.2/32 via 192.168.77.1 dev eth2"}
+          {["addr", "add", overlap, "dev", "eth1"], ["addr", "del", overlap, "dev", "eth1"]},
+          {["route", "add", "#{vm.usb.peer}/32", "via", "192.168.77.1", "dev", "eth2"],
+           ["route", "del", "#{vm.usb.peer}/32", "via", "192.168.77.1", "dev", "eth2"]}
         ] do
-      {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", add])
+      {_, 0} = :erpc.call(vm.node, System, :cmd, ["ip", add])
 
       try do
-        assert {false, 1} =
-                 :erpc.call(@guest, NervesGate.SSH.USBPassword, :check, [
-                   ~c"root",
-                   ~c"nerves_gate",
-                   {{172, 31, 255, 2}, 12_345},
-                   0
-                 ])
+        refute_password(vm)
       after
-        {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", remove])
+        {_, 0} = :erpc.call(vm.node, System, :cmd, ["ip", remove])
       end
     end
 
-    assert {:ok, connection} = password(Qemu.current().forwards.usb, ~c"root", ~c"nerves_gate")
+    assert {:ok, connection} = password(vm, vm.forwards.usb, ~c"root", ~c"nerves_gate")
     :ok = :ssh.close(connection)
+  end
+
+  defp refute_password(vm) do
+    {:ok, peer} = :inet.parse_address(String.to_charlist(vm.usb.peer))
+
+    assert {false, 1} =
+             :erpc.call(vm.node, NervesGate.SSH.USBPassword, :check, [
+               ~c"root",
+               ~c"nerves_gate",
+               {peer, 12_345},
+               0
+             ])
   end
 
   defp reject_invalid(vm, line) do
@@ -104,26 +110,24 @@ defmodule NervesGate.Scenarios.SshAccess do
   end
 
   defp reject_failed_save(vm, line, key) do
-    path = :erpc.call(@guest, NervesGate.SSH.Keys, :path, []) <> ".new"
-    :ok = :erpc.call(@guest, File, :mkdir, [path])
+    path = :erpc.call(vm.node, NervesGate.SSH.Keys, :path, []) <> ".new"
+    :ok = :erpc.call(vm.node, File, :mkdir, [path])
     before = Qemu.status(vm).ssh.keys
 
     try do
       assert {:error, %{code: "ssh_keys_unavailable"}} = Qemu.call(vm, :ssh_add_key, [line])
       assert Qemu.status(vm).ssh.keys == before
-      assert {:error, _} = public_key(key)
+      assert {:error, _} = ssh_public_key(vm, key)
     after
-      :ok = :erpc.call(@guest, File, :rmdir, [path])
+      :ok = :erpc.call(vm.node, File, :rmdir, [path])
     end
   end
 
-  defp assert_key_works(key) do
-    assert {:ok, connection} = public_key(key)
+  defp assert_key_works(vm, key) do
+    assert {:ok, connection} = ssh_public_key(vm, key)
     :ok = :ssh.close(connection)
   end
 
-  defp password(port, user, password),
-    do: ssh_connect(port, user: user, password: password, auth_methods: ~c"password")
-
-  defp public_key(key), do: ssh_public_key(Qemu.current(), key)
+  defp password(vm, port, user, password),
+    do: ssh_connect(vm, port, user: user, password: password, auth_methods: ~c"password")
 end

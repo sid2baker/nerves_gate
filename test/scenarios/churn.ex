@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.Churn do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "three apply cancel and save cycles do not retain stale trials"
+  def spec, do: %{:name => "three apply cancel and save cycles do not retain stale trials"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     saved = save(vm, settings("eth0"))
 
     for _ <- 1..3 do

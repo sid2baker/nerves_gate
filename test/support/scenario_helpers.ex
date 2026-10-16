@@ -12,14 +12,14 @@ defmodule NervesGate.ScenarioHelpers do
     {key, line, to_string(:ssh.hostkey_fingerprint(:sha256, public))}
   end
 
-  def await_ssh do
+  def await_ssh(vm) do
     # Wait behind NervesSSH's host-key generation and daemon startup.
     assert {:ok, _info} =
-             :erpc.call(Qemu.guest(), GenServer, :call, [NervesSSH, :info, 60_000], 65_000)
+             :erpc.call(vm.node, GenServer, :call, [NervesSSH, :info, 60_000], 65_000)
   end
 
   def ssh_public_key(vm, key) do
-    ssh_connect(vm.forwards.ssh,
+    ssh_connect(vm, vm.forwards.ssh,
       user: ~c"root",
       key_cb: {__MODULE__, key: key},
       auth_methods: ~c"publickey",
@@ -27,9 +27,9 @@ defmodule NervesGate.ScenarioHelpers do
     )
   end
 
-  def ssh_connect(port, options) do
+  def ssh_connect(vm, port, options) do
     :ssh.connect(
-      {127, 0, 0, 1},
+      String.to_charlist(vm.address),
       port,
       options ++
         [

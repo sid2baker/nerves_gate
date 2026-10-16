@@ -11,9 +11,10 @@ defmodule NervesGateWeb.TestsController do
   def control(conn, params) do
     result =
       case params do
+        %{"lifecycle" => action} -> NervesGate.QemuTests.lifecycle(action)
         %{"mode" => mode} -> NervesGate.QemuTests.mode(mode)
         %{"action" => action} -> NervesGate.QemuTests.manual(action)
-        _ -> {:error, "Expected a mode or manual action"}
+        _ -> {:error, "Expected a lifecycle, mode or manual action"}
       end
 
     case result do

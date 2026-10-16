@@ -1,5 +1,5 @@
 defmodule NervesGate.QemuTests do
-  @moduledoc "One test bench and one owned QEMU device, shared by the page, CLI and CI."
+  @moduledoc "One admission owner for the multi-device simulator, shared by page, CLI and CI."
   use GenServer
   alias NervesGate.ManualFaults
   alias NervesGate.TestQemu, as: Qemu
@@ -20,6 +20,7 @@ defmodule NervesGate.QemuTests do
   def run(selection \\ "all"), do: GenServer.call(__MODULE__, {:run, selection})
   def mode(mode), do: GenServer.call(__MODULE__, {:mode, mode})
   def manual(action), do: GenServer.call(__MODULE__, {:manual, action})
+  def lifecycle(action), do: GenServer.call(__MODULE__, {:lifecycle, action})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
   def unsubscribe, do: Phoenix.PubSub.unsubscribe(NervesGate.PubSub, @topic)
 
@@ -31,22 +32,40 @@ defmodule NervesGate.QemuTests do
       Enum.map(scenarios(), fn {id, module} ->
         %{
           id: id,
-          name: module.name(),
-          fresh_disk: function_exported?(module, :boot_options, 0),
+          name: module.spec().name,
+          fresh_disk: Map.get(module.spec(), :fresh_disk, false),
           status: :waiting,
           detail: "",
           milliseconds: nil
         }
       end)
 
-    vm = Application.get_env(:nerves_gate, :qemu_vm)
+    simulator = Application.get_env(:nerves_gate, :simulator_node)
+
+    lifecycle =
+      if simulator,
+        do: NervesGate.Simulator.subscribe(simulator),
+        else: %{
+          status: :unavailable,
+          phase: "Use mix dev for the simulator bench.",
+          devices: [],
+          progress: %{},
+          reset_required: false
+        }
+
+    devices = %{}
+    primary = nil
+    vm = nil
 
     view = %{
       id: nil,
-      topology: if(vm, do: Qemu.topology()),
+      lifecycle: lifecycle,
+      devices: devices |> Map.keys() |> Enum.sort(),
+      device: primary,
+      topology: nil,
       status: :idle,
       rows: rows,
-      phase: "Ready",
+      phase: "Simulator empty",
       mode: :scenarios,
       manual_action: nil,
       blocked: false,
@@ -58,7 +77,9 @@ defmodule NervesGate.QemuTests do
      %{
        view: view,
        vm: vm,
-       network_monitor: if(vm, do: Process.monitor(Process.whereis(NervesGate.TestNetwork))),
+       devices: devices,
+       simulator: simulator,
+       simulator_monitor: if(simulator, do: Process.monitor({NervesGate.Simulator, simulator})),
        worker: nil,
        timer: nil,
        completed: false
@@ -68,14 +89,37 @@ defmodule NervesGate.QemuTests do
   @impl true
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
 
-  def handle_call(_, _, %{view: %{blocked: true}} = state),
+  def handle_call({:lifecycle, _}, _, %{worker: worker} = state) when not is_nil(worker),
     do:
-      {:reply, {:error, "Control state is uncertain. Restart mix dev.qemu before continuing."},
-       state}
+      {:reply, {:error, "Finish the current operation before changing device lifecycle."}, state}
+
+  def handle_call({:lifecycle, action}, _, state) do
+    with true <- lifecycle_allowed?(action, state.view),
+         :ok <- NervesGate.Simulator.lifecycle(state.simulator, action) do
+      # Close admission immediately, before the asynchronous progress arrives.
+      Application.delete_env(:nerves_gate, :backend_node)
+      status = if action == "start", do: :starting, else: :stopping
+      view = %{state.view | lifecycle: %{state.view.lifecycle | status: status}}
+      {:reply, :ok, %{state | view: view, vm: nil}}
+    else
+      false ->
+        {:reply,
+         {:error,
+          "Lifecycle action unavailable. Release manual control or Reset after a failure."},
+         state}
+
+      error ->
+        {:reply, error, state}
+    end
+  catch
+    :exit, _ -> {:reply, {:error, "Simulator unavailable; restart mix dev."}, state}
+  end
+
+  def handle_call(_, _, %{view: %{blocked: true}} = state),
+    do: {:reply, {:error, "Control uncertain. Reset devices or restart mix dev."}, state}
 
   def handle_call(_, _, %{vm: nil} = state),
-    do:
-      {:reply, {:error, "Start mix dev.qemu. Tests never attach to an arbitrary device."}, state}
+    do: {:reply, {:error, "Start configured devices on /tests first."}, state}
 
   def handle_call({:run, _}, _, %{view: %{mode: :manual}} = state),
     do:
@@ -96,7 +140,10 @@ defmodule NervesGate.QemuTests do
       id = System.unique_integer([:positive, :monotonic])
 
       worker =
-        :erlang.spawn_opt(fn -> execute(owner, id, state.vm, scenarios) end, [:link, :monitor])
+        :erlang.spawn_opt(
+          fn -> execute(owner, id, %{device: state.vm, devices: state.devices}, scenarios) end,
+          [:link, :monitor]
+        )
 
       rows = prepare_rows(state.view.rows, selection)
 
@@ -151,12 +198,50 @@ defmodule NervesGate.QemuTests do
        state}
 
   @impl true
+  def handle_info({:simulator, %{status: :ready} = lifecycle}, state) do
+    devices = NervesGate.Simulator.devices(state.simulator)
+    primary = devices |> Map.keys() |> Enum.min()
+    vm = Map.fetch!(devices, primary)
+    Application.put_env(:nerves_gate, :backend_node, vm.node)
+
+    view = %{
+      state.view
+      | devices: Map.keys(devices) |> Enum.sort(),
+        device: primary,
+        topology: Qemu.topology(vm),
+        status: :idle
+    }
+
+    {:noreply, lifecycle_progress(%{state | view: view, devices: devices, vm: vm}, lifecycle)}
+  end
+
+  def handle_info({:simulator, lifecycle}, state) do
+    state = interrupt_worker(state)
+    Application.delete_env(:nerves_gate, :backend_node)
+    cleared = lifecycle.status == :stopped and not lifecycle.reset_required
+    blocked = not cleared and (state.view.blocked or lifecycle.status in [:failed, :unavailable])
+
+    view = %{
+      state.view
+      | devices: [],
+        device: nil,
+        topology: nil,
+        blocked: blocked,
+        status: lifecycle.status,
+        mode: if(cleared, do: :scenarios, else: state.view.mode),
+        manual_action: nil,
+        faults: %{}
+    }
+
+    {:noreply, lifecycle_progress(%{state | view: view, devices: %{}, vm: nil}, lifecycle)}
+  end
+
   def handle_info({:progress, id, scenario, result}, %{view: %{id: id}} = state) do
     cancel_timer(state)
 
     timer =
       if result.status == :running,
-        do: Process.send_after(self(), {:timeout, id, scenario}, 300_000)
+        do: Process.send_after(self(), {:timeout, id, scenario}, 900_000)
 
     rows =
       Enum.map(state.view.rows, fn row ->
@@ -165,6 +250,15 @@ defmodule NervesGate.QemuTests do
 
     view = %{state.view | rows: rows} |> event("#{scenario}: #{result.status}")
     {:noreply, publish(%{state | view: view, timer: timer})}
+  end
+
+  def handle_info({:scenario_failed, id, scenario, detail}, %{view: %{id: id}} = state) do
+    rows =
+      Enum.map(state.view.rows, fn row ->
+        if row.id == scenario, do: %{row | detail: detail}, else: row
+      end)
+
+    {:noreply, publish(%{state | view: %{state.view | rows: rows}})}
   end
 
   def handle_info({:phase, id, phase}, %{view: %{id: id}} = state) do
@@ -222,17 +316,24 @@ defmodule NervesGate.QemuTests do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{network_monitor: ref} = state) do
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{simulator_monitor: ref} = state) do
     cancel_timer(state)
     if state.worker, do: Process.exit(elem(state.worker, 0), :kill)
-    Qemu.stop_owned()
+
+    Application.delete_env(:nerves_gate, :backend_node)
+
+    lifecycle = %{
+      state.view.lifecycle
+      | status: :unavailable,
+        phase: "Simulator unavailable. Restart mix dev."
+    }
 
     view =
-      state.view
+      %{state.view | lifecycle: lifecycle}
       |> finish(true)
-      |> event("Ethernet relay stopped; the owned VM was stopped. Restart mix dev.qemu.")
+      |> event("Simulator stopped; device control is unavailable. Restart mix dev.")
 
-    {:noreply, publish(%{state | view: view, timer: nil})}
+    {:noreply, publish(%{state | view: view, vm: nil, devices: %{}, timer: nil})}
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, %{worker: {pid, ref}} = state) do
@@ -240,7 +341,7 @@ defmodule NervesGate.QemuTests do
 
     blocked =
       state.view.blocked or reason != :normal or not state.completed or state.view.faults != %{} or
-        state.view.topology != NervesGate.TestNetwork.baseline()
+        state.view.topology != NervesGate.Simulator.Network.baseline()
 
     view = finish(state.view, blocked)
     {:noreply, publish(%{state | worker: nil, timer: nil, view: view})}
@@ -251,6 +352,40 @@ defmodule NervesGate.QemuTests do
   @impl true
   def terminate(_, %{worker: {pid, _}}), do: Process.exit(pid, :kill)
   def terminate(_, _), do: :ok
+
+  defp interrupt_worker(%{worker: nil} = state), do: state
+
+  defp interrupt_worker(%{worker: {pid, _}} = state) do
+    cancel_timer(state)
+    Process.exit(pid, :kill)
+    %{state | view: finish(state.view, true), timer: nil}
+  end
+
+  defp lifecycle_allowed?("start", %{
+         blocked: false,
+         lifecycle: %{status: :stopped, reset_required: false}
+       }),
+       do: true
+
+  defp lifecycle_allowed?("stop", %{
+         blocked: false,
+         mode: :scenarios,
+         lifecycle: %{status: :ready}
+       }),
+       do: true
+
+  defp lifecycle_allowed?("stop", %{lifecycle: %{status: :starting}}), do: true
+
+  defp lifecycle_allowed?("reset", %{mode: mode, blocked: blocked, lifecycle: %{status: status}})
+       when status in [:stopped, :ready, :failed] and (mode == :scenarios or blocked), do: true
+
+  defp lifecycle_allowed?(_, _), do: false
+
+  defp lifecycle_progress(state, lifecycle) do
+    view = %{state.view | lifecycle: lifecycle, phase: lifecycle.phase}
+    view = if state.view.phase != lifecycle.phase, do: event(view, lifecycle.phase), else: view
+    publish(%{state | view: view})
+  end
 
   defp start_manual(%{worker: {pid, _}} = state, action) do
     send(pid, {:manual_action, action})
@@ -285,7 +420,15 @@ defmodule NervesGate.QemuTests do
     rows =
       Enum.map(view.rows, fn row ->
         if row.status in [:waiting, :running] and view.mode == :scenarios,
-          do: %{row | status: :failed, detail: "Runner stopped; inspect QEMU diagnostics."},
+          do: %{
+            row
+            | status: :failed,
+              detail:
+                if(row.detail == "",
+                  do: "Runner stopped; inspect QEMU diagnostics.",
+                  else: row.detail
+                )
+          },
           else: row
       end)
 
@@ -297,7 +440,7 @@ defmodule NervesGate.QemuTests do
         manual_action: nil,
         phase: "Control state uncertain"
     }
-    |> event("Worker or cleanup failed. Fault state is uncertain; restart mix dev.qemu.")
+    |> event("Worker or cleanup failed. Fault state is uncertain; Reset devices.")
   end
 
   defp finish(%{mode: :manual} = view, false) do
@@ -343,33 +486,44 @@ defmodule NervesGate.QemuTests do
     Process.put(:qemu_topology, fn topology -> send(owner, {:topology, pid, topology}) end)
   end
 
-  defp execute(owner, run_id, vm, scenarios) do
-    Qemu.adopt(vm)
+  defp execute(owner, run_id, context, scenarios) do
+    vm = context.device
     report_to(owner)
     Process.put(:qemu_report, fn phase -> send(owner, {:phase, run_id, phase}) end)
 
     for {id, module} <- scenarios do
       send(owner, {:progress, run_id, id, %{status: :running}})
       start = System.monotonic_time(:millisecond)
-      reset? = function_exported?(module, :boot_options, 0)
+      spec = module.spec()
+      reset? = Map.get(spec, :fresh_disk, false)
+      affected = if spec[:devices] == :all, do: Map.values(context.devices), else: [vm]
 
       result =
         try do
-          vm =
-            if reset?, do: Qemu.fresh(Qemu.current(), module.boot_options()), else: Qemu.current()
+          if reset? do
+            fresh_devices(affected, vm, Map.get(spec, :boot, []))
+          else
+            baseline(vm)
+          end
 
-          unless reset?, do: baseline(vm)
-          module.run(vm)
+          module.run(%{context | device: vm})
           %{status: :passed, detail: "OK"}
         rescue
           error -> %{status: :failed, detail: Exception.format(:error, error, __STACKTRACE__)}
         catch
+          :exit, :simulator_control_failed ->
+            exit(:simulator_control_failed)
+
           kind, reason ->
             %{status: :failed, detail: Exception.format(kind, reason, __STACKTRACE__)}
         after
           # A cleanup failure stops the worker and blocks further runs, rather than hiding a fault.
+          if Process.get(:simulator_control_failed), do: exit(:simulator_control_failed)
           Qemu.cleanup()
         end
+
+      if result.status == :failed,
+        do: send(owner, {:scenario_failed, run_id, id, result.detail})
 
       if reset? or result.status == :failed do
         send(
@@ -377,24 +531,26 @@ defmodule NervesGate.QemuTests do
           {:phase, run_id, "Replacing disposable disk after #{id}; enrollment is erased"}
         )
 
-        Qemu.fresh(Qemu.current())
+        fresh_devices(affected, vm, [])
+        Qemu.cleanup()
       end
 
       result = Map.put(result, :milliseconds, System.monotonic_time(:millisecond) - start)
       send(owner, {:progress, run_id, id, result})
     end
 
-    if Qemu.current().socket != vm.socket do
-      :ok = :gen_tcp.controlling_process(Qemu.current().socket, owner)
-    end
+    send(owner, {:finished, run_id, vm})
+  end
 
-    send(owner, {:finished, run_id, Qemu.current()})
+  defp fresh_devices(devices, primary, options) do
+    for device <- devices, do: Qemu.fresh(device, options)
+    :ok = Qemu.network(primary, NervesGate.Simulator.Network.defaults())
   end
 
   defp baseline(vm) do
     Qemu.resume(vm)
     Qemu.insert_lan1(vm)
-    :ok = Qemu.network(vm, NervesGate.TestNetwork.defaults())
+    :ok = Qemu.network(vm, NervesGate.Simulator.Network.defaults())
     status = Qemu.await(vm, "Waiting for device", & &1)
     if status.network.pending, do: Qemu.call(vm, :network_cancel, [status.network.pending.id])
     NervesGate.ScenarioHelpers.save(vm, NervesGate.ScenarioHelpers.settings("eth0"))

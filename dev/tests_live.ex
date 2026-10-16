@@ -7,8 +7,19 @@ defmodule NervesGateWeb.TestsLive do
 
   def mount(_, _, socket) do
     if connected?(socket), do: QemuTests.subscribe()
-    {:ok, assign(socket, run: QemuTests.snapshot(), error: nil, confirm_run: nil)}
+
+    {:ok,
+     assign(socket, run: QemuTests.snapshot(), error: nil, confirm_run: nil, confirm_reset: false)}
   end
+
+  def handle_event("prepare_reset", _, socket),
+    do: {:noreply, assign(socket, confirm_reset: true, error: nil)}
+
+  def handle_event("cancel_reset", _, socket),
+    do: {:noreply, assign(socket, :confirm_reset, false)}
+
+  def handle_event("lifecycle", %{"action" => action}, socket),
+    do: command(socket, QemuTests.lifecycle(action))
 
   def handle_event("mode", %{"mode" => mode}, socket),
     do: command(socket, QemuTests.mode(mode))
@@ -32,7 +43,14 @@ defmodule NervesGateWeb.TestsLive do
   defp command(socket, {:ok, _}), do: command(socket, :ok)
 
   defp command(socket, :ok),
-    do: {:noreply, assign(socket, run: QemuTests.snapshot(), error: nil, confirm_run: nil)}
+    do:
+      {:noreply,
+       assign(socket,
+         run: QemuTests.snapshot(),
+         error: nil,
+         confirm_run: nil,
+         confirm_reset: false
+       )}
 
   def render(assigns) do
     ~H"""
@@ -48,12 +66,69 @@ defmodule NervesGateWeb.TestsLive do
           Connection to the bench lost. Controls and observations may be stale; connections and faults remain active.
         </.notice>
       </div>
+      <.panel title="Simulator lifecycle" icon="settings" id="simulator-lifecycle">
+        <p role="status" aria-live="polite" id="simulator-phase">{@run.lifecycle.phase}</p>
+        <p :if={@run.lifecycle.devices != []} class="ui-help">
+          Configured: {Enum.join(@run.lifecycle.devices, ", ")}
+        </p>
+        <ul :if={@run.lifecycle.progress != %{}} class="ui-help" id="device-progress">
+          <li :for={{id, phase} <- Enum.sort(@run.lifecycle.progress)}>{id}: {phase}</li>
+        </ul>
+        <div class="ui-actions">
+          <.button
+            id="start-devices"
+            phx-click="lifecycle"
+            phx-value-action="start"
+            disabled={
+              @run.lifecycle.status != :stopped || @run.lifecycle.reset_required || @run.blocked
+            }
+          >
+            Start configured devices
+          </.button>
+          <.button
+            id="stop-devices"
+            variant="secondary"
+            phx-click="lifecycle"
+            phx-value-action="stop"
+            disabled={
+              @run.lifecycle.status not in [:starting, :ready] ||
+                (@run.lifecycle.status == :ready && (busy?(@run) || @run.mode == :manual))
+            }
+          >
+            Stop · preserve disks
+          </.button>
+          <.button
+            id="reset-devices"
+            variant="secondary"
+            phx-click="prepare_reset"
+            disabled={
+              @run.lifecycle.status not in [:stopped, :ready, :failed] ||
+                @run.status == :running || (@run.mode == :manual && !@run.blocked)
+            }
+          >
+            Reset · erase disks
+          </.button>
+        </div>
+        <p class="ui-help">
+          Stop is a power-off and preserves disks. Interrupted startup requires Reset.
+        </p>
+        <.notice :if={@confirm_reset} tone="warning" id="confirm-reset" role="alert">
+          <p>Erase all configured devices' disks and enrollment? This cannot be undone.</p>
+          <div class="ui-actions">
+            <.button id="confirm-reset-devices" phx-click="lifecycle" phx-value-action="reset">
+              Erase all devices
+            </.button>
+            <.button variant="quiet" phx-click="cancel_reset">Cancel</.button>
+          </div>
+        </.notice>
+      </.panel>
       <.panel
-        title="Observed device"
-        description="Live device projection, not a test verdict"
+        title={"Observed device: #{@run.device}"}
+        description="Primary device projection and manual controls; scenarios can use every simulator device"
         icon="network"
         id="device-summary"
       >
+        <p class="ui-help">Simulator devices: {Enum.join(@run.devices, ", ")}</p>
         <div class="bench-summary">
           <div
             :for={item <- summary(@projection)}
@@ -91,7 +166,7 @@ defmodule NervesGateWeb.TestsLive do
           <p class="ui-help">These are deliberate disruptions, not observed device failures.</p>
         </div>
         <p :if={@run.blocked} role="alert">
-          Unknown — last confirmed faults below. Restart the session.
+          Unknown — last confirmed faults below. Reset devices before starting again.
         </p>
         <p :if={@run.faults == %{} && !@run.blocked} id="no-faults">None active</p>
         <ul :if={@run.faults != %{}} class="bench-fault-list">
@@ -104,7 +179,9 @@ defmodule NervesGateWeb.TestsLive do
       <.notice :if={@error} tone="warning" role="alert" id="bench-error">{@error}</.notice>
       <.notice :if={@run.blocked} tone="warning" role="alert">
         A worker or cleanup failed. Control is blocked because fault state is uncertain.
-        Inspect <code>_build/qemu-tests/</code>, then restart <code>mix dev.qemu</code>.
+        Inspect <code>_build/qemu-tests/</code>, then {if @run.lifecycle.status == :unavailable,
+          do: "restart mix dev.",
+          else: "Reset the devices."}
       </.notice>
       <div class="bench-toolbar">
         <div class="ui-actions" role="group" aria-label="Bench control mode">
@@ -202,7 +279,8 @@ defmodule NervesGateWeb.TestsLive do
             </:meta>
             <p class="ui-help">
               Scenarios change device settings. Fresh-disk scenarios erase enrollment;
-              any failed scenario also replaces the disk. Do not edit the device elsewhere during a run.
+              failed scenarios replace their devices' disks (all devices for multi-device scenarios).
+              Do not edit devices elsewhere during a run.
             </p>
             <.notice :if={@confirm_run} tone="warning" id="confirm-run" role="alert">
               <p>
@@ -280,8 +358,8 @@ defmodule NervesGateWeb.TestsLive do
           · latest run and 100 events kept in memory · diagnostics: <code>_build/qemu-tests/</code>
         </p>
         <p>
-          Firmware is built at session startup. Restart <code>mix dev.qemu</code>
-          for device-code changes; restarting replaces the disposable disk.
+          Start builds one shared firmware image and bootstraps configured devices. Stop preserves disks;
+          Reset erases them. Device-code changes require Reset and Start.
         </p>
       </footer>
     </main>
@@ -291,7 +369,11 @@ defmodule NervesGateWeb.TestsLive do
   defp network_label(:internet), do: "Internet router"
   defp network_label(:equipment), do: "Isolated equipment network"
 
-  defp busy?(run), do: run.blocked || run.status == :running || run.manual_action != nil
+  defp busy?(run),
+    do:
+      run.lifecycle.status != :ready || run.blocked || run.status == :running ||
+        run.manual_action != nil
+
   defp completed(run), do: Enum.count(run.rows, &(&1.status in [:passed, :failed]))
   defp selected(run), do: Enum.count(run.rows, &(&1.status != :skipped))
   defp result_tone(:passed), do: "good"
@@ -300,7 +382,14 @@ defmodule NervesGateWeb.TestsLive do
   defp duration(ms) when ms < 1000, do: "#{ms} ms"
   defp duration(ms), do: "#{Float.round(ms / 1000, 1)} s"
 
-  defp owner_label(%{blocked: true}), do: "Control blocked · restart required"
+  defp owner_label(%{lifecycle: %{status: :unavailable}}),
+    do: "Simulator unavailable · restart mix dev"
+
+  defp owner_label(%{blocked: true}), do: "Control blocked · Reset required"
+
+  defp owner_label(%{lifecycle: %{status: status}}) when status != :ready,
+    do: "No device controller · simulator #{status}"
+
   defp owner_label(%{mode: :manual}), do: "Manual owns the device · switching modes clears faults"
   defp owner_label(%{status: :running}), do: "Scenario runner owns the device"
   defp owner_label(_), do: "Ready · no active controller"

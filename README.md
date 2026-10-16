@@ -10,23 +10,27 @@ On a [prepared Linux workstation](docs/development.md#prerequisites):
 
 ```sh
 mix setup
-mix dev.qemu
+mix dev
 ```
 
-Open **http://localhost:4000**. Setup installs Mix tooling and dependencies,
+Open **http://localhost:4000/tests** and choose **Start configured devices**.
+Phoenix starts immediately with an empty simulator; gateway pages stay disconnected
+until bootstrapping finishes. Setup installs Mix tooling and dependencies,
 verifies and installs the x86 Tailscale binary, and downloads the prebuilt EC100
 QEMU system. Dependencies and application firmware still compile locally, but
 Linux and Erlang do not. No Docker, physical device, tailnet enrollment,
 workstation network changes or Node.js are needed for normal development.
 
-Keep `mix dev.qemu` running. In another terminal:
+Keep `mix dev` running. Once the devices are ready, in another terminal:
 
 ```sh
 mix test --only cable_loss       # one scenario; results also appear at /tests
 ```
 
-The workstation runs only the UI and development tools. Device services run in
-QEMU, not hardware simulators. See [development](docs/development.md) for workflow,
+The workstation runs the UI and a separate host-only Simulator BEAM. Start builds
+one firmware image and bootstraps two QEMU devices through real USB SSH/fwup updates.
+Stop preserves their disks; explicit Reset erases disks and enrollment. Device services run in Nerves, not in-memory mocks.
+See [development](docs/development.md) for simulator configuration, workflow,
 all-scenario checks, CI, EC100 development and troubleshooting.
 
 ## Use a gateway

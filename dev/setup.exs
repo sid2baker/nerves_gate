@@ -22,7 +22,10 @@ defmodule Mix.Tasks.Setup.Qemu do
 
     Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached on subsequent runs).")
     target_mix!(["nerves.artifact.get"])
-    Mix.shell().info("Ready. Run mix dev.qemu, then open http://localhost:4000.")
+
+    Mix.shell().info(
+      "Ready. Run mix dev, open http://localhost:4000/tests, then Start configured devices."
+    )
   end
 
   def run(_), do: Mix.raise("Usage: mix setup")

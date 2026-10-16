@@ -15,17 +15,17 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   alias Phoenix.LiveView.{Lifecycle, Socket}
 
-  @guest NervesGate.TestQemu.guest()
-  @server {ProjectionServer, @guest}
+  def spec,
+    do: %{
+      :name =>
+        "UI reducers follow the device stream, survive restart and reconnect, and keep drafts"
+    }
 
-  def name,
-    do: "UI reducers follow the device stream, survive restart and reconnect, and keep drafts"
-
-  def run(vm) do
-    assert Qemu.status(vm).system.node == @guest
-    assert_runtime_backend()
+  def run(%{device: vm}) do
+    assert Qemu.status(vm).system.node == vm.node
+    assert_runtime_backend(vm)
     assert_remote_events()
-    assert_discovery_observations()
+    assert_discovery_observations(vm)
     assert_http_pages()
     assert_distribution_cookie_cached()
     assert_network_forms(vm)
@@ -39,7 +39,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     try do
       initial = converged(vm, clients)
       assert initial.status.system.target == "x86_64"
-      assert initial.status.system.node == @guest
+      assert initial.status.system.node == vm.node
       assert {:ok, _} = Jason.encode(initial.status)
       assert Process.whereis(ProjectionServer) == nil
 
@@ -63,8 +63,8 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert_drafts(clients)
 
       old_server = client_state(hd(clients)).server
-      assert node(old_server) == @guest
-      :erpc.call(@guest, Process, :exit, [old_server, :kill])
+      assert node(old_server) == vm.node
+      :erpc.call(vm.node, Process, :exit, [old_server, :kill])
 
       Qemu.await(vm, "UI clients resubscribe after server restart", fn _ ->
         Enum.all?(clients, fn pid ->
@@ -79,7 +79,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert_drafts(clients)
 
       disconnects = Map.new(clients, &{&1, client_state(&1).disconnects})
-      assert Node.disconnect(@guest)
+      assert Node.disconnect(vm.node)
 
       Qemu.await(vm, "UI clients resubscribe after distribution disconnect", fn _ ->
         Enum.all?(clients, fn pid ->
@@ -96,13 +96,13 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     end
 
     Qemu.await(vm, "server releases dead subscribers", fn _ ->
-      state = :erpc.call(@guest, :sys, :get_state, [ProjectionServer])
+      state = :erpc.call(vm.node, :sys, :get_state, [ProjectionServer])
       Enum.all?(clients, &(not Map.has_key?(state.clients, &1)))
     end)
   end
 
-  defp assert_discovery_observations do
-    projection = ProjectionServer.snapshot(@server)
+  defp assert_discovery_observations(vm) do
+    projection = NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node})
     network = projection.inputs.network
 
     # Pure interpretation regression: two observed uplinks are online even when
@@ -160,16 +160,17 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   end
 
   @doc false
-  def assert_bench_controls do
+  def assert_bench_controls(vm) do
     run = %{NervesGate.QemuTests.snapshot() | mode: :manual}
 
     page =
       %{
         __changed__: nil,
-        projection: ProjectionServer.snapshot(@server).status,
+        projection: NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node}).status,
         run: run,
         error: nil,
-        confirm_run: nil
+        confirm_run: nil,
+        confirm_reset: false
       }
       |> NervesGateWeb.TestsLive.render()
       |> Phoenix.HTML.Safe.to_iodata()
@@ -371,8 +372,8 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     |> Floki.parse_document!()
   end
 
-  defp assert_runtime_backend do
-    assert NervesGateWeb.Backend.status().system.node == @guest
+  defp assert_runtime_backend(vm) do
+    assert NervesGateWeb.Backend.status().system.node == vm.node
     assert Process.whereis(NervesGate.Network) == nil
     assert Process.whereis(ProjectionServer) == nil
     assert Process.whereis(Tailscaled.Supervisor) == nil
@@ -390,8 +391,8 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     end
 
     # The same compiled host code immediately selects the real device again.
-    assert NervesGateWeb.Backend.status().system.node == @guest
-    assert NervesGateWeb.Backend.projection().status.system.node == @guest
+    assert NervesGateWeb.Backend.status().system.node == vm.node
+    assert NervesGateWeb.Backend.projection().status.system.node == vm.node
   end
 
   # Exercise real static mounts through the development Unix socket too. It is
@@ -646,11 +647,11 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   defp converged(vm, clients) do
     Qemu.await(vm, "client reducers equal the device reducer", fn _ ->
-      projection = ProjectionServer.snapshot(@server)
+      projection = NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node})
       Enum.all?(clients, &(client_state(&1).projection == projection))
     end)
 
-    ProjectionServer.snapshot(@server)
+    NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node})
   end
 
   defp assert_drafts(clients) do

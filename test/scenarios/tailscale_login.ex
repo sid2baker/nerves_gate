@@ -5,12 +5,13 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
   alias NervesGate.Remote.Policy
   alias NervesGate.TestQemu, as: Qemu
 
-  @guest NervesGate.TestQemu.guest()
+  def spec,
+    do: %{
+      name: "Tailscale obtains a private login link and defers HTTPS until enrollment",
+      fresh_disk: true
+    }
 
-  def name, do: "Tailscale obtains a private login link and defers HTTPS until enrollment"
-  def boot_options, do: []
-
-  def run(vm) do
+  def run(%{device: vm}) do
     assert_serve_policy()
     assert_auth_keys()
     Qemu.check_firewall(vm)
@@ -34,7 +35,7 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
     assert rejected.remote_access.auth_state == "error"
     assert rejected.remote_access.error.code == "remote_failed"
     refute Jason.encode!(rejected) =~ key
-    refute inspect(:erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000)) =~ key
+    refute inspect(:erpc.call(vm.node, Tailscaled, :get_configuration, [], 5_000)) =~ key
     assert :ok = Qemu.call(vm, :remote_connect, ["nerves-gate-qemu"])
 
     status =
@@ -42,7 +43,7 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
         vm,
         "Tailscale control server returned a private login link",
         fn status ->
-          status.remote_access.operation == nil && Qemu.login_ready?()
+          status.remote_access.operation == nil && NervesGate.TestQemu.login_ready?(vm)
         end,
         45_000
       )
@@ -52,21 +53,21 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
     NervesGate.Scenarios.ProjectionStream.assert_remote_sign_in()
 
     # Real unenrolled daemon: no listener is written before a usable identity.
-    before = :erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000)
+    before = :erpc.call(vm.node, Tailscaled, :get_configuration, [], 5_000)
     assert before.serve == []
-    assert :ok = :erpc.call(@guest, Tailscaled, :refresh_configuration, [], 5_000)
-    assert :erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000) == before
+    assert :ok = :erpc.call(vm.node, Tailscaled, :refresh_configuration, [], 5_000)
+    assert :erpc.call(vm.node, Tailscaled, :get_configuration, [], 5_000) == before
 
     assert {:error, :serve_not_ready} =
              :erpc.call(
-               @guest,
+               vm.node,
                NervesGate.Remote.Tailscaled,
                :execute,
                [:serve, %{dns_name: "not-enrolled.example.ts.net"}, nil],
                5_000
              )
 
-    assert :erpc.call(@guest, Tailscaled, :get_configuration, [], 5_000) == before
+    assert :erpc.call(vm.node, Tailscaled, :get_configuration, [], 5_000) == before
     assert :ok = Qemu.call(vm, :remote_disconnect, [])
     Qemu.await(vm, "Tailscale disconnect completed", &is_nil(&1.remote_access.operation))
   end

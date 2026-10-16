@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.TrialExpiry do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "unconfirmed settings expire and restore the saved network"
+  def spec, do: %{:name => "unconfirmed settings expire and restore the saved network"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     saved = save(vm, settings("eth0"))
     trial = propose(vm, settings("eth1"))
     assert Qemu.status(vm).network.pending.id == trial

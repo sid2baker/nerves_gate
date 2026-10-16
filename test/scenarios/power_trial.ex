@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.PowerTrial do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "VM process loss during a trial restores only confirmed settings"
+  def spec, do: %{:name => "VM process loss during a trial restores only confirmed settings"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     saved = settings("eth0")
     save(vm, saved)
     trial = propose(vm, settings("eth1"))

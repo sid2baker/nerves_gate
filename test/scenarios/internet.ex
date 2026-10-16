@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.Internet do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "real DNS/HTTPS works, fails during an upstream outage, and recovers"
+  def spec, do: %{:name => "real DNS/HTTPS works, fails during an upstream outage, and recovers"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     Qemu.network(vm, %{uplink: %{loss: :none}})
     save(vm, settings("eth0"))
     assert {:ok, 200} = Qemu.internet_request(vm)
@@ -14,7 +14,7 @@ defmodule NervesGate.Scenarios.Internet do
 
     try do
       Qemu.network(vm, %{uplink: %{loss: :all}})
-      before = Qemu.network_stats().dropped
+      before = NervesGate.TestQemu.network_stats(vm).dropped
       assert {:error, _} = Qemu.internet_request(vm, 5_000)
 
       degraded =
@@ -30,7 +30,7 @@ defmodule NervesGate.Scenarios.Internet do
           90_000
         )
 
-      assert Qemu.network_stats().dropped > before
+      assert NervesGate.TestQemu.network_stats(vm).dropped > before
       assert degraded.backend.available
       assert degraded.connections.internet.health == "unverified"
     after

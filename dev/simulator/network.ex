@@ -1,4 +1,4 @@
-defmodule NervesGate.TestNetwork do
+defmodule NervesGate.Simulator.Network do
   @moduledoc """
   The owned bench's real Ethernet switch. QEMU supplies the network protocols.
 
@@ -26,15 +26,15 @@ defmodule NervesGate.TestNetwork do
   def connections(internet),
     do: Map.new([:lan1, :lan2], &{&1, if(&1 == internet, do: :internet, else: :equipment)})
 
-  def start_link(dir), do: GenServer.start_link(__MODULE__, dir, name: __MODULE__)
-  def snapshot, do: GenServer.call(__MODULE__, :snapshot)
-  def configure(patch), do: GenServer.call(__MODULE__, {:configure, patch})
-  def attach, do: GenServer.call(__MODULE__, :attach, 15_000)
-  def detach, do: GenServer.call(__MODULE__, :detach)
-  def release, do: GenServer.call(__MODULE__, :release)
+  def start_link(dir), do: GenServer.start_link(__MODULE__, dir)
+  def snapshot(server), do: GenServer.call(server, :snapshot)
+  def configure(server, patch), do: GenServer.call(server, {:configure, patch})
+  def attach(server), do: GenServer.call(server, :attach, 15_000)
+  def detach(server), do: GenServer.call(server, :detach)
+  def release(server), do: GenServer.call(server, :release)
 
   # A fixed graph: only frame forwarding changes, never a realized NIC's netdev.
-  def arguments(dir, forwards, usb?) do
+  def arguments(dir, address, forwards, usb) do
     streams =
       Enum.flat_map(@ports, fn port ->
         [
@@ -52,23 +52,20 @@ defmodule NervesGate.TestNetwork do
 
     management =
       "user,id=mgmt,net=192.168.77.0/24,host=192.168.77.1,ipv6=off,restrict=on" <>
-        forward(forwards.epmd, "192.168.77.2", 4369) <>
-        forward(forwards.distribution, "192.168.77.2", 9100) <>
-        forward(forwards.http, "192.168.77.2", 4000) <>
-        forward(forwards.ssh, "192.168.77.2", 22)
+        forward(address, forwards.epmd, "192.168.77.2", 4369) <>
+        forward(address, forwards.distribution, "192.168.77.2", 9100) <>
+        forward(address, forwards.http, "192.168.77.2", 4000) <>
+        forward(address, forwards.ssh, "192.168.77.2", 22)
 
-    usb =
-      if usb? do
-        [
-          "-netdev",
-          "user,id=usb,net=172.31.255.0/24,ipv6=off,restrict=on" <>
-            forward(forwards.usb, "172.31.255.1", 22),
-          "-device",
-          "virtio-net-pci,netdev=usb,id=usb-nic,mac=52:54:00:12:34:59"
-        ]
-      else
-        []
-      end
+    # VintageNetDirect runs in the guest, including its DHCP server. Libslirp is
+    # a statically addressed recovery peer, not a DHCP-client qualification.
+    usb = [
+      "-netdev",
+      "user,id=usb,net=#{usb.network}/24,host=#{usb.peer},ipv6=off,restrict=on" <>
+        forward(address, forwards.usb, usb.device, 22),
+      "-device",
+      "virtio-net-pci,netdev=usb,id=usb-nic,mac=52:54:00:12:34:59"
+    ]
 
     streams ++ nics ++ internet ++ router(1, :control, management, "mgmt") ++ usb
   end
@@ -84,8 +81,11 @@ defmodule NervesGate.TestNetwork do
     ]
   end
 
-  defp forward(port, address, target), do: ",hostfwd=tcp:127.0.0.1:#{port}-#{address}:#{target}"
-  defp socket_path(dir, port), do: Path.join(dir, "#{port}.sock")
+  defp forward(host, port, address, target),
+    do: ",hostfwd=tcp:#{host}:#{port}-#{address}:#{target}"
+
+  defp socket_path(dir, port),
+    do: dir |> Path.join("#{port}.sock") |> Path.relative_to_cwd()
 
   @impl true
   def init(dir) do

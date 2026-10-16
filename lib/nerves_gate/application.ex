@@ -17,8 +17,12 @@ defmodule NervesGate.Application do
   if @host do
     # The host serves the UI only. No device services, tables or simulators.
     defp backend_children do
-      if is_nil(Application.get_env(:nerves_gate, :backend_node)),
-        do: raise("Host mode requires a device backend. Run mix dev.ec100 or mix dev.qemu.")
+      if is_nil(Application.get_env(:nerves_gate, :backend_node)) and
+           is_nil(Application.get_env(:nerves_gate, :simulator_node)),
+         do:
+           raise(
+             "Host mode requires a device backend or owned simulator. Run mix dev.ec100 or mix dev."
+           )
 
       unless Node.alive?(),
         do: raise("Start the remote UI with elixir --name <name@address> -S mix phx.server")

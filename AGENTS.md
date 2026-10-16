@@ -30,7 +30,7 @@
 ## Development and validation
 
 - Use `mix setup` for initial QEMU development setup; use `mix deps.get` when only fetching dependencies.
-- The user runs `mix dev.qemu` in another shell. Do not launch or stop that session. If it is unavailable, ask the user to start it.
+- The user runs `mix dev` in another shell and starts devices on `/tests`. Do not launch or stop that session, or boot devices through lifecycle controls without authorization. If unavailable, ask the user to start it.
 - Run focused scenarios against the existing session with `mix test --only <scenario>`; do not use `--ci` to launch another VM.
 - UI, CLI and CI use the same QEMU scenarios. Extend those rather than creating a separate hardware-mock or simulator suite.
 - `mix ci` is expensive and is run only by the user. Do not run it; report the focused checks you performed and leave full CI to the user.

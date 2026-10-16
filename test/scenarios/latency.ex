@@ -4,17 +4,17 @@ defmodule NervesGate.Scenarios.Latency do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "real HTTPS survives 200ms upstream delay without losing management"
+  def spec, do: %{:name => "real HTTPS survives 200ms upstream delay without losing management"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     Qemu.await(vm, "public Internet reachable", &internet?/1, 60_000)
 
     try do
       Qemu.network(vm, %{uplink: %{delay_ms: 200}})
-      before = Qemu.network_stats()
+      before = NervesGate.TestQemu.network_stats(vm)
       assert {:ok, 200} = Qemu.internet_request(vm)
       assert addressed?(Qemu.status(vm))
-      stats = Qemu.network_stats()
+      stats = NervesGate.TestQemu.network_stats(vm)
       assert stats.delayed > 0
       assert stats.min_delay_ms >= 200
       assert stats.overflow == before.overflow

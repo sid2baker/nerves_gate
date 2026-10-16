@@ -3,9 +3,9 @@ defmodule NervesGate.Scenarios.InvalidTrialIds do
   import ExUnit.Assertions
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "Invalid trial IDs cannot change network settings"
+  def spec, do: %{:name => "Invalid trial IDs cannot change network settings"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     before = Qemu.status(vm)
 
     for command <- [:network_confirm, :network_cancel] do

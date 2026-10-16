@@ -4,18 +4,17 @@ defmodule NervesGate.Scenarios.SystemArtifact do
   alias Mix.Tasks.Nerves.Artifact.Release, as: Release
   alias NervesGate.TestQemu, as: Qemu
 
-  @guest NervesGate.TestQemu.guest()
   @system Path.expand("../../systems/nerves_system_ec100_qemu", __DIR__)
 
-  def name, do: "QEMU runs the versioned system and artifact publication stays safe"
+  def spec, do: %{:name => "QEMU runs the versioned system and artifact publication stays safe"}
 
-  def run(vm) do
-    assert Qemu.status(vm).system.node == @guest
+  def run(%{device: vm}) do
+    assert Qemu.status(vm).system.node == vm.node
     version = File.read!(Path.join(@system, "VERSION")) |> String.trim()
-    assert {:ok, os_release} = :erpc.call(@guest, File, :read, ["/usr/lib/os-release"], 5_000)
+    assert {:ok, os_release} = :erpc.call(vm.node, File, :read, ["/usr/lib/os-release"], 5_000)
     assert "NERVES_SYSTEM_VERSION=#{version}" in String.split(os_release, "\n")
 
-    assert :erpc.call(@guest, Nerves.Runtime.KV, :get_active, ["nerves_fw_platform"], 5_000) ==
+    assert :erpc.call(vm.node, Nerves.Runtime.KV, :get_active, ["nerves_fw_platform"], 5_000) ==
              "x86_64"
 
     notes = Release.release_notes!(File.read!(Path.join(@system, "CHANGELOG.md")), version)

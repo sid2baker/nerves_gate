@@ -8,10 +8,9 @@ config :nerves_gate,
   recovery_adapter: nil,
   indicators_adapter: nil
 
-# Controller-visible identity through the loopback-only management forward.
-# The actual NIC remains 192.168.77.2; no Tailscale login is needed.
-node = System.get_env("NERVES_GATE_DEVICE_NODE") || "nerves_gate@127.0.0.1"
-config :nerves_gate, development_node: String.to_atom(node)
+# Initialize real VintageNetDirect and a serial-derived development identity
+# before VintageNet starts. Every simulated device uses this same firmware.
+config :nerves_runtime, init_module: NervesGate.QemuInit
 
 # Management is separate from eth0/eth1; LAN trials cannot remove this address.
 config :vintage_net,

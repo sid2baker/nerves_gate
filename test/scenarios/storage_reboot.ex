@@ -4,10 +4,13 @@ defmodule NervesGate.Scenarios.StorageReboot do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "reboot after failed persistence never accepts the failed update"
-  def boot_options, do: []
+  def spec,
+    do: %{
+      name: "reboot after failed persistence never accepts the failed update",
+      fresh_disk: true
+    }
 
-  def run(vm) do
+  def run(%{device: vm}) do
     saved = settings("eth0")
     rejected = settings("eth1")
     save(vm, saved)

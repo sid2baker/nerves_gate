@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.TrialReboot do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "reset during an unconfirmed trial restores only confirmed settings"
+  def spec, do: %{:name => "reset during an unconfirmed trial restores only confirmed settings"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     saved = save(vm, settings("eth0"))
     propose(vm, settings("eth1"))
     Qemu.reboot(vm)

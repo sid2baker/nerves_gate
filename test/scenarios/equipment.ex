@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.Equipment do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "equipment cable failure leaves Internet and management available"
+  def spec, do: %{:name => "equipment cable failure leaves Internet and management available"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     before = Qemu.status(vm).network.desired
 
     network =

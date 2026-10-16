@@ -2,29 +2,29 @@ defmodule NervesGate.Scenarios.Topology do
   @moduledoc false
   import ExUnit.Assertions
   import NervesGate.ScenarioHelpers
-  alias NervesGate.TestNetwork
   alias NervesGate.TestQemu, as: Qemu
 
-  @guest NervesGate.TestQemu.guest()
+  def spec,
+    do: %{
+      name: "Internet moves between stable LAN ports; equipment and management cannot forward",
+      fresh_disk: true
+    }
 
-  def name, do: "Internet moves between stable LAN ports; equipment and management cannot forward"
-  def boot_options, do: []
-
-  def run(vm) do
+  def run(%{device: vm}) do
     assert_frame_policy()
-    assert Qemu.topology() == TestNetwork.baseline()
-    original = identities()
+    assert NervesGate.TestQemu.topology(vm) == NervesGate.Simulator.Network.baseline()
+    original = identities(vm)
     factory = Qemu.status(vm).network.desired
     assert factory == %{"mode" => "unconfigured"}
     online(vm, "eth0")
 
-    assert {:ok, destination} = :erpc.call(@guest, :inet, :getaddr, [~c"example.com", :inet])
+    assert {:ok, destination} = :erpc.call(vm.node, :inet, :getaddr, [~c"example.com", :inet])
 
     Qemu.network(vm, %{internet: :lan2})
-    assert Qemu.topology() == %{lan1: :equipment, lan2: :internet}
+    assert NervesGate.TestQemu.topology(vm) == %{lan1: :equipment, lan2: :internet}
     online(vm, "eth1")
     assert Qemu.status(vm).network.desired == factory
-    assert identities() == original
+    assert identities(vm) == original
 
     # Supply a deliberately tempting gateway on the equipment LAN. Even a
     # manually injected route must not turn equipment into a second uplink.
@@ -41,28 +41,28 @@ defmodule NervesGate.Scenarios.Topology do
 
     save(vm, configured)
     online(vm, "eth1")
-    refuses_forwarding("eth0", "10.0.3.2", destination)
-    refuses_forwarding("eth2", "192.168.77.1", destination)
-    refuses_host_loopback()
+    refuses_forwarding(vm, "eth0", "10.0.3.2", destination)
+    refuses_forwarding(vm, "eth2", "192.168.77.1", destination)
+    refuses_host_loopback(vm)
 
     Qemu.network(vm, %{internet: :off})
-    assert Qemu.topology() == %{lan1: :equipment, lan2: :equipment}
+    assert NervesGate.TestQemu.topology(vm) == %{lan1: :equipment, lan2: :equipment}
     assert {:error, _} = Qemu.internet_request(vm, 3_000)
     assert Qemu.status(vm).backend.available
     assert Qemu.status(vm).network.desired == configured
-    assert identities() == original
+    assert identities(vm) == original
 
     Qemu.network(vm, %{internet: :lan1})
     assert Qemu.status(vm).network.desired == configured
     save(vm, settings("eth0"))
     online(vm, "eth0")
-    assert identities() == original
+    assert identities(vm) == original
   end
 
   # Small admission checks live with the same scenario, not a mock-network suite.
   # QEMU remains responsible for checksums and complete protocol validation.
   def assert_frame_policy do
-    alias NervesGate.TestNetwork.Ethernet
+    alias NervesGate.Simulator.Network.Ethernet
     tcp = <<12_345::16, 443::16, 0::128>>
     dns = <<12_345::16, 53::16, 8::16, 0::16>>
     dhcp = <<68::16, 67::16, 8::16, 0::16>>
@@ -77,6 +77,8 @@ defmodule NervesGate.Scenarios.Topology do
           {0x0A00020F, 0xFFFFFFFF, 6, 0, tcp, :deny},
           {0x0A00020F, 0xC0A84D02, 6, 0, tcp, :deny},
           {0x0A00020F, 0xAC1FFF02, 6, 0, tcp, :deny},
+          {0x0A00020F, 0xAC1F0001, 6, 0, tcp, :deny},
+          {0x0A00020F, 0xAC1F7F81, 6, 0, tcp, :deny},
           {0xC0A84D02, 0x01010101, 6, 0, tcp, :deny}
         ] do
       frame =
@@ -106,7 +108,7 @@ defmodule NervesGate.Scenarios.Topology do
   end
 
   defp assert_management_policy do
-    alias NervesGate.TestNetwork.Ethernet
+    alias NervesGate.Simulator.Network.Ethernet
 
     for {port, flags, target, expected} <- [
           {9100, 0x12, 0xC0A84D01, :local},
@@ -140,23 +142,23 @@ defmodule NervesGate.Scenarios.Topology do
     end
   end
 
-  defp refuses_host_loopback do
+  defp refuses_host_loopback(vm) do
     {:ok, listener} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}, active: false])
 
     try do
       {:ok, port} = :inet.port(listener)
-      before = Qemu.network_stats().denied
+      before = NervesGate.TestQemu.network_stats(vm).denied
 
       assert {:error, _} =
                :erpc.call(
-                 @guest,
+                 vm.node,
                  :gen_tcp,
                  :connect,
                  [{10, 0, 2, 2}, port, [:binary, active: false], 1000],
                  2000
                )
 
-      assert Qemu.network_stats().denied > before
+      assert NervesGate.TestQemu.network_stats(vm).denied > before
       assert {:error, :timeout} = :gen_tcp.accept(listener, 100)
     after
       :gen_tcp.close(listener)
@@ -177,15 +179,15 @@ defmodule NervesGate.Scenarios.Topology do
     assert {:ok, 200} = Qemu.internet_request(vm)
   end
 
-  defp identities do
+  defp identities(vm) do
     Map.new(~w(eth0 eth1 eth2), fn interface ->
-      {:ok, mac} = :erpc.call(@guest, File, :read, ["/sys/class/net/#{interface}/address"])
-      {:ok, index} = :erpc.call(@guest, File, :read, ["/sys/class/net/#{interface}/ifindex"])
+      {:ok, mac} = :erpc.call(vm.node, File, :read, ["/sys/class/net/#{interface}/address"])
+      {:ok, index} = :erpc.call(vm.node, File, :read, ["/sys/class/net/#{interface}/ifindex"])
       {interface, {mac, index}}
     end)
   end
 
-  defp refuses_forwarding(interface, gateway, destination) do
+  defp refuses_forwarding(vm, interface, gateway, destination) do
     address = destination |> :inet.ntoa() |> to_string()
     route = ["#{address}/32", "via", gateway, "dev", interface]
 
@@ -210,35 +212,35 @@ defmodule NervesGate.Scenarios.Topology do
         gateway
       end
 
-    mac = router_mac(router_interface, router_address)
-    before = Qemu.network_stats().rejected[port]
-    neighbor(:replace, interface, gateway, mac)
+    mac = router_mac(vm, router_interface, router_address)
+    before = NervesGate.TestQemu.network_stats(vm).rejected[port]
+    neighbor(vm, :replace, interface, gateway, mac)
 
     try do
-      assert {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", ["route", "add" | route]])
+      assert {_, 0} = :erpc.call(vm.node, System, :cmd, ["ip", ["route", "add" | route]])
 
       try do
         assert {:error, _} =
                  :erpc.call(
-                   @guest,
+                   vm.node,
                    :gen_tcp,
                    :connect,
                    [destination, 443, [:binary, active: false], 2000],
                    3000
                  )
 
-        assert Qemu.network_stats().rejected[port] > before
-        assert :erpc.call(@guest, Node, :alive?, [])
+        assert NervesGate.TestQemu.network_stats(vm).rejected[port] > before
+        assert :erpc.call(vm.node, Node, :alive?, [])
       after
-        assert {_, 0} = :erpc.call(@guest, System, :cmd, ["ip", ["route", "del" | route]])
+        assert {_, 0} = :erpc.call(vm.node, System, :cmd, ["ip", ["route", "del" | route]])
       end
     after
-      neighbor(:delete, interface, gateway, mac)
+      neighbor(vm, :delete, interface, gateway, mac)
     end
   end
 
-  defp router_mac(interface, address) do
-    {:ok, table} = :erpc.call(@guest, File, :read, ["/proc/net/arp"])
+  defp router_mac(vm, interface, address) do
+    {:ok, table} = :erpc.call(vm.node, File, :read, ["/proc/net/arp"])
 
     mac =
       Enum.find_value(String.split(table, "\n"), fn line ->
@@ -254,7 +256,7 @@ defmodule NervesGate.Scenarios.Topology do
 
   # BusyBox ip only supports neighbor show/flush. Send RTM_NEWNEIGH/DELNEIGH
   # in the owned guest, with an ACK, rather than add a host tool or fake ARP peer.
-  defp neighbor(operation, interface, address, mac) do
+  defp neighbor(vm, operation, interface, address, mac) do
     {type, flags} = if operation == :replace, do: {28, 0x505}, else: {29, 5}
     {:ok, ip} = :inet.parse_address(String.to_charlist(address))
     ip = :erlang.list_to_binary(Tuple.to_list(ip))
@@ -291,6 +293,6 @@ defmodule NervesGate.Scenarios.Topology do
         end
       end
 
-    assert {:ok, _bindings} = :erpc.call(@guest, Code, :eval_quoted, [code], 3000)
+    assert {:ok, _bindings} = :erpc.call(vm.node, Code, :eval_quoted, [code], 3000)
   end
 end

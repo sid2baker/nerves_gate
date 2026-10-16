@@ -3,9 +3,9 @@ defmodule NervesGate.Scenarios.Hotplug do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "LAN1 NIC removal and replacement recover without losing management"
+  def spec, do: %{:name => "LAN1 NIC removal and replacement recover without losing management"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     try do
       NervesGate.TestQemu.remove_lan1(vm)
 

@@ -4,9 +4,12 @@ defmodule NervesGate.Scenarios.MissingTrialNic do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "removing the proposed Internet NIC prevents confirmation and permits rollback"
+  def spec,
+    do: %{
+      :name => "removing the proposed Internet NIC prevents confirmation and permits rollback"
+    }
 
-  def run(vm) do
+  def run(%{device: vm}) do
     saved = settings("eth1")
     save(vm, saved)
     trial = propose(vm, settings("eth0"))

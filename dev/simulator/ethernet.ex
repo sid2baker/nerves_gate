@@ -1,4 +1,4 @@
-defmodule NervesGate.TestNetwork.Ethernet do
+defmodule NervesGate.Simulator.Network.Ethernet do
   @moduledoc false
   import Bitwise
 
@@ -83,7 +83,7 @@ defmodule NervesGate.TestNetwork.Ethernet do
 
     first in [0, 127] or first >= 224 or
       (address >>> 8) in [0x0A0002, 0xC0A84D] or
-      address >>> 2 == 0xAC1FFF01 >>> 2 or
+      address >>> 16 == 0xAC1F or
       address >>> 16 == 0xA9FE
   end
 end

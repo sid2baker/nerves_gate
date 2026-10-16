@@ -1,7 +1,7 @@
-defmodule Mix.Tasks.Dev.Qemu do
+defmodule Mix.Tasks.Dev do
   @moduledoc false
   use Mix.Task
-  @shortdoc "Boot one disposable QEMU and its /tests page"
+  @shortdoc "Start Phoenix and the empty multi-device simulator"
 
   @impl true
   def run(args) do
@@ -78,17 +78,14 @@ defmodule Mix.Tasks.Dev.Qemu do
     File.rm(socket)
     {:ok, _} = Application.ensure_all_started(:muontrap)
 
-    check_tools!()
-
     try do
-      build_firmware!()
-      IO.puts("Starting QEMU; waiting for the device and Phoenix...")
+      IO.puts("Starting Phoenix with an empty simulator...")
 
       status =
         if ci? do
-          run_session(true, socket, options[:only] || "all", port)
+          run_session(true, socket, options[:only] || "all", port, options[:config])
         else
-          serve(port, socket)
+          serve(port, socket, options[:config])
         end
 
       if status != 0, do: Mix.raise("QEMU session failed (exit #{status})")
@@ -97,27 +94,22 @@ defmodule Mix.Tasks.Dev.Qemu do
     end
   end
 
-  defp check_tools! do
-    for tool <- ["qemu-system-x86_64", "fwup"] do
-      unless System.find_executable(tool),
-        do: Mix.raise("Install #{tool}; see docs/development.md#prerequisites.")
-    end
-  end
-
   defp options!(args) do
     {options, []} =
-      OptionParser.parse!(args, strict: [port: :integer, ci: :boolean, only: :string])
+      OptionParser.parse!(args,
+        strict: [port: :integer, ci: :boolean, only: :string, config: :string]
+      )
 
     options
   end
 
-  defp serve(port, socket) do
+  defp serve(port, socket, config) do
     {:ok, _} = Application.ensure_all_started(:req)
-    task = Task.async(fn -> run_session(false, socket, "all", port) end)
+    task = Task.async(fn -> run_session(false, socket, "all", port, config) end)
 
     try do
-      await_http(task, socket, port, System.monotonic_time(:millisecond) + 240_000)
-      IO.puts("QEMU ready: http://localhost:#{port}/tests")
+      await_http(task, socket, port, System.monotonic_time(:millisecond) + 600_000)
+      IO.puts("Simulator controls ready: http://localhost:#{port}/tests")
       Task.await(task, :infinity)
     after
       Task.shutdown(task, :brutal_kill)
@@ -151,7 +143,7 @@ defmodule Mix.Tasks.Dev.Qemu do
     end
   end
 
-  defp run_session(ci?, socket, selection, port) do
+  defp run_session(ci?, socket, selection, port, config) do
     # erl reads ERL_EPMD_PORT into -epmd_port at VM startup, not at Node.start.
     # Reserve a candidate here; the child checks it again before QEMU binds it.
     {:ok, reservation} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
@@ -170,7 +162,8 @@ defmodule Mix.Tasks.Dev.Qemu do
              "dev"
            end},
           {"ERL_EPMD_PORT", Integer.to_string(epmd_port)},
-          {"NERVES_GATE_BACKEND_NODE", to_string(NervesGate.TestQemu.guest())},
+          {"NERVES_GATE_BACKEND_NODE", nil},
+          {"QEMU_SIM_CONFIG", Path.expand(config || "dev/simulator.exs")},
           {"NERVES_GATE_DEVICE_NODE", nil},
           {"QEMU_HTTP_SOCKET", socket},
           {"QEMU_HTTP_PORT", Integer.to_string(port)},
@@ -195,21 +188,5 @@ defmodule Mix.Tasks.Dev.Qemu do
           "Port #{port} unavailable: #{inspect(reason)}. Stop the existing server or use --port."
         )
     end
-  end
-
-  defp build_firmware! do
-    {_, status} =
-      MuonTrap.cmd("mix", ["firmware", "--overwrite"],
-        env: [
-          {"MIX_TARGET", "x86_64"},
-          {"MIX_ENV", "dev"},
-          {"NERVES_GATE_BACKEND_NODE", nil},
-          {"NERVES_GATE_DEVICE_NODE", nil}
-        ],
-        into: IO.stream(),
-        stderr_to_stdout: true
-      )
-
-    if status != 0, do: Mix.raise("QEMU firmware build failed")
   end
 end

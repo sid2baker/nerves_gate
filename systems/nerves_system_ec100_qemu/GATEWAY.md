@@ -60,7 +60,8 @@ this system does not simulate them.
 
 ## Build and run
 
-From the application root, use `mix setup`, then `mix dev.qemu`. Setup downloads
+From the application root, use `mix setup`, then `mix dev`. Open `/tests` and
+Start configured devices to build firmware and bootstrap QEMU. Setup downloads
 this prebuilt system and installs the checksum-pinned x86 daemon; the launcher
 builds firmware and boots an isolated disposable device. See the
 [development guide](../../docs/development.md) for prerequisites and scenarios.

@@ -5,18 +5,19 @@ defmodule NervesGate.Scenarios.FrontendAssets do
   alias NervesGateWeb.Endpoint
   alias Phoenix.Socket.Transport
 
-  @guest NervesGate.TestQemu.guest()
+  def spec, do: %{:name => "Host and firmware serve the frontend; firmware needs no Volt runtime"}
 
-  def name, do: "Host and firmware serve the frontend; firmware needs no Volt runtime"
-
-  def run(vm) do
+  def run(%{device: vm}) do
     assert_websocket_csrf()
-    assert Qemu.status(vm).system.node == @guest
+    assert Qemu.status(vm).system.node == vm.node
 
+    # Independent probes: development error pages may close a keep-alive
+    # connection after sending their response. Never retry to conceal failures.
     host =
       Req.new(
         base_url: "http://localhost",
         unix_socket: System.fetch_env!("QEMU_HTTP_SOCKET"),
+        headers: [connection: "close"],
         retry: false
       )
 
@@ -24,12 +25,24 @@ defmodule NervesGate.Scenarios.FrontendAssets do
     assert %URI{scheme: "http", host: "localhost", port: ^port} = URI.parse(Endpoint.url())
     assert Endpoint.config(:http)[:ip] == {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}
 
-    firmware = Req.new(base_url: "http://127.0.0.1:#{vm.forwards.http}", retry: false)
+    firmware =
+      Req.new(
+        base_url: "http://#{vm.address}:#{vm.forwards.http}",
+        headers: [connection: "close"],
+        retry: false
+      )
+
     assert_assets(host)
     assert_assets(firmware)
 
     if System.get_env("QEMU_CI") != "true" do
-      browser = Req.new(base_url: "http://127.0.0.1:#{port}", retry: false)
+      browser =
+        Req.new(
+          base_url: "http://127.0.0.1:#{port}",
+          headers: [connection: "close"],
+          retry: false
+        )
+
       assert_assets(browser)
 
       if Endpoint.config(:code_reloader) do
@@ -81,7 +94,7 @@ defmodule NervesGate.Scenarios.FrontendAssets do
 
     assert Req.get!(firmware, url: "/config").status == 404
     assert Req.get!(firmware, url: "/tidewave/mcp").status == 404
-    assert :erpc.call(@guest, :code, :where_is_file, [~c"tidewave.app"]) == :non_existing
+    assert :erpc.call(vm.node, :code, :where_is_file, [~c"tidewave.app"]) == :non_existing
 
     page = Req.get!(firmware, url: "/")
     [csp] = Req.Response.get_header(page, "content-security-policy")
@@ -89,7 +102,7 @@ defmodule NervesGate.Scenarios.FrontendAssets do
     refute csp =~ "unsafe-inline"
     refute page.body =~ "/@volt/"
     assert Req.get!(firmware, url: "/@volt/client.js").status == 404
-    assert :erpc.call(@guest, :code, :where_is_file, [~c"volt.app"]) == :non_existing
+    assert :erpc.call(vm.node, :code, :where_is_file, [~c"volt.app"]) == :non_existing
 
     for path <- ["/assets/js/app.js", "/assets/css/app.css"] do
       response = Req.get!(firmware, url: path)

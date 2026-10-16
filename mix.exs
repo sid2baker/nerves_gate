@@ -1,6 +1,6 @@
 # Select host tooling before Nerves reads the project, even after firmware builds.
 case List.first(System.argv()) do
-  command when command in ["setup", "dev.ec100", "dev.qemu", "assets.build"] ->
+  command when command in ["setup", "dev.ec100", "dev", "assets.build"] ->
     Mix.env(:dev)
     Mix.target(:host)
 
@@ -29,7 +29,7 @@ defmodule NervesGate.MixProject do
       releases: [
         nerves_gate: [
           include_erts: &Nerves.erts/0,
-          applications: if(Mix.target() == :ec100, do: [nerves_runtime: :transient], else: []),
+          applications: if(Mix.target() in @targets, do: [nerves_runtime: :transient], else: []),
           steps: [&Nerves.init_release/1, :assemble]
         ]
       ],
@@ -38,6 +38,7 @@ defmodule NervesGate.MixProject do
           :mix,
           :nerves,
           :muontrap,
+          :one_dhcpd,
           :ssh,
           :ex_unit,
           :tailscaled_ex,
@@ -76,7 +77,7 @@ defmodule NervesGate.MixProject do
         test: :host,
         ci: :host,
         "dev.ec100": :host,
-        "dev.qemu": :host,
+        dev: :host,
         "qemu.test": :host,
         "assets.build": :host
       ],
@@ -84,7 +85,7 @@ defmodule NervesGate.MixProject do
         setup: :dev,
         ci: :test,
         "dev.ec100": :dev,
-        "dev.qemu": :dev,
+        dev: :dev,
         "qemu.test": :test,
         "assets.build": :dev
       ]
@@ -100,7 +101,7 @@ defmodule NervesGate.MixProject do
   defp elixirc_paths do
     if Mix.target() == :host,
       do: ["lib", "dev", "test/support", "test/scenarios"],
-      else: ["lib"]
+      else: ["lib", "firmware/#{Mix.target()}"]
   end
 
   defp deps do
@@ -140,7 +141,7 @@ defmodule NervesGate.MixProject do
       {:vintage_net, "~> 0.13", runtime: Mix.target() != :host},
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
-      {:vintage_net_direct, "~> 0.10", targets: @targets},
+      {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
       {:nerves_system_ec100,
        github: "sid2baker/nerves_system_ec100", tag: "v0.2.0", runtime: false, targets: :ec100},
       {:nerves_system_ec100_qemu,

@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.ConfirmedReboot do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "confirmed settings survive a VM reset"
+  def spec, do: %{:name => "confirmed settings survive a VM reset"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     settings = save(vm, settings("eth0"))
 
     Qemu.reboot(vm)

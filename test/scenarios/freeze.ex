@@ -4,9 +4,9 @@ defmodule NervesGate.Scenarios.Freeze do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "a frozen VM becomes unreachable and resumes without losing state"
+  def spec, do: %{:name => "a frozen VM becomes unreachable and resumes without losing state"}
 
-  def run(vm) do
+  def run(%{device: vm}) do
     before = Qemu.status(vm)
 
     try do

@@ -4,9 +4,12 @@ defmodule NervesGate.Scenarios.InvalidConfiguration do
   import NervesGate.ScenarioHelpers
   alias NervesGate.TestQemu, as: Qemu
 
-  def name, do: "invalid configuration is rejected without losing management or changing settings"
+  def spec,
+    do: %{
+      :name => "invalid configuration is rejected without losing management or changing settings"
+    }
 
-  def run(vm) do
+  def run(%{device: vm}) do
     before = Qemu.status(vm)
     invalid = %{"mode" => "not-a-mode"}
     assert {:error, %{code: "invalid_parameters"}} = Qemu.call(vm, :network_validate, [invalid])
