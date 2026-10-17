@@ -37,10 +37,13 @@ See the [public API](action-api.md) for calling conventions and completion seman
 | Alarmist | Fault timing, severity and subscriptions; not admission or recovery |
 | LiveView | Drafts, presentation, subscriptions and command submission |
 
-The device's `rest_for_one` order is PubSub, workflow PropertyTable, SSH, Network,
-Remote, Equipment, Indicators, Buses, ProjectionServer, then Endpoint. Dependencies
-supervise VintageNet, `tailscaled_ex` and Alarmist themselves. Host UI instances start
-neither domain processes nor a projection mirror.
+Configuration supplies the service list: EC100 and QEMU share one list, and the
+workstation UI has its own. The device's `rest_for_one` order is PubSub, one-time
+routing setup, workflow PropertyTable, SSH, Network, Remote, Equipment, Indicators,
+Buses, ProjectionServer, then Endpoint. Dependencies supervise VintageNet,
+`tailscaled_ex` and Alarmist themselves. Host UI instances start neither domain
+processes nor a projection mirror. The UI backend is `:local` on devices, or a
+remote node (nil while disconnected) on the workstation; there is no local fallback.
 
 Workers are linked and bounded. Owners stop and join them before restoration or
 new work. Network uses deferred `GenServer.reply/2` after hardware completion;
@@ -74,8 +77,10 @@ or application-wide recovery journal is introduced.
 Firmware application startup sets default-deny IPv4 forwarding before enabling
 forwarding; Tailscale owns VPN allow/NAT rules.
 EC100 factory reset stops data writers, normally unmounts data and uses Nerves'
-reset operation. A Nerves initialization hook checks writable ext4 before data
-users start. See [reset safety](indicators.md#recovery).
+reset operation. Both devices use the same Nerves initialization hook, which
+requires their data partition mounted writable ext4 before data users start.
+Code that needs `nerves_runtime` lives in `firmware/` and is compiled only into
+firmware. See [reset safety](indicators.md#recovery).
 
 ## UI projection
 
@@ -136,8 +141,13 @@ builds and bootstraps; Start after Stop resumes the preserved disks. Phoenix sta
 available through device failures. Each `Simulator.Device` owns its
 QEMU process, disk, QMP socket and `Simulator.Network` Ethernet relay. UI and
 scenario workers are distribution clients, not hardware owners. `TestQemu` only
-adds scenario assertions and cleanup. `dev/` is compiled only on the host;
-QEMU boot initialization lives separately in `firmware/x86_64/`.
+adds scenario assertions and cleanup. `dev/` is compiled only on the host.
+The QEMU Nerves system names the provisioning NIC `usb0` and sets the full serial
+as its hostname before Erlang starts. Both targets use the same application
+sources, data-initialization hook and standard VintageNetDirect configuration;
+there is no separate QEMU application boot module. Runtime configuration derives
+the bench-specific loopback node name from the system hostname; the distribution
+module consumes that configuration without knowing the target.
 
 Every new or reset device starts from the configured factory artifact, boots real
 VintageNetDirect on USB Ethernet, and receives current firmware over the normal

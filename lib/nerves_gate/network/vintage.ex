@@ -4,25 +4,25 @@ defmodule NervesGate.Network.Vintage do
   import Bitwise
   alias NervesGate.Config
   alias NervesGate.Network.{Cellular, LAN}
+  require Logger
 
-  # One-time firmware setup; Tailscale owns its forwarding/NAT rules. This must
-  # never run against the workstation or prevent local/USB web access on failure.
-  if Mix.target() == :host do
-    def prepare_routing, do: :ok
-  else
-    require Logger
+  # Listed first in the firmware services: one-time routing setup before Network
+  # starts. Tailscale owns its forwarding/NAT rules. Failure must not prevent
+  # local/USB web access. Workstation configuration never starts this.
+  def child_spec(_), do: %{id: __MODULE__, start: {__MODULE__, :prepare_routing, []}}
 
-    def prepare_routing do
-      :ok = File.write("/proc/sys/net/ipv4/ip_forward", "0\n")
+  def prepare_routing do
+    :ok = File.write("/proc/sys/net/ipv4/ip_forward", "0\n")
 
-      {_, 0} =
-        System.cmd("iptables", ["-w", "5", "-P", "FORWARD", "DROP"], stderr_to_stdout: true)
+    {_, 0} =
+      System.cmd("iptables", ["-w", "5", "-P", "FORWARD", "DROP"], stderr_to_stdout: true)
 
-      :ok = File.write("/proc/sys/net/ipv4/ip_forward", "1\n")
-    rescue
-      _exception in [MatchError, ErlangError] ->
-        Logger.warning("IPv4 subnet forwarding setup failed; local web access remains available.")
-    end
+    :ok = File.write("/proc/sys/net/ipv4/ip_forward", "1\n")
+    :ignore
+  rescue
+    _exception in [MatchError, ErlangError] ->
+      Logger.warning("IPv4 subnet forwarding setup failed; local web access remains available.")
+      :ignore
   end
 
   @impl true

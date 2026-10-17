@@ -374,6 +374,12 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   defp assert_runtime_backend(vm) do
     assert NervesGateWeb.Backend.status().system.node == vm.node
+    assert :erpc.call(vm.node, NervesGateWeb.Backend, :status, []).system.node == vm.node
+
+    # Firmware-only data/recovery code is not compiled into workstation tooling.
+    for module <- [NervesGate.Recovery.DataInit, NervesGate.Recovery.EC100],
+        do: assert(:code.where_is_file(~c"#{module}.beam") == :non_existing)
+
     assert Process.whereis(NervesGate.Network) == nil
     assert Process.whereis(ProjectionServer) == nil
     assert Process.whereis(Tailscaled.Supervisor) == nil

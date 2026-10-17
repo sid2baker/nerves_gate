@@ -2,19 +2,20 @@ import Config
 import_config "firmware.exs"
 
 # One QEMU development firmware, also used by all scenarios. Not the workstation.
-# No EC100 peripherals or modem are emulated.
+# Same application as EC100; only virtual hardware differs. QEMU does not emulate
+# EC100 buses, LEDs or the recovery button, so those adapters are disabled.
 config :nerves_gate,
+  data_partition: "/sys/class/block/vda4/dev",
   buses_adapter: nil,
   recovery_adapter: nil,
   indicators_adapter: nil
 
-# Initialize real VintageNetDirect and a serial-derived development identity
-# before VintageNet starts. Every simulated device uses this same firmware.
-config :nerves_runtime, init_module: NervesGate.QemuInit
-
-# Management is separate from eth0/eth1; LAN trials cannot remove this address.
+# The QEMU system exposes usb0 before Erlang starts, so USB is configured exactly
+# as on EC100. eth2 is the bench's private management link (distribution, HTTP,
+# SSH forwards); it is separate from eth0/eth1 and LAN trials cannot remove it.
 config :vintage_net,
   config: [
+    {"usb0", %{type: VintageNetDirect}},
     {"eth2",
      %{
        type: VintageNetEthernet,

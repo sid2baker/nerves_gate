@@ -236,9 +236,26 @@ services, then add their own hardware and recovery-network settings. Workstation
 code reload and LiveReload live in `host.exs`, enabled only in `dev`; there is no
 separate `dev.exs` or catch-all `target.exs`.
 
+QEMU runs the same device application as EC100: the same code, services,
+data-initialization hook, SSH upload check and USB configuration
+(`%{type: VintageNetDirect}`). Hardware setup belongs to the Nerves systems; the
+QEMU system names its fourth virtio NIC `usb0` and sets the hostname to the disk's
+full serial before Erlang starts. `x86_64.exs` differs only where QEMU cannot be
+the device:
+
+- EC100 buses, LEDs and the recovery button are not emulated, so those adapters are nil.
+- The data partition is `vda4` rather than `mmcblk0p3`.
+- The bench's private management NIC `eth2` and loopback node name (derived in
+  `runtime.exs` from the hostname) replace Tailscale-based development access.
+
+Application modules do not branch on `MIX_TARGET`. Host builds add `dev/` and the
+scenarios; firmware builds add `firmware/`, which holds code that needs
+`nerves_runtime` (data initialization and recovery).
+
 At startup, `config/runtime.exs` supplies the HTTP session secret and the host's
-remote `backend_node`. **That node selects the connection destination**, not
-`MIX_TARGET`. The development launchers supply it:
+remote `backend_node`. Firmware configures `backend_node: :local`; a disconnected
+host uses nil, never an implicit local fallback. **That node selects the connection
+destination**, not `MIX_TARGET`. The development launchers supply it:
 
 - `mix dev` runs the `host` UI with an empty simulator; Start builds `x86_64`
   firmware and connects the backend only after all configured devices are ready.
@@ -438,8 +455,8 @@ mix test --only firewall          # guest IPv4/IPv6 filter, NAT and mangle table
 mix test --only tailscale_login   # fresh guest checks firewall and obtains a private login link
 ```
 
-Every device boots real VintageNetDirect on `usb0`, using a serial-derived
-`172.31.0.0/16` /30 and running its normal DHCP server. The restricted libslirp peer
+Every device boots real VintageNetDirect on `usb0`, using its system hostname
+(the full disk serial) to derive a `172.31.0.0/16` /30 and running its normal DHCP server. The restricted libslirp peer
 is statically addressed; **DHCP-client discovery is not tested**. USB supplies
 recovery SSH, not Internet. `mix test --only ssh_access` uses a fresh disposable
 disk and that same USB path with its own loopback SSH forward. It checks actual SSH password/key
@@ -607,8 +624,9 @@ this custom system with an upstream x86 artifact: their networking capabilities
 differ. This is real gateway software on virtual x86 hardware, not an EC100
 peripheral simulator. After the artifact is available, Reset and Start devices
 on /tests and run `mix test --only system_artifact` to check the guest's system
-version and firmware platform, plus release-note, draft-discovery and safe-retry
-contracts.
+version and firmware platform, system-provided USB interface/hostname, shared
+initialization hook and writable data mount, plus release-note, draft-discovery
+and safe-retry contracts.
 
 ## CI
 

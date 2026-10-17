@@ -1,10 +1,10 @@
 defmodule NervesGateWeb.Backend do
   @moduledoc """
-  UI calls run locally in firmware, or on the runtime `:backend_node` in
-  development. Commands have no local fallback or retries. Projection subscriptions
-  call the device server directly, preserving the LiveView caller's identity.
+  UI calls use the configured `:backend_node`: `:local` for device services,
+  a node name for remote services, or nil while disconnected. Commands have no
+  local fallback or retries. Projection subscriptions call the device server
+  directly, preserving the LiveView caller's identity.
   """
-  @host Application.compile_env(:nerves_gate, :target) == :host
 
   def subscribe_projection, do: projection_call(:subscribe)
 
@@ -16,7 +16,11 @@ defmodule NervesGateWeb.Backend do
   end
 
   defp projection_call(request) do
-    request_projection(request)
+    case Application.get_env(:nerves_gate, :backend_node) do
+      :local -> GenServer.call(NervesGate.ProjectionServer, request)
+      nil -> {:error, :unavailable}
+      node -> GenServer.call({NervesGate.ProjectionServer, node}, request)
+    end
   catch
     :exit, {_, {GenServer, :call, _}} -> {:error, :unavailable}
   end
@@ -40,45 +44,34 @@ defmodule NervesGateWeb.Backend do
   def bus_capture(port), do: call(:bus_capture, [port])
   def modbus_read(port, params), do: call(:modbus_read, [port, params])
 
-  if @host do
-    # Workstation HTTP addresses cannot prove USB access to the device.
-    def network_propose(settings, opts \\ []),
-      do: call(:network_propose, [settings, Keyword.delete(opts, :access)])
+  def network_propose(settings, opts \\ []) do
+    # Only the device's own HTTP socket can prove USB access. Never forward a
+    # workstation's socket observations, even when both endpoints share a host.
+    backend = Application.get_env(:nerves_gate, :backend_node)
+    opts = if backend == :local, do: opts, else: Keyword.delete(opts, :access)
+    call(:network_propose, [settings, opts], backend)
+  end
 
-    defp request_projection(request) do
-      case Application.get_env(:nerves_gate, :backend_node) do
-        nil -> {:error, :unavailable}
-        node -> GenServer.call({NervesGate.ProjectionServer, node}, request)
-      end
+  defp call(function, args, backend \\ Application.get_env(:nerves_gate, :backend_node)) do
+    case backend do
+      :local -> apply(NervesGate, function, args)
+      nil -> unavailable(function)
+      node -> :erpc.call(node, NervesGate, function, args, 5_000)
     end
+  catch
+    :error, {:erpc, reason} when reason in [:noconnection, :timeout] -> unavailable(function)
+  end
 
-    defp call(function, args) do
-      case Application.get_env(:nerves_gate, :backend_node) do
-        nil -> unavailable(function)
-        node -> :erpc.call(node, NervesGate, function, args, 5_000)
-      end
-    catch
-      :error, {:erpc, reason} when reason in [:noconnection, :timeout] -> unavailable(function)
-    end
+  defp unavailable(:status), do: NervesGate.Status.disconnected()
 
-    defp unavailable(:status), do: NervesGate.Status.disconnected()
+  defp unavailable(function) when function in [:remote_login_url, :distribution_cookie],
+    do: {:error, %{code: "backend_disconnected", message: "The device did not reply."}}
 
-    defp unavailable(function) when function in [:remote_login_url, :distribution_cookie],
-      do: {:error, %{code: "backend_disconnected", message: "The device did not reply."}}
-
-    defp unavailable(_) do
-      {:error,
-       %{
-         code: "outcome_unknown",
-         message:
-           "The device did not reply. The command may have run; read status before retrying."
-       }}
-    end
-  else
-    def network_propose(settings, opts \\ []), do: call(:network_propose, [settings, opts])
-
-    defp request_projection(request), do: GenServer.call(NervesGate.ProjectionServer, request)
-
-    defp call(function, args), do: apply(NervesGate, function, args)
+  defp unavailable(_) do
+    {:error,
+     %{
+       code: "outcome_unknown",
+       message: "The device did not reply. The command may have run; read status before retrying."
+     }}
   end
 end

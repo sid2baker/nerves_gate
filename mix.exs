@@ -99,9 +99,10 @@ defmodule NervesGate.MixProject do
   end
 
   defp elixirc_paths do
+    # firmware/ needs nerves_runtime, which is not a workstation dependency.
     if Mix.target() == :host,
       do: ["lib", "dev", "test/support", "test/scenarios"],
-      else: ["lib", "firmware/#{Mix.target()}"]
+      else: ["lib", "firmware"]
   end
 
   defp deps do

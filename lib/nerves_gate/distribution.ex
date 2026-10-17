@@ -6,16 +6,12 @@ defmodule NervesGate.Distribution do
   """
   require Logger
 
-  @cookie Application.compile_env(:nerves_gate, :distribution_cookie)
-
   def ensure_started(remote) do
-    # Only the Nerves backend chooses its node; the development command names the UI.
-    if NervesGate.target() in [:ec100, :x86_64] do
-      case Application.get_env(:nerves_gate, :development_node) || node_name(remote) do
-        nil -> :ok
-        name when name == node() -> :ok
-        name -> start(name)
-      end
+    # Called by the device-owned Remote service; launchers name workstation nodes.
+    case Application.get_env(:nerves_gate, :development_node) || node_name(remote) do
+      nil -> :ok
+      name when name == node() -> :ok
+      name -> start(name)
     end
 
     configure_cookie()
@@ -23,7 +19,8 @@ defmodule NervesGate.Distribution do
 
   @doc false
   def configure_cookie do
-    if @cookie && Node.alive?(), do: Node.set_cookie(@cookie)
+    cookie = Application.get_env(:nerves_gate, :distribution_cookie)
+    if cookie && Node.alive?(), do: Node.set_cookie(cookie)
     :ok
   end
 

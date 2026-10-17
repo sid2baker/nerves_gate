@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-17
+
+### Breaking changes
+
+- The fourth virtio Ethernet interface is now exposed as `usb0` before Erlang starts. Applications must remove their own `eth3` rename and configure `usb0` directly.
+- The hostname now uses the full board serial. With provisioned `qemu-N` serials, standard VintageNetDirect configuration preserves the simulator's existing USB recovery subnet without an application hostname override.
+
 ## 0.1.0 - 2026-10-14
 
 ### Added

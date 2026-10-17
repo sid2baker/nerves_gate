@@ -56,7 +56,13 @@ this system does not simulate them.
   boot chain. Bootloader and data-partition offsets must not be copied from ARM.
 - No EC100 GPIO watchdog, USB provisioning gadget, LEDs, RS485 or CAN controller.
   The soft watchdog is also disabled, matching EC100's kernel policy.
-- x86 board-ID hostname and disk discovery remain platform-specific.
+- The fourth virtio NIC represents the provisioning link. The system's
+  `erlinit --pre-run-exec` names it `usb0` before Erlang starts; the other three
+  remain `eth0`, `eth1` and the private bench-management `eth2`.
+- Board-ID reads the provisioned disk serial, and erlinit uses the full serial as
+  the hostname. Plain VintageNetDirect configuration then derives the existing
+  per-device USB subnet without an application-specific initialization hook.
+  Disk discovery remains platform-specific.
 
 ## Build and run
 

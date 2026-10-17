@@ -2,6 +2,8 @@ import Config
 
 # Workstation UI/tools only. runtime.exs selects the remote device to connect to.
 # No firmware settings or local device services are loaded here.
+config :nerves_gate, services: [NervesGate.HostInit, NervesGate.QemuTests]
+
 # Stable entry names let firmware use Phoenix static paths without loading Volt.
 config :volt,
   entry: "assets/js/app.js",

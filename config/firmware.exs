@@ -1,8 +1,22 @@
 import Config
 
 # Shared device settings, imported by ec100.exs and x86_64.exs only.
-# Nothing in this file configures the workstation UI.
+# Nothing in this file configures the workstation UI. The platform files add
+# only real hardware differences; the device application is otherwise identical.
 config :nerves_gate,
+  # The UI calls this device's own services; the workstation uses a remote node.
+  backend_node: :local,
+  services: [
+    NervesGate.Network.Vintage,
+    {PropertyTable, name: NervesGate.Properties},
+    NervesGate.SSH,
+    NervesGate.Network,
+    NervesGate.Remote,
+    NervesGate.Equipment,
+    NervesGate.Indicators,
+    NervesGate.Buses,
+    NervesGate.ProjectionServer
+  ],
   # Disabled until the real modem is identified; QEMU does not emulate one.
   cellular: nil,
   network_adapter: {NervesGate.Network.Vintage, nil},
@@ -21,7 +35,15 @@ config :nerves, :erlinit, update_clock: true
 
 # Sends the Heart init handshake required by HEART_INIT_TIMEOUT in vm.args.
 # Validate firmware only after OTP applications start; internet is not required.
-config :nerves_runtime, startup_guard_enabled: true
+# DataInit runs Nerves' normal mount/format, then requires the platform's data
+# partition to be mounted writable ext4 before data users start.
+config :nerves_runtime,
+  startup_guard_enabled: true,
+  init_module: NervesGate.Recovery.DataInit
+
+# Uploads and EC100 button recovery share one boot-lifetime interlock.
+config :ssh_subsystem_fwup,
+  precheck_callback: {NervesGate.Recovery.EC100, :firmware_precheck, []}
 
 # Nerves 2 ordering is explicit: data initialization must precede Tailscale,
 # VintageNet, SSH, time persistence, and application services.
