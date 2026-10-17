@@ -236,7 +236,9 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       ])
     end
 
-    case asset(release!(info.tag), info) do
+    draft = await_release!(info.tag, "creation", fn _ -> true end)
+
+    case asset(draft, info) do
       nil ->
         gh!(["release", "upload", info.tag, archive])
 
@@ -247,13 +249,14 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
         Mix.raise("The draft already contains different artifact bytes. Refusing to overwrite.")
     end
 
-    unless match?(
-             %{"digest" => ^digest, "state" => "uploaded"},
-             asset(release!(info.tag), info)
-           ),
-           do: Mix.raise("Uploaded artifact digest does not match the local build.")
+    uploaded =
+      await_release!(info.tag, "upload", &match?(%{"state" => "uploaded"}, asset(&1, info)))
+
+    unless asset(uploaded, info)["digest"] == digest,
+      do: Mix.raise("Uploaded artifact digest does not match the local build.")
 
     gh!(["release", "edit", info.tag, "--draft=false", "--latest=false"])
+    await_release!(info.tag, "publication", &(&1["draft"] == false))
     unless release_state!(info) == :published, do: Mix.raise("Release verification failed.")
     Mix.shell().info("Published and verified #{info.tag}")
   end
@@ -280,8 +283,22 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     |> release_from_response!(tag)
   end
 
-  defp release!(tag) do
-    release(tag) || Mix.raise("GitHub release #{tag} is missing after creation or upload.")
+  # GitHub's release list can lag behind a successful write. Wait a bounded time
+  # for the write to become visible; never repeat the write itself.
+  defp await_release!(tag, step, visible?, attempts \\ 30) do
+    release = release(tag)
+
+    cond do
+      release && visible?.(release) ->
+        release
+
+      attempts > 1 ->
+        Process.sleep(2_000)
+        await_release!(tag, step, visible?, attempts - 1)
+
+      true ->
+        Mix.raise("GitHub release #{tag} did not show the #{step} within 60 seconds.")
+    end
   end
 
   @doc false
