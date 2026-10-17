@@ -3,9 +3,16 @@ defmodule NervesGate.Simulator do
   use GenServer
   alias NervesGate.Simulator.{Device, Qemu}
 
+  @config_header """
+  # Ordinary data, not a scenario DSL. The simulator site edits the devices and
+  # their Internet wiring. All devices use the same firmware build; set
+  # factory_firmware to a compatible older artifact for cross-version work.
+  """
+
   def start_link(config), do: GenServer.start_link(__MODULE__, config, name: __MODULE__)
   def subscribe(node), do: GenServer.call({__MODULE__, node}, {:subscribe, self()})
   def lifecycle(node, action), do: GenServer.call({__MODULE__, node}, {:lifecycle, action})
+  def configure(node, change), do: GenServer.call({__MODULE__, node}, {:configure, change})
   def devices, do: GenServer.call(__MODULE__, :devices)
   def devices(node), do: GenServer.call({__MODULE__, node}, :devices)
 
@@ -27,7 +34,14 @@ defmodule NervesGate.Simulator do
     true = is_map(config.devices) and map_size(config.devices) in 1..253
     firmware = Path.expand(config.firmware)
     factory = Path.expand(Map.get(config, :factory_firmware, firmware))
-    Map.merge(config, %{dir: dir, firmware: firmware, factory_firmware: factory})
+
+    Map.merge(config, %{
+      path: path,
+      raw: config,
+      dir: dir,
+      firmware: firmware,
+      factory_firmware: factory
+    })
   end
 
   @impl true
@@ -37,9 +51,10 @@ defmodule NervesGate.Simulator do
     view = %{
       status: :stopped,
       phase: "Simulator empty. Start configured devices to build firmware and boot.",
-      devices: config.devices |> Map.keys() |> Enum.sort(),
+      devices: device_views(config),
       progress: %{},
-      reset_required: false
+      reset_required: false,
+      prepared: false
     }
 
     {:ok,
@@ -123,6 +138,32 @@ defmodule NervesGate.Simulator do
        {:error, "Lifecycle action unavailable. Wait for cleanup, or Reset after a failure."},
        state}
 
+  def handle_call(
+        {:configure, change},
+        _,
+        %{view: %{status: :stopped, reset_required: false}} = state
+      ) do
+    case change(state.config.devices, change, state.prepared) do
+      {:ok, devices} ->
+        raw = %{state.config.raw | devices: devices}
+        data = raw |> inspect(limit: :infinity) |> Code.format_string!()
+        File.write!(state.config.path <> ".tmp", [@config_header, data, "\n"])
+        File.rename!(state.config.path <> ".tmp", state.config.path)
+        config = %{state.config | raw: raw, devices: devices}
+        view = %{state.view | devices: device_views(config)}
+        {:reply, :ok, publish(%{state | config: config, view: view})}
+
+      {:error, message} ->
+        {:reply, {:error, message}, state}
+    end
+  end
+
+  def handle_call({:configure, _}, _, state),
+    do:
+      {:reply,
+       {:error, "Stop the devices, or Reset after a failure, before editing configuration."},
+       state}
+
   @impl true
   def handle_info({:phase, token, phase}, %{token: token} = state),
     do: {:noreply, publish(%{state | view: %{state.view | phase: phase}})}
@@ -137,7 +178,15 @@ defmodule NervesGate.Simulator do
 
   def handle_info({:started, token, devices}, %{token: token, view: %{status: :starting}} = state) do
     clear_worker(state)
-    view = %{state.view | status: :ready, phase: "Devices ready", reset_required: false}
+
+    view = %{
+      state.view
+      | status: :ready,
+        phase: "Devices ready",
+        reset_required: false,
+        prepared: true
+    }
+
     {:noreply, publish(%{state | view: view, devices: devices, worker: nil, prepared: true})}
   end
 
@@ -154,16 +203,18 @@ defmodule NervesGate.Simulator do
     phase =
       if reset?, do: "Disks erased. Start to build and bootstrap fresh devices.", else: phase
 
-    view = %{state.view | status: status, phase: phase, reset_required: required, progress: %{}}
+    prepared = state.prepared and not reset?
 
-    {:noreply,
-     publish(%{
-       state
-       | view: view,
-         worker: nil,
-         supervisor: nil,
-         prepared: state.prepared and not reset?
-     })}
+    view = %{
+      state.view
+      | status: status,
+        phase: phase,
+        reset_required: required,
+        progress: %{},
+        prepared: prepared
+    }
+
+    {:noreply, publish(%{state | view: view, worker: nil, supervisor: nil, prepared: prepared})}
   end
 
   def handle_info({:DOWN, ref, :process, pid, _}, %{worker: {pid, ref}} = state) do
@@ -263,6 +314,58 @@ defmodule NervesGate.Simulator do
     state
   end
 
+  # Device addresses follow the sorted configuration, and preserved disks keep
+  # the serial they were burned with. Adding or removing therefore needs Reset.
+  defp change(devices, {:put, id, internet}, prepared) do
+    with {:ok, internet} <- port(internet),
+         {:ok, id} <- device_id(id),
+         true <- Map.has_key?(devices, id) or (not prepared and map_size(devices) < 253) do
+      settings = Map.get(devices, id, %{})
+      network = settings |> Map.get(:network, %{}) |> Map.put(:internet, internet)
+      {:ok, Map.put(devices, id, Map.put(settings, :network, network))}
+    else
+      false -> {:error, "Reset the devices before adding one; device addresses would change."}
+      error -> error
+    end
+  end
+
+  defp change(devices, {:delete, id}, prepared) do
+    case Enum.find(Map.keys(devices), &(Atom.to_string(&1) == id)) do
+      nil ->
+        {:error, "Unknown device"}
+
+      _ when prepared ->
+        {:error, "Reset the devices before removing one; addresses would change."}
+
+      _ when map_size(devices) == 1 ->
+        {:error, "Keep at least one device."}
+
+      id ->
+        {:ok, Map.delete(devices, id)}
+    end
+  end
+
+  defp port("lan1"), do: {:ok, :lan1}
+  defp port("lan2"), do: {:ok, :lan2}
+  defp port(_), do: {:error, "Connect the Internet router to LAN1 or LAN2."}
+
+  defp device_id(id) do
+    if Regex.match?(~r/^[a-z][a-z0-9_]{0,31}$/, id),
+      do: {:ok, String.to_atom(id)},
+      else: {:error, "Device names use lowercase letters, digits and underscores."}
+  end
+
+  defp device_views(config) do
+    for device <- device_configs(config) do
+      %{
+        id: device.id,
+        node: device.node,
+        address: device.address,
+        internet: get_in(device, [:network, :internet]) || :lan1
+      }
+    end
+  end
+
   defp device_configs(config) do
     config.devices
     |> Enum.sort_by(&elem(&1, 0))
@@ -292,7 +395,6 @@ defmodule NervesGate.Simulator do
         env: [
           {"MIX_TARGET", "x86_64"},
           {"MIX_ENV", "dev"},
-          {"NERVES_GATE_BACKEND_NODE", nil},
           {"NERVES_GATE_DEVICE_NODE", nil}
         ],
         into: IO.stream(),

@@ -98,7 +98,7 @@ jobs:
         run: |
           mkdir -p _build/qemu-tests
           set -o pipefail
-          mise exec -- env -u NERVES_GATE_BACKEND_NODE -u NERVES_GATE_DEVICE_NODE mix ci 2>&1 | tee _build/qemu-tests/suite.log
+          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix ci 2>&1 | tee _build/qemu-tests/suite.log
       - name: Retain diagnostics (never VM disks)
         if: always()
         uses: actions/upload-artifact@v4

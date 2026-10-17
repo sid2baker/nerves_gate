@@ -12,10 +12,15 @@ defmodule NervesGateWeb.Observations do
 
   # The callback receives the new status and the old socket, so editors can
   # update clean fields without losing drafts or their previous observation.
-  def subscribe(socket, refresh \\ &assign(&1, :projection, &2)) do
+  def subscribe(socket, refresh \\ &assign(&1, :projection, &2), backend \\ Backend.configured()) do
     socket =
       socket
-      |> assign(projection_server: nil, projection_monitor: nil, projection_retry: nil)
+      |> assign(
+        projection_backend: backend,
+        projection_server: nil,
+        projection_monitor: nil,
+        projection_retry: nil
+      )
       |> initialize()
 
     Phoenix.LiveView.attach_hook(socket, :observations, :handle_info, fn message, socket ->
@@ -27,12 +32,12 @@ defmodule NervesGateWeb.Observations do
     if Phoenix.LiveView.connected?(socket) do
       bind(socket)
     else
-      put_projection(socket, Backend.projection())
+      put_projection(socket, Backend.projection(socket.assigns.projection_backend))
     end
   end
 
   defp bind(socket) do
-    case Backend.subscribe_projection() do
+    case Backend.subscribe_projection(socket.assigns.projection_backend) do
       {:ok, pid, projection} ->
         socket
         |> assign(projection_server: pid, projection_monitor: Process.monitor(pid))

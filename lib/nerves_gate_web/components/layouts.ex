@@ -12,16 +12,8 @@ defmodule NervesGateWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={get_csrf_token()} />
         <title>Nerves Gate</title>
-        <link
-          phx-track-static
-          rel="stylesheet"
-          href={NervesGateWeb.Endpoint.static_path("/assets/css/app.css")}
-        />
-        <script
-          phx-track-static
-          type="module"
-          src={NervesGateWeb.Endpoint.static_path("/assets/js/app.js")}
-        >
+        <link phx-track-static rel="stylesheet" href="/assets/css/app.css" />
+        <script phx-track-static type="module" src="/assets/js/app.js">
         </script>
       </head>
       <body>{@inner_content}</body>
@@ -30,10 +22,7 @@ defmodule NervesGateWeb.Layouts do
   end
 
   def app(assigns) do
-    assigns =
-      assigns
-      |> assign(:section, section(assigns.live_action))
-      |> assign(:dev_tests, Application.get_env(:nerves_gate, :dev_tests, false))
+    assigns = assign(assigns, :section, section(assigns.live_action))
 
     ~H"""
     <a href="#main-content" class="ui-skip-link">Skip to content</a>
@@ -46,7 +35,6 @@ defmodule NervesGateWeb.Layouts do
           navigate="/settings"
           aria-current={if @section == :settings, do: "page"}
         >Settings</.link>
-        <.link :if={@dev_tests} href="/tests">Tests</.link>
       </nav>
     </header>
     <main id="main-content" class="ui-main ui-stack" tabindex="-1">

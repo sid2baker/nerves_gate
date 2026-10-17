@@ -23,9 +23,7 @@ defmodule Mix.Tasks.Setup.Qemu do
     Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached on subsequent runs).")
     target_mix!(["nerves.artifact.get"])
 
-    Mix.shell().info(
-      "Ready. Run mix dev, open http://localhost:4000/tests, then Start configured devices."
-    )
+    Mix.shell().info("Ready. Run mix dev, open http://localhost:4000, then Start devices.")
   end
 
   def run(_), do: Mix.raise("Usage: mix setup")
@@ -145,7 +143,6 @@ defmodule Mix.Tasks.Setup.Qemu do
         env: [
           {"MIX_TARGET", "x86_64"},
           {"MIX_ENV", "dev"},
-          {"NERVES_GATE_BACKEND_NODE", nil},
           {"NERVES_GATE_DEVICE_NODE", nil}
         ],
         into: IO.stream(),

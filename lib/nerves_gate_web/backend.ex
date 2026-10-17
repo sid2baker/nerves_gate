@@ -3,20 +3,23 @@ defmodule NervesGateWeb.Backend do
   UI calls use the configured `:backend_node`: `:local` for device services,
   a node name for remote services, or nil while disconnected. Commands have no
   local fallback or retries. Projection subscriptions call the device server
-  directly, preserving the LiveView caller's identity.
+  directly, preserving the LiveView caller's identity. The simulator site
+  observes each device by passing its node explicitly.
   """
 
-  def subscribe_projection, do: projection_call(:subscribe)
+  def configured, do: Application.get_env(:nerves_gate, :backend_node)
 
-  def projection do
-    case projection_call(:snapshot) do
+  def subscribe_projection(backend \\ configured()), do: projection_call(:subscribe, backend)
+
+  def projection(backend \\ configured()) do
+    case projection_call(:snapshot, backend) do
       {:error, :unavailable} -> NervesGate.Projection.disconnected()
       projection -> projection
     end
   end
 
-  defp projection_call(request) do
-    case Application.get_env(:nerves_gate, :backend_node) do
+  defp projection_call(request, backend) do
+    case backend do
       :local -> GenServer.call(NervesGate.ProjectionServer, request)
       nil -> {:error, :unavailable}
       node -> GenServer.call({NervesGate.ProjectionServer, node}, request)
@@ -47,12 +50,12 @@ defmodule NervesGateWeb.Backend do
   def network_propose(settings, opts \\ []) do
     # Only the device's own HTTP socket can prove USB access. Never forward a
     # workstation's socket observations, even when both endpoints share a host.
-    backend = Application.get_env(:nerves_gate, :backend_node)
+    backend = configured()
     opts = if backend == :local, do: opts, else: Keyword.delete(opts, :access)
     call(:network_propose, [settings, opts], backend)
   end
 
-  defp call(function, args, backend \\ Application.get_env(:nerves_gate, :backend_node)) do
+  defp call(function, args, backend \\ configured()) do
     case backend do
       :local -> apply(NervesGate, function, args)
       nil -> unavailable(function)

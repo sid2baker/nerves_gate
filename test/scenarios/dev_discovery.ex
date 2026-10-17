@@ -4,7 +4,12 @@ defmodule NervesGate.Scenarios.DevDiscovery do
   alias NervesGate.DevDiscovery
   alias NervesGate.TestQemu, as: Qemu
 
-  def spec, do: %{name: "Discovery authenticates distinct real gateways and rejects ambiguity"}
+  # Discovery probes every device, so none may be rebooting in another run.
+  def spec,
+    do: %{
+      name: "Discovery authenticates distinct real gateways and rejects ambiguity",
+      devices: :all
+    }
 
   def run(%{device: vm, devices: devices}) do
     guest = vm.node

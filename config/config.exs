@@ -20,8 +20,7 @@ Application.start(:nerves_bootstrap)
 # Public cookie for trusted development networks only. Production keeps OTP's cookie.
 config :nerves_gate,
   target: config_target(),
-  distribution_cookie: if(config_env() == :dev, do: :mycookie),
-  dev_tests: config_target() == :host
+  distribution_cookie: if(config_env() == :dev, do: :mycookie)
 
 config :phoenix, :json_library, Jason
 config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret", "public_key"]

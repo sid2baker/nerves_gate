@@ -20,23 +20,13 @@ defmodule NervesGateWeb.Endpoint do
     longpoll: false
   )
 
+  # mix dev.ui only; firmware is never compiled with code reloading.
   if code_reloading? do
-    plug(:tidewave)
+    plug(Tidewave)
     socket("/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket)
     plug(Phoenix.LiveReloader)
     plug(Phoenix.CodeReloader)
     plug(Volt.DevServer, root: "assets")
-
-    defp tidewave(conn, _opts) do
-      # QEMU's private CLI reaches Phoenix over a Unix socket. The simulator
-      # marker is runtime state: host compilation is shared with dev.ec100.
-      opts =
-        Tidewave.init(
-          allow_remote_access: Application.get_env(:nerves_gate, :simulator_node) != nil
-        )
-
-      Tidewave.call(conn, opts)
-    end
   end
 
   # Firmware uses stable filenames; revalidate them across firmware upgrades.

@@ -19,7 +19,7 @@ defmodule NervesGate.DevDiscovery do
         tailnet_addresses(status)
 
       {:ok, %{status: 200}} ->
-        {:error, "Connect workstation Tailscale before running mix dev.ec100."}
+        {:error, "Workstation Tailscale is not connected."}
 
       _ ->
         {:error,

@@ -1,106 +1,83 @@
 defmodule NervesGate.QemuTests do
-  @moduledoc "One admission owner for the multi-device simulator, shared by page, CLI and CI."
+  @moduledoc """
+  One admission owner for the multi-device simulator, shared by the site, CLI and CI.
+
+  A run or manual control holds its devices. Runs on different devices proceed in
+  parallel; a scenario with `devices: :all` holds every device for its run.
+  """
   use GenServer
-  alias NervesGate.ManualFaults
+  alias NervesGate.{ManualFaults, Simulator}
+  alias NervesGate.Simulator.Network
   alias NervesGate.TestQemu, as: Qemu
 
   @topic "qemu-tests"
   @event_limit 100
+  @run_limit 20
 
-  defp scenarios do
-    Path.wildcard("test/scenarios/*.ex")
-    |> Enum.map(fn path ->
+  def scenarios do
+    for path <- Enum.sort(Path.wildcard("test/scenarios/*.ex")) do
       id = Path.basename(path, ".ex")
-      {id, Module.concat(NervesGate.Scenarios, Macro.camelize(id))}
-    end)
+      module = Module.concat(NervesGate.Scenarios, Macro.camelize(id))
+      spec = module.spec()
+
+      %{
+        id: id,
+        module: module,
+        name: spec.name,
+        fresh_disk: Map.get(spec, :fresh_disk, false),
+        all: spec[:devices] == :all
+      }
+    end
   end
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
-  def run(selection \\ "all"), do: GenServer.call(__MODULE__, {:run, selection})
-  def mode(mode), do: GenServer.call(__MODULE__, {:mode, mode})
-  def manual(action), do: GenServer.call(__MODULE__, {:manual, action})
+  def run(device, selection \\ "all"), do: GenServer.call(__MODULE__, {:run, device, selection})
+  def mode(device, mode), do: GenServer.call(__MODULE__, {:mode, device, mode})
+  def manual(device, action), do: GenServer.call(__MODULE__, {:manual, device, action})
   def lifecycle(action), do: GenServer.call(__MODULE__, {:lifecycle, action})
+  def configure(change), do: GenServer.call(__MODULE__, {:configure, change})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
   def unsubscribe, do: Phoenix.PubSub.unsubscribe(NervesGate.PubSub, @topic)
 
   @impl true
   def init(_) do
     Process.flag(:trap_exit, true)
-
-    rows =
-      Enum.map(scenarios(), fn {id, module} ->
-        %{
-          id: id,
-          name: module.spec().name,
-          fresh_disk: Map.get(module.spec(), :fresh_disk, false),
-          status: :waiting,
-          detail: "",
-          milliseconds: nil
-        }
-      end)
-
-    simulator = Application.get_env(:nerves_gate, :simulator_node)
-
-    lifecycle =
-      if simulator,
-        do: NervesGate.Simulator.subscribe(simulator),
-        else: %{
-          status: :unavailable,
-          phase: "Use mix dev for the simulator bench.",
-          devices: [],
-          progress: %{},
-          reset_required: false
-        }
-
-    devices = %{}
-    primary = nil
-    vm = nil
+    simulator = Application.fetch_env!(:nerves_gate, :simulator_node)
 
     view = %{
-      id: nil,
-      lifecycle: lifecycle,
-      devices: devices |> Map.keys() |> Enum.sort(),
-      device: primary,
-      topology: nil,
-      status: :idle,
-      rows: rows,
-      phase: "Simulator empty",
-      mode: :scenarios,
-      manual_action: nil,
+      lifecycle: Simulator.subscribe(simulator),
+      devices: %{},
+      scenarios: Enum.map(scenarios(), &Map.delete(&1, :module)),
+      runs: [],
       blocked: false,
-      faults: %{},
       events: []
     }
 
     {:ok,
      %{
        view: view,
-       vm: vm,
-       devices: devices,
+       handles: %{},
+       workers: %{},
        simulator: simulator,
-       simulator_monitor: if(simulator, do: Process.monitor({NervesGate.Simulator, simulator})),
-       worker: nil,
-       timer: nil,
-       completed: false
+       simulator_monitor: Process.monitor({Simulator, simulator})
      }}
   end
 
   @impl true
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
 
-  def handle_call({:lifecycle, _}, _, %{worker: worker} = state) when not is_nil(worker),
-    do:
-      {:reply, {:error, "Finish the current operation before changing device lifecycle."}, state}
+  def handle_call({kind, _}, _, state)
+      when kind in [:lifecycle, :configure] and map_size(state.workers) > 0,
+      do: {:reply, {:error, "Finish the current operations first."}, state}
 
   def handle_call({:lifecycle, action}, _, state) do
     with true <- lifecycle_allowed?(action, state.view),
-         :ok <- NervesGate.Simulator.lifecycle(state.simulator, action) do
+         :ok <- Simulator.lifecycle(state.simulator, action) do
       # Close admission immediately, before the asynchronous progress arrives.
-      Application.delete_env(:nerves_gate, :backend_node)
       status = if action == "start", do: :starting, else: :stopping
-      view = %{state.view | lifecycle: %{state.view.lifecycle | status: status}}
-      {:reply, :ok, %{state | view: view, vm: nil}}
+      view = %{state.view | lifecycle: %{state.view.lifecycle | status: status}, devices: %{}}
+      {:reply, :ok, publish(%{state | view: view, handles: %{}})}
     else
       false ->
         {:reply,
@@ -115,212 +92,248 @@ defmodule NervesGate.QemuTests do
     :exit, _ -> {:reply, {:error, "Simulator unavailable; restart mix dev."}, state}
   end
 
-  def handle_call(_, _, %{view: %{blocked: true}} = state),
-    do: {:reply, {:error, "Control uncertain. Reset devices or restart mix dev."}, state}
+  def handle_call({:configure, change}, _, state) do
+    {:reply, Simulator.configure(state.simulator, change), state}
+  catch
+    :exit, _ -> {:reply, {:error, "Simulator unavailable; restart mix dev."}, state}
+  end
 
-  def handle_call(_, _, %{vm: nil} = state),
-    do: {:reply, {:error, "Start configured devices on /tests first."}, state}
+  def handle_call({:run, device, selection}, _, state) do
+    scenarios = Enum.filter(scenarios(), &(selection in ["all", &1.id]))
 
-  def handle_call({:run, _}, _, %{view: %{mode: :manual}} = state),
-    do:
-      {:reply,
-       {:error, "Manual control is held. Switch to Scenarios to clear faults and release it."},
-       state}
-
-  def handle_call({:run, _}, _, %{worker: worker} = state) when not is_nil(worker),
-    do: {:reply, {:error, "A run is already in progress."}, state}
-
-  def handle_call({:run, selection}, _, state) do
-    scenarios = Enum.filter(scenarios(), fn {id, _} -> selection in ["all", id] end)
-
-    if scenarios == [] do
-      {:reply, {:error, "Unknown scenario"}, state}
-    else
+    with {:ok, id} <- device_id(state, device),
+         [_ | _] <- scenarios,
+         held = if(Enum.any?(scenarios, & &1.all), do: Map.keys(state.handles), else: [id]),
+         :ok <- available(state, held) do
       owner = self()
-      id = System.unique_integer([:positive, :monotonic])
+      run_id = System.unique_integer([:positive, :monotonic])
+      context = %{device: state.handles[id], devices: state.handles}
 
-      worker =
+      {pid, ref} =
+        :erlang.spawn_opt(fn -> execute(owner, run_id, context, scenarios) end, [:link, :monitor])
+
+      rows =
+        for scenario <- scenarios,
+            do: %{
+              id: scenario.id,
+              name: scenario.name,
+              status: :waiting,
+              detail: "",
+              milliseconds: nil
+            }
+
+      run = %{
+        id: run_id,
+        device: id,
+        devices: Enum.sort(held),
+        selection: selection,
+        status: :running,
+        phase: "Preparing",
+        rows: rows
+      }
+
+      view =
+        %{state.view | runs: keep_runs([run | state.view.runs])}
+        |> hold(held, run_id)
+        |> update_device(id, &%{&1 | run: run_id})
+        |> event("#{id}: run ##{run_id} started: #{selection}")
+
+      worker = %{ref: ref, run: run_id, devices: held, timer: nil, completed: false}
+      state = %{state | view: view, workers: Map.put(state.workers, pid, worker)}
+      {:reply, {:ok, run_id}, publish(state)}
+    else
+      [] -> {:reply, {:error, "Unknown scenario"}, state}
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:mode, device, "manual"}, _, state) do
+    with {:ok, id} <- device_id(state, device), :ok <- available(state, [id]) do
+      owner = self()
+      vm = state.handles[id]
+
+      {pid, ref} =
         :erlang.spawn_opt(
-          fn -> execute(owner, id, %{device: state.vm, devices: state.devices}, scenarios) end,
+          fn ->
+            report_to(owner)
+            ManualFaults.execute(owner, vm)
+          end,
           [:link, :monitor]
         )
 
-      rows = prepare_rows(state.view.rows, selection)
+      worker = %{ref: ref, run: nil, devices: [id], timer: nil, completed: false}
 
       view =
-        %{state.view | id: id, rows: rows, status: :running, phase: "Preparing"}
-        |> event("Run ##{id} started: #{selection}")
+        state.view
+        |> hold([id], :manual)
+        |> update_device(id, &%{&1 | manual_action: "acquire"})
+        |> event("#{id}: manual control requested")
 
-      {:reply, {:ok, id}, publish(%{state | worker: worker, view: view, completed: false})}
-    end
-  end
-
-  def handle_call({:mode, "manual"}, _, %{worker: nil} = state) do
-    owner = self()
-
-    worker =
-      :erlang.spawn_opt(
-        fn ->
-          report_to(owner)
-          ManualFaults.execute(owner, state.vm)
-        end,
-        [:link, :monitor]
-      )
-
-    view =
-      %{state.view | mode: :manual, manual_action: "acquire", phase: "Taking manual control"}
-      |> event("Manual control requested")
-
-    state = %{state | worker: worker, view: view, completed: false}
-    {:reply, :ok, state |> arm_manual_timeout() |> publish()}
-  end
-
-  def handle_call({:mode, "scenarios"}, _, %{view: %{mode: :manual, manual_action: nil}} = state),
-    do: {:reply, :ok, start_manual(state, "release")}
-
-  def handle_call({:mode, "scenarios"}, _, %{worker: nil} = state),
-    do: {:reply, :ok, state}
-
-  def handle_call({:mode, _}, _, state),
-    do: {:reply, {:error, "Finish the current operation before changing control mode."}, state}
-
-  def handle_call({:manual, action}, _, %{view: %{mode: :manual, manual_action: nil}} = state) do
-    if action in ManualFaults.actions() do
-      {:reply, :ok, start_manual(state, action)}
+      state = %{state | view: view, workers: Map.put(state.workers, pid, worker)}
+      {:reply, :ok, state |> arm_manual_timeout(pid) |> publish()}
     else
-      {:reply, {:error, "Unknown manual action"}, state}
+      error -> {:reply, error, state}
     end
   end
 
-  def handle_call({:manual, _}, _, state),
-    do:
-      {:reply, {:error, "Manual control is required and no other operation may be running."},
-       state}
+  def handle_call({:mode, device, "scenarios"}, _, state) do
+    case device_id(state, device) do
+      {:ok, id} ->
+        case state.view.devices[id] do
+          %{owner: :manual, manual_action: nil} ->
+            {:reply, :ok, start_manual(state, id, "release")}
+
+          %{owner: nil} ->
+            {:reply, :ok, state}
+
+          _ ->
+            {:reply, {:error, "#{id}: finish the current operation first."}, state}
+        end
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:mode, _, _}, _, state), do: {:reply, {:error, "Unknown mode"}, state}
+
+  def handle_call({:manual, device, action}, _, state) do
+    with {:ok, id} <- device_id(state, device),
+         %{owner: :manual, manual_action: nil} <- state.view.devices[id],
+         true <- action in ManualFaults.actions() do
+      {:reply, :ok, start_manual(state, id, action)}
+    else
+      false -> {:reply, {:error, "Unknown manual action"}, state}
+      {:error, _} = error -> {:reply, error, state}
+      _ -> {:reply, {:error, "Manual control is required and must be idle."}, state}
+    end
+  end
 
   @impl true
   def handle_info({:simulator, %{status: :ready} = lifecycle}, state) do
-    devices = NervesGate.Simulator.devices(state.simulator)
-    primary = devices |> Map.keys() |> Enum.min()
-    vm = Map.fetch!(devices, primary)
-    Application.put_env(:nerves_gate, :backend_node, vm.node)
-
-    view = %{
-      state.view
-      | devices: Map.keys(devices) |> Enum.sort(),
-        device: primary,
-        topology: Qemu.topology(vm),
-        status: :idle
-    }
-
-    {:noreply, lifecycle_progress(%{state | view: view, devices: devices, vm: vm}, lifecycle)}
+    handles = Simulator.devices(state.simulator)
+    devices = Map.new(handles, fn {id, vm} -> {id, device_view(vm)} end)
+    view = %{state.view | devices: devices}
+    {:noreply, lifecycle_progress(%{state | view: view, handles: handles}, lifecycle)}
   end
 
   def handle_info({:simulator, lifecycle}, state) do
-    state = interrupt_worker(state)
-    Application.delete_env(:nerves_gate, :backend_node)
+    interrupted = state.workers != %{}
+    state = Enum.reduce(Map.keys(state.workers), state, &interrupt(&2, &1))
     cleared = lifecycle.status == :stopped and not lifecycle.reset_required
-    blocked = not cleared and (state.view.blocked or lifecycle.status in [:failed, :unavailable])
 
-    view = %{
+    blocked =
+      not cleared and
+        (state.view.blocked or interrupted or lifecycle.status in [:failed, :unavailable])
+
+    view = %{state.view | devices: %{}, blocked: blocked}
+    {:noreply, lifecycle_progress(%{state | view: view, handles: %{}}, lifecycle)}
+  end
+
+  def handle_info({:progress, run_id, scenario, result}, state) do
+    case worker_for(state, run_id) do
+      {pid, worker} ->
+        cancel_timer(worker)
+
+        timer =
+          if result.status == :running,
+            do: Process.send_after(self(), {:timeout, run_id, scenario}, 900_000)
+
+        view =
+          state.view
+          |> update_run(run_id, fn run ->
+            %{run | rows: update_row(run.rows, scenario, &Map.merge(&1, result))}
+          end)
+          |> event("#{run_label(state.view, run_id)} · #{scenario}: #{result.status}")
+
+        workers = Map.put(state.workers, pid, %{worker | timer: timer})
+        {:noreply, publish(%{state | view: view, workers: workers})}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:scenario_failed, run_id, scenario, detail}, state) do
+    view =
+      update_run(state.view, run_id, fn run ->
+        %{run | rows: update_row(run.rows, scenario, &%{&1 | detail: detail})}
+      end)
+
+    {:noreply, publish(%{state | view: view})}
+  end
+
+  def handle_info({:phase, run_id, phase}, state) do
+    view =
       state.view
-      | devices: [],
-        device: nil,
-        topology: nil,
-        blocked: blocked,
-        status: lifecycle.status,
-        mode: if(cleared, do: :scenarios, else: state.view.mode),
-        manual_action: nil,
-        faults: %{}
-    }
+      |> update_run(run_id, &%{&1 | phase: phase})
+      |> event("#{run_label(state.view, run_id)} · #{phase}")
 
-    {:noreply, lifecycle_progress(%{state | view: view, devices: %{}, vm: nil}, lifecycle)}
-  end
-
-  def handle_info({:progress, id, scenario, result}, %{view: %{id: id}} = state) do
-    cancel_timer(state)
-
-    timer =
-      if result.status == :running,
-        do: Process.send_after(self(), {:timeout, id, scenario}, 900_000)
-
-    rows =
-      Enum.map(state.view.rows, fn row ->
-        if row.id == scenario, do: Map.merge(row, result), else: row
-      end)
-
-    view = %{state.view | rows: rows} |> event("#{scenario}: #{result.status}")
-    {:noreply, publish(%{state | view: view, timer: timer})}
-  end
-
-  def handle_info({:scenario_failed, id, scenario, detail}, %{view: %{id: id}} = state) do
-    rows =
-      Enum.map(state.view.rows, fn row ->
-        if row.id == scenario, do: %{row | detail: detail}, else: row
-      end)
-
-    {:noreply, publish(%{state | view: %{state.view | rows: rows}})}
-  end
-
-  def handle_info({:phase, id, phase}, %{view: %{id: id}} = state) do
-    view = %{state.view | phase: phase} |> event(phase)
     {:noreply, publish(%{state | view: view})}
   end
 
-  def handle_info({:fault, pid, key, label}, %{worker: {pid, _}} = state) do
-    faults = state.view.faults
+  def handle_info({:fault, pid, device, key, label}, state) do
+    faults = holds?(state, pid, device) && state.view.devices[device].faults
 
-    view =
-      if Map.get(faults, key) == label do
+    if faults && Map.get(faults, key) != label do
+      updated = if label, do: Map.put(faults, key, label), else: Map.delete(faults, key)
+      message = if label, do: "injected #{label}", else: "cleared #{faults[key]}"
+
+      view =
         state.view
-      else
-        updated = if label, do: Map.put(faults, key, label), else: Map.delete(faults, key)
-        message = if label, do: "Injected: #{label}", else: "Cleared: #{faults[key]}"
-        %{state.view | faults: updated} |> event(message)
-      end
+        |> update_device(device, &%{&1 | faults: updated})
+        |> event("#{device}: #{message}")
 
-    {:noreply, publish(%{state | view: view})}
+      {:noreply, publish(%{state | view: view})}
+    else
+      {:noreply, state}
+    end
   end
 
-  def handle_info({:topology, pid, topology}, %{worker: {pid, _}} = state) do
-    view =
-      %{state.view | topology: topology}
-      |> event("Connections: LAN1 → #{topology.lan1}, LAN2 → #{topology.lan2}")
+  def handle_info({:topology, pid, device, topology}, state) do
+    if holds?(state, pid, device) do
+      view =
+        state.view
+        |> update_device(device, &%{&1 | topology: topology})
+        |> event("#{device}: LAN1 → #{topology.lan1}, LAN2 → #{topology.lan2}")
 
-    {:noreply, publish(%{state | view: view})}
+      {:noreply, publish(%{state | view: view})}
+    else
+      {:noreply, state}
+    end
   end
 
-  def handle_info({:manual_ready, pid}, %{worker: {pid, _}} = state),
-    do: {:noreply, manual_idle(state, "Manual control ready")}
+  def handle_info({:manual_ready, pid}, state),
+    do: {:noreply, manual_idle(state, pid, "manual control ready")}
 
-  def handle_info({:manual_done, pid, action}, %{worker: {pid, _}} = state),
-    do: {:noreply, manual_idle(state, "Completed: #{manual_label(action)}")}
+  def handle_info({:manual_done, pid, action}, state),
+    do: {:noreply, manual_idle(state, pid, "completed #{manual_label(action)}")}
 
-  def handle_info({:manual_released, pid}, %{worker: {pid, _}} = state),
-    do: {:noreply, %{state | completed: true}}
+  def handle_info({:manual_released, pid}, state), do: {:noreply, complete(state, pid)}
 
-  def handle_info({:finished, id, vm}, %{view: %{id: id}} = state),
-    do: {:noreply, %{state | vm: vm, completed: true}}
+  def handle_info({:finished, run_id}, state) do
+    case worker_for(state, run_id) do
+      {pid, _} -> {:noreply, complete(state, pid)}
+      nil -> {:noreply, state}
+    end
+  end
 
-  def handle_info(
-        {:timeout, timer, {:manual_timeout, ref}},
-        %{worker: {pid, ref}, timer: timer} = state
-      ) do
-    Process.exit(pid, :kill)
+  def handle_info({:timeout, timer, {:manual_timeout, pid}}, state) do
+    if match?(%{timer: ^timer}, state.workers[pid]), do: Process.exit(pid, :kill)
     {:noreply, state}
   end
 
-  def handle_info({:timeout, id, scenario}, %{view: %{id: id}, worker: {pid, _}} = state) do
-    if Enum.any?(state.view.rows, &(&1.id == scenario && &1.status == :running)),
-      do: Process.exit(pid, :kill)
+  def handle_info({:timeout, run_id, scenario}, state) do
+    with {pid, _} <- worker_for(state, run_id),
+         %{rows: rows} <- Enum.find(state.view.runs, &(&1.id == run_id)),
+         true <- Enum.any?(rows, &(&1.id == scenario and &1.status == :running)),
+         do: Process.exit(pid, :kill)
 
     {:noreply, state}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{simulator_monitor: ref} = state) do
-    cancel_timer(state)
-    if state.worker, do: Process.exit(elem(state.worker, 0), :kill)
-
-    Application.delete_env(:nerves_gate, :backend_node)
+    state = Enum.reduce(Map.keys(state.workers), state, &interrupt(&2, &1))
 
     lifecycle = %{
       state.view.lifecycle
@@ -329,36 +342,122 @@ defmodule NervesGate.QemuTests do
     }
 
     view =
-      %{state.view | lifecycle: lifecycle}
-      |> finish(true)
+      %{state.view | lifecycle: lifecycle, devices: %{}, blocked: true}
       |> event("Simulator stopped; device control is unavailable. Restart mix dev.")
 
-    {:noreply, publish(%{state | view: view, vm: nil, devices: %{}, timer: nil})}
+    {:noreply, publish(%{state | view: view, handles: %{}})}
   end
 
-  def handle_info({:DOWN, ref, :process, pid, reason}, %{worker: {pid, ref}} = state) do
-    cancel_timer(state)
+  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
+    case state.workers[pid] do
+      %{ref: ^ref} = worker ->
+        cancel_timer(worker)
 
-    blocked =
-      state.view.blocked or reason != :normal or not state.completed or state.view.faults != %{} or
-        state.view.topology != NervesGate.Simulator.Network.baseline()
+        uncertain =
+          reason != :normal or not worker.completed or
+            Enum.any?(worker.devices, &(not clean?(state.view.devices[&1])))
 
-    view = finish(state.view, blocked)
-    {:noreply, publish(%{state | worker: nil, timer: nil, view: view})}
+        view = finish(state.view, worker, uncertain)
+        {:noreply, publish(%{state | view: view, workers: Map.delete(state.workers, pid)})}
+
+      _ ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(_, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_, %{worker: {pid, _}}), do: Process.exit(pid, :kill)
-  def terminate(_, _), do: :ok
+  def terminate(_, state), do: Enum.each(Map.keys(state.workers), &Process.exit(&1, :kill))
 
-  defp interrupt_worker(%{worker: nil} = state), do: state
+  defp device_view(vm) do
+    topology = Qemu.topology(vm)
 
-  defp interrupt_worker(%{worker: {pid, _}} = state) do
-    cancel_timer(state)
+    %{
+      id: vm.id,
+      node: vm.node,
+      address: vm.address,
+      ui: "http://#{vm.address}:#{vm.forwards.http}",
+      # The configured wiring the device booted with; scenarios use the baseline.
+      wiring: topology,
+      topology: topology,
+      owner: nil,
+      manual_action: nil,
+      blocked: false,
+      faults: %{},
+      run: nil
+    }
+  end
+
+  defp device_id(state, device) do
+    case Enum.find(Map.keys(state.handles), &(Atom.to_string(&1) == to_string(device))) do
+      nil when state.handles == %{} -> {:error, "Start the configured devices first."}
+      nil -> {:error, "Unknown device #{device}"}
+      id -> {:ok, id}
+    end
+  end
+
+  defp available(state, ids) do
+    Enum.find_value(ids, :ok, fn id ->
+      case state.view.devices[id] do
+        %{blocked: true} -> {:error, "#{id}: control uncertain. Reset the devices."}
+        %{owner: :manual} -> {:error, "#{id}: manual control is held. Switch to Scenarios."}
+        %{owner: nil} -> nil
+        %{owner: run} -> {:error, "#{id}: run ##{run} is in progress."}
+      end
+    end)
+  end
+
+  defp clean?(device),
+    do: device.faults == %{} and device.topology in [Network.baseline(), device.wiring]
+
+  defp holds?(state, pid, device) do
+    case state.workers[pid] do
+      %{devices: devices} -> device in devices
+      nil -> false
+    end
+  end
+
+  defp hold(view, ids, owner),
+    do: Enum.reduce(ids, view, &update_device(&2, &1, fn device -> %{device | owner: owner} end))
+
+  defp update_device(view, id, fun),
+    do: %{view | devices: Map.update!(view.devices, id, fun)}
+
+  defp update_run(view, id, fun),
+    do: %{view | runs: Enum.map(view.runs, &if(&1.id == id, do: fun.(&1), else: &1))}
+
+  # Never evict an active run, even when more than 20 devices run concurrently.
+  defp keep_runs(runs) do
+    {active, finished} = Enum.split_with(runs, &(&1.status == :running))
+    Enum.sort_by(active ++ Enum.take(finished, @run_limit), & &1.id, :desc)
+  end
+
+  defp update_row(rows, id, fun), do: Enum.map(rows, &if(&1.id == id, do: fun.(&1), else: &1))
+
+  defp run_label(view, run_id) do
+    case Enum.find(view.runs, &(&1.id == run_id)) do
+      %{device: device} -> "#{device} ##{run_id}"
+      nil -> "##{run_id}"
+    end
+  end
+
+  defp worker_for(state, run_id), do: Enum.find(state.workers, fn {_, w} -> w.run == run_id end)
+
+  defp complete(state, pid) do
+    case state.workers[pid] do
+      nil -> state
+      worker -> %{state | workers: Map.put(state.workers, pid, %{worker | completed: true})}
+    end
+  end
+
+  defp interrupt(state, pid) do
+    worker = state.workers[pid]
+    cancel_timer(worker)
+    Process.demonitor(worker.ref, [:flush])
+    Process.unlink(pid)
     Process.exit(pid, :kill)
-    %{state | view: finish(state.view, true), timer: nil}
+    %{state | view: finish(state.view, worker, true), workers: Map.delete(state.workers, pid)}
   end
 
   defp lifecycle_allowed?("start", %{
@@ -367,42 +466,61 @@ defmodule NervesGate.QemuTests do
        }),
        do: true
 
-  defp lifecycle_allowed?("stop", %{
-         blocked: false,
-         mode: :scenarios,
-         lifecycle: %{status: :ready}
-       }),
-       do: true
-
+  defp lifecycle_allowed?("stop", %{blocked: false, lifecycle: %{status: :ready}}), do: true
   defp lifecycle_allowed?("stop", %{lifecycle: %{status: :starting}}), do: true
 
-  defp lifecycle_allowed?("reset", %{mode: mode, blocked: blocked, lifecycle: %{status: status}})
-       when status in [:stopped, :ready, :failed] and (mode == :scenarios or blocked), do: true
+  defp lifecycle_allowed?("reset", %{lifecycle: %{status: status}})
+       when status in [:stopped, :ready, :failed],
+       do: true
 
   defp lifecycle_allowed?(_, _), do: false
 
   defp lifecycle_progress(state, lifecycle) do
-    view = %{state.view | lifecycle: lifecycle, phase: lifecycle.phase}
-    view = if state.view.phase != lifecycle.phase, do: event(view, lifecycle.phase), else: view
+    view = %{state.view | lifecycle: lifecycle}
+
+    view =
+      if state.view.lifecycle.phase != lifecycle.phase,
+        do: event(view, lifecycle.phase),
+        else: view
+
     publish(%{state | view: view})
   end
 
-  defp start_manual(%{worker: {pid, _}} = state, action) do
+  defp start_manual(state, id, action) do
+    {pid, _} = Enum.find(state.workers, fn {_, w} -> w.run == nil and w.devices == [id] end)
     send(pid, {:manual_action, action})
-    label = manual_label(action)
-    view = %{state.view | manual_action: action, phase: label} |> event("Requested: #{label}")
-    %{state | view: view} |> arm_manual_timeout() |> publish()
+
+    view =
+      state.view
+      |> update_device(id, &%{&1 | manual_action: action})
+      |> event("#{id}: requested #{manual_label(action)}")
+
+    %{state | view: view} |> arm_manual_timeout(pid) |> publish()
   end
 
-  defp arm_manual_timeout(%{worker: {_, ref}} = state) do
-    cancel_timer(state)
-    %{state | timer: :erlang.start_timer(15_000, self(), {:manual_timeout, ref})}
+  defp arm_manual_timeout(state, pid) do
+    worker = state.workers[pid]
+    cancel_timer(worker)
+    timer = :erlang.start_timer(15_000, self(), {:manual_timeout, pid})
+    %{state | workers: Map.put(state.workers, pid, %{worker | timer: timer})}
   end
 
-  defp manual_idle(state, message) do
-    cancel_timer(state)
-    view = %{state.view | manual_action: nil, phase: "Manual control ready"} |> event(message)
-    publish(%{state | view: view, timer: nil})
+  defp manual_idle(state, pid, message) do
+    case state.workers[pid] do
+      %{run: nil, devices: [id]} = worker ->
+        cancel_timer(worker)
+
+        view =
+          state.view
+          |> update_device(id, &%{&1 | manual_action: nil})
+          |> event("#{id}: #{message}")
+
+        workers = Map.put(state.workers, pid, %{worker | timer: nil})
+        publish(%{state | view: view, workers: workers})
+
+      _ ->
+        state
+    end
   end
 
   defp manual_label("acquire"), do: "Take manual control"
@@ -416,54 +534,60 @@ defmodule NervesGate.QemuTests do
     end)
   end
 
-  defp finish(view, true) do
-    rows =
-      Enum.map(view.rows, fn row ->
-        if row.status in [:waiting, :running] and view.mode == :scenarios,
-          do: %{
-            row
-            | status: :failed,
-              detail:
-                if(row.detail == "",
-                  do: "Runner stopped; inspect QEMU diagnostics.",
-                  else: row.detail
-                )
-          },
-          else: row
+  # Release the worker's devices. An uncertain outcome blocks them until Reset.
+  defp finish(view, worker, uncertain) do
+    devices =
+      Map.new(view.devices, fn {id, device} ->
+        if id in worker.devices,
+          do:
+            {id, %{device | owner: nil, manual_action: nil, blocked: device.blocked or uncertain}},
+          else: {id, device}
       end)
 
-    %{
-      view
-      | blocked: true,
-        status: :failed,
-        rows: rows,
-        manual_action: nil,
-        phase: "Control state uncertain"
-    }
-    |> event("Worker or cleanup failed. Fault state is uncertain; Reset devices.")
+    view = %{view | devices: devices, blocked: view.blocked or uncertain}
+
+    if worker.run,
+      do: finish_run(view, worker.run, uncertain),
+      else: finish_manual(view, worker, uncertain)
   end
 
-  defp finish(%{mode: :manual} = view, false) do
-    %{view | mode: :scenarios, manual_action: nil, phase: "Ready"}
-    |> event("Manual control released; disk and settings preserved")
+  defp finish_manual(view, %{devices: [id]}, false),
+    do: event(view, "#{id}: manual control released; disk and settings preserved")
+
+  defp finish_manual(view, %{devices: [id]}, true),
+    do: event(view, "#{id}: manual control or cleanup failed. Fault state is uncertain; Reset.")
+
+  defp finish_run(view, run_id, uncertain) do
+    view
+    |> update_run(run_id, fn run ->
+      rows = if uncertain, do: Enum.map(run.rows, &stopped/1), else: run.rows
+
+      status =
+        if not uncertain and Enum.all?(rows, &(&1.status == :passed)),
+          do: :passed,
+          else: :failed
+
+      phase = if uncertain, do: "Control state uncertain; Reset the devices", else: "Finished"
+      %{run | rows: rows, status: status, phase: phase}
+    end)
+    |> then(fn view ->
+      run = Enum.find(view.runs, &(&1.id == run_id))
+      view = event(view, "#{run_label(view, run_id)} #{run.status}")
+      %{view | runs: keep_runs(view.runs)}
+    end)
   end
 
-  defp finish(view, false) do
-    status =
-      if Enum.all?(view.rows, &(&1.status in [:passed, :skipped])), do: :passed, else: :failed
+  defp stopped(%{status: status} = row) when status in [:waiting, :running] do
+    detail =
+      if row.detail == "", do: "Runner stopped; inspect QEMU diagnostics.", else: row.detail
 
-    %{view | status: status, phase: "Finished"} |> event("Run ##{view.id} #{status}")
+    %{row | status: :failed, detail: detail}
   end
+
+  defp stopped(row), do: row
 
   defp cancel_timer(%{timer: nil}), do: :ok
   defp cancel_timer(%{timer: timer}), do: Process.cancel_timer(timer)
-
-  defp prepare_rows(rows, selection) do
-    Enum.map(rows, fn row ->
-      status = if selection in ["all", row.id], do: :waiting, else: :skipped
-      %{row | status: status, detail: "", milliseconds: nil}
-    end)
-  end
 
   defp event(view, message) do
     entry = %{
@@ -482,8 +606,14 @@ defmodule NervesGate.QemuTests do
 
   defp report_to(owner) do
     pid = self()
-    Process.put(:qemu_fault, fn key, label -> send(owner, {:fault, pid, key, label}) end)
-    Process.put(:qemu_topology, fn topology -> send(owner, {:topology, pid, topology}) end)
+
+    Process.put(:qemu_fault, fn device, key, label ->
+      send(owner, {:fault, pid, device, key, label})
+    end)
+
+    Process.put(:qemu_topology, fn device, topology ->
+      send(owner, {:topology, pid, device, topology})
+    end)
   end
 
   defp execute(owner, run_id, context, scenarios) do
@@ -491,22 +621,18 @@ defmodule NervesGate.QemuTests do
     report_to(owner)
     Process.put(:qemu_report, fn phase -> send(owner, {:phase, run_id, phase}) end)
 
-    for {id, module} <- scenarios do
-      send(owner, {:progress, run_id, id, %{status: :running}})
+    for scenario <- scenarios do
+      send(owner, {:progress, run_id, scenario.id, %{status: :running}})
       start = System.monotonic_time(:millisecond)
-      spec = module.spec()
-      reset? = Map.get(spec, :fresh_disk, false)
-      affected = if spec[:devices] == :all, do: Map.values(context.devices), else: [vm]
+      affected = if scenario.all, do: Map.values(context.devices), else: [vm]
 
       result =
         try do
-          if reset? do
-            fresh_devices(affected, vm, Map.get(spec, :boot, []))
-          else
-            baseline(vm)
-          end
+          if scenario.fresh_disk,
+            do: fresh_devices(affected, vm, Map.get(scenario.module.spec(), :boot, [])),
+            else: baseline(vm)
 
-          module.run(%{context | device: vm})
+          scenario.module.run(context)
           %{status: :passed, detail: "OK"}
         rescue
           error -> %{status: :failed, detail: Exception.format(:error, error, __STACKTRACE__)}
@@ -517,18 +643,19 @@ defmodule NervesGate.QemuTests do
           kind, reason ->
             %{status: :failed, detail: Exception.format(kind, reason, __STACKTRACE__)}
         after
-          # A cleanup failure stops the worker and blocks further runs, rather than hiding a fault.
+          # A cleanup failure stops the worker and blocks its devices, rather than hiding a fault.
           if Process.get(:simulator_control_failed), do: exit(:simulator_control_failed)
           Qemu.cleanup()
         end
 
       if result.status == :failed,
-        do: send(owner, {:scenario_failed, run_id, id, result.detail})
+        do: send(owner, {:scenario_failed, run_id, scenario.id, result.detail})
 
-      if reset? or result.status == :failed do
+      if scenario.fresh_disk or result.status == :failed do
         send(
           owner,
-          {:phase, run_id, "Replacing disposable disk after #{id}; enrollment is erased"}
+          {:phase, run_id,
+           "Replacing disposable disks after #{scenario.id}; enrollment is erased"}
         )
 
         fresh_devices(affected, vm, [])
@@ -536,21 +663,21 @@ defmodule NervesGate.QemuTests do
       end
 
       result = Map.put(result, :milliseconds, System.monotonic_time(:millisecond) - start)
-      send(owner, {:progress, run_id, id, result})
+      send(owner, {:progress, run_id, scenario.id, result})
     end
 
-    send(owner, {:finished, run_id, vm})
+    send(owner, {:finished, run_id})
   end
 
   defp fresh_devices(devices, primary, options) do
     for device <- devices, do: Qemu.fresh(device, options)
-    :ok = Qemu.network(primary, NervesGate.Simulator.Network.defaults())
+    :ok = Qemu.network(primary, Network.defaults())
   end
 
   defp baseline(vm) do
     Qemu.resume(vm)
     Qemu.insert_lan1(vm)
-    :ok = Qemu.network(vm, NervesGate.Simulator.Network.defaults())
+    :ok = Qemu.network(vm, Network.defaults())
     status = Qemu.await(vm, "Waiting for device", & &1)
     if status.network.pending, do: Qemu.call(vm, :network_cancel, [status.network.pending.id])
     NervesGate.ScenarioHelpers.save(vm, NervesGate.ScenarioHelpers.settings("eth0"))

@@ -27,15 +27,6 @@ defmodule NervesGateWeb.Router do
   scope("/", NervesGateWeb) do
     pipe_through(:browser)
 
-    if Application.compile_env(:nerves_gate, :dev_tests, false) do
-      scope "/tests" do
-        live("/", TestsLive)
-        get("/state", TestsController, :state)
-        post("/run", TestsController, :run)
-        post("/control", TestsController, :control)
-      end
-    end
-
     live_session(:management,
       session: {NervesGateWeb.Access, :session, []},
       layout: {NervesGateWeb.Layouts, :app}

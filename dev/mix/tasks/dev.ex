@@ -1,7 +1,7 @@
 defmodule Mix.Tasks.Dev do
   @moduledoc false
   use Mix.Task
-  @shortdoc "Start Phoenix and the empty multi-device simulator"
+  @shortdoc "Start the simulator site with an empty multi-device simulator"
 
   @impl true
   def run(args) do
@@ -79,7 +79,7 @@ defmodule Mix.Tasks.Dev do
     {:ok, _} = Application.ensure_all_started(:muontrap)
 
     try do
-      IO.puts("Starting Phoenix with an empty simulator...")
+      IO.puts("Starting the simulator site with an empty simulator...")
 
       status =
         if ci? do
@@ -109,7 +109,7 @@ defmodule Mix.Tasks.Dev do
 
     try do
       await_http(task, socket, port, System.monotonic_time(:millisecond) + 600_000)
-      IO.puts("Simulator controls ready: http://localhost:#{port}/tests")
+      IO.puts("Simulator site ready: http://localhost:#{port}")
       Task.await(task, :infinity)
     after
       Task.shutdown(task, :brutal_kill)
@@ -130,8 +130,8 @@ defmodule Mix.Tasks.Dev do
     ]
 
     with {:ok, %{status: 200}} <-
-           Req.get("http://localhost/tests/state", [unix_socket: socket] ++ options),
-         {:ok, %{status: 200}} <- Req.get("http://127.0.0.1:#{port}/tests/state", options) do
+           Req.get("http://localhost/api/state", [unix_socket: socket] ++ options),
+         {:ok, %{status: 200}} <- Req.get("http://127.0.0.1:#{port}/api/state", options) do
       :ok
     else
       _ ->
@@ -162,7 +162,6 @@ defmodule Mix.Tasks.Dev do
              "dev"
            end},
           {"ERL_EPMD_PORT", Integer.to_string(epmd_port)},
-          {"NERVES_GATE_BACKEND_NODE", nil},
           {"QEMU_SIM_CONFIG", Path.expand(config || "dev/simulator.exs")},
           {"NERVES_GATE_DEVICE_NODE", nil},
           {"QEMU_HTTP_SOCKET", socket},

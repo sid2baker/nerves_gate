@@ -13,9 +13,9 @@ mix setup
 mix dev
 ```
 
-Open **http://localhost:4000/tests** and choose **Start configured devices**.
-Phoenix starts immediately with an empty simulator; gateway pages stay disconnected
-until bootstrapping finishes. Setup installs Mix tooling and dependencies,
+Open **http://localhost:4000** and choose **Start devices**.
+The simulator site starts immediately with no devices booted. Each device has a
+tests page and a link to its own gateway UI. Setup installs Mix tooling and dependencies,
 verifies and installs the x86 Tailscale binary, and downloads the prebuilt EC100
 QEMU system. Dependencies and application firmware still compile locally, but
 Linux and Erlang do not. No Docker, physical device, tailnet enrollment,
@@ -24,10 +24,13 @@ workstation network changes or Node.js are needed for normal development.
 Keep `mix dev` running. Once the devices are ready, in another terminal:
 
 ```sh
-mix test --only cable_loss       # one scenario; results also appear at /tests
+mix test --only cable_loss --device gateway_a
+mix dev.ui gateway_a             # gateway UI with code reload, localhost:4001
+# mix dev.ui nerves_gate@100.101.102.103   # same UI against real hardware
 ```
 
-The workstation runs the UI and a separate host-only Simulator BEAM. Start builds
+The workstation runs the simulator site and a separate host-only Simulator BEAM.
+`mix dev.ui [target]` runs the gateway UI against a simulated or real device. Start builds
 one firmware image and bootstraps two QEMU devices through real USB SSH/fwup updates.
 Stop preserves their disks; explicit Reset erases disks and enrollment. Device services run in Nerves, not in-memory mocks.
 See [development](docs/development.md) for simulator configuration, workflow,

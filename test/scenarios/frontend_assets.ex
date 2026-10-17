@@ -3,9 +3,13 @@ defmodule NervesGate.Scenarios.FrontendAssets do
   import ExUnit.Assertions
   alias NervesGate.TestQemu, as: Qemu
   alias NervesGateWeb.Endpoint
+  alias NervesGateWeb.Simulator.Endpoint, as: Site
   alias Phoenix.Socket.Transport
 
-  def spec, do: %{:name => "Host and firmware serve the frontend; firmware needs no Volt runtime"}
+  def spec,
+    do: %{
+      :name => "Simulator site and firmware serve the frontend; firmware needs no Volt runtime"
+    }
 
   def run(%{device: vm}) do
     assert_websocket_csrf()
@@ -22,8 +26,10 @@ defmodule NervesGate.Scenarios.FrontendAssets do
       )
 
     port = String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
-    assert %URI{scheme: "http", host: "localhost", port: ^port} = URI.parse(Endpoint.url())
-    assert Endpoint.config(:http)[:ip] == {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}
+    assert %URI{scheme: "http", host: "localhost", port: ^port} = URI.parse(Site.url())
+    assert Site.config(:http)[:ip] == {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}
+    # The session checks the gateway Endpoint's configuration but never serves it.
+    refute Phoenix.Endpoint.server?(:nerves_gate, Endpoint)
 
     firmware =
       Req.new(
@@ -34,6 +40,10 @@ defmodule NervesGate.Scenarios.FrontendAssets do
 
     assert_assets(host)
     assert_assets(firmware)
+    assert_simulator_site(host, vm)
+    assert Req.get!(firmware, url: "/tests").status == 404
+    assert Req.get!(firmware, url: "/devices/#{vm.id}").status == 404
+    assert Req.get!(firmware, url: "/api/state").status == 404
 
     if System.get_env("QEMU_CI") != "true" do
       browser =
@@ -45,7 +55,7 @@ defmodule NervesGate.Scenarios.FrontendAssets do
 
       assert_assets(browser)
 
-      if Endpoint.config(:code_reloader) do
+      if Site.config(:code_reloader) do
         assert Req.get!(browser, url: "/tidewave/config").body["framework_type"] == "phoenix"
 
         assert Req.get!(browser,
@@ -60,7 +70,7 @@ defmodule NervesGate.Scenarios.FrontendAssets do
 
     # Tidewave owns its JSON parser; the gateway only accepts form bodies.
     # Test/CI hosts and firmware must not expose Tidewave at all.
-    if Endpoint.config(:code_reloader) do
+    if Site.config(:code_reloader) do
       assert Req.get!(host, url: "/tidewave/config").body["framework_type"] == "phoenix"
       assert Req.get!(host, url: "/tidewave/mcp").status == 405
 
@@ -166,6 +176,24 @@ defmodule NervesGate.Scenarios.FrontendAssets do
 
     token = Plug.CSRFProtection.get_csrf_token()
     {Plug.Conn.send_resp(conn, 200, ""), token}
+  end
+
+  defp assert_simulator_site(client, vm) do
+    overview = Req.get!(client, url: "/").body |> Floki.parse_document!()
+    assert [_] = Floki.find(overview, "#simulator-lifecycle")
+    assert [_] = Floki.find(overview, "#add-device")
+    assert [_] = Floki.find(overview, "#simulator-devices a[href='/devices/#{vm.id}']")
+    assert [] = Floki.find(overview, "#internet-editor")
+    assert Req.get!(client, url: "/network").status == 404
+
+    device = Req.get!(client, url: "/devices/#{vm.id}").body |> Floki.parse_document!()
+    assert [_] = Floki.find(device, "#device-summary")
+    assert [_] = Floki.find(device, "#test-results")
+
+    assert Floki.attribute(device, "#device-ui-link", "href") ==
+             ["http://#{vm.address}:#{vm.forwards.http}"]
+
+    assert Floki.text(device) =~ "mix dev.ui #{vm.id}"
   end
 
   defp assert_assets(client) do

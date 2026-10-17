@@ -132,7 +132,11 @@ readiness or a trigger for automatic remedies. See [LED policy](indicators.md#le
 
 ## QEMU bench
 
-`mix dev` starts Phoenix and an empty host-only `Simulator` BEAM under MuonTrap.
+`mix dev` serves a simulator configuration site, separate from the gateway UI,
+and starts an empty host-only `Simulator` BEAM under MuonTrap. Each device serves
+the same gateway UI as EC100. `mix dev.ui [target]` runs that UI on the workstation
+with code reload against any simulated or real gateway; its hidden, outbound-only
+node uses the chosen device's EPMD registry and starts no local device services.
 Its lifecycle GenServer owns asynchronous build/start/stop/reset work and progress.
 No firmware is built and no device boots until Start is admitted. Stop powers off
 and preserves disks; Reset explicitly erases them without restarting. A new Start
@@ -179,17 +183,24 @@ bypass or silent hardware restart. Raw packet data is excluded
 from status/crash reports and notifications. Loopback services, like the local UI,
 trust workstation users; this is not an OS sandbox.
 
-`QemuTests` remains the single UI/CLI admission/controller process for lifecycle,
-manual controls and scenarios. It keeps the UI backend disconnected until all
-devices are ready and rejects lifecycle operations during scenario/manual ownership.
-Manual controls and ordinary Elixir scenarios use the same drivers, bounded operations and restoration
-callbacks. Scenarios declare data with `spec/0` and receive `%{device: primary,
-devices: devices}` in `run/1`. The UI and manual controls stay attached to the
-primary device; multi-device scenarios address explicit handles. The runner
-publishes confirmed primary topology separately from injected faults and observed
-gateway state. Cleanup resumes a paused VM first and restores the default
-network map; failure blocks the bench until Reset. Initial network creation is a
-Start operation, not a hot upgrade of an existing bench.
+`QemuTests` is the single site/CLI admission owner for lifecycle, configuration,
+manual controls and scenarios. It reserves devices, not a shared UI backend:
+runs on different devices can proceed in parallel, while a `devices: :all` scenario
+holds all devices for its whole run. Lifecycle operations cannot interrupt an
+active run or manual controller. The overview edits default wiring while stopped
+and persists it to the config file; adding/removing devices requires erased disks
+because sorted device IDs determine serial numbers and loopback addresses.
+
+Each `/devices/:id` page subscribes directly to its device's projection and shows
+its topology, injected faults and results separately from observed gateway state.
+Manual controls and ordinary Elixir scenarios share drivers, bounded operations
+and restoration callbacks. Scenarios declare data with `spec/0` and receive
+`%{device: selected, devices: devices}` in `run/1`; multi-device scenarios address
+explicit handles. Cleanup resumes a paused VM first and restores the default
+network map; failure blocks affected devices until Reset. Initial network creation
+is a Start operation, not a hot upgrade of an existing bench. The site retains
+active runs, 20 completed runs and 100 events in memory; none contain private
+login links or distribution credentials.
 
 New protocol peers or fault types can be added to these real networks and drivers
 as needed. There is no scenario DSL, plugin registry or second simulator framework.

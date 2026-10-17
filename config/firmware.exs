@@ -15,7 +15,8 @@ config :nerves_gate,
     NervesGate.Equipment,
     NervesGate.Indicators,
     NervesGate.Buses,
-    NervesGate.ProjectionServer
+    NervesGate.ProjectionServer,
+    NervesGateWeb.Endpoint
   ],
   # Disabled until the real modem is identified; QEMU does not emulate one.
   cellular: nil,

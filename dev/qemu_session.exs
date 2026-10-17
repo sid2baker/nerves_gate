@@ -82,17 +82,38 @@ connected =
 true = connected
 
 Application.put_env(:nerves_gate, :simulator_node, :"simulator@127.0.0.1")
-Application.delete_env(:nerves_gate, :backend_node)
-endpoint = Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)
 
-endpoint =
-  Keyword.merge(endpoint,
+# The session serves the simulator site, not the gateway UI. The gateway
+# Endpoint runs without a listener so scenarios can check its configuration.
+Application.put_env(:nerves_gate, :services, [
+  NervesGate.QemuTests,
+  NervesGateWeb.Endpoint,
+  NervesGateWeb.Simulator.Endpoint
+])
+
+gateway = Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)
+Application.put_env(:nerves_gate, NervesGateWeb.Endpoint, Keyword.put(gateway, :server, false))
+port = String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
+site = Application.fetch_env!(:nerves_gate, NervesGateWeb.Simulator.Endpoint)
+
+site =
+  Keyword.merge(site,
     server: true,
-    url: [host: "localhost", port: String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))],
+    url: [host: "localhost", port: port],
     http: [ip: {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}, port: 0]
   )
 
-Application.put_env(:nerves_gate, NervesGateWeb.Endpoint, endpoint)
+Application.put_env(:nerves_gate, NervesGateWeb.Simulator.Endpoint, site)
+
+views = fn timeout, message ->
+  Stream.repeatedly(fn ->
+    receive do
+      {:qemu_tests, view} -> view
+    after
+      timeout -> raise message
+    end
+  end)
+end
 
 result =
   try do
@@ -100,10 +121,10 @@ result =
 
     if System.get_env("QEMU_CI") != "true" do
       [spec] =
-        Bandit.PhoenixAdapter.child_specs(NervesGateWeb.Endpoint,
+        Bandit.PhoenixAdapter.child_specs(NervesGateWeb.Simulator.Endpoint,
           otp_app: :nerves_gate,
-          code_reloader: endpoint[:code_reloader],
-          http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))]
+          code_reloader: site[:code_reloader],
+          http: [ip: {127, 0, 0, 1}, port: port]
         )
 
       {:ok, _} = Supervisor.start_child(supervisor, spec)
@@ -113,47 +134,33 @@ result =
       QemuTests.subscribe()
       :ok = QemuTests.lifecycle("start")
 
-      Stream.repeatedly(fn ->
-        receive do
-          {:qemu_tests, view} -> view
-        after
-          900_000 -> raise "QEMU startup stopped reporting"
-        end
-      end)
-      |> Enum.reduce_while(:starting, fn view, _ ->
-        case view.lifecycle.status do
-          :ready ->
-            {:halt, :ready}
+      views.(900_000, "QEMU startup stopped reporting")
+      |> Enum.find(fn view ->
+        if view.lifecycle.status in [:failed, :unavailable],
+          do: raise("QEMU startup failed: #{view.lifecycle.phase}")
 
-          status when status in [:failed, :unavailable] ->
-            raise "QEMU startup failed: #{view.lifecycle.phase}"
-
-          _ ->
-            {:cont, :starting}
-        end
+        view.lifecycle.status == :ready
       end)
 
-      {:ok, _} = QemuTests.run(System.fetch_env!("QEMU_SCENARIO"))
+      # CI runs on the first device; multi-device scenarios hold the others.
+      [first | _] = QemuTests.snapshot().lifecycle.devices
+      {:ok, id} = QemuTests.run(first.id, System.fetch_env!("QEMU_SCENARIO"))
 
-      Stream.repeatedly(fn ->
-        receive do
-          {:qemu_tests, view} -> view
-        after
-          600_000 -> raise "QEMU runner stopped reporting"
-        end
-      end)
-      |> Enum.reduce_while(MapSet.new(), fn view, seen ->
-        seen =
-          Enum.reduce(view.rows, seen, fn row, seen ->
-            if row.status in [:passed, :failed] and not MapSet.member?(seen, row.id) do
+      views.(600_000, "QEMU runner stopped reporting")
+      |> Enum.reduce_while(MapSet.new(), fn view, printed ->
+        run = Enum.find(view.runs, &(&1.id == id))
+
+        printed =
+          Enum.reduce(run.rows, printed, fn row, printed ->
+            if row.status in [:passed, :failed] and not MapSet.member?(printed, row.id) do
               IO.puts("#{row.status}: #{row.id} (#{row.milliseconds} ms) #{row.detail}")
-              MapSet.put(seen, row.id)
+              MapSet.put(printed, row.id)
             else
-              seen
+              printed
             end
           end)
 
-        if view.status == :running, do: {:cont, seen}, else: {:halt, view.status}
+        if run.status == :running, do: {:cont, printed}, else: {:halt, run.status}
       end)
     else
       Process.sleep(:infinity)

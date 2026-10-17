@@ -15,18 +15,31 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   alias Phoenix.LiveView.{Lifecycle, Socket}
 
+  # The workstation UI's backend is VM-wide, so this scenario holds every device.
   def spec,
     do: %{
       :name =>
-        "UI reducers follow the device stream, survive restart and reconnect, and keep drafts"
+        "UI reducers follow the device stream, survive restart and reconnect, and keep drafts",
+      :devices => :all
     }
 
   def run(%{device: vm}) do
+    # Select the device exactly as mix dev.ui does for the in-process UI checks.
+    Application.put_env(:nerves_gate, :backend_node, vm.node)
+
+    try do
+      check(vm)
+    after
+      Application.delete_env(:nerves_gate, :backend_node)
+    end
+  end
+
+  defp check(vm) do
     assert Qemu.status(vm).system.node == vm.node
     assert_runtime_backend(vm)
     assert_remote_events()
     assert_discovery_observations(vm)
-    assert_http_pages()
+    assert_http_pages(vm)
     assert_distribution_cookie_cached()
     assert_network_forms(vm)
     assert_settings_commands()
@@ -161,18 +174,18 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   @doc false
   def assert_bench_controls(vm) do
-    run = %{NervesGate.QemuTests.snapshot() | mode: :manual}
+    bench = put_in(NervesGate.QemuTests.snapshot(), [:devices, vm.id, :owner], :manual)
 
     page =
       %{
         __changed__: nil,
         projection: NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node}).status,
-        run: run,
+        bench: bench,
+        id: Atom.to_string(vm.id),
         error: nil,
-        confirm_run: nil,
-        confirm_reset: false
+        confirm_run: nil
       }
-      |> NervesGateWeb.TestsLive.render()
+      |> NervesGateWeb.Simulator.DeviceLive.render()
       |> Phoenix.HTML.Safe.to_iodata()
       |> IO.iodata_to_binary()
       |> Floki.parse_document!()
@@ -181,7 +194,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
       assert [_] = Floki.find(page, "#manual-#{id}")
     end
 
-    for {port, network} <- run.topology do
+    for {port, network} <- bench.devices[vm.id].topology do
       text = page |> Floki.find("#bench-#{port}-network") |> Floki.text()
 
       assert text ==
@@ -400,9 +413,13 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert NervesGateWeb.Backend.projection().status.system.node == vm.node
   end
 
-  # Exercise real static mounts through the development Unix socket too. It is
-  # not an IP address and must never count as proof of USB management access.
-  defp assert_http_pages do
+  # Real pages from the device's own Endpoint, through the bench's management
+  # forward. That peer is not USB and must never count as USB management access.
+  # The device serves the release UI; it has no development pages.
+  defp assert_http_pages(vm) do
+    device = Req.new(base_url: "http://#{vm.address}:#{vm.forwards.http}", retry: false)
+    assert Req.get!(device, url: "/tests").status == 404
+
     for path <- [
           "/",
           "/network",
@@ -410,23 +427,15 @@ defmodule NervesGate.Scenarios.ProjectionStream do
           "/equipment/lan/2",
           "/remote",
           "/settings",
-          "/distribution",
-          "/tests"
+          "/distribution"
         ] do
-      response =
-        Req.get!("http://localhost#{path}",
-          unix_socket: System.fetch_env!("QEMU_HTTP_SOCKET"),
-          retry: false
-        )
-
+      response = Req.get!(device, url: path)
       assert response.status == 200
       assert response.body =~ "data-phx-main"
       refute response.body =~ "Use a trusted network."
       refute response.body =~ "Network changes have a 60-second undo window."
       refute response.body =~ "Configure equipment addressing under"
-      destination = if path == "/tests", do: "/", else: "/tests"
-      assert [link] = Regex.run(~r/<a\b[^>]*href="#{destination}"[^>]*>/, response.body)
-      refute link =~ "data-phx-link"
+      refute response.body =~ ~s(href="/tests")
 
       if path == "/network" do
         page = Floki.parse_document!(response.body)

@@ -6,7 +6,7 @@ defmodule NervesGate.Application do
   def start(_type, _args) do
     children =
       [{Phoenix.PubSub, [name: NervesGate.PubSub]}] ++
-        Application.fetch_env!(:nerves_gate, :services) ++ [NervesGateWeb.Endpoint]
+        Application.fetch_env!(:nerves_gate, :services)
 
     NervesGate.Distribution.configure_cookie()
     Supervisor.start_link(children, strategy: :rest_for_one, name: NervesGate.Supervisor)
@@ -14,7 +14,12 @@ defmodule NervesGate.Application do
 
   @impl true
   def config_change(changed, _new, removed) do
-    NervesGateWeb.Endpoint.config_change(changed, removed)
+    for service <- Application.fetch_env!(:nerves_gate, :services),
+        is_atom(service),
+        function_exported?(service, :config_change, 2) do
+      service.config_change(changed, removed)
+    end
+
     :ok
   end
 end

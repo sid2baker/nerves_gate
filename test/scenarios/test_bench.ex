@@ -1,18 +1,29 @@
 defmodule NervesGate.Scenarios.TestBench do
   @moduledoc false
   import ExUnit.Assertions
-  alias NervesGate.{ManualFaults, QemuTests}
+  alias NervesGate.{ManualFaults, QemuTests, Simulator}
   alias NervesGate.TestQemu, as: Qemu
 
+  # Holding every device proves that a run excludes other runs and manual control.
   def spec,
     do: %{
-      :name => "bench ownership, reversible manual faults and cleanup preserve device settings"
+      :name => "bench ownership, reversible manual faults and cleanup preserve device settings",
+      :devices => :all
     }
 
-  def run(%{device: vm}) do
-    assert {:error, _} = QemuTests.run("firewall")
-    assert {:error, _} = QemuTests.mode("manual")
-    assert {:error, _} = QemuTests.manual("lan1_down")
+  def run(%{device: vm, devices: devices}) do
+    assert_configuration(vm)
+
+    for id <- Map.keys(devices) do
+      assert QemuTests.snapshot().devices[id].owner == QemuTests.snapshot().devices[vm.id].owner
+      assert {:error, _} = QemuTests.run(id, "firewall")
+      assert {:error, _} = QemuTests.mode(id, "manual")
+      assert {:error, _} = QemuTests.mode(id, "scenarios")
+      assert {:error, _} = QemuTests.manual(id, "lan1_down")
+    end
+
+    assert {:error, _} = QemuTests.run("unknown_device", "firewall")
+    assert {:error, _} = QemuTests.configure({:put, "gateway_z", "lan1"})
     assert QemuTests.snapshot().lifecycle.status == :ready
     for action <- ~w(start stop reset), do: assert({:error, _} = QemuTests.lifecycle(action))
     before = Qemu.status(vm)
@@ -61,11 +72,11 @@ defmodule NervesGate.Scenarios.TestBench do
 
     try do
       assert_receive {:manual_ready, ^pid}, 5_000
-      assert {:error, _} = QemuTests.mode("scenarios")
+      assert {:error, _} = QemuTests.mode(vm.id, "scenarios")
       faults(pid, vm)
       action(pid, "clear")
       recovered(vm, before)
-      assert QemuTests.snapshot().faults == %{}
+      assert device(vm).faults == %{}
 
       # Release must clean up too, even when the browser did not press Clear.
       faults(pid, vm)
@@ -75,18 +86,69 @@ defmodule NervesGate.Scenarios.TestBench do
     end
 
     recovered(vm, before)
-    assert QemuTests.snapshot().faults == %{}
+    assert device(vm).faults == %{}
     events = QemuTests.snapshot().events
     assert Enum.count_until(events, 101) <= 100
     ids = Enum.map(events, & &1.id)
     assert ids == Enum.sort(Enum.uniq(ids))
   end
 
+  # Exercise configuration persistence without starting another simulator or VM.
+  @doc false
+  def assert_configuration(vm) do
+    path = Path.join(vm.dir, "configuration.exs")
+    dir = Path.join(vm.dir, "configuration")
+    raw = %{firmware: vm.firmware, devices: %{first: %{provision: %{ssh_keys: []}}}}
+    File.write!(path, inspect(raw))
+    trap_exit = Process.flag(:trap_exit, true)
+
+    try do
+      {:ok, state} = Simulator.init(Simulator.config(path, dir))
+
+      {:reply, :ok, state} =
+        Simulator.handle_call({:configure, {:put, "second", "lan2"}}, nil, state)
+
+      assert Simulator.config(path, dir).devices.second.network.internet == :lan2
+
+      assert Enum.map(state.view.devices, & &1.node) ==
+               [:"nerves_gate@127.0.0.2", :"nerves_gate@127.0.0.3"]
+
+      preserved = %{state | prepared: true}
+      reject_configuration(preserved, {:put, "third", "lan1"})
+      reject_configuration(preserved, {:delete, "second"})
+
+      {:reply, :ok, _} =
+        Simulator.handle_call({:configure, {:put, "first", "lan2"}}, nil, preserved)
+
+      assert Simulator.config(path, dir).devices.first.provision == %{ssh_keys: []}
+      assert Simulator.config(path, dir).devices.first.network.internet == :lan2
+
+      for change <- [{:put, "bad-name", "lan1"}, {:put, "third", "off"}, {:delete, "unknown"}],
+          do: reject_configuration(state, change)
+
+      reject_configuration(put_in(state.view.status, :ready), {:put, "third", "lan1"})
+      reject_configuration(put_in(state.view.reset_required, true), {:put, "third", "lan1"})
+      {:reply, :ok, state} = Simulator.handle_call({:configure, {:delete, "second"}}, nil, state)
+      reject_configuration(state, {:delete, "first"})
+      assert Map.keys(Simulator.config(path, dir).devices) == [:first]
+    after
+      Process.flag(:trap_exit, trap_exit)
+      File.rm!(path)
+      File.rm(path <> ".tmp")
+    end
+  end
+
+  defp reject_configuration(state, change) do
+    before = File.read!(state.config.path)
+    assert {:reply, {:error, _}, ^state} = Simulator.handle_call({:configure, change}, nil, state)
+    assert File.read!(state.config.path) == before
+  end
+
   defp faults(pid, vm) do
     action(pid, "lan1_down")
     action(pid, "connect_lan2")
     assert NervesGate.TestQemu.topology(vm) == %{lan1: :equipment, lan2: :internet}
-    assert QemuTests.snapshot().faults["lan1"]
+    assert device(vm).faults["lan1"]
     NervesGate.Scenarios.ProjectionStream.assert_bench_controls(vm)
 
     for action <- ~w(lan1_down lan2_down latency_on latency_on internet_loss internet_down),
@@ -98,10 +160,12 @@ defmodule NervesGate.Scenarios.TestBench do
 
     action(pid, "pause")
     assert Qemu.status(vm) == nil
-    faults = QemuTests.snapshot().faults
+    faults = device(vm).faults
     assert Enum.sort(Map.keys(faults)) == ~w(internet lan1 lan2 latency vm)
     assert faults["internet"] == "Internet outage"
   end
+
+  defp device(vm), do: QemuTests.snapshot().devices[vm.id]
 
   defp action(pid, action) do
     send(pid, {:manual_action, action})
@@ -117,7 +181,7 @@ defmodule NervesGate.Scenarios.TestBench do
       end)
 
     assert NervesGate.TestQemu.topology(vm) == NervesGate.Simulator.Network.baseline()
-    assert QemuTests.snapshot().topology == NervesGate.Simulator.Network.baseline()
+    assert device(vm).topology == NervesGate.Simulator.Network.baseline()
     assert status.network.desired == before.network.desired
     assert status.remote_access.auth_state == before.remote_access.auth_state
     assert status.remote_access.ipv4 == before.remote_access.ipv4
