@@ -1,44 +1,49 @@
 # Nerves Gate
 
-## Most important: KISS — Keep it stupidly simple
+## KISS — Keep it stupidly simple
 
-- Choose the simplest design that correctly solves the problem.
-- Large changes are welcome when they simplify the system. Minimize concepts and indirection, not necessarily changed lines.
-- Prefer direct code and ordinary Elixir/OTP over frameworks, generic machinery, speculative abstractions or configuration layers.
-- Keep one clear way to do each job. Remove obsolete code rather than carrying parallel implementations.
-- Solve today's requirements. Optimize or generalize only when there is a demonstrated need.
+- Use the simplest design that solves today's problem.
+- Prefer direct code and ordinary Elixir/OTP. Minimize concepts and indirection, not changed lines.
+- Keep one clear way to do each job. Remove obsolete code; avoid speculative frameworks and configuration layers.
+- Document how the system works now, not the history of replaced code.
 
 ## Elixir only
 
-- Write application logic, tests and development tooling in Elixir. Do not introduce helper scripts in other languages.
-- Prefer Elixir libraries over shelling out when they cover the task; for example, use Req for HTTP.
-- External system tools remain appropriate for actual firmware, networking and QEMU operations. Do not wrap ordinary application logic in shell scripts.
+- Write application logic, tests and development tooling in Elixir.
+- Prefer Elixir libraries, such as Req for HTTP, over shelling out.
+- Use external tools for actual firmware, networking and QEMU operations.
 
-## Ownership and architecture
+## Structure and ownership
 
-- Domain processes own commands, admission, deadlines and persistence.
-- The projection is a read model, not a command coordinator. UI action availability never replaces backend validation.
-- Keep `NervesGate.status/1` as a direct domain query. LiveViews share the device-owned projection stream and keep form drafts separate.
-- Preserve clear boundaries without adding layers just to enforce them.
+- `lib/nerves_gate/`: device domains. They own commands, admission, deadlines and persistence.
+- `lib/nerves_gate.ex`: public API. Keep `NervesGate.status/1` as a direct domain query.
+- `lib/nerves_gate_web/`: gateway UI, shared by EC100, QEMU and `mix dev.ui`.
+- `dev/simulator.ex` and `dev/simulator/`: host-only lifecycle and owned QEMU hardware.
+- `dev/simulator_web/`: simulator site, with configuration at `/` and tests at `/devices/:id`.
+- `test/support/runner.ex`: shared UI/CLI/CI admission and per-device reservations. Independent devices can run concurrently; `devices: :all` reserves every device.
+- `test/scenarios/`: shared QEMU scenarios. Extend these rather than adding a hardware-mock suite.
+- `config/firmware.exs`: shared device services; `config/host.exs`: workstation services.
+- Projections are read models. LiveViews subscribe to the device-owned stream and keep drafts separate. UI availability never replaces backend validation.
+- Preserve boundaries without adding layers just to enforce them.
 
 ## Safety
 
-- Tests operate only on disposable, supervised QEMU instances on the bench's private socket-based networks. Never attach the drivers to an arbitrary VM or alter workstation networking.
-- Never flash physical devices, modify workstation networking/VPN, or stop unrelated processes without explicit authorization.
-- Keep private login URLs, distribution cookies and other secrets out of projections, notifications and logs.
+- Tests use only disposable, supervised QEMU devices on private socket networks. Never attach drivers to arbitrary VMs.
+- Never flash physical devices, change workstation networking/VPN, or stop unrelated processes without explicit authorization.
+- Keep private login URLs, distribution cookies, CSRF tokens and other secrets out of projections, notifications and logs.
 
 ## Development and validation
 
-- Use `mix setup` for initial QEMU development setup; use `mix deps.get` when only fetching dependencies.
-- The user runs `mix dev` in another shell and starts devices on the simulator overview (`/`). Do not launch or stop that session, or boot devices through lifecycle controls without authorization. If unavailable, ask the user to start it.
-- Run focused scenarios against the existing session with `mix test --only <scenario> [--device <id>]`; do not use `--ci` to launch another VM. Device pages are `/devices/:id`; the private CLI API is on `_build/qemu-dev/http.sock`.
-- `mix dev.ui [device-id | nerves_gate@<IPv4>] [--port 4001]` serves the real gateway UI with code reload against a simulated or real device. It never boots devices; gateway firmware has no simulator pages.
-- UI, CLI and CI use the same QEMU scenarios. Extend those rather than creating a separate hardware-mock or simulator suite.
-- `mix ci` is expensive and is run only by the user. Do not run it; report the focused checks you performed and leave full CI to the user.
-- Keep code formatted and test changed behavior. Documentation-only changes do not require QEMU checks.
+- `mix setup` prepares QEMU development; `mix deps.get` only fetches dependencies.
+- The user owns `mix dev` and starts devices on the simulator overview. Do not launch/stop that session or boot devices without authorization. If unavailable, ask the user to start it.
+- Run focused checks with `mix test --only <scenario> [--device <id>]` against that session. Never use `--ci` to launch another bench.
+- `mix dev.ui <device-id | nerves_gate@IPv4> [--port 4001]` serves the gateway UI with code reload. It connects to a running device; it does not boot one.
+- Build changed assets with `mix assets.build` and commit `priv/static/assets/` with their sources.
+- Keep code formatted and test changed behavior. Documentation-only changes need no QEMU checks.
+- Full `mix ci` is expensive and belongs to the user. Report focused checks; do not run it.
 
 ## Start here
 
-- [Architecture](docs/architecture.md)
-- [Development and QEMU workflow](docs/development.md)
+- [Architecture and source map](docs/architecture.md)
+- [Development](docs/development.md)
 - [Public API](lib/nerves_gate.ex)

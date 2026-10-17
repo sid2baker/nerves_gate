@@ -66,7 +66,7 @@ solid on healthy cellular plus healthy Tailscale; USER2 indicates degraded redun
 ### Modem qualification is still required
 
 **The default EC100 firmware has cellular support disabled (`cellular: nil`).**
-The local BSP has USB groundwork but no qualified modem power/reset or networking.
+The EC100 system has USB groundwork but no qualified modem power/reset or networking.
 Configuration, selection, persistence and UI support are prepared; the unidentified
 factory modem and its EC100 BSP drivers remain unqualified.
 
@@ -270,21 +270,9 @@ an advertisement or disconnecting is not proof that existing sessions have ended
 The UI reports advertisements, not isolation, approval or reachability. Authenticated
 end-to-end routing, NAT and real-device behavior still require target qualification.
 
-#### Existing external or legacy routes
-
-Old 4via6 advertisements are not converted or deleted automatically. They remain
-external Tailscale preferences and may still provide access. The equipment switch
-only controls the current IPv4 subnet; other advertisements must be removed before
-LAN changes. Inspect them under **Overview → Remote access → Connection details**.
-From recovery IEx, remove only the exact unwanted route, preserving the others:
-
-```elixir
-routes = Tailscaled.get_configuration().advertise_routes
-# Replace this string with the exact old route you intend to withdraw.
-Tailscaled.update_configuration(%{advertise_routes: List.delete(routes, "old-route/CIDR")})
-```
-
-Do not reset all daemon preferences or delete routes belonging to other services.
+Inspect other advertisements under **Overview → Remote access → Connection details**.
+The equipment switch controls only its current IPv4 subnet. Remove only routes
+you intend to withdraw, preserving unrelated routes and daemon preferences.
 
 ## Erlang distribution and Livebook
 
@@ -376,7 +364,7 @@ It does not grant password access to Ethernet, Tailscale, IPv6 or QEMU managemen
 Add/remove SSH public keys under **Settings** (`/settings`). Keys grant full device
 access, including IEx, SFTP and firmware uploads. Changes are saved in
 `/data/nerves_gate/ssh_authorized_keys` before taking effect. Build-time
-`NERVES_GATE_SSH_KEYS` and legacy NervesSSH keys seed this store only on first use;
+`NERVES_GATE_SSH_KEYS` and configured NervesSSH keys seed this store only on first use;
 removed keys do not return after updates or reboots. Use `NervesGate.ssh_add_key/1`
 and `ssh_remove_key/1`, not NervesSSH's separate key APIs. Factory reset erases
 saved keys; configured build-time keys seed the reset device again.

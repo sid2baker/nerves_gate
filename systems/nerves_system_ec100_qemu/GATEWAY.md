@@ -1,18 +1,15 @@
 # EC100-aligned QEMU test system
 
-This is the real Nerves system used by the application's `x86_64` target, not a
-host simulator. It lives under `systems` as development/test infrastructure,
-not a second production hardware target. EC100 continues to use
-the external checkout configured in the application's `mix.exs`; that checkout
-is not copied or modified here.
+`nerves_system_ec100_qemu` supplies the application's `x86_64` development system.
+EC100 uses the release-tagged system dependency in `mix.exs`. Both run the same
+gateway application.
 
-The x86 source is based on
+The source is based on
 [`nerves-project/nerves_system_x86_64`](https://github.com/nerves-project/nerves_system_x86_64)
 commit `5d755dba94fff478eac2bfd90ba91d2e0025d4eb` (1.34.2). Upstream licenses,
 [changelog](UPSTREAM_CHANGELOG.md) and [hardware documentation](UPSTREAM_README.md)
-are retained. `nerves_system_ec100_qemu` has its own version, starting at `0.1.0`.
-Fingerprint-matched artifacts come from this project's GitHub Releases, never
-from an unmodified upstream system.
+are retained. This package has its own `VERSION` and fingerprint-matched artifacts
+in the project's GitHub Releases.
 
 ## Alignment with EC100
 
@@ -54,6 +51,10 @@ this system does not simulate them.
   do not guarantee identical kernel behavior.
 - GRUB/MBR and the upstream x86 A/B rootfs layout instead of EC100's U-Boot/GPT/FIT
   boot chain. Bootloader and data-partition offsets must not be copied from ARM.
+- fwup sets `nerves_fw_validated` instead of EC100's U-Boot `upgrade_available` and
+  `bootcount`: `1` after a complete install, `0` after an upgrade until
+  `Nerves.Runtime.StartupGuard` validates the booted slot. Both give the guard a
+  known status. GRUB does not fall back automatically after a failed upgrade.
 - No EC100 GPIO watchdog, USB provisioning gadget, LEDs, RS485 or CAN controller.
   The soft watchdog is also disabled, matching EC100's kernel policy.
 - The fourth virtio NIC represents the provisioning link. The system's
@@ -66,17 +67,18 @@ this system does not simulate them.
 
 ## Build and run
 
-From the application root, use `mix setup`, then `mix dev`. Open `/tests` and
-Start configured devices to build firmware and bootstrap QEMU. Setup downloads
-this prebuilt system and installs the checksum-pinned x86 daemon; the launcher
-builds firmware and boots an isolated disposable device. See the
-[development guide](../../docs/development.md) for prerequisites and scenarios.
-Do not use `fwup` against a physical disk for this test target.
+From the application root:
 
-The previous local variant was boot-tested with both device and workstation
-Phoenix clients using the same Nerves backend. The renamed package's first hosted
-build, published download and QEMU boot still need end-to-end validation. A/B
-updates, recovery and complete kernel-feature parity also need qualification;
-configuration tests alone do not prove them. See the
-[development guide](../../docs/development.md) for the workflow and separate QEMU
-management NIC.
+```sh
+mix setup
+mix dev
+```
+
+Open **http://localhost:4000** and choose **Start devices**. Setup downloads the
+prebuilt system; Start builds application firmware and bootstraps the configured
+devices. Each `/devices/:id` page provides tests and a link to the gateway UI.
+Use `mix dev.ui gateway_a` for gateway UI code reload.
+
+Disks are disposable files. Never write this target to a physical disk. See
+[development](../../docs/development.md) for configuration and scenarios, and
+[coverage limits](../../docs/development.md#coverage-and-limits) for hardware qualification.

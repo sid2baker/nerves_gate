@@ -1,8 +1,11 @@
-# UI and equipment
+# Gateway UI
 
-Navigation is **Overview · Equipment · Settings**. Open a
-connection or physical port for settings and diagnostics. All pages use the same
-device-owned projection; local form drafts remain separate from live observations.
+EC100 and QEMU devices serve the same UI from `lib/nerves_gate_web/`.
+`mix dev.ui <target>` serves it on the workstation with code reload.
+
+Navigation is **Overview · Equipment · Settings**. Open a connection or physical
+port for settings and diagnostics. Pages share the device-owned projection;
+form drafts remain separate from live observations.
 
 ## Pages
 
@@ -71,6 +74,13 @@ does not change or restore network settings.
 - **Settings:** Identify blinks available status LEDs, then resumes current patterns.
   There is no web reboot/reset action. See [LEDs and physical gestures](indicators.md).
 
-The workstation is a UI client, not a hardware simulator. QEMU reports unavailable
-EC100 peripherals honestly. HTTP is unauthenticated; see
+Workstation gateway UIs send commands to the selected device. QEMU reports missing
+EC100 peripherals as unavailable. HTTP is unauthenticated; see
 [deployment and recovery access](networking.md#local-recovery-and-http-exposure).
+
+## Simulator site
+
+`mix dev` serves `dev/simulator_web/` at localhost:4000. Its overview (`/`) manages
+devices, default wiring and lifecycle. Each `/devices/:id` page shows one device's
+observations, injected faults and scenario results, with a link to its gateway UI.
+See [development](development.md) for controls and commands.
