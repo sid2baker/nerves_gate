@@ -314,8 +314,18 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
   # Called by the real, unenrolled Tailscale scenario after its private URL is ready.
   @doc false
-  def assert_remote_sign_in do
-    observer = remote_socket()
+  def assert_remote_sign_in(vm) do
+    # The simulator has no global gateway backend. Keep the snapshot and private
+    # login query on the same selected guest without changing application config.
+    projection_state = NervesGateWeb.Backend.projection(vm.node)
+
+    observer =
+      Phoenix.Component.assign(remote_socket(),
+        projection_backend: vm.node,
+        projection_state: projection_state,
+        projection: projection_state.status
+      )
+
     projection = observer.assigns.projection
     previous = put_in(projection.remote_access.operation, "connect")
 
@@ -325,6 +335,11 @@ defmodule NervesGate.Scenarios.ProjectionStream do
         request: :connect,
         login_requested: true
       )
+
+    disconnected = Phoenix.Component.assign(requester, :projection_backend, nil)
+    disconnected = TailscaleLive.refresh_observations(disconnected, projection)
+    private = disconnected.assigns.login_url == nil and not disconnected.assigns.login_open
+    assert private
 
     ready = TailscaleLive.refresh_observations(requester, projection)
     url = ready.assigns.login_url

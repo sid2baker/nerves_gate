@@ -50,7 +50,7 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
 
     assert status.remote_access.error == nil
     assert status.remote_access.auth_state != "authenticated"
-    NervesGate.Scenarios.ProjectionStream.assert_remote_sign_in()
+    NervesGate.Scenarios.ProjectionStream.assert_remote_sign_in(vm)
 
     # Real unenrolled daemon: no listener is written before a usable identity.
     before = :erpc.call(vm.node, Tailscaled, :get_configuration, [], 5_000)

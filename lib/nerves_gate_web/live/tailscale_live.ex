@@ -238,7 +238,7 @@ defmodule NervesGateWeb.TailscaleLive do
          auth_state: auth
        })
        when auth in ["authenticating", "needs_login"] do
-    case Backend.remote_login_url() do
+    case Backend.remote_login_url(socket.assigns.projection_backend) do
       {:ok, url} -> login_url(socket, url)
       _ -> login_url(socket, nil)
     end
