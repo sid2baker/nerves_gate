@@ -626,30 +626,19 @@ defmodule NervesGate.QemuTests do
       start = System.monotonic_time(:millisecond)
       affected = if scenario.all, do: Map.values(context.devices), else: [vm]
 
-      result =
-        try do
-          if scenario.fresh_disk,
-            do: fresh_devices(affected, vm, Map.get(scenario.module.spec(), :boot, [])),
-            else: baseline(vm)
+      result = run_scenario(scenario, context, affected)
 
-          scenario.module.run(context)
-          %{status: :passed, detail: "OK"}
-        rescue
-          error -> %{status: :failed, detail: Exception.format(:error, error, __STACKTRACE__)}
-        catch
-          :exit, :simulator_control_failed ->
-            exit(:simulator_control_failed)
+      if result.status == :failed do
+        # Keep the original failure and collect evidence while the fault is still present.
+        # Leave the scenario timer armed until cleanup and disk replacement finish.
+        send(owner, {:scenario_failed, run_id, scenario.id, result.detail})
+        Enum.each(affected, &NervesGate.RecoveryChecks.capture_failure/1)
+      end
 
-          kind, reason ->
-            %{status: :failed, detail: Exception.format(kind, reason, __STACKTRACE__)}
-        after
-          # A cleanup failure stops the worker and blocks its devices, rather than hiding a fault.
-          if Process.get(:simulator_control_failed), do: exit(:simulator_control_failed)
-          Qemu.cleanup()
-        end
-
-      if result.status == :failed,
-        do: send(owner, {:scenario_failed, run_id, scenario.id, result.detail})
+      # An uncertain control outcome forbids further commands. Cleanup failures stop
+      # the worker and block its devices; neither can overwrite the original failure.
+      if Process.get(:simulator_control_failed), do: exit(:simulator_control_failed)
+      Qemu.cleanup()
 
       if scenario.fresh_disk or result.status == :failed do
         send(
@@ -667,6 +656,20 @@ defmodule NervesGate.QemuTests do
     end
 
     send(owner, {:finished, run_id})
+  end
+
+  defp run_scenario(scenario, context, affected) do
+    if scenario.fresh_disk,
+      do: fresh_devices(affected, context.device, Map.get(scenario.module.spec(), :boot, [])),
+      else: baseline(context.device)
+
+    scenario.module.run(context)
+    %{status: :passed, detail: "OK"}
+  rescue
+    error -> %{status: :failed, detail: Exception.format(:error, error, __STACKTRACE__)}
+  catch
+    :exit, :simulator_control_failed -> exit(:simulator_control_failed)
+    kind, reason -> %{status: :failed, detail: Exception.format(kind, reason, __STACKTRACE__)}
   end
 
   defp fresh_devices(devices, primary, options) do
