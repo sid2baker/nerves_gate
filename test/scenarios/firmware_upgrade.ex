@@ -40,6 +40,8 @@ defmodule NervesGate.Scenarios.FirmwareUpgrade do
           180_000
         )
 
+      # fwup leaves the new slot unvalidated; only the booted application validates it.
+      await_firmware_validated(vm)
       assert restored.network.desired == saved
       assert restored.network.pending == nil
       assert Enum.any?(restored.ssh.keys, &(&1.fingerprint == fingerprint))

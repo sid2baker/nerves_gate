@@ -18,6 +18,20 @@ defmodule NervesGate.ScenarioHelpers do
              :erpc.call(vm.node, GenServer, :call, [NervesSSH, :info, 60_000], 65_000)
   end
 
+  # StartupGuard validates the running slot, then removes its Heart callback. An
+  # unknown status leaves the callback armed, rebooting after 15 minutes of uptime.
+  def await_firmware_validated(vm) do
+    Qemu.await(
+      vm,
+      "startup guard validated firmware",
+      fn _ ->
+        :erpc.call(vm.node, Nerves.Runtime, :firmware_validation_status, [], 2_000) ==
+          :validated and :erpc.call(vm.node, :heart, :get_callback, [], 2_000) == :none
+      end,
+      150_000
+    )
+  end
+
   def ssh_public_key(vm, key) do
     ssh_connect(vm, vm.forwards.ssh,
       user: ~c"root",

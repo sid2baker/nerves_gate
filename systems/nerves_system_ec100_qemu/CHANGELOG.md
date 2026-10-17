@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-17
+
+### Fixed
+
+- Firmware images now initialize `nerves_fw_validated`. A complete install is valid; an upgrade remains unvalidated until `Nerves.Runtime.StartupGuard` validates it after the applications start. Previously the status was unknown, so the guard's Heart callback rebooted every device after 15 minutes of uptime.
+
 ## 0.2.0 - 2026-10-17
 
 ### Breaking changes

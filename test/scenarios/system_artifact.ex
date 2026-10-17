@@ -18,6 +18,7 @@ defmodule NervesGate.Scenarios.SystemArtifact do
              "x86_64"
 
     assert_boot_contract(vm)
+    NervesGate.ScenarioHelpers.await_firmware_validated(vm)
 
     notes = Release.release_notes!(File.read!(Path.join(@system, "CHANGELOG.md")), version)
     assert notes != ""
