@@ -376,14 +376,13 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert NervesGateWeb.Backend.status().system.node == vm.node
     assert :erpc.call(vm.node, NervesGateWeb.Backend, :status, []).system.node == vm.node
 
-    # Firmware-only data/recovery code is not compiled into workstation tooling.
-    for module <- [NervesGate.Recovery.DataInit, NervesGate.Recovery.EC100],
-        do: assert(:code.where_is_file(~c"#{module}.beam") == :non_existing)
-
     assert Process.whereis(NervesGate.Network) == nil
     assert Process.whereis(ProjectionServer) == nil
     assert Process.whereis(Tailscaled.Supervisor) == nil
-    refute :tailscaled_ex in Application.spec(:nerves_gate, :applications)
+    # Compiled for the host, but never started there.
+    for app <- [:tailscaled_ex, :nerves_runtime, :vintage_net],
+        do: refute(app in Application.spec(:nerves_gate, :applications))
+
     backend = Application.fetch_env!(:nerves_gate, :backend_node)
 
     try do

@@ -49,8 +49,8 @@ defmodule NervesGate.Recovery.EC100 do
     end)
   end
 
-  # Compiled only into firmware, never the workstation. Enabled only by EC100's
-  # recovery_adapter; QEMU has no recovery button.
+  # Enabled only by EC100's recovery_adapter. QEMU has no recovery button, and
+  # the workstation never starts Indicators or any other device service.
   def execute(action, _) when action in [:reboot, :factory_reset] do
     with :ok <- admit(:recovery), do: recover(action)
   end

@@ -79,8 +79,7 @@ forwarding; Tailscale owns VPN allow/NAT rules.
 EC100 factory reset stops data writers, normally unmounts data and uses Nerves'
 reset operation. Both devices use the same Nerves initialization hook, which
 requires their data partition mounted writable ext4 before data users start.
-Code that needs `nerves_runtime` lives in `firmware/` and is compiled only into
-firmware. See [reset safety](indicators.md#recovery).
+See [reset safety](indicators.md#recovery).
 
 ## UI projection
 

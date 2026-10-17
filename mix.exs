@@ -37,6 +37,7 @@ defmodule NervesGate.MixProject do
         plt_add_apps: [
           :mix,
           :nerves,
+          :nerves_runtime,
           :muontrap,
           :one_dhcpd,
           :ssh,
@@ -99,10 +100,9 @@ defmodule NervesGate.MixProject do
   end
 
   defp elixirc_paths do
-    # firmware/ needs nerves_runtime, which is not a workstation dependency.
     if Mix.target() == :host,
       do: ["lib", "dev", "test/support", "test/scenarios"],
-      else: ["lib", "firmware"]
+      else: ["lib"]
   end
 
   defp deps do
@@ -134,7 +134,8 @@ defmodule NervesGate.MixProject do
       {:ethercat, github: "sid2baker/ethercat"},
       # Host tooling must never start the workstation VPN.
       {:tailscaled_ex, "~> 0.3.0", runtime: Mix.target() != :host},
-      {:nerves_runtime, "~> 0.13", targets: @targets},
+      # Compiled on the host like VintageNet, but started only by firmware.
+      {:nerves_runtime, "~> 0.13", runtime: Mix.target() != :host},
       {:nerves_motd, "~> 0.1", targets: @targets},
       {:ring_logger, "~> 0.11", targets: @targets},
       {:nerves_ssh, "~> 1.3", targets: @targets},

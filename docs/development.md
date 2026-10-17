@@ -248,9 +248,9 @@ the device:
 - The bench's private management NIC `eth2` and loopback node name (derived in
   `runtime.exs` from the hostname) replace Tailscale-based development access.
 
-Application modules do not branch on `MIX_TARGET`. Host builds add `dev/` and the
-scenarios; firmware builds add `firmware/`, which holds code that needs
-`nerves_runtime` (data initialization and recovery).
+Application modules do not branch on `MIX_TARGET`; every target compiles `lib/`,
+and host builds add `dev/` and the scenarios. Like VintageNet, `nerves_runtime`
+is compiled on the host but started only by firmware.
 
 At startup, `config/runtime.exs` supplies the HTTP session secret and the host's
 remote `backend_node`. Firmware configures `backend_node: :local`; a disconnected
