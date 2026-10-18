@@ -25,9 +25,16 @@ defmodule NervesGate.QemuTests do
         module: module,
         name: spec.name,
         fresh_disk: Map.get(spec, :fresh_disk, false),
-        all: spec[:devices] == :all
+        all: spec[:devices] == :all,
+        opt_in: spec[:opt_in] == true
       }
     end
+  end
+
+  def scenarios(selection) do
+    Enum.filter(scenarios(), fn scenario ->
+      scenario.id == selection or (selection == "all" and not scenario.opt_in)
+    end)
   end
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -143,7 +150,7 @@ defmodule NervesGate.QemuTests do
   end
 
   def handle_call({:run, device, selection}, _, state) do
-    scenarios = Enum.filter(scenarios(), &(selection in ["all", &1.id]))
+    scenarios = scenarios(selection)
 
     with {:ok, id} <- device_id(state, device),
          [_ | _] <- scenarios,

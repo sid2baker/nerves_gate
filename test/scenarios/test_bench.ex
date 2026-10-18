@@ -1,7 +1,7 @@
 defmodule NervesGate.Scenarios.TestBench do
   @moduledoc false
   import ExUnit.Assertions
-  alias NervesGate.{DevSession, ManualFaults, QemuTests, Simulator}
+  alias NervesGate.{DevSession, ManualFaults, QemuTests, Simulator, TailnetAuth}
   alias NervesGate.TestQemu, as: Qemu
 
   # Holding every device proves that a run excludes other runs and manual control.
@@ -14,6 +14,7 @@ defmodule NervesGate.Scenarios.TestBench do
   def run(%{device: vm, devices: devices}) do
     assert_configuration(vm)
     assert_session_tools(vm)
+    assert_tailnet_tools()
     assert {:error, _} = QemuTests.stop_session(System.get_env("QEMU_SESSION_ID"))
     assert_shutdown_admission()
 
@@ -143,6 +144,50 @@ defmodule NervesGate.Scenarios.TestBench do
     after
       if Port.info(port), do: Port.close(port)
       File.rm_rf!(dir)
+    end
+  end
+
+  @doc false
+  def assert_tailnet_tools do
+    refute Enum.any?(QemuTests.scenarios("all"), & &1.opt_in)
+
+    assert [%{id: "tailscale_auth", opt_in: true, all: true}] =
+             QemuTests.scenarios("tailscale_auth")
+
+    assert [] = QemuTests.scenarios("unknown")
+
+    request = TailnetAuth.key_request("ng-ci-1-1-1")
+    assert request.expirySeconds == 600
+
+    assert request.capabilities.devices.create == %{
+             reusable: false,
+             ephemeral: true,
+             preauthorized: true,
+             tags: ["tag:ci"]
+           }
+
+    resources = %{"names" => ["ng-ci-1-1-1"], "keys" => ["key-id"]}
+    assert TailnetAuth.resources!(JSON.encode!(resources), "ng-ci-1-1") == resources
+
+    for invalid <- [
+          %{resources | "names" => ["ng-ci-other-1"]},
+          %{resources | "keys" => ["../other-key"]},
+          %{resources | "keys" => List.duplicate("key-id", 4)}
+        ] do
+      assert_raise RuntimeError, fn ->
+        TailnetAuth.resources!(JSON.encode!(invalid), "ng-ci-1-1")
+      end
+    end
+
+    node = %{"hostname" => "ng-ci-1-1-1", "isEphemeral" => true, "tags" => ["tag:ci"]}
+    assert TailnetAuth.owned_node?(node, resources["names"])
+
+    for other <- [
+          %{node | "hostname" => "ng-ci-2-1-1"},
+          %{node | "isEphemeral" => false},
+          %{node | "tags" => ["tag:production"]}
+        ] do
+      refute TailnetAuth.owned_node?(other, resources["names"])
     end
   end
 

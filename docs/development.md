@@ -245,8 +245,11 @@ Useful focused checks:
 | `firewall`, `tailscale_login` | Guest firewall and real Tailscale enrollment handshake |
 | `ssh_access`, `firmware_upgrade` | USB SSH, key persistence, A/B firmware updates and their validation |
 
-Internet and Tailscale scenarios use real public services. They never enroll an
-account or print private login links.
+Ordinary Internet and Tailscale scenarios use real public services without enrolling
+an account or printing private login links. The explicitly selected `tailscale_auth`
+scenario enrolls three disposable guests into a real test tailnet; it is excluded
+from **Run all**, `mix test` and `mix ci`. See [real tailnet CI setup](tailnet-ci.md)
+for its GitHub OIDC trust configuration, manual workflow and cleanup.
 
 `process_crash` kills each gateway worker without cleanup and stops the Endpoint
 supervisor as OTP would. Each must recover within 30 seconds, including six stable
@@ -321,8 +324,9 @@ statically addressed, so USB DHCP-client discovery is not tested.
 
 QEMU does not cover physical buses, LEDs/button, USB gadget hardware, cellular,
 watchdog, EC100 flash/bootloader recovery or interrupted updates. It does not
-check authenticated Tailscale routing/NAT, browser workflows, throughput, IPv6 or
-VPN path selection. Killing QEMU keeps host disk caches, so it is not a physical
+check authenticated Tailscale subnet routing/NAT, browser workflows, throughput, IPv6
+or VPN path selection. The opt-in [tailnet workflow](tailnet-ci.md) additionally checks
+real enrollment, peer HTTP and identity persistence across a guest power cycle. Killing QEMU keeps host disk caches, so it is not a physical
 power loss. `process_crash` covers the private management path only.
 
 Boot waits are bounded at 180 seconds and scenario runs at fifteen minutes. Real

@@ -185,7 +185,7 @@ defmodule NervesGate.TestQemu do
     if errors != [], do: raise("Fault cleanup failed; Reset the simulator devices")
   end
 
-  defp on_exit(id, callback) do
+  def on_exit(id, callback) do
     callbacks = Process.get(:qemu_cleanup, [])
     Process.put(:qemu_cleanup, [{id, callback} | List.keydelete(callbacks, id, 0)])
   end

@@ -4,7 +4,7 @@ case List.first(System.argv()) do
     Mix.env(:dev)
     Mix.target(:host)
 
-  command when command in ["test", "test.qemu", "qemu.test", "ci"] ->
+  command when command in ["test", "test.qemu", "qemu.test", "qemu.tailnet", "ci"] ->
     Mix.env(:test)
     Mix.target(:host)
 
@@ -82,6 +82,7 @@ defmodule NervesGate.MixProject do
         "dev.stop": :host,
         dev: :host,
         "qemu.test": :host,
+        "qemu.tailnet": :host,
         "assets.build": :host
       ],
       preferred_envs: [
@@ -92,6 +93,7 @@ defmodule NervesGate.MixProject do
         "dev.stop": :dev,
         dev: :dev,
         "qemu.test": :test,
+        "qemu.tailnet": :test,
         "assets.build": :dev
       ]
     ]

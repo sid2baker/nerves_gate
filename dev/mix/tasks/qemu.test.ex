@@ -38,7 +38,13 @@ defmodule Mix.Tasks.Qemu.Test do
   defp options!(args) do
     {options, []} =
       OptionParser.parse!(args,
-        strict: [ci: :boolean, only: :string, device: :string, lifecycle: :string]
+        strict: [
+          ci: :boolean,
+          only: :string,
+          device: :string,
+          lifecycle: :string,
+          config: :string
+        ]
       )
 
     if options[:lifecycle] && (options[:ci] || options[:only] || options[:device]),
@@ -50,8 +56,15 @@ defmodule Mix.Tasks.Qemu.Test do
     if options[:ci] && options[:device],
       do: Mix.raise("CI runs on the first configured device")
 
+    validate_config!(options[:config], options[:ci])
     options
   end
+
+  defp validate_config!(nil, _), do: :ok
+  defp validate_config!(_, true), do: :ok
+
+  defp validate_config!(_, _),
+    do: Mix.raise("Use --config only with --ci; mix dev owns the running session's configuration")
 
   defp run_existing(client, state, options) do
     if action = options[:lifecycle] do
