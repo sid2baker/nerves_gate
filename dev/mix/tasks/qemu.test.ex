@@ -24,37 +24,7 @@ defmodule Mix.Tasks.Qemu.Test do
   end
 
   # The running session's site, over its private Unix socket; nil without one.
-  def session do
-    socket = Path.expand("_build/qemu-dev/http.sock")
-    {:ok, _} = Application.ensure_all_started(:req)
-
-    client =
-      Req.new(
-        base_url: "http://localhost",
-        unix_socket: socket,
-        retry: false,
-        redirect: false,
-        receive_timeout: 10_000
-      )
-
-    with true <- File.exists?(socket),
-         {:ok, %{status: 200, body: %{"epmd_port" => _}} = response} <-
-           Req.get(client, url: "/api/state") do
-      cookie =
-        response
-        |> Req.Response.get_header("set-cookie")
-        |> Enum.map_join("; ", &(String.split(&1, ";", parts: 2) |> hd()))
-
-      headers = [cookie: cookie, "x-csrf-token": response.body["csrf_token"]]
-      {Req.merge(client, headers: headers), response.body}
-    else
-      {:ok, _} ->
-        Mix.raise("Simulator API unavailable. Restart mix dev after configuration changes.")
-
-      _ ->
-        nil
-    end
-  end
+  defdelegate session(), to: NervesGate.DevSession, as: :connect
 
   # Never print HTTP error pages: development pages can include private state.
   defp api_body!(%{status: 200, body: body}) when is_map(body), do: body

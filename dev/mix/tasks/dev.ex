@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Dev do
   @moduledoc false
   use Mix.Task
+  alias NervesGate.DevSession
   @shortdoc "Start the simulator site with an empty multi-device simulator"
 
   @impl true
@@ -51,7 +52,7 @@ defmodule Mix.Tasks.Dev do
 
     case status do
       0 -> :ok
-      75 -> Mix.raise("A QEMU session is already running. Stop it before starting another.")
+      75 -> Mix.raise(DevSession.conflict_message())
       _ -> Mix.raise("QEMU session failed (exit #{status})")
     end
   end
@@ -74,6 +75,9 @@ defmodule Mix.Tasks.Dev do
     ci? = options[:ci] || false
     port = options[:port] || 4000
     socket = Path.join(dir, "http.sock")
+    session_id = DevSession.prepare(dir, port)
+    System.put_env("QEMU_SESSION_ID", session_id)
+    System.put_env("QEMU_SESSION_DIR", dir)
     unless ci?, do: check_port!(port)
     File.rm(socket)
     {:ok, _} = Application.ensure_all_started(:muontrap)
@@ -90,6 +94,7 @@ defmodule Mix.Tasks.Dev do
 
       if status != 0, do: Mix.raise("QEMU session failed (exit #{status})")
     after
+      DevSession.phase(dir, :stopping)
       File.rm(socket)
     end
   end

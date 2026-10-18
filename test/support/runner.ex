@@ -36,6 +36,7 @@ defmodule NervesGate.QemuTests do
   def mode(device, mode), do: GenServer.call(__MODULE__, {:mode, device, mode})
   def manual(device, action), do: GenServer.call(__MODULE__, {:manual, device, action})
   def lifecycle(action), do: GenServer.call(__MODULE__, {:lifecycle, action})
+  def stop_session(id), do: GenServer.call(__MODULE__, {:stop_session, id})
   def configure(change), do: GenServer.call(__MODULE__, {:configure, change})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
   def unsubscribe, do: Phoenix.PubSub.unsubscribe(NervesGate.PubSub, @topic)
@@ -59,6 +60,7 @@ defmodule NervesGate.QemuTests do
        view: view,
        handles: %{},
        workers: %{},
+       session_stopping: false,
        simulator: simulator,
        simulator_monitor: Process.monitor({Simulator, simulator})
      }}
@@ -66,6 +68,48 @@ defmodule NervesGate.QemuTests do
 
   @impl true
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
+
+  def handle_call(_, _, %{session_stopping: true} = state),
+    do:
+      {:reply, {:error, "Simulator session is stopping; wait for mix dev.stop to finish."}, state}
+
+  def handle_call({:stop_session, id}, {request, _}, state) do
+    owner = Process.whereis(NervesGate.DevSession)
+
+    cond do
+      map_size(state.workers) > 0 ->
+        {:reply,
+         {:error, "Finish scenario runs and release manual control before stopping the session."},
+         state}
+
+      state.view.lifecycle.status in [:starting, :stopping] ->
+        {:reply,
+         {:error,
+          "Wait for the device lifecycle operation to finish before stopping the session."},
+         state}
+
+      not is_binary(id) or id != System.get_env("QEMU_SESSION_ID") ->
+        {:reply, {:error, "Session identity changed. Inspect mix dev.status."}, state}
+
+      not is_pid(owner) or System.get_env("QEMU_CI") == "true" ->
+        {:reply,
+         {:error, "This session cannot be stopped through the API. Use its original terminal."},
+         state}
+
+      true ->
+        # Serialize with admission: no new command can race shutdown acceptance.
+        send(owner, {:stop_session, request})
+
+        lifecycle = %{
+          state.view.lifecycle
+          | status: :stopping,
+            phase: "Stopping simulator session"
+        }
+
+        state = Map.put(state, :session_stopping, true)
+        {:reply, :ok, publish(%{state | view: %{state.view | lifecycle: lifecycle}})}
+    end
+  end
 
   def handle_call({kind, _}, _, state)
       when kind in [:lifecycle, :configure] and map_size(state.workers) > 0,

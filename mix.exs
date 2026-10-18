@@ -1,6 +1,6 @@
 # Select host tooling before Nerves reads the project, even after firmware builds.
 case List.first(System.argv()) do
-  command when command in ["setup", "dev.ui", "dev", "assets.build"] ->
+  command when command in ["setup", "dev.ui", "dev", "dev.status", "dev.stop", "assets.build"] ->
     Mix.env(:dev)
     Mix.target(:host)
 
@@ -78,6 +78,8 @@ defmodule NervesGate.MixProject do
         test: :host,
         ci: :host,
         "dev.ui": :host,
+        "dev.status": :host,
+        "dev.stop": :host,
         dev: :host,
         "qemu.test": :host,
         "assets.build": :host
@@ -86,6 +88,8 @@ defmodule NervesGate.MixProject do
         setup: :dev,
         ci: :test,
         "dev.ui": :dev,
+        "dev.status": :dev,
+        "dev.stop": :dev,
         dev: :dev,
         "qemu.test": :test,
         "assets.build": :dev

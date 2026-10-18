@@ -1,6 +1,7 @@
 # The UI owns only the simulator BEAM's MuonTrap wrapper. QMP sockets, disks and
 # Ethernet relays stay inside that BEAM, never in scenario/UI worker processes.
-alias NervesGate.{QemuTests, Simulator}
+alias NervesGate.{DevSession, QemuTests, Simulator}
+Process.register(self(), DevSession)
 
 # mix run --no-start keeps Mix's Logger, so apply the configured level (test: warning).
 if level = Application.get_env(:logger, :level), do: Logger.configure(level: level)
@@ -164,7 +165,7 @@ result =
         if run.status == :running, do: {:cont, printed}, else: {:halt, run.status}
       end)
     else
-      Process.sleep(:infinity)
+      DevSession.await_stop(System.fetch_env!("QEMU_SESSION_DIR"))
     end
   after
     QemuTests.unsubscribe()
@@ -172,4 +173,4 @@ result =
     Supervisor.stop(supervisor, :normal, 30_000)
   end
 
-if result != :passed, do: Mix.raise("QEMU scenarios failed")
+if result not in [:passed, :stopped], do: Mix.raise("QEMU scenarios failed")

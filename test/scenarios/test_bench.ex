@@ -1,7 +1,7 @@
 defmodule NervesGate.Scenarios.TestBench do
   @moduledoc false
   import ExUnit.Assertions
-  alias NervesGate.{ManualFaults, QemuTests, Simulator}
+  alias NervesGate.{DevSession, ManualFaults, QemuTests, Simulator}
   alias NervesGate.TestQemu, as: Qemu
 
   # Holding every device proves that a run excludes other runs and manual control.
@@ -13,6 +13,9 @@ defmodule NervesGate.Scenarios.TestBench do
 
   def run(%{device: vm, devices: devices}) do
     assert_configuration(vm)
+    assert_session_tools(vm)
+    assert {:error, _} = QemuTests.stop_session(System.get_env("QEMU_SESSION_ID"))
+    assert_shutdown_admission()
 
     for id <- Map.keys(devices) do
       assert QemuTests.snapshot().devices[id].owner == QemuTests.snapshot().devices[vm.id].owner
@@ -91,6 +94,95 @@ defmodule NervesGate.Scenarios.TestBench do
     assert Enum.count_until(events, 101) <= 100
     ids = Enum.map(events, & &1.id)
     assert ids == Enum.sort(Enum.uniq(ids))
+  end
+
+  @doc false
+  def assert_session_tools(vm) do
+    dir = Path.join(vm.dir, "session-tooling")
+    File.mkdir_p!(dir)
+    id = DevSession.prepare(dir, 4_321)
+    # Metadata and a leftover socket path must never be mistaken for a live lock.
+    File.write!(Path.join(dir, "http.sock"), "stale")
+    assert %{status: :stopped} = DevSession.status(dir)
+    assert :ok = DevSession.stop(dir)
+    lock = Path.join(dir, "session.lock")
+
+    port =
+      Port.open({:spawn_executable, System.find_executable("flock")}, [
+        :binary,
+        :exit_status,
+        args: ["--nonblock", "--no-fork", lock, System.find_executable("cat")]
+      ])
+
+    try do
+      Port.command(port, "locked\n")
+      assert_receive {^port, {:data, "locked\n"}}, 5_000
+      assert DevSession.locked?(dir)
+      assert %{status: :starting, id: ^id, url: "http://localhost:4321"} = DevSession.status(dir)
+      DevSession.phase(dir, :running)
+      assert %{status: :unresponsive} = info = DevSession.status(dir)
+      refute DevSession.describe(info) =~ id
+      assert {:error, _} = DevSession.stop(dir)
+      assert DevSession.locked?(dir)
+      metadata = Path.join(dir, "session.json")
+      saved = File.read!(metadata)
+      File.write!(metadata, "not JSON")
+      assert %{status: :unresponsive, id: nil} = DevSession.status(dir)
+      assert {:error, _} = DevSession.stop(dir)
+      assert DevSession.locked?(dir)
+      File.write!(metadata, saved)
+      DevSession.phase(dir, :stopping)
+      assert %{status: :stopping} = DevSession.status(dir)
+      task = Task.async(fn -> DevSession.stop(dir) end)
+      assert Task.yield(task, 100) == nil
+      Port.close(port)
+      assert Task.await(task, 5_000) == :ok
+      assert File.exists?(lock)
+      assert %{status: :stopped} = DevSession.status(dir)
+      assert_response_handoff(dir)
+    after
+      if Port.info(port), do: Port.close(port)
+      File.rm_rf!(dir)
+    end
+  end
+
+  defp assert_shutdown_admission do
+    state = %{session_stopping: true, view: %{lifecycle: %{status: :stopping}}}
+    assert {:reply, view, ^state} = QemuTests.handle_call(:snapshot, nil, state)
+    assert view == state.view
+
+    for command <- [
+          {:run, "gateway_a", "all"},
+          {:lifecycle, "start"},
+          {:configure, :invalid},
+          {:mode, "gateway_a", "manual"},
+          {:manual, "gateway_a", "clear"}
+        ] do
+      assert {:reply, {:error, _}, ^state} = QemuTests.handle_call(command, nil, state)
+    end
+  end
+
+  defp assert_response_handoff(dir) do
+    request =
+      spawn(fn ->
+        receive do
+          :done -> :ok
+        after
+          5_000 -> :ok
+        end
+      end)
+
+    task = Task.async(fn -> DevSession.await_stop(dir) end)
+
+    try do
+      send(task.pid, {:stop_session, request})
+      assert Task.yield(task, 100) == nil
+      send(request, :done)
+      assert Task.await(task, 5_000) == :stopped
+    after
+      send(request, :done)
+      Task.shutdown(task, :brutal_kill)
+    end
   end
 
   # Exercise configuration persistence without starting another simulator or VM.

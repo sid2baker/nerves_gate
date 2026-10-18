@@ -8,6 +8,8 @@ defmodule NervesGateWeb.Simulator.Api do
       conn,
       Map.merge(QemuTests.snapshot(), %{
         csrf_token: Plug.CSRFProtection.get_csrf_token(),
+        session_id: System.get_env("QEMU_SESSION_ID"),
+        session_port: String.to_integer(System.fetch_env!("QEMU_HTTP_PORT")),
         # mix dev.ui must start its VM with the session's private EPMD port.
         epmd_port: String.to_integer(System.fetch_env!("ERL_EPMD_PORT"))
       })
@@ -17,11 +19,15 @@ defmodule NervesGateWeb.Simulator.Api do
   def control(conn, params) do
     result =
       case params do
+        %{"session" => "stop", "session_id" => id} -> QemuTests.stop_session(id)
         %{"lifecycle" => action} -> QemuTests.lifecycle(action)
         %{"device" => device, "mode" => mode} -> QemuTests.mode(device, mode)
         %{"device" => device, "action" => action} -> QemuTests.manual(device, action)
         _ -> {:error, "Expected a lifecycle action, or a device with a mode or manual action"}
       end
+
+    conn =
+      if params["session"] == "stop", do: put_resp_header(conn, "connection", "close"), else: conn
 
     reply(conn, result)
   end

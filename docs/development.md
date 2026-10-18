@@ -47,10 +47,31 @@ to build the Nerves system from source.
 
 ## Daily workflow
 
-Keep `mix dev` running. On the simulator overview:
+Keep `mix dev` running. In another terminal:
+
+```sh
+mix dev.status  # session state, URL and launcher PID; never starts devices
+mix dev.stop    # stop the entire idle session and wait for cleanup
+```
+
+`mix dev.stop` refuses active scenarios, manual control and device lifecycle
+operations. It never force-kills an unresponsive session. If the private API is
+unavailable, use the original terminal to stop the session; during startup, wait
+for the site to become ready first. A session without matching control identity
+must also be stopped from its original terminal.
+
+The OS lock, not the existence of `session.lock` or `http.sock`, determines whether
+a session is alive. Never delete the lock file or use broad `pkill` commands to
+bypass it. `mix dev.status` distinguishes starting, running, stopping and an
+unresponsive API. A duplicate `mix dev` reports the existing session instead of
+starting another. Start again with `mix dev` after `mix dev.stop` completes; a new
+session has empty devices.
+
+On the simulator overview:
 
 - **Start devices** builds and bootstraps empty devices, or resumes preserved disks.
-- **Stop** powers devices off and preserves disks. Interrupted bootstrap requires Reset.
+- **Stop** powers devices off and preserves disks; the simulator site stays running.
+  `mix test --lifecycle stop` does the same. Interrupted bootstrap requires Reset.
 - **Reset** stops devices and erases all disks and enrollment.
 
 Lifecycle changes cannot interrupt active runs or manual control. After a failure, inspect
