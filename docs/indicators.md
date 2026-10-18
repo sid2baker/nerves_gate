@@ -1,8 +1,8 @@
 # LEDs and physical button
 
-One `NervesGate.Indicators` process owns policy, blink timing and button state.
-EC100 uses standard Linux LED/input devices. Workstation UI clients control that
-device; QEMU does not simulate the missing EC100 peripherals.
+One `NervesGate.Indicators` process owns LED policy, blink timing and button state.
+EC100 uses standard Linux LED and input devices. Workstation UIs control the
+device's indicators; QEMU has none.
 
 ## LEDs
 
@@ -12,42 +12,39 @@ device; QEMU does not simulate the missing EC100 peripherals.
 | USER1 | GPIO1_A6 / `ec100:user1` | Off intentionally disconnected/unconfigured Tailscale; solid confirmed Internet + healthy Tailscale; slow connecting/unknown/debouncing; fast managed connectivity fault |
 | USER2 | GPIO1_A4 / `ec100:user2` | Off no known alarms, slow warning/unknown alarm observations, fast critical fault |
 
-The operator confirmed brightness **1 = on, 0 = off**. Slow means one complete
-cycle per second (500 ms per half-cycle); fast means four (125 ms per half-cycle).
-RUN has no early-boot blink. An abrupt VM crash can leave the last output latched
-until watchdog recovery/reboot; the LED is not an independent health monitor.
+Brightness 1 is on and 0 off. Slow is one cycle per second (500 ms per half-cycle);
+fast is four (125 ms). RUN has no early-boot blink. A crashed VM can leave the last
+output latched until reboot: LEDs are not an independent health monitor.
 
-Alarmist assigns error severity immediately to `network_restore_failed`,
-`led_restore_failed` and `recovery_failed`. Availability faults become managed
-warnings after two continuous seconds and clear immediately on factual recovery.
-USER2 uses Alarmist severity, including alarms from dependencies. No alarms means
-*no known alarms*, not proof that every subsystem is healthy.
+`network_restore_failed`, `led_restore_failed` and `recovery_failed` are immediate
+errors. Availability faults become warnings after two continuous seconds and clear
+on recovery. USER2 follows Alarmist severity, including dependency alarms; no alarms
+means *no known alarms*, not proof of health.
 
-VintageNet's per-interface `connection` reports Internet availability on the
-permitted uplinks (Ethernet/`br0` and optionally the modem), never USB or the global
-best connection. Working 4G backup still counts as Internet: USER1 can stay solid;
-USER2 warns about backup use or unavailable cellular redundancy.
-Before port assignment, a unique observed Internet candidate may indicate online,
-but there is no configured uplink requirement to alarm. `:lan` is not Internet;
-missing observations are unknown. Tailscale `Running`/`:online` is a separate
-backend state; health warnings can report control-server failures while it remains
-Running. USER1 is solid only with confirmed Internet, authenticated online Tailscale,
-no health warnings and no managed connectivity fault. Stopped/needs-login is off;
-unknown is slow, never healthy. LED policy uses current observations and managed faults.
+Internet means VintageNet's per-interface `connection` on the permitted uplinks
+(Ethernet/`br0` and optionally the modem), never USB or the global best connection.
+Working 4G backup counts as Internet: USER1 can stay solid while USER2 warns about
+backup use or unavailable cellular. Before ports are assigned, a unique Internet
+candidate may show online without raising alarms. `:lan` is not Internet, and
+missing observations are unknown.
 
-Network, Remote and Alarmist events refresh policy. Five-second reconciliation repairs
-missed notifications and retries unavailable LEDs. A monotonic 125 ms tick drives
-blinks. Successful output values are cached; unchanged outputs are not rewritten.
-Only the three mapped binary LEDs are eligible. Active kernel triggers are never
-changed or taken over. A failed channel does not prevent the others from working.
+USER1 is solid only with confirmed Internet, authenticated online Tailscale, no
+Tailscale health warnings and no managed connectivity fault. Stopped or needs-login
+is off; unknown is slow, never healthy.
 
-**Identify gateway** blinks all available status channels slowly for five seconds,
-rejects overlapping requests and then resumes the *current* normal patterns, not
-an old brightness snapshot. Identify requires all three channels to be controllable.
+Network, Remote and Alarmist events refresh policy; a five-second reconciliation
+repairs missed events and retries unavailable LEDs. A monotonic 125 ms tick drives
+blinks, and unchanged outputs are not rewritten. Only the three mapped binary LEDs
+are used; active kernel triggers are left alone. A failed channel does not affect
+the others.
 
-## Fixed button gestures
+**Identify gateway** blinks all status channels slowly for five seconds, rejects
+overlapping requests and then resumes the *current* patterns. It requires all three
+channels.
 
-Actions occur only on release after a known uninterrupted press:
+## Button gestures
+
+Actions happen on release after a known, uninterrupted press:
 
 | Hold duration | Feedback while held | Release action |
 | --- | --- | --- |
@@ -58,54 +55,40 @@ Actions occur only on release after a known uninterrupted press:
 | 30 s or longer | All fast | Factory-reset request |
 
 Discovery matches `gpio-keys` and KEY_PROG1, not an event-device number. The first
-release after startup/reconnection/input loss only arms the button. This prevents
-the input library's initial held-key snapshot from becoming a recovery gesture.
-There is a 50 ms debounce interval; shorter presses are ignored. Duplicates and
-repeats do not extend a press. Disconnect, reader exit, invalid key values and
-SYN_DROPPED disarm it. A dropped-event report invalidates the entire batch.
-Durations use monotonic receipt time; the input library does not retain kernel
-event timestamps. Device-level bounce/loss/timing qualification remains necessary.
+release after startup, reconnection or input loss only arms the button, so a key
+already held at startup never triggers recovery. Presses shorter than the 50 ms
+debounce are ignored; repeats do not extend a press. Disconnect, reader exit,
+invalid key values and SYN_DROPPED disarm it, and a dropped-event report discards
+the batch. Durations use monotonic receipt time.
 
 Button feedback takes priority over Identify, which takes priority over normal
-patterns. There are no configurable button modes and no web reboot/reset action.
+patterns. There are no button modes and no web reboot or reset.
 
 ## Recovery
 
-Recovery runs outside the LED loop in one worker, with a 15-second deadline.
-There is no automatic retry, and only one recovery attempt is accepted per
-Indicators instance. The EC100 adapter also latches its attempt for the VM lifetime
-and uses `Nerves.Runtime.reboot/0`. A timeout is an unknown outcome, not proof that
-an independent OS shutdown stopped. Failure appears in Settings, status and USER2.
+Recovery runs in one worker outside the LED loop, with a 15-second deadline and no
+retry. Each Indicators instance accepts one attempt; the EC100 adapter also latches
+its attempt for the VM lifetime and reboots with `Nerves.Runtime.reboot/0`. A
+timeout is an unknown outcome. Failure appears in Settings, status and USER2.
 
 **EC100 factory reset deletes everything in `/root` (`/data`)**, including
-software credentials, Tailscale identity, network settings and persistent shell
-history. It does not change GPT, firmware slots, U-Boot, its environment or
-hardware identity. Network access may disappear; keep local serial recovery.
+credentials, Tailscale identity, network settings and shell history. It does not
+change GPT, firmware slots, U-Boot, its environment or hardware identity. Network
+access may disappear, so keep serial recovery.
 
-The adapter blocks SSH firmware uploads, stops application writers, Tailscale,
-VintageNet, SSH and time persistence, closes shell history, leaves the data working
-directory, and normally unmounts every mount of the data partition. Shell history
-remains persistent across ordinary reboots; it is disabled only during reset.
-RingLogger's periodic persistence is stopped before unmounting. Busy mounts abort
-reset—no lazy or forced unmount.
-After **any** admitted SSH upload (even a failed one), recovery requires a reboot,
-so reset cannot race an update or its delayed reboot callback.
+The adapter blocks SSH firmware uploads; stops application writers, Tailscale,
+VintageNet, SSH, time persistence and RingLogger persistence; closes shell history;
+and unmounts every mount of the data partition. A busy mount aborts the reset; there
+is no lazy or forced unmount. After **any** admitted SSH upload, even a failed one,
+recovery requires a reboot, so reset cannot race an update.
 
-Only after unmount readback does it call `Nerves.Runtime.FwupOps.factory_reset()`
-with the default immediate reboot. The BSP invalidates the first 128 KiB; Nerves
-reformats the actual expanded partition on the next boot. The Nerves initialization
-hook requires `/root` to be the expected partition mounted read-write as ext4.
-Runtime starts before data users with a fatal-on-error boot mode, so failed format
-or mount cannot silently start services. No custom formatter or reset journal.
+Only after unmount readback does it call `Nerves.Runtime.FwupOps.factory_reset()`,
+which reboots immediately. The BSP invalidates the first 128 KiB and Nerves
+reformats the partition on the next boot. The initialization hook requires `/root`
+to be the expected ext4 partition mounted read-write, and runtime starts before
+data users in fatal-on-error mode, so a failed format or mount cannot silently start
+services.
 
-Failure leaves services stopped; no cleanup, remount, graceful shutdown or retry
-is requested after invalidation. USER2 reports failure; Settings remains readable
-only if connectivity survives writer shutdown. A timeout is an unknown outcome.
-
-This is a logical reset, **not secure erasure**; old blocks may remain recoverable.
-Hardware qualification remains pending: expanded p3, busy mounts and I/O failures,
-power cuts during invalidation/reformatting, usable empty storage after boot, and
-unchanged firmware/identity. Nothing here erases or reboots a workstation.
-
-See [test coverage and limits](development.md#coverage-and-limits). QEMU cannot
-qualify the physical button, LEDs, watchdog or reset behavior.
+After a failure, services stay stopped and nothing is retried. USER2 reports it;
+Settings stays readable only if connectivity survived. This is a logical reset,
+**not secure erasure**: old blocks may remain recoverable.

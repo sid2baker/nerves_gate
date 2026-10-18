@@ -48,23 +48,21 @@ status = NervesGate.status()
 | `subscribe(opts)` | `:ok`; subscriptions belong to the caller |
 
 `opts` is always an optional keyword list. Configuration uses validated string
-keys; hostname and trial ID are direct strings. Failures return
+keys; hostname and trial ID are plain strings. Failures return
 `{:error, %{code: code, message: message}}`, never raw adapter errors.
 
-`remote_connect(hostname, auth_key: key)` optionally enrolls with an auth key
-instead of a browser sign-in link. The key is validated, used only by the bounded
-remote worker, and never persisted or included in status/events. Do not log it or
-place it in application configuration. Read remote operation, authentication state
-and error for completion; `:ok` means only that the request was accepted.
+`remote_connect(hostname, auth_key: key)` enrolls with an auth key instead of a
+browser sign-in link. Only the bounded remote worker uses the key; it is never
+persisted or included in status or events. Do not log it or put it in configuration.
 
 Cellular configuration adds `"internet" => %{"mode" => "cellular", "apn" => "..."}`
-without an Ethernet Internet role, or uses `"mode" => "backup"` with Ethernet.
-Omitting it preserves Ethernet-only behavior. Validation checks shape, not driver
-availability; proposals require a [qualified modem](networking.md#modem-qualification-is-still-required).
+without an Ethernet Internet role, or `"mode" => "backup"` with one. Without it,
+the gateway is Ethernet-only. Validation checks shape, not hardware; proposals
+require a [configured modem](networking.md#cellular-modems).
 
 ## Completion and safety
 
-Editors should pass the saved configuration they started from:
+Editors pass the saved configuration they started from:
 
 ```elixir
 base = NervesGate.status().network.desired
@@ -72,38 +70,31 @@ base = NervesGate.status().network.desired
 {:ok, id} = NervesGate.network_propose(candidate, expected: base)
 ```
 
-The Network process compares `:expected` with its current saved configuration
-before applying anything. A mismatch returns `stale_network`; reload settings
-rather than replaying the old candidate. Omitting `:expected` retains explicit
-whole-configuration replacement for console callers.
+Network compares `:expected` with its saved configuration before applying anything.
+A mismatch returns `stale_network`: reload rather than replaying the old candidate.
+Without `:expected`, the candidate replaces the whole configuration.
 
-Console proposals require confirmation with the **exact current trial ID**. Only
-trusted server code may supply `:access` to verify first setup through USB; never
-derive it from request parameters or forwarded headers. Immediately-ready USB
-setup waits for auto-save; otherwise it acknowledges a pending trial. See
-[saving and rollback](networking.md#saving-and-rollback) for deadlines, readiness
-and partial-persistence limits.
+Confirmation requires the **exact current trial ID**. Only trusted server code may
+pass `:access` to verify first setup through USB; never derive it from request
+parameters or forwarded headers. Immediately-ready USB setup waits for auto-save;
+otherwise it returns a pending trial. See [saving and rollback](networking.md#saving-and-rollback).
 
 Remote and bus acceptance is **not completion**. Observe `remote_access.operation`
-and `.error`, or `buses.operation`, `.error` and `.result`. Each domain admits one
+and `.error`, or `buses.operation`, `.error` and `.result`. Each domain runs one
 operation at a time. Private enrollment URLs come only from `remote_login_url/1`;
 never log them or put them in status, notifications or shared UI assigns.
 
-Network uses deferred hardware-completion replies with a 15-second caller timeout;
-sharing allows 70 seconds. On `outcome_unknown`, **read status before considering a
-retry**. Caller timeout does not cancel admitted work. Commands are not replayed
-automatically, including after reconnect or domain restart.
+Network calls time out after 15 seconds; sharing allows 70. On `outcome_unknown`,
+**read status before considering a retry**. A caller timeout does not cancel
+admitted work, and commands are never replayed automatically.
 
-Use the facade's `equipment_scan`, `equipment_share` and `equipment_unshare` rather
-than internal worker entry points: they retain Network's cross-domain admission
-guard. Sharing accepts no caller-supplied route. Enable requires the confirmed
-equipment link/address; disable needs the confirmed subnet and available daemon.
-Other advertisements are preserved and block LAN changes. See
-[sharing limits](networking.md#equipment-sharing).
+Use the facade's `equipment_scan`, `equipment_share` and `equipment_unshare`, not
+internal worker entry points: they hold Network's cross-domain admission guard.
+Sharing takes no caller-supplied route. See [equipment sharing](networking.md#equipment-sharing).
 
-UI `actions` and `capabilities` are presentation metadata, **not authorization**.
-Future interfaces must establish access control before calling commands. There is
-no public/web reboot or factory-reset command.
+Commands perform no access control. UI `actions` and `capabilities` are
+presentation metadata, **not authorization**; every interface must control access
+before calling commands. There is no public or web reboot or factory-reset command.
 
 ## Bus parameters
 
@@ -119,17 +110,17 @@ NervesGate.modbus_read("ttyS3", %{
 ```
 
 Only can0/can1 and ttyS3/ttyS4 are eligible. Numbers also accept decimal strings;
-booleans accept `"true"`/`"false"`. Modbus authorization means the operator approved
+booleans accept `"true"`/`"false"`. Modbus `authorized` means the operator approved
 that request and ensured there is no other master; it is not access control.
 
 Results include `port`, `kind`, `completed_at` and bounded `data`: `frames` for CAN,
-`hex`/`bytes` for serial, or `unit`/`function`/`address`/`count`/`registers` for Modbus.
-See [bus operations and safety](buses.md) for enablement, limits and qualification.
+`hex`/`bytes` for serial, or `unit`/`function`/`address`/`count`/`registers` for
+Modbus. See [bus operations](buses.md).
 
 ## Status
 
-`status/1` reads domains independently, **not an atomic cross-domain snapshot**.
-[`Status`](../lib/nerves_gate/status.ex) derives the JSON-encodable v6 map:
+`status/1` reads domains independently; it is **not an atomic snapshot**.
+[`Status`](../lib/nerves_gate/status.ex) builds the JSON-encodable v6 map:
 
 - `version`, `system`: shape version and firmware/runtime information.
 - `network`: saved settings, trial, observations, readiness, recovery and errors.
@@ -144,31 +135,28 @@ See [bus operations and safety](buses.md) for enablement, limits and qualificati
 - `ssh`: availability, public-key fingerprints/types/comments and persistence errors.
 - `capabilities`, `actions`: presentation-only availability, labels and reasons.
 
-Unknown routes are `nil`, not assumed empty. Advertisements prove neither approval
-nor reachability. Network and Remote commands remain independent except where the
-facade explicitly holds Network's guard. There is no cross-domain revision lock.
+Unknown routes are `nil`, not empty. Advertisements prove neither approval nor
+reachability. There is no cross-domain revision lock.
 
 ## Subscriptions
 
 `subscribe/1` binds the caller to workflow metadata and adapter observations.
-Notifications are `%PropertyTable.Event{}` or subsystem tuples, **hints to re-read
-status**, not complete snapshots. Subscribe before reading and again after
-reconnect or domain replacement. Failed subscriptions need retry; caller death
-removes subscriptions.
+Notifications (`%PropertyTable.Event{}` or subsystem tuples) are **hints to re-read
+status**, not snapshots. Subscribe before reading and again after reconnecting or a
+domain restart. Caller death removes subscriptions.
 
-LiveViews instead subscribe to the device-owned projection stream, receiving an
-initial snapshot and sanitized replacements. They clear availability on server
-loss and resubscribe for a fresh snapshot. See [projection lifecycle](architecture.md#ui-projection).
+LiveViews use the device-owned projection stream instead; see
+[UI projection](architecture.md#ui-projection).
 
 ## Domain APIs and explicit instances
 
 Each domain documents its own commands and accepts a server reference:
 [Network](../lib/nerves_gate/network.ex), [Remote](../lib/nerves_gate/remote.ex),
 [Equipment](../lib/nerves_gate/equipment.ex), [Indicators](../lib/nerves_gate/indicators.ex)
-and [Buses](../lib/nerves_gate/buses.ex). Direct calls use ordinary OTP exit behavior;
-the public facade normalizes process-call failures for clients.
+and [Buses](../lib/nerves_gate/buses.ex). Direct calls use ordinary OTP exit
+behavior; the facade normalizes process-call failures.
 
-Facade options select instances directly:
+Facade options select instances:
 
 ```elixir
 opts = [network: network_server, remote: remote_server]
@@ -176,6 +164,6 @@ opts = [network: network_server, remote: remote_server]
 status = NervesGate.status(opts)
 ```
 
-Other server options are `:equipment`, `:indicators` and `:buses`.
-[SSH](../lib/nerves_gate/ssh.ex) is a single device-owned store, not an instance-selectable service. See the
-[QEMU scenarios](../test/scenarios) for real-device API examples.
+Other options are `:equipment`, `:indicators` and `:buses`.
+[SSH](../lib/nerves_gate/ssh.ex) is a single device-owned store. See the
+[QEMU scenarios](../test/scenarios) for examples against real devices.

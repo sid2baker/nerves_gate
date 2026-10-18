@@ -65,20 +65,9 @@ this system does not simulate them.
   per-device USB subnet without an application-specific initialization hook.
   Disk discovery remains platform-specific.
 
-## Build and run
+## Use
 
-From the application root:
-
-```sh
-mix setup
-mix dev
-```
-
-Open **http://localhost:4000** and choose **Start devices**. Setup downloads the
-prebuilt system; Start builds application firmware and bootstraps the configured
-devices. Each `/devices/:id` page provides tests and a link to the gateway UI.
-Use `mix dev.ui gateway_a` for gateway UI code reload.
-
-Disks are disposable files. Never write this target to a physical disk. See
-[development](../../docs/development.md) for configuration and scenarios, and
-[coverage limits](../../docs/development.md#coverage-and-limits) for hardware qualification.
+`mix setup` downloads the prebuilt system and `mix dev` runs it; see
+[development](../../docs/development.md) and its
+[coverage limits](../../docs/development.md#coverage-and-limits). Disks are
+disposable files. Never write this target to a physical disk.

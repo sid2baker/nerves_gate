@@ -9,9 +9,8 @@ mix setup
 mix dev
 ```
 
-Open **http://localhost:4000** and choose **Start devices**. The site starts with
-an empty simulator; Start builds one firmware image and bootstraps the configured
-QEMU devices through USB SSH/fwup.
+Open **http://localhost:4000** and choose **Start devices**. Start builds one
+firmware image and bootstraps the configured QEMU devices through USB SSH/fwup.
 
 | Interface | Purpose |
 | --- | --- |
@@ -21,9 +20,9 @@ QEMU devices through USB SSH/fwup.
 | `mix dev.ui <target>` | Gateway UI with code reload at localhost:4001 |
 
 `mix setup` installs missing Mix tooling, fetches dependencies, installs the
-checksum-pinned x86 Tailscale daemon and downloads the prebuilt QEMU system.
-It needs Internet access and does not overwrite a different installed daemon.
-Use `mix deps.get` when only fetching dependencies.
+checksum-pinned x86 Tailscale daemon and downloads the prebuilt QEMU system. It
+needs Internet access and does not overwrite a different installed daemon. Use
+`mix deps.get` to fetch dependencies only.
 
 ### Prerequisites
 
@@ -39,24 +38,24 @@ sudo apt install git build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu
 ```
 
 On Apple Silicon, use an arm64 Ubuntu [OrbStack](https://orbstack.dev) machine
-(`orb create --arch arm64 ubuntu nerves-gate`) with fwup's arm64 package. Clone
-inside the Linux filesystem. OrbStack forwards localhost:4000 to the Mac.
-Avoid amd64/Rosetta machines because the BEAM JIT fails there.
+(`orb create --arch arm64 ubuntu nerves-gate`) with fwup's arm64 package, and clone
+inside the Linux filesystem. OrbStack forwards localhost:4000 to the Mac. Avoid
+amd64/Rosetta machines: the BEAM JIT fails there.
 
-Normal setup needs neither Docker nor privileged networking. Docker is required
-only for building the Nerves system from source.
+Normal setup needs neither Docker nor privileged networking. Docker is needed only
+to build the Nerves system from source.
 
 ## Daily workflow
 
 Keep `mix dev` running. On the simulator overview:
 
 - **Start devices** builds and bootstraps empty devices, or resumes preserved disks.
-- **Stop** powers off devices and preserves disks. Interrupted bootstrap requires Reset.
-- **Reset** stops devices and erases all disks and enrollment. It leaves devices stopped.
+- **Stop** powers devices off and preserves disks. Interrupted bootstrap requires Reset.
+- **Reset** stops devices and erases all disks and enrollment.
 
-Lifecycle changes cannot interrupt active runs or manual control. After a failure,
-inspect diagnostics and Reset. If the simulator BEAM is unavailable, restart `mix dev`.
-A new session starts with empty disks.
+Lifecycle changes cannot interrupt active runs or manual control. After a failure, inspect
+diagnostics and Reset. If the simulator BEAM is lost, restart `mix dev`; a new
+session starts with empty disks.
 
 In another terminal:
 
@@ -67,55 +66,53 @@ mix test                                        # all scenarios
 ```
 
 Results appear on the device page and overview. Independent devices can run
-concurrently. A selection containing a `devices: :all` scenario reserves every
-device for the whole run; **Run all** does too.
+concurrently; a selection with a `devices: :all` scenario, or **Run all**, reserves
+every device.
 
 Each device page has two modes:
 
 - **Scenarios** runs the shared test modules. Fresh-disk scenarios and failure
   recovery erase the affected devices' disks, including enrollment.
 - **Manual** holds the device for cable, Internet, latency, loss and pause controls.
-  Closing the page does not release it. Switching to Scenarios clears faults first.
+  Closing the page does not release it; switching to Scenarios clears faults first.
 
 **Clear all faults** resumes the VM, connects Internet to LAN1, reconnects both
-cables and removes uplink faults. It preserves device settings and disk contents.
-Injected faults are shown separately from live device observations. A paused VM
-can show its last observation until distribution detects the loss.
+cables and removes uplink faults, keeping settings and disks. A paused VM can show
+its last observation until distribution detects the loss.
 
-Control timeouts and failed cleanup mean uncertain state: inspect diagnostics,
-then Reset. Do not replay commands blindly. Avoid changing gateway settings from
+Control timeouts and failed cleanup leave the state uncertain: inspect diagnostics,
+then Reset rather than replaying commands. Avoid changing gateway settings from
 another UI during scenarios.
 
 ### Reloading changes
 
 - Gateway UI: use `mix dev.ui`; templates and assets reload.
 - Device code or built firmware assets: Reset and Start.
-- Simulator code, dependencies or configuration: restart `mix dev`.
-- New scenarios: restart `mix dev` so the runner lists them.
+- Simulator code, dependencies, configuration or new scenarios: restart `mix dev`.
 
-The simulator site and `mix dev.ui` include Volt, LiveReload and Tidewave in dev.
-Tidewave MCP is `/tidewave/mcp`, with metadata at `/tidewave/config` on the chosen
-site port. Origin checks remain enabled. The simulator also serves its CLI API
-(`/api/state`, `/api/run`, `/api/control`) at `_build/qemu-dev/http.sock`.
-Treat API state as private: it includes a CSRF token.
+The simulator site and `mix dev.ui` include Volt, LiveReload and Tidewave
+(`/tidewave/mcp`, metadata at `/tidewave/config`). The simulator also serves its
+CLI API (`/api/state`, `/api/run`, `/api/control`) at `_build/qemu-dev/http.sock`.
+API state is private: it includes a CSRF token.
+
+The site listens only on `127.0.0.1` and that socket; it has no sign-in and Tidewave
+can run code. From another machine, use an SSH tunnel such as
+`ssh -N -L 4000:127.0.0.1:4000 <workstation>` and open http://localhost:4000.
 
 ### Frontend assets
 
-Edit `assets/css/`, `assets/js/` and the UI modules. Volt watches sources and
-serves development assets. Before committing assets or building firmware:
+Edit `assets/css/`, `assets/js/` and the UI modules; Volt serves development assets.
+Before committing assets or building firmware:
 
 ```sh
 mix assets.build
 MIX_TARGET=host MIX_ENV=dev mix volt.js.check
 ```
 
-Commit generated `priv/static/assets/` with their sources. Rebuild after updating
-Phoenix or LiveView dependencies. Firmware serves these built files. `mix format`
-also formats JavaScript on the host.
+Commit `priv/static/assets/` with its sources, and rebuild after updating Phoenix
+or LiveView. Firmware serves these built files. `mix format` also formats JavaScript.
 
 ## Gateway UI development
-
-Use the same launcher for simulated and real development gateways:
 
 ```sh
 mix dev.ui gateway_a
@@ -124,21 +121,21 @@ mix dev.ui gateway_b --port 4002
 mix dev.ui                                      # use the only gateway found
 ```
 
-The default UI port is **4001**. Start a simulated target on the simulator site
-first. Without a target, the launcher reads the running simulator session and
-probes gateways on the local tailnet. Ambiguous discovery lists explicit commands.
-An explicit target probes only that gateway.
+The default port is **4001**. Start a simulated target on the simulator site first.
+Without a target, the launcher checks the running simulator session and the local
+tailnet; ambiguous results list explicit commands. An explicit target probes only
+that gateway.
 
 Real gateways need compatible development firmware, OTP/Elixir and the development
-cookie. Use their exact `nerves_gate@<IPv4>` node name. Tailnet policy must permit
-TCP 4369 (EPMD) and 9100 (distribution). Automatic tailnet discovery needs read
-access to `/var/run/tailscale/tailscaled.sock`.
+cookie. Use their exact `nerves_gate@<IPv4>` name. Tailnet policy must permit TCP
+4369 (EPMD) and 9100 (distribution). Tailnet discovery needs read access to
+`/var/run/tailscale/tailscaled.sock`.
 
 The launcher serves on loopback and connects over hidden, outbound-only Erlang
-distribution. Simulated targets use the session's private EPMD port; real targets
-use standard EPMD. It starts no device services and does not change the simulator
-lifecycle or workstation networking. Restart it to choose another target.
-Workstation HTTP access does not count as verified USB access.
+distribution: the session's private EPMD for simulated targets, standard EPMD for
+real ones. It starts no device services and changes neither the simulator nor
+workstation networking. Restart it to switch targets. Workstation HTTP access never
+counts as verified USB access.
 
 ## Simulator configuration
 
@@ -158,23 +155,22 @@ mix dev --config path/to/simulator.exs
 }
 ```
 
-Edit default wiring on the overview while stopped. Add/remove devices while empty
-or after Reset. Changes are saved to the selected file. Sorted device IDs determine
-serials and management addresses, so device membership cannot change under preserved
-disks. Keep the default two unprovisioned devices for the full suite.
+Edit default wiring on the overview while stopped; add or remove devices while disks
+are empty. Changes are saved to the selected file. Sorted device IDs determine
+serials and management addresses. Keep the default two unprovisioned devices for
+the full suite.
 
 Each device gets its own disk, relay, QEMU process (1 GiB RAM), serial and
-`127.0.0.N` management address. Optional file settings:
+`127.0.0.N` management address. Optional settings:
 
 - `factory_firmware`: compatible factory artifact; defaults to `firmware`.
-- Per-device `provision: %{ssh_keys: [public_key_line], network: settings}`:
-  applies settings through normal SSH/public commands after bootstrap.
+- Per-device `provision: %{ssh_keys: [public_key_line], network: settings}`, applied
+  through normal SSH/public commands after bootstrap.
 
-## Which configuration is used?
+## Build configurations
 
-`MIX_TARGET` selects where code runs; `mix dev.ui` selects which gateway to connect to.
-The launchers select the host target automatically. Use per-command environment
-variables for firmware builds.
+`MIX_TARGET` selects where code runs; `mix dev.ui` selects which gateway to use.
+The launchers select the host target automatically.
 
 | Target / environment | Configuration | Purpose |
 | --- | --- | --- |
@@ -183,18 +179,14 @@ variables for firmware builds.
 | `x86_64/dev` | `config/x86_64.exs` | QEMU firmware |
 | `ec100/dev`, `ec100/prod` | `config/ec100.exs` | EC100 firmware |
 
-Firmware profiles import `config/firmware.exs` for shared services. Both targets
-compile `lib/`; host builds also compile `dev/`, `test/support/` and `test/scenarios/`.
-`config/runtime.exs` supplies session secrets and runtime node settings. QEMU uses
-the same device services, initialization hook and VintageNetDirect configuration
-as EC100; hardware-specific settings live in the platform profiles and systems.
+Both firmware profiles import `config/firmware.exs` for the shared device services.
+All targets compile `lib/`; host builds also compile `dev/`, `test/support/` and
+`test/scenarios/`. `config/runtime.exs` supplies session secrets and node settings.
+Hardware-specific settings live in the platform profiles and systems.
 
-The EC100 system is pinned to a release tag in `mix.exs`; firmware builds download
-its published artifact. See [building EC100 firmware](../README.md#build-ec100-firmware).
+## Scenarios
 
-## One scenario folder, one runner
-
-UI, CLI and CI use [`test/scenarios/`](../test/scenarios) and the same runner.
+UI, CLI and CI run [`test/scenarios/`](../test/scenarios) with the same runner.
 Scenarios are ordinary Elixir modules using ExUnit assertions and owned device handles:
 
 ```elixir
@@ -202,15 +194,15 @@ def spec, do: %{name: "My scenario", fresh_disk: true}
 def run(%{device: selected, devices: all_devices}), do: ...
 ```
 
-- `fresh_disk: true` bootstraps a fresh disk before the scenario.
+- `fresh_disk: true` bootstraps a fresh disk first.
 - `devices: :all` reserves every device and includes them all in failure recovery.
 - `boot: [receive_stall: true]` enables the receive-stall hardware fault.
 
-Before ordinary scenarios, the runner establishes Internet on LAN1, equipment on
-LAN2, connected cables and eth0 DHCP. Failure recovery replaces the selected device,
-or all devices for a multi-device scenario. Cleanup resumes paused VMs and restores
-the network baseline; uncertainty blocks affected devices until Reset. The site
-retains active runs, 20 completed runs and 100 events.
+Before ordinary scenarios, the runner sets Internet on LAN1, equipment on LAN2,
+connected cables and eth0 DHCP. On failure it records the error and bounded,
+secret-free diagnostics, then replaces the affected devices' disks. Cleanup resumes
+paused VMs and restores the baseline; uncertainty blocks affected devices until
+Reset. The site keeps active runs, 20 completed runs and 100 events.
 
 Useful focused checks:
 
@@ -219,7 +211,7 @@ Useful focused checks:
 | `system_artifact` | System version, firmware validation, USB/hostname contract, data mount and release contracts |
 | `frontend_assets` | Host/firmware assets, CSP, CSRF and development tooling boundaries |
 | `test_bench` | Configuration, reservations and manual cleanup |
-| `process_crash` | Eight gateway children, restart scope, saved settings/SSH key fingerprints and fresh local HTTP |
+| `process_crash` | Gateway process restarts, restart scope, saved settings and fresh local HTTP |
 | `projection_stream` | Device projection, reconnect and draft preservation |
 | `dev_discovery` | Gateway discovery, filtering and ambiguity |
 | `multi_device` | Independent identities, disks, faults and power cuts |
@@ -228,8 +220,14 @@ Useful focused checks:
 | `firewall`, `tailscale_login` | Guest firewall and real Tailscale enrollment handshake |
 | `ssh_access`, `firmware_upgrade` | USB SSH, key persistence, A/B firmware updates and their validation |
 
-See the source folder for the full list. Internet/Tailscale scenarios require real
-public services. They do not enroll an account or print private login links.
+Internet and Tailscale scenarios use real public services. They never enroll an
+account or print private login links.
+
+`process_crash` kills each gateway worker without cleanup and stops the Endpoint
+supervisor as OTP would. Each must recover within 30 seconds, including five stable
+seconds, with the expected `rest_for_one` scope and unchanged boot identity,
+settings and SSH keys. Two negative controls log expected `recovery_timeout`
+entries in `recovery.log`.
 
 ### Isolation
 
@@ -244,14 +242,16 @@ eth2 ─────────── restricted management → loopback distri
 usb0 ─────────── VintageNetDirect → restricted USB SSH
 ```
 
-The relay applies cable/uplink faults to real frames; QMP supplies carrier changes.
-Management is never faulted. Internet uses gateway `10.0.2.2` and DNS `10.0.2.3`;
-equipment has no IP server. Frame admission blocks cross-segment and workstation
-loopback access. Workstation interfaces, routes, DNS, firewall and VPN are untouched.
+The relay applies cable and uplink faults to real frames; QMP supplies carrier
+changes. Management is never faulted. Internet uses gateway `10.0.2.2` and DNS
+`10.0.2.3`; equipment has no IP server. Frame admission blocks cross-segment and
+workstation loopback access. Workstation interfaces, routes, DNS, firewall and VPN
+are untouched.
 
-Device nodes are `nerves_gate@127.0.0.2`, `nerves_gate@127.0.0.3`, etc. The session
-owns a private EPMD. Loopback services trust local users: this is network isolation,
-not a hostile-local-user sandbox. See the [system notes](../systems/nerves_system_ec100_qemu/GATEWAY.md).
+Device nodes are `nerves_gate@127.0.0.2`, `nerves_gate@127.0.0.3`, and so on, with
+a session-private EPMD. Loopback services trust local users: this is network
+isolation, not a sandbox against hostile local users. See the
+[system notes](../systems/nerves_system_ec100_qemu/GATEWAY.md).
 
 ### Network control API
 
@@ -268,49 +268,39 @@ Qemu.network_stats(vm)
 Qemu.network(vm, NervesGate.Simulator.Network.defaults())
 ```
 
-Patches preserve omitted fields and reject invalid values before changing forwarding.
-Internet is `:lan1 | :lan2 | :off`, delay is 0–5000 ms, and loss is
-`:none | :alternate | :all`. Alternate loss drops every other eligible outgoing
-packet. Management and local ARP/DHCP bypass Internet faults. Wiring and faults
-survive VM replacement; queued packets and live libslirp state do not.
+Patches keep omitted fields and reject invalid values before changing forwarding.
+Internet is `:lan1 | :lan2 | :off`, delay 0–5000 ms, and loss
+`:none | :alternate | :all` (alternate drops every other eligible outgoing packet).
+Management and local ARP/DHCP bypass Internet faults. Wiring and faults survive VM
+replacement; queued packets and libslirp state do not.
 
 ## Coverage and limits
 
-QEMU exercises the real Nerves application, VintageNet, tailscaled, persistence,
-projection and USB SSH/fwup path. Firmware tests perform same-image A/B updates.
-The USB peer is statically addressed; USB DHCP-client discovery is not tested.
+QEMU runs the real Nerves application, VintageNet, tailscaled, persistence,
+projection and USB SSH/fwup path, including same-image A/B updates. The USB peer is
+statically addressed, so USB DHCP-client discovery is not tested.
 
-Physical buses, LEDs/button, USB gadget hardware, cellular, EC100 flash/bootloader
-recovery and interrupted updates need hardware qualification. Authenticated
-end-to-end Tailscale routing/NAT and browser workflows also need separate checks.
-QEMU uses IPv4 userspace networking; it does not qualify throughput, IPv6 or VPN
-path selection. SIGKILL retains host disk caches and is not physical power loss.
+QEMU does not cover physical buses, LEDs/button, USB gadget hardware, cellular,
+watchdog, EC100 flash/bootloader recovery or interrupted updates. It does not
+check authenticated Tailscale routing/NAT, browser workflows, throughput, IPv6 or
+VPN path selection. Killing QEMU keeps host disk caches, so it is not a physical
+power loss. `process_crash` covers the private management path only.
 
-`process_crash` checks private-management recovery only, not SSH host identity or
-remote tailnet access. Workers are killed without cleanup; the Endpoint supervisor
-stops its children and exits, as OTP supervisors fail. It allows 30 seconds
-including a five-second stability window for each isolated crash. It first verifies that unchanged PIDs and a stopped
-HTTP listener cannot pass. These negative controls intentionally produce two
-`recovery_timeout` entries in `recovery.log`. Failures are recorded and bounded,
-secret-free boot/process diagnostics captured before fault cleanup or disk replacement.
-
-Boot waits are bounded at 180 seconds, scenario runs at fifteen minutes. Real
-Internet outages fail checks. See the [MuonTrap runtime limitation](networking.md#known-runtime-limitation).
-
-See the [reliability implementation plan](reliability-plan.md) for remote-access,
-crash/hang, watchdog and chaos testing work.
+Boot waits are bounded at 180 seconds and scenario runs at fifteen minutes. Real
+Internet outages fail checks. See the
+[MuonTrap limitation](networking.md#known-runtime-limitation).
 
 ## Troubleshooting
 
-- Port in use: choose `mix dev --port 4002` or `mix dev.ui <target> --port 4003`.
+- Port in use: `mix dev --port 4002` or `mix dev.ui <target> --port 4003`.
 - CLI unavailable: start `mix dev`, then Start devices on the overview.
-- Session already running: stop the owning session before restarting. Never delete
-  `_build/qemu-dev/session.lock`; the kernel releases the lock on exit.
-- Setup failure: fix the reported prerequisite/download error, then rerun `mix setup`.
+- Session already running: stop the owning session first. Never delete
+  `_build/qemu-dev/session.lock`; the kernel releases it on exit.
+- Setup failure: fix the reported prerequisite or download error, then rerun `mix setup`.
 - Device failure: inspect `_build/qemu-tests/<session>/<device>/` and the site log.
   Reset after uncertain control; restart `mix dev` after simulator loss.
-- Distribution conflict: resolve the process using port 9100 on the device's
-  loopback address. The launcher never stops unrelated processes.
+- Distribution conflict: free port 9100 on the device's loopback address. The
+  launcher never stops other processes.
 
 ## Maintaining the QEMU system
 
@@ -321,23 +311,17 @@ crash/hang, watchdog and chaos testing work.
 3. Push to `main`. The system workflow publishes and verifies the artifact before
    simulator CI uses it.
 
-Published tags/assets are immutable. Matching releases are reused. An interrupted
-draft can resume only with matching tagged sources, locks, toolchain pins and
-artifact bytes. Conflicts require explicit maintainer cleanup or a new version;
-never move a tag or overwrite an artifact. Ordinary application changes reuse the
-published system.
+Published tags and assets are immutable; matching releases are reused. An
+interrupted draft resumes only with identical sources, locks, toolchain pins and
+artifact bytes. Otherwise clean up explicitly or bump the version; never move a
+tag or overwrite an artifact.
 
-For deliberate local system builds (Docker required):
+Local system build (Docker required) and release-plan check (no build, no GitHub):
 
 ```sh
 MIX_TARGET=x86_64 MIX_ENV=dev mix deps.get
 MIX_TARGET=x86_64 MIX_ENV=dev mix nerves.artifact.build nerves_system_ec100_qemu
 mix setup
-```
-
-Inspect the artifact plan locally without building or contacting GitHub:
-
-```sh
 MIX_TARGET=x86_64 MIX_ENV=dev elixir -r dev/artifact_release.ex -S mix nerves.artifact.release plan
 ```
 
@@ -346,14 +330,12 @@ After changing the system, Reset and Start devices and run
 
 ## CI
 
-`.github/workflows/qemu.yml` runs `mix setup` and `mix ci` on disposable GitHub-hosted
-Ubuntu runners. It builds application firmware, bootstraps both default devices,
-runs the shared scenarios and shuts down. Downloads are cached; only diagnostic
-`.log` files are uploaded, for 14 days.
-
-Main-branch system changes first run `.github/workflows/ec100-qemu-system.yml`.
-Publication uses trusted main code and write permission; PRs cannot publish.
-An unpublished required artifact fails setup. Both workflows support manual dispatch.
+`.github/workflows/qemu.yml` runs `mix setup` and `mix ci` on disposable
+GitHub-hosted Ubuntu runners: it builds firmware, bootstraps both default devices,
+runs the shared scenarios and uploads only diagnostic `.log` files (14 days).
+Main-branch system changes first run `.github/workflows/ec100-qemu-system.yml`,
+which publishes with trusted main code; PRs cannot publish. Setup fails if a required artifact is
+unpublished. Both workflows support manual dispatch.
 
 For an operator-owned standalone run, stop the development session first:
 
@@ -362,6 +344,5 @@ mix test --ci                   # clean bench and shared scenarios
 mix ci                          # quality gates plus the clean scenario run
 ```
 
-Agents use focused checks on the operator's existing session. Starting/stopping
-that session or booting devices requires authorization. Full `mix ci` is run only
-by the operator.
+Agents run focused checks on the operator's session. Starting or stopping that
+session, booting devices and full `mix ci` belong to the operator.
