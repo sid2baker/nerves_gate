@@ -28,10 +28,10 @@ jobs:
       NERVES_ARTIFACTS_DIR: ${{ github.workspace }}/_build/system-release-${{ github.run_id }}-${{ github.run_attempt }}/artifacts
       NERVES_SYSTEM: ''
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: jdx/mise-action@v3
+      - uses: jdx/mise-action@v5
       - name: Install Nerves host tools
         run: |
           gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
@@ -57,7 +57,7 @@ jobs:
         run: mise exec -- elixir -r dev/artifact_release.ex -S mix nerves.artifact.release check
       - name: Cache system source downloads
         if: steps.release.outputs.publish == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.NERVES_DL_DIR }}
           key: ec100-qemu-downloads-v1-${{ hashFiles('systems/nerves_system_ec100_qemu/**', 'mix.lock') }}
