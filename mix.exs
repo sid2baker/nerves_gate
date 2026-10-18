@@ -30,7 +30,7 @@ defmodule NervesGate.MixProject do
         nerves_gate: [
           include_erts: &Nerves.erts/0,
           applications: if(Mix.target() in @targets, do: [nerves_runtime: :transient], else: []),
-          steps: [&Nerves.init_release/1, :assemble]
+          steps: [&Nerves.init_release/1, &gateway_restart_policy/1, :assemble]
         ]
       ],
       dialyzer: [
@@ -91,6 +91,19 @@ defmodule NervesGate.MixProject do
         "assets.build": :dev
       ]
     ]
+  end
+
+  # Setting the app mode in applications: also changes its dependencies' modes.
+  # Change only the gateway's boot entry; Nerves preserves explicit transient modes.
+  defp gateway_restart_policy(release) do
+    if Mix.target() in @targets do
+      scripts =
+        Map.update!(release.boot_scripts, :start, &Keyword.replace!(&1, :nerves_gate, :transient))
+
+      %{release | boot_scripts: scripts}
+    else
+      release
+    end
   end
 
   # Setup must be available before dependencies or ordinary dev tasks can compile.

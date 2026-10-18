@@ -54,6 +54,11 @@ Remote, Equipment, Indicators, Buses, ProjectionServer and Endpoint. Dependencie
 supervise VintageNet, tailscaled and Alarmist. Workstation UIs (`config/host.exs`)
 start no device domains.
 
+Firmware starts `nerves_gate` as `transient`: ordinary child failures recover under
+supervision; abnormal application exit, including an exhausted restart limit,
+terminates the BEAM and erlinit reboots the device. An orderly application stop
+remains possible. Dependency application start modes are unchanged.
+
 Workers are linked and bounded; owners stop and join them before restoration or
 new work. Network replies after hardware completion; Remote acknowledges acceptance
 and reports completion in status. A caller timeout means **unknown outcome**, not

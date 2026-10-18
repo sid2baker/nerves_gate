@@ -18,6 +18,7 @@ defmodule NervesGate.Scenarios.SystemArtifact do
              "x86_64"
 
     assert_boot_contract(vm)
+    assert_restart_policy(vm)
     NervesGate.ScenarioHelpers.await_firmware_validated(vm)
 
     notes = Release.release_notes!(File.read!(Path.join(@system, "CHANGELOG.md")), version)
@@ -56,6 +57,18 @@ defmodule NervesGate.Scenarios.SystemArtifact do
 
     assert :erpc.call(vm.node, Application, :fetch_env!, [:nerves_gate, :recovery_adapter]) == nil
     refute :erpc.call(vm.node, Code, :ensure_loaded?, [NervesGate.HostInit])
+  end
+
+  defp assert_restart_policy(vm) do
+    root = :erpc.call(vm.node, :code, :root_dir, []) |> to_string()
+    version = :erpc.call(vm.node, Application, :spec, [:nerves_gate, :vsn]) |> to_string()
+    path = Path.join([root, "releases", version, "nerves_gate.rel"]) |> String.to_charlist()
+    assert {:ok, [{:release, _, _, apps}]} = :erpc.call(vm.node, :file, :consult, [path])
+    assert {:nerves_gate, _, :transient} = List.keyfind(apps, :nerves_gate, 0)
+
+    for dependency <- [:vintage_net, :tailscaled_ex, :alarmist] do
+      assert {^dependency, _, :temporary} = List.keyfind(apps, dependency, 0)
+    end
   end
 
   @doc false

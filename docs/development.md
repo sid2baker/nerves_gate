@@ -212,6 +212,10 @@ Useful focused checks:
 | `frontend_assets` | Host/firmware assets, CSP, CSRF and development tooling boundaries |
 | `test_bench` | Configuration, reservations and manual cleanup |
 | `process_crash` | Gateway process restarts, restart scope, saved settings and fresh local HTTP |
+| `restart_intensity` | Four rapid crashes exhaust supervision; firmware reboots without harness rescue |
+| `alarm_recovery` | Two-second debounce, immediate critical alarms, timer preservation and clearing after owner restart |
+| `dependency_restart` | VintageNet, Tailscale and property-subscription workers; fresh UI read-model updates |
+| `process_chaos` | Six seeded single/double crashes with saved-state, scope and stable recovery checks |
 | `projection_stream` | Device projection, reconnect and draft preservation |
 | `dev_discovery` | Gateway discovery, filtering and ambiguity |
 | `multi_device` | Independent identities, disks, faults and power cuts |
@@ -224,10 +228,24 @@ Internet and Tailscale scenarios use real public services. They never enroll an
 account or print private login links.
 
 `process_crash` kills each gateway worker without cleanup and stops the Endpoint
-supervisor as OTP would. Each must recover within 30 seconds, including five stable
+supervisor as OTP would. Each must recover within 30 seconds, including six stable
 seconds, with the expected `rest_for_one` scope and unchanged boot identity,
 settings and SSH keys. Two negative controls log expected `recovery_timeout`
 entries in `recovery.log`.
+
+`process_chaos` defaults to seed 40465. Set `PROCESS_CHAOS_SEED=<integer>` or
+`PROCESS_CHAOS_SEED=random` when starting `mix dev` or `mix ci`, not the attaching
+`mix test` client. The seed and chosen sequence are recorded in `recovery.log`.
+Faults stay within an explicit guest-process allowlist; each step waits for six
+stable seconds before the next, aging out OTP's inclusive five-second restart
+window. This is not arbitrary PID killing, a hang test or proof of tailnet
+reachability.
+
+`alarm_recovery` measures controlled condition pulses using Alarmist's guest
+monotonic timestamps, separately from cable/DHCP detection. It also disconnects the
+Internet cable, restarts Network while its alarm is active, then requires the alarm
+to clear when connectivity returns. `dependency_restart` checks the device's cached
+projection after SSH-key and cable changes, not just direct domain queries.
 
 ### Isolation
 
