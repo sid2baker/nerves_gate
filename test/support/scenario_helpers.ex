@@ -111,10 +111,12 @@ defmodule NervesGate.ScenarioHelpers do
       Enum.any?(status.connections.ports, &match?(%{name: "eth0", connection: :internet}, &1))
   end
 
-  def addressed?(status) do
-    Enum.any?(
-      status.connections.ports,
-      &match?(%{name: "eth0", link: true, addresses: [_ | _]}, &1)
-    )
+  # A linked port with an IPv4 address, or without one when `addressed` is false.
+  def addressed?(status, port \\ "eth0", addressed \\ true) do
+    Enum.any?(status.connections.ports, fn
+      %{name: ^port, link: true, addresses: [_ | _]} -> addressed
+      %{name: ^port, link: true, addresses: []} -> not addressed
+      _ -> false
+    end)
   end
 end

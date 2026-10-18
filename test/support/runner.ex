@@ -368,7 +368,7 @@ defmodule NervesGate.QemuTests do
   def handle_info(_, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_, state), do: Enum.each(Map.keys(state.workers), &Process.exit(&1, :kill))
+  def terminate(_, state), do: for({pid, _} <- state.workers, do: Process.exit(pid, :kill))
 
   defp device_view(vm) do
     topology = Qemu.topology(vm)
@@ -665,8 +665,6 @@ defmodule NervesGate.QemuTests do
 
     scenario.module.run(context)
     %{status: :passed, detail: "OK"}
-  rescue
-    error -> %{status: :failed, detail: Exception.format(:error, error, __STACKTRACE__)}
   catch
     :exit, :simulator_control_failed -> exit(:simulator_control_failed)
     kind, reason -> %{status: :failed, detail: Exception.format(kind, reason, __STACKTRACE__)}

@@ -1,3 +1,4 @@
+# reach:disable-for-this-file unsafe_atom_creation -- distribution needs node-name atoms
 defmodule Mix.Tasks.Dev.Ui do
   @moduledoc """
   Run the gateway UI on the workstation, with code reload, against one device.

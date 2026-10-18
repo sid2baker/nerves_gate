@@ -350,9 +350,12 @@ defmodule NervesGate.Simulator do
   defp port(_), do: {:error, "Connect the Internet router to LAN1 or LAN2."}
 
   defp device_id(id) do
-    if Regex.match?(~r/^[a-z][a-z0-9_]{0,31}$/, id),
-      do: {:ok, String.to_atom(id)},
-      else: {:error, "Device names use lowercase letters, digits and underscores."}
+    if Regex.match?(~r/^[a-z][a-z0-9_]{0,31}$/, id) do
+      # reach:disable-next-line unsafe_atom_creation -- validated local device IDs
+      {:ok, String.to_atom(id)}
+    else
+      {:error, "Device names use lowercase letters, digits and underscores."}
+    end
   end
 
   defp device_views(config) do

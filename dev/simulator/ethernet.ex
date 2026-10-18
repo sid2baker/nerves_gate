@@ -36,10 +36,12 @@ defmodule NervesGate.Simulator.Network.Ethernet do
   defp arp?(:management, source, target),
     do: source in [0, 0xC0A84D02] and target in [0xC0A84D01, 0xC0A84D02]
 
+  # DHCP clients send from 0.0.0.0, or from their Internet lease when renewing.
+  defp ipv4(:internet, 0, target, 17, 0, <<68::16, 67::16, _::binary>>), do: dhcp(target)
+
   defp ipv4(:internet, source, target, 17, 0, <<68::16, 67::16, _::binary>>)
-       when source == 0 or source >>> 8 == 0x0A0002 do
-    if target in [0xFFFFFFFF, 0x0A0002FF, 0x0A000202], do: :local, else: :deny
-  end
+       when source >>> 8 == 0x0A0002,
+       do: dhcp(target)
 
   defp ipv4(:internet, source, target, protocol, fragment, payload) do
     cond do
@@ -78,12 +80,14 @@ defmodule NervesGate.Simulator.Network.Ethernet do
   # The DNS address is admitted above, solely for port 53. No gateway TCP/UDP
   # reaches libslirp's workstation-loopback mapping. Reachable LAN/tailnet
   # destinations outside these bench networks remain allowed, as before.
+  defp dhcp(target),
+    do: if(target in [0xFFFFFFFF, 0x0A0002FF, 0x0A000202], do: :local, else: :deny)
+
   defp forbidden?(address) do
     first = address >>> 24
 
     first in [0, 127] or first >= 224 or
       (address >>> 8) in [0x0A0002, 0xC0A84D] or
-      address >>> 16 == 0xAC1F or
-      address >>> 16 == 0xA9FE
+      (address >>> 16) in [0xAC1F, 0xA9FE]
   end
 end

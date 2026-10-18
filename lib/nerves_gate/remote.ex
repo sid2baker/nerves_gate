@@ -225,8 +225,6 @@ defmodule NervesGate.Remote do
   # Do not let task crash reports include credential-bearing arguments or errors.
   defp execute(adapter, :connect, %{auth_key: _} = params) do
     Adapter.execute(adapter, :connect, params)
-  rescue
-    _ -> {:error, :outcome_unknown}
   catch
     _, _ -> {:error, :outcome_unknown}
   end

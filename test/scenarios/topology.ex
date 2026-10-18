@@ -1,3 +1,4 @@
+# reach:disable-for-this-file redundant_computation -- identities/1 re-reads guest NICs after each change
 defmodule NervesGate.Scenarios.Topology do
   @moduledoc false
   import ExUnit.Assertions

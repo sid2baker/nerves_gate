@@ -91,11 +91,10 @@ defmodule NervesGate.Simulator.Qemu do
   end
 
   def await_boot(vm) do
+    node = vm.node
+
     poll(vm, "device boot", 180_000, fn ->
-      case status(vm) do
-        %{system: %{target: "x86_64", node: name}} when name == vm.node -> true
-        _ -> false
-      end
+      match?(%{system: %{target: "x86_64", node: ^node}}, status(vm))
     end)
   end
 

@@ -46,11 +46,7 @@ defmodule NervesGate.Scenarios.Equipment do
     end
 
     Qemu.await(vm, "equipment and Internet recovered", fn status ->
-      internet?(status) &&
-        Enum.any?(
-          status.connections.ports,
-          &match?(%{name: "eth1", link: true, addresses: [_ | _]}, &1)
-        )
+      internet?(status) && addressed?(status, "eth1")
     end)
   end
 end

@@ -29,11 +29,6 @@ defmodule NervesGate.Scenarios.TrialFault do
       Qemu.network(vm, %{cables: %{lan2: true}})
     end
 
-    Qemu.await(vm, "saved offline port acquired an address", fn status ->
-      Enum.any?(
-        status.connections.ports,
-        &match?(%{name: "eth1", link: true, addresses: [_ | _]}, &1)
-      )
-    end)
+    Qemu.await(vm, "saved offline port acquired an address", &addressed?(&1, "eth1"))
   end
 end

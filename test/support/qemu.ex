@@ -171,10 +171,12 @@ defmodule NervesGate.TestQemu do
     errors =
       for {_, callback} <- callbacks, reduce: [] do
         errors ->
+          # Run every callback, but let exits after uncertain control propagate.
           try do
             callback.()
             errors
           rescue
+            # reach:disable-next-line bare_rescue -- any raised cleanup failure blocks the device
             error -> [error | errors]
           end
       end

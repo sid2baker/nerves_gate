@@ -13,22 +13,14 @@ defmodule NervesGate.Scenarios.ReceiveStall do
 
   def run(%{device: vm}) do
     try do
-      Qemu.await(vm, "carrier without an address", fn status ->
-        Enum.any?(
-          status.connections.ports,
-          &match?(%{name: "eth0", link: true, addresses: []}, &1)
-        )
-      end)
+      Qemu.await(vm, "carrier without an address", &addressed?(&1, "eth0", false))
 
       for _ <- 1..10 do
         Process.sleep(1_000)
         status = Qemu.status(vm)
         assert status.system.target == "x86_64"
 
-        assert Enum.any?(
-                 status.connections.ports,
-                 &match?(%{name: "eth0", link: true, addresses: []}, &1)
-               )
+        assert addressed?(status, "eth0", false)
 
         refute status.connections.internet.health == "online"
       end

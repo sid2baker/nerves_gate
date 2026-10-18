@@ -128,16 +128,12 @@ defmodule NervesGate.RecoveryChecks do
       snapshot: diagnostic(fn -> snapshot(vm) end),
       error_tags: diagnostic(fn -> error_tags(vm) end)
     })
-  rescue
-    _ -> diagnostic_unavailable(vm)
   catch
     _, _ -> diagnostic_unavailable(vm)
   end
 
   defp diagnostic(read) do
     read.()
-  rescue
-    _ -> :unavailable
   catch
     _, _ -> :unavailable
   end
@@ -165,8 +161,8 @@ defmodule NervesGate.RecoveryChecks do
 
   defp diagnostic_unavailable(vm) do
     event(vm, :failure_diagnostics_unavailable, %{})
-  rescue
-    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp poll(vm, before, target, timing) do
