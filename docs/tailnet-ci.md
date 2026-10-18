@@ -1,8 +1,12 @@
 # Real Tailscale authentication in QEMU
 
-The **Tailnet authentication** GitHub workflow is manual, main-branch-only and
-uses the `tailnet-ci` GitHub environment. It does not run on pushes or pull requests.
-Normal `mix test` / `mix ci` selections exclude `tailscale_auth`.
+**Simulator CI** runs the **Tailscale authentication** job automatically on pushes
+to `main`, after the ordinary simulator checks pass. The job uses the protected
+`tailnet-ci` GitHub environment and never runs for pull requests. No separate
+workflow or manual trigger is needed.
+
+Local `mix test` / `mix ci` selections remain credential-free and exclude
+`tailscale_auth`; the CI job selects it explicitly.
 
 It starts the dedicated three-device configuration in `dev/tailnet.exs`. Each
 guest enrolls through `NervesGate.remote_connect/2` with a different single-use,
@@ -43,31 +47,36 @@ does not undo broader existing grants or the default allow-all ACL: remove those
 in the isolated test tailnet if they would allow CI access beyond this rule.
 No SSH, distribution, route approval, or policy-edit permission is needed.
 
-### 2. Create a Tailscale OIDC trust credential
+### 2. Use the shared Tailscale OIDC trust credential
 
-Open **Settings → Trust credentials → Credential → OpenID Connect** in Tailscale.
-Configure:
+The credential is shared by `sid2baker` repositories. In **Settings → Trust
+credentials**, configure its OpenID Connect trust as:
 
 | Setting | Value |
 | --- | --- |
 | Issuer | GitHub Actions (`https://token.actions.githubusercontent.com`) |
-| Subject | `repo:sid2baker/nerves_gate:environment:tailnet-ci` |
-| Custom claim `repository` | `sid2baker/nerves_gate` |
-| Custom claim `ref` | `refs/heads/main` |
-| Custom claim `workflow_ref` | `sid2baker/nerves_gate/.github/workflows/tailnet.yml@refs/heads/main` |
-| Custom claim `event_name` | `workflow_dispatch` |
+| Subject | `repo:*` |
+| **Required custom claim** `repository_owner_id` | `79519556` |
 | Scopes | **Auth keys: write** (`auth_keys`) and **Devices → Core: write** (`devices:core`) |
 | Permitted tag | `tag:ci` |
 
-The environment determines the JWT subject, so the branch restriction belongs in
-the `ref` claim as well as GitHub's environment protection. Do not use wildcards or
-grant `all`, policy editing, or route-management scopes. Device-core permission is
-needed to verify registrations and delete this run's nodes deterministically.
+The owner-ID claim restricts the wildcard to repositories owned by `sid2baker`.
+**Never use `repo:*` without that claim.** GitHub's newer subjects include immutable
+owner/repository IDs, so a name-only pattern such as `repo:sid2baker/*` does not
+match them. Matching the owner claim supports both subject formats without
+hardcoding each repository's ID.
 
-Copy the generated **Client ID** and **Audience**. They are identifiers, not
-long-lived authentication secrets. A credential for `tailscaled_ex` is not
-sufficient unless its trust rules explicitly authorize this repository; create a
-separate narrowly scoped credential instead of broadening that one.
+Do not add `nerves_gate`-specific repository or workflow-path claims to this shared
+credential: they would exclude other repositories. Remove any old
+`event_name: workflow_dispatch` restriction: automatic CI uses the `push` event.
+Every consuming repository must protect its own credential-bearing jobs; this
+workflow limits the job to `main` and the protected `tailnet-ci` environment. Do not
+grant `all`, policy editing, or route-management scopes. Device-core permission is needed to verify registrations
+and delete test nodes deterministically.
+
+Copy the credential's **Client ID** and **Audience**. They are identifiers, not
+long-lived authentication secrets. If token exchange fails, the credential details
+show the received subject and exact validation error. Never print the JWT itself.
 
 ### 3. Configure the GitHub environment
 
@@ -84,10 +93,13 @@ enabled only in this workflow's job with `id-token: write`.
 
 ## Run and inspect
 
-After the workflow is on `main`, open **Actions → Tailnet authentication → Run
-workflow**, select `main`, and approve the environment if required. The OIDC
-preflight runs before firmware building or guest enrollment. Missing settings,
-claim mismatches and insufficient permissions fail the run, never silently skip it.
+Push to `main` and inspect **Actions → Simulator CI → Tailscale authentication**.
+Approve the environment if required. To start the complete CI manually, use
+**Actions → Simulator CI → Run workflow** with `main` selected.
+
+The OIDC preflight runs before the Tailscale job builds firmware or enrolls guests.
+Missing settings, claim mismatches and insufficient permissions fail the job,
+never silently skip it.
 
 The scenario is shared with the existing runner, but credential acquisition is
 intentionally limited to GitHub Actions. Do not run `--ci` locally or paste keys
@@ -112,9 +124,11 @@ Inspect nodes with the run's `ng-ci-<run>-<attempt>-` prefix in Tailscale if nee
 never delete unrelated CI nodes or assume revoking a key deletes its devices.
 
 Generated JWTs, API tokens and auth keys stay in process memory and are masked in
-GitHub logs. Do not enable HTTP/request tracing or tee workflow stdout into files:
-GitHub masking commands themselves contain credential values. This workflow uploads
-no raw daemon logs, VM disks, or identity files, and caches only verified downloads.
+GitHub logs. Do not enable HTTP/request tracing or tee the Tailscale job's stdout
+into files: GitHub masking commands themselves contain credential values. This job
+uploads no raw daemon logs, VM disks, or identity files, and caches only verified
+downloads. The ordinary simulator job retains its credential-free diagnostics.
 
 References: [workload identity federation](https://tailscale.com/kb/1581/workload-identity-federation),
-[trust-credential scopes](https://tailscale.com/kb/1623/trust-credentials).
+[trust-credential scopes](https://tailscale.com/kb/1623/trust-credentials),
+[GitHub immutable subject claims](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims).

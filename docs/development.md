@@ -249,7 +249,7 @@ Ordinary Internet and Tailscale scenarios use real public services without enrol
 an account or printing private login links. The explicitly selected `tailscale_auth`
 scenario enrolls three disposable guests into a real test tailnet; it is excluded
 from **Run all**, `mix test` and `mix ci`. See [real tailnet CI setup](tailnet-ci.md)
-for its GitHub OIDC trust configuration, manual workflow and cleanup.
+for its shared GitHub OIDC trust configuration, main-branch CI job and cleanup.
 
 `process_crash` kills each gateway worker without cleanup and stops the Endpoint
 supervisor as OTP would. Each must recover within 30 seconds, including six stable
