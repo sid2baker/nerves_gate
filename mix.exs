@@ -113,7 +113,6 @@ defmodule NervesGate.MixProject do
       {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:vibe_kit, "~> 0.1"},
       {:nerves, "~> 2.0.0-pre.4", runtime: false},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},

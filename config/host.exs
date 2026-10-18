@@ -55,3 +55,7 @@ if config_env() == :dev do
 
   config :phoenix_live_view, debug_heex_annotations: true, debug_attributes: true
 end
+
+# mix test and mix ci print scenario results. OTP SSH and Phoenix log every
+# connection, expected authentication rejection and 404 below warning level.
+if config_env() == :test, do: config(:logger, level: :warning)

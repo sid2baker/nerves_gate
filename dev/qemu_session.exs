@@ -2,6 +2,9 @@
 # Ethernet relays stay inside that BEAM, never in scenario/UI worker processes.
 alias NervesGate.{QemuTests, Simulator}
 
+# mix run --no-start keeps Mix's Logger, so apply the configured level (test: warning).
+if level = Application.get_env(:logger, :level), do: Logger.configure(level: level)
+
 {:ok, _} = Application.ensure_all_started(:muontrap)
 {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one, max_restarts: 0)
 
@@ -23,15 +26,13 @@ epmd =
   )
 
 # Do not let Node.start race the supervised EPMD and auto-start an unowned one.
-epmd_port = System.fetch_env!("ERL_EPMD_PORT") |> String.to_integer()
-
+# A names request uses ERL_EPMD_PORT; a bare connection makes EPMD log a partial packet.
 true =
   Enum.reduce_while(1..100, false, fn _, _ ->
     unless Process.alive?(epmd_daemon), do: raise("Session EPMD exited during startup")
 
-    case :gen_tcp.connect({127, 0, 0, 1}, epmd_port, [active: false], 100) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket)
+    case :erl_epmd.names({127, 0, 0, 1}) do
+      {:ok, _names} ->
         {:halt, true}
 
       {:error, _} ->

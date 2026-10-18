@@ -1,5 +1,8 @@
 alias NervesGate.Simulator
 
+# mix run --no-start keeps Mix's Logger, so apply the configured level (test: warning).
+if level = Application.get_env(:logger, :level), do: Logger.configure(level: level)
+
 {:ok, _} = Application.ensure_all_started(:muontrap)
 {:ok, _} = Application.ensure_all_started(:ssh)
 Application.put_env(:kernel, :inet_dist_use_interface, {127, 0, 0, 1})
