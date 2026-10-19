@@ -4,28 +4,36 @@ defmodule NervesGate.Simulator.BuildOutput do
   latest line, at most every 250 ms and once at the end, so the simulator site
   shows build progress and the last line of a failed build.
   """
-  defstruct [:report, :reported_at, pending: nil]
+  defstruct [:report, :reported_at, pending: nil, fragment: ""]
 
   def new(report), do: %__MODULE__{report: report}
 
-  def line(chunk) do
-    chunk
+  def line(line) do
+    line
     |> String.replace_invalid()
     |> String.replace(~r/\e\[[0-9;]*[A-Za-z]/, "")
-    |> String.split(["\n", "\r"], trim: true)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> List.last()
-    |> then(&(&1 && String.slice(&1, 0, 200)))
+    |> String.trim()
+    |> case do
+      "" -> nil
+      line -> String.slice(line, 0, 200)
+    end
   end
 
   defimpl Collectable do
     def into(output), do: {output, &collect/2}
 
     defp collect(output, {:cont, chunk}) do
-      IO.write(chunk)
       now = System.monotonic_time(:millisecond)
-      output = %{output | pending: @for.line(chunk) || output.pending}
+      buffered = output.fragment <> chunk
+      [fragment | lines] = String.split(buffered, ["\n", "\r"]) |> Enum.reverse()
+
+      IO.write(binary_part(buffered, 0, byte_size(buffered) - byte_size(fragment)))
+
+      output = %{
+        output
+        | fragment: fragment,
+          pending: Enum.find_value(lines, &@for.line/1) || output.pending
+      }
 
       due = output.reported_at == nil or now - output.reported_at >= 250
 
@@ -34,7 +42,11 @@ defmodule NervesGate.Simulator.BuildOutput do
         else: output
     end
 
-    defp collect(output, :done), do: report(output)
+    defp collect(output, :done) do
+      IO.write(output.fragment)
+      report(%{output | pending: @for.line(output.fragment) || output.pending})
+    end
+
     defp collect(_, :halt), do: :ok
 
     defp report(%{pending: nil} = output), do: output

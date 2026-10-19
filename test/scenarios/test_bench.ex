@@ -12,6 +12,7 @@ defmodule NervesGate.Scenarios.TestBench do
     }
 
   def run(%{device: vm, devices: devices}) do
+    assert_build_output()
     assert_configuration(vm)
     assert_session_tools(vm)
     assert_tailnet_tools()
@@ -95,6 +96,22 @@ defmodule NervesGate.Scenarios.TestBench do
     assert Enum.count_until(events, 101) <= 100
     ids = Enum.map(events, & &1.id)
     assert ids == Enum.sort(Enum.uniq(ids))
+  end
+
+  @doc false
+  def assert_build_output do
+    owner = self()
+    output = Simulator.BuildOutput.new(&send(owner, {:build_output, &1}))
+
+    _ =
+      Enum.into(
+        ["Compiling 12 fi", "les (.ex)\n", "\e[3", "1mfailed caf", <<195>>, <<169>>, "\e[0m"],
+        output
+      )
+
+    assert_received {:build_output, "Compiling 12 files (.ex)"}
+    assert_received {:build_output, "failed café"}
+    refute_received {:build_output, _}
   end
 
   @doc false

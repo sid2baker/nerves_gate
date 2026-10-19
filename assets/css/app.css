@@ -115,15 +115,12 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 .ui-icon-button { width: 40px; min-height: 40px; padding: 0; }
 .ui-icon-button .ui-icon { width: 18px; height: 18px; }
 .ui-button:disabled { opacity: .5; }
-.ui-spinner { display: none; width: 16px; height: 16px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: ui-spin .8s linear infinite; }
+.ui-spinner { display: none; width: 16px; height: 16px; flex: none; border: 2px solid currentColor; border-radius: 50%; }
 /* aria-busy marks long operations; phx-click-loading covers the wait for the server reply. */
 .ui-button[aria-busy="true"] .ui-spinner, .ui-button.phx-click-loading .ui-spinner, .phx-submit-loading button[type="submit"] .ui-spinner { display: inline-block; }
 .ui-button.phx-click-loading { pointer-events: none; opacity: .8; }
 .ui-button[aria-busy="true"]:disabled { opacity: .8; }
-.ui-progress { position: relative; height: 4px; overflow: hidden; border-radius: 999px; background: var(--ui-accent-soft); }
-.ui-progress::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: var(--ui-accent); animation: ui-progress 1.4s ease-in-out infinite; }
-@keyframes ui-progress { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
-@keyframes ui-spin { to { transform: rotate(360deg); } }
+.ui-progress { height: 4px; border-radius: 999px; background: var(--ui-accent); }
 
 /* A row of aria-pressed buttons that choose one value. */
 .ui-segmented { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--ui-control-line); border-radius: 9px; background: var(--ui-surface-muted); }
@@ -161,8 +158,7 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 .ui-status--warning { color: var(--ui-warning); }
 .ui-status--warning > span { background: var(--ui-warning-dot); }
 .ui-status--busy { color: var(--ui-accent); }
-.ui-status--busy > span { background: var(--ui-good-dot); animation: ui-pulse 1.2s ease-in-out infinite; }
-@keyframes ui-pulse { 50% { opacity: .25; } }
+.ui-status--busy > span { background: var(--ui-good-dot); }
 .ui-notice { display: flex; gap: 12px; padding: 16px; border: 1px solid var(--ui-line); border-radius: 9px; background: var(--ui-surface-muted); color: var(--ui-muted); font-size: 14px; line-height: 1.6; }
 .ui-notice > .ui-icon { width: 18px; height: 18px; margin-top: 2px; }
 .ui-notice strong { display: block; color: var(--ui-ink); margin-bottom: 4px; font-weight: 600; }
@@ -266,5 +262,4 @@ details[open] > summary { margin-bottom: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
-  .ui-spinner, .ui-progress::after, .ui-status--busy > span { animation: none; }
 }
