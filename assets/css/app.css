@@ -36,21 +36,21 @@
   background: var(--ui-bg);
   font-size: 15px;
   font-synthesis: none;
-  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 body { margin: 0; }
+body:has(.ui-modal) { overflow: hidden; }
 a, button, input, textarea, summary { -webkit-tap-highlight-color: transparent; }
 button, input, select, textarea { font: inherit; }
 button, summary { cursor: pointer; }
 a { text-decoration: none; }
 button:disabled { cursor: not-allowed; }
 :focus-visible { outline: 3px solid var(--ui-focus); outline-offset: 4px; }
-p { margin: 0; line-height: 1.6; }
-h1, h2, h3 { margin: 0; }
+p { margin: 0; line-height: 1.6; text-wrap: pretty; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
 code, pre { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: .9em; }
 
 /* Form controls look the same everywhere, inside or outside .ui-field. */
@@ -60,7 +60,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--ui-accent); }
 input:disabled, select:disabled, textarea:disabled { opacity: .6; cursor: not-allowed; }
 textarea { resize: vertical; }
 select { appearance: none; padding-right: 36px; cursor: pointer; background-image: linear-gradient(45deg, transparent 50%, var(--ui-muted) 50%), linear-gradient(135deg, var(--ui-muted) 50%, transparent 50%); background-position: calc(100% - 19px) 50%, calc(100% - 14px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
-select:hover:not(:disabled) { border-color: var(--ui-muted); }
 
 .ui-icon { width: 20px; height: 20px; display: inline-block; flex: none; }
 .ui-muted, .ui-help { color: var(--ui-muted); }
@@ -76,11 +75,9 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 .ui-brand > .ui-icon { color: var(--ui-accent); }
 .ui-navigation { display: flex; gap: 4px; }
 .ui-navigation a { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 10px 12px; border-radius: 7px; font-size: 14px; line-height: 1.4; color: var(--ui-muted); }
-.ui-navigation a:hover { background: var(--ui-hover); color: var(--ui-ink); }
 .ui-navigation a[aria-current="page"] { background: var(--ui-selected); color: var(--ui-accent-strong); font-weight: 600; }
 .ui-main { max-width: 880px; margin: 32px auto 0; padding: 0 32px 40px; }
 .ui-back-link { display: inline-flex; align-items: center; gap: 6px; width: fit-content; min-height: 32px; color: var(--ui-muted); font-size: 14px; font-weight: 600; }
-.ui-back-link:hover { color: var(--ui-ink); }
 .ui-back-link .ui-icon { width: 16px; height: 16px; }
 .ui-page-header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding-bottom: 8px; }
 .ui-page-header h1 { font-size: 32px; line-height: 1.2; font-weight: 650; letter-spacing: -1px; }
@@ -97,7 +94,6 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 .ui-connection:first-child { border-radius: var(--ui-radius) var(--ui-radius) 0 0; }
 .ui-connection:last-child { border-radius: 0 0 var(--ui-radius) var(--ui-radius); }
 .ui-connection + .ui-connection { border-top: 1px solid var(--ui-line); }
-.ui-connection:hover { background: var(--ui-hover); }
 .ui-connection-copy { flex: 1; min-width: 0; }
 .ui-connection-copy p { color: var(--ui-muted); font-size: 13px; margin-top: 4px; overflow-wrap: anywhere; }
 .ui-connection > .ui-icon { width: 16px; color: var(--ui-muted); }
@@ -105,13 +101,10 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 .ui-button:active:not(:disabled) { transform: translateY(1px); }
 .ui-button .ui-icon { width: 16px; height: 16px; }
 .ui-button--primary { color: var(--ui-on-accent); background: var(--ui-accent); border-color: var(--ui-accent); }
-.ui-button--primary:hover:not(:disabled) { background: var(--ui-accent-strong); border-color: var(--ui-accent-strong); }
 .ui-button--secondary { background: var(--ui-surface); border-color: var(--ui-control-line); color: var(--ui-ink); }
-.ui-button--secondary:hover:not(:disabled), .ui-button--quiet:hover:not(:disabled) { background: var(--ui-hover); }
 .ui-button[aria-pressed="true"] { border-color: var(--ui-accent); background: var(--ui-selected); color: var(--ui-accent-strong); }
 .ui-button--quiet { color: var(--ui-muted); }
 .ui-button--danger { color: var(--ui-warning); }
-.ui-button--danger:hover:not(:disabled) { background: var(--ui-warning-soft); }
 .ui-icon-button { width: 40px; min-height: 40px; padding: 0; }
 .ui-icon-button .ui-icon { width: 18px; height: 18px; }
 .ui-button:disabled { opacity: .5; }
@@ -125,7 +118,6 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 /* A row of aria-pressed buttons that choose one value. */
 .ui-segmented { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--ui-control-line); border-radius: 9px; background: var(--ui-surface-muted); }
 .ui-segmented > .ui-button { min-height: 36px; padding: 6px 12px; border-color: transparent; border-radius: 6px; background: transparent; color: var(--ui-muted); }
-.ui-segmented > .ui-button:hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-ink); }
 .ui-segmented > .ui-button[aria-pressed="true"] { background: var(--ui-surface); border-color: var(--ui-accent); color: var(--ui-accent-strong); opacity: 1; }
 /* Native <details> menu: keyboard accessible without a popup library. */
 .ui-menu { position: relative; }
@@ -134,7 +126,6 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 .ui-menu[open] > summary { margin: 0; background: var(--ui-hover); color: var(--ui-ink); }
 .ui-menu-list { position: absolute; z-index: 20; right: 0; top: calc(100% + 4px); min-width: 180px; padding: 4px; display: flex; flex-direction: column; border: 1px solid var(--ui-line); border-radius: 9px; background: var(--ui-surface); box-shadow: 0 8px 30px var(--ui-shadow); }
 .ui-menu-list > .ui-button { justify-content: flex-start; min-height: 38px; padding: 8px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--ui-ink); font-weight: 500; }
-.ui-menu-list > .ui-button:hover:not(:disabled) { background: var(--ui-hover); }
 .ui-menu-list > .ui-button--danger { color: var(--ui-warning); }
 .ui-badge { display: inline-flex; align-items: center; padding: 1px 8px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface-muted); color: var(--ui-muted); font-size: 12px; font-weight: 550; line-height: 1.6; white-space: nowrap; }
 .ui-badge--warning { border-color: var(--ui-warning-line); background: var(--ui-warning-soft); color: var(--ui-warning); }
@@ -149,7 +140,6 @@ select:hover:not(:disabled) { border-color: var(--ui-muted); }
 .ui-login-link { overflow-wrap: anywhere; }
 .ui-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .ui-text-link { display: inline-flex; align-items: center; gap: 4px; color: var(--ui-accent); font-weight: 600; }
-.ui-text-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .ui-text-link .ui-icon { width: 15px; height: 15px; }
 .ui-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; line-height: 1.6; color: var(--ui-muted); }
 .ui-status > span { width: 7px; height: 7px; border-radius: 50%; background: var(--ui-neutral-dot); flex: none; }
@@ -223,7 +213,6 @@ details[open] > summary { margin-bottom: 16px; }
 .bench-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
 .bench-workspace { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(260px, 1fr); gap: 24px; align-items: start; }
 .bench-device h3 a { font-size: 15px; font-weight: 600; color: var(--ui-ink); }
-.bench-device h3 a:hover { color: var(--ui-accent); }
 .bench-device .ui-setting-value { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px 16px; }
 .bench-output { display: block; overflow: hidden; color: var(--ui-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .bench-add { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
@@ -236,6 +225,20 @@ details[open] > summary { margin-bottom: 16px; }
 .bench-log { list-style: none; padding: 0 4px 0 0; margin: 0; max-height: 36rem; overflow-y: auto; }
 .bench-log li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--ui-line); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .bench-log time { color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+/* Touch screens keep :hover after a tap, so only a real pointer gets hover styles. */
+@media (hover: hover) and (pointer: fine) {
+  select:hover:not(:disabled) { border-color: var(--ui-muted); }
+  .ui-navigation a:not([aria-current="page"]):hover { background: var(--ui-hover); color: var(--ui-ink); }
+  .ui-back-link:hover { color: var(--ui-ink); }
+  .ui-connection:hover { background: var(--ui-hover); }
+  .ui-button--primary:hover:not(:disabled) { background: var(--ui-accent-strong); border-color: var(--ui-accent-strong); }
+  .ui-button--secondary:hover:not(:disabled), .ui-button--quiet:hover:not(:disabled) { background: var(--ui-hover); }
+  .ui-button--danger:hover:not(:disabled) { background: var(--ui-warning-soft); }
+  .ui-segmented > .ui-button:hover:not(:disabled) { background: var(--ui-hover); color: var(--ui-ink); }
+  .ui-menu-list > .ui-button:hover:not(:disabled) { background: var(--ui-hover); }
+  .ui-text-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .bench-device h3 a:hover { color: var(--ui-accent); }
+}
 @media (max-width: 900px) {
   .bench-workspace { grid-template-columns: minmax(0, 1fr); }
   .bench-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
