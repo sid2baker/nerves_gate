@@ -27,9 +27,10 @@ defmodule NervesGateWeb.LanLive do
     end
   end
 
-  # Recheck scope on every command: another session may have reassigned this port.
+  # Equipment commands act on the device's current scope, which another session may
+  # have moved to a different port. Refuse commands from a page that no longer owns it.
   def handle_event(event, params, socket) do
-    projection = NervesGateWeb.Backend.status()
+    projection = socket.assigns.projection
     scope = projection.equipment.scope
 
     scoped =

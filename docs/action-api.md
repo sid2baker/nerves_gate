@@ -74,6 +74,10 @@ Network compares `:expected` with its saved configuration before applying anythi
 A mismatch returns `stale_network`: reload rather than replaying the old candidate.
 Without `:expected`, the candidate replaces the whole configuration.
 
+Tailscale editors likewise pass the hostname they started from:
+`remote_configure(name, expected: base)` or `remote_connect(name, expected: base)`.
+Remote returns `stale_remote` if the hostname has changed, before any daemon write.
+
 Confirmation requires the **exact current trial ID**. Only trusted server code may
 pass `:access` to verify first setup through USB; never derive it from request
 parameters or forwarded headers. Immediately-ready USB setup waits for auto-save;

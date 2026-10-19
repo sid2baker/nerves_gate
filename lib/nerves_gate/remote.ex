@@ -4,9 +4,11 @@ defmodule NervesGate.Remote do
 
   ## Commands
 
-  `connect/2`, `configure/2` and `disconnect/1` return `:ok` when accepted,
+  `connect/3`, `configure/3` and `disconnect/1` return `:ok` when accepted,
   or `{:error, reason}`. Only one daemon operation runs at a time. Acceptance
   does not mean completion: read `status/1` for `:operation` and `:error`.
+  Editors pass `expected:`, the hostname their draft started from; a changed
+  hostname is rejected as stale before any daemon write.
 
   ## Queries and notifications
 
@@ -47,17 +49,17 @@ defmodule NervesGate.Remote do
         params
       end
 
-    command(:connect, params, server)
+    command(:connect, params, server, opts)
   end
 
   @doc "Request a hostname change without changing connection intent; preserves omitted preferences."
-  @spec configure(String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def configure(hostname, server \\ __MODULE__),
-    do: command(:configure, %{"hostname" => hostname}, server)
+  @spec configure(String.t(), GenServer.server(), keyword()) :: :ok | {:error, term()}
+  def configure(hostname, server \\ __MODULE__, opts \\ []),
+    do: command(:configure, %{"hostname" => hostname}, server, opts)
 
   @doc "Request Tailscale down without logging out. May disconnect a caller using the VPN."
   @spec disconnect(GenServer.server()) :: :ok | {:error, term()}
-  def disconnect(server \\ __MODULE__), do: command(:disconnect, %{}, server)
+  def disconnect(server \\ __MODULE__), do: command(:disconnect, %{}, server, [])
 
   @doc "Read daemon observations and the current operation/error. Never returns an enrollment URL."
   @spec status(GenServer.server()) :: map()
@@ -79,8 +81,10 @@ defmodule NervesGate.Remote do
   @doc false
   defdelegate unavailable(), to: Policy
 
-  defp command(operation, params, server),
-    do: GenServer.call(server, {:command, operation, params})
+  defp command(operation, params, server, opts) do
+    expected = Keyword.get(opts, :expected, :any)
+    GenServer.call(server, {:command, operation, params, expected})
+  end
 
   @impl true
   def init(opts) do
@@ -124,10 +128,11 @@ defmodule NervesGate.Remote do
     {:reply, state.adapter |> Adapter.login_url() |> Policy.login_url(), state}
   end
 
-  def handle_call({:command, operation, params}, _, state) do
+  def handle_call({:command, operation, params, expected}, _, state) do
     observed = snapshot(state)
 
     with :ok <- Policy.available(observed),
+         :ok <- Policy.expected(observed, expected),
          {:ok, params} <- Policy.validate(operation, params) do
       state =
         if operation in [:connect, :configure] do

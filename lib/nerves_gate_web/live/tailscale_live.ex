@@ -7,12 +7,12 @@ defmodule NervesGateWeb.TailscaleLive do
   def mount(_, _, socket) do
     socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/2)
     if connected?(socket), do: Process.send_after(self(), :check_login, 1000)
-    name = hostname(socket.assigns.projection.remote_access)
+    remote = socket.assigns.projection.remote_access
 
     {:ok,
      assign(socket,
-       form: to_form(%{"hostname" => name}, as: :remote),
-       base: name,
+       form: to_form(%{"hostname" => hostname(remote)}, as: :remote),
+       base: remote.hostname,
        dirty: false,
        pending_name: nil,
        request: nil,
@@ -34,9 +34,8 @@ defmodule NervesGateWeb.TailscaleLive do
       do:
         {:noreply, assign(socket, method: method, key_revision: socket.assigns.key_revision + 1)}
 
+  # Remote rejects the save if the device name changed since this draft's base.
   def handle_event("save", %{"remote" => params}, socket) do
-    remote = Backend.status().remote_access
-
     socket =
       socket
       |> clear_flash()
@@ -46,21 +45,9 @@ defmodule NervesGateWeb.TailscaleLive do
         key_revision: socket.assigns.key_revision + 1
       )
 
-    cond do
-      socket.assigns.request != nil or socket.assigns.login_requested ->
-        {:noreply, socket}
-
-      socket.assigns.base != hostname(remote) ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           "The device name changed in another session. Reload before saving."
-         )}
-
-      true ->
-        submit(socket, remote.state, params)
-    end
+    if socket.assigns.request != nil or socket.assigns.login_requested,
+      do: {:noreply, socket},
+      else: submit(socket, socket.assigns.projection.remote_access.state, params)
   end
 
   def handle_event("show-login", _, socket),
@@ -87,7 +74,7 @@ defmodule NervesGateWeb.TailscaleLive do
   def handle_event(_, _, socket), do: {:noreply, socket}
 
   defp submit(socket, state, params) do
-    case command(state, socket.assigns.method, params) do
+    case command(state, socket.assigns.method, params, socket.assigns.base) do
       :ok ->
         {:noreply,
          assign(socket,
@@ -103,12 +90,14 @@ defmodule NervesGateWeb.TailscaleLive do
     end
   end
 
-  defp command("online", _, params), do: Backend.remote_configure(params["hostname"])
+  defp command("online", _, params, base),
+    do: Backend.remote_configure(params["hostname"], expected: base)
 
-  defp command(_, "auth_key", params),
-    do: Backend.remote_connect(params["hostname"], auth_key: params["auth_key"])
+  defp command(_, "auth_key", params, base),
+    do: Backend.remote_connect(params["hostname"], auth_key: params["auth_key"], expected: base)
 
-  defp command(_, "link", params), do: Backend.remote_connect(params["hostname"])
+  defp command(_, "link", params, base),
+    do: Backend.remote_connect(params["hostname"], expected: base)
 
   @doc false
   def refresh_observations(socket, %{backend: %{available: false}} = projection),
@@ -194,14 +183,14 @@ defmodule NervesGateWeb.TailscaleLive do
     cond do
       socket.assigns.pending_name == name and remote.operation == nil ->
         unchanged = String.downcase(socket.assigns.form.params["hostname"] || "") == name
-        socket = assign(socket, base: name, pending_name: nil, dirty: not unchanged)
+        socket = assign(socket, base: remote.hostname, pending_name: nil, dirty: not unchanged)
 
         if unchanged,
           do: assign(socket, form: to_form(%{"hostname" => name}, as: :remote)),
           else: socket
 
       not socket.assigns.dirty ->
-        assign(socket, form: to_form(%{"hostname" => name}, as: :remote), base: name)
+        assign(socket, form: to_form(%{"hostname" => name}, as: :remote), base: remote.hostname)
 
       previous.operation != nil and remote.operation == nil ->
         assign(socket, pending_name: nil)

@@ -68,6 +68,18 @@ defmodule NervesGate.Remote.Policy do
       {:error,
        Error.new("remote_unavailable", "Tailscale is starting or unavailable. Try again shortly.")}
 
+  # Optimistic concurrency for editors: reject a draft based on an old hostname.
+  def expected(_, :any), do: :ok
+  def expected(%{hostname: hostname}, hostname), do: :ok
+
+  def expected(_, _),
+    do:
+      {:error,
+       Error.new(
+         "stale_remote",
+         "The device name changed in another session. Reload before saving."
+       )}
+
   # Serve needs an enrolled, online DNS identity. One attempt per name prevents
   # observation updates from replaying failed writes or racing another command.
   def serve_dns_name(

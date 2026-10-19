@@ -40,8 +40,9 @@ defmodule NervesGate do
 
     * `:access` — trusted server-observed USB access for `network_propose/2` only.
       Never populate it from user parameters or forwarded headers.
-    * `:expected` — saved network settings the proposal was based on. When supplied,
-      the Network process rejects stale drafts before applying any changes.
+    * `:expected` — the state an editor's draft started from: saved network settings
+      for `network_propose/2`, or the Tailscale hostname for `remote_connect/2` and
+      `remote_configure/2`. The owning process rejects a stale draft before any change.
     * `:network`, `:remote`, `:equipment`, `:indicators`, `:buses` — domain servers for tests or independent instances.
       No client object or extra process is required.
   """
@@ -91,13 +92,17 @@ defmodule NervesGate do
   @spec remote_connect(String.t(), keyword()) :: command_result()
   def remote_connect(hostname, opts \\ []),
     do:
-      invoke(fn -> Remote.connect(hostname, remote(opts), Keyword.take(opts, [:auth_key])) end)
+      invoke(fn ->
+        Remote.connect(hostname, remote(opts), Keyword.take(opts, [:auth_key, :expected]))
+      end)
       |> result()
 
   @doc "Request a Tailscale hostname change without replacing other daemon preferences."
   @spec remote_configure(String.t(), keyword()) :: command_result()
   def remote_configure(hostname, opts \\ []),
-    do: invoke(fn -> Remote.configure(hostname, remote(opts)) end) |> result()
+    do:
+      invoke(fn -> Remote.configure(hostname, remote(opts), Keyword.take(opts, [:expected])) end)
+      |> result()
 
   @doc "Request Tailscale down without signing out. May interrupt callers using that VPN."
   @spec remote_disconnect(keyword()) :: command_result()

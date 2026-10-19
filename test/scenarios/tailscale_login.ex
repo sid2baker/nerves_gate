@@ -17,7 +17,18 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
     Qemu.check_firewall(vm)
     save(vm, settings("eth0"))
     Qemu.await(vm, "public Internet reachable", &internet?/1, 60_000)
-    Qemu.await(vm, "Tailscale daemon ready", & &1.actions["remote.connect"].enabled)
+    ready = Qemu.await(vm, "Tailscale daemon ready", & &1.actions["remote.connect"].enabled)
+
+    # Remote itself rejects a draft based on another hostname, before any daemon write.
+    stale = [expected: "not-#{ready.remote_access.hostname}"]
+
+    assert {:error, %{code: "stale_remote"}} =
+             Qemu.call(vm, :remote_connect, ["nerves-gate-qemu", stale])
+
+    assert {:error, %{code: "stale_remote"}} =
+             Qemu.call(vm, :remote_configure, ["nerves-gate-qemu", stale])
+
+    assert Qemu.status(vm).remote_access.operation == nil
     # A deliberately invalid, non-secret key exercises the actual daemon path.
     key = "tskey-auth-qemu-invalid"
     assert :ok = Qemu.call(vm, :remote_connect, ["nerves-gate-qemu", [auth_key: key]])
@@ -96,6 +107,11 @@ defmodule NervesGate.Scenarios.TailscaleLogin do
              Policy.sanitize(%{health: ["Failed tskey-auth-test-key"]})
 
     refute Map.has_key?(Policy.sanitize(%{auth_key: "test-key"}), :auth_key)
+
+    assert :ok = Policy.expected(%{hostname: nil}, :any)
+    assert :ok = Policy.expected(%{hostname: nil}, nil)
+    assert :ok = Policy.expected(%{hostname: "gateway"}, "gateway")
+    assert {:error, %{code: "stale_remote"}} = Policy.expected(%{hostname: "renamed"}, "gateway")
   end
 
   @doc false

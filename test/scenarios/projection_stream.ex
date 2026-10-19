@@ -247,7 +247,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     assert [] =
              Floki.find(page, "#tailscale-form[phx-change], input[type='password'][phx-change]")
 
-    # Stale submission is rejected without a domain write, and never retains a key.
+    # The device rejects a stale submission before any write; the page never retains a key.
     stale = Phoenix.Component.assign(keyed, base: "not-the-current-hostname")
     secret = "tskey-auth-ui-test-only"
 
@@ -401,8 +401,10 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   end
 
   defp assert_runtime_backend(vm) do
-    assert NervesGateWeb.Backend.status().system.node == vm.node
-    assert :erpc.call(vm.node, NervesGateWeb.Backend, :status, []).system.node == vm.node
+    assert NervesGateWeb.Backend.projection().status.system.node == vm.node
+
+    assert :erpc.call(vm.node, NervesGateWeb.Backend, :projection, []).status.system.node ==
+             vm.node
 
     assert Process.whereis(NervesGate.Network) == nil
     assert Process.whereis(ProjectionServer) == nil
@@ -415,7 +417,6 @@ defmodule NervesGate.Scenarios.ProjectionStream do
 
     try do
       Application.put_env(:nerves_gate, :backend_node, nil)
-      refute NervesGateWeb.Backend.status().backend.available
       refute NervesGateWeb.Backend.projection().status.backend.available
       assert {:error, :unavailable} = NervesGateWeb.Backend.subscribe_projection()
       assert {:error, %{code: "outcome_unknown"}} = NervesGateWeb.Backend.identify()
@@ -424,7 +425,6 @@ defmodule NervesGate.Scenarios.ProjectionStream do
     end
 
     # The same compiled host code immediately selects the real device again.
-    assert NervesGateWeb.Backend.status().system.node == vm.node
     assert NervesGateWeb.Backend.projection().status.system.node == vm.node
   end
 
