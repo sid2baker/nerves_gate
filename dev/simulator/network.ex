@@ -54,7 +54,7 @@ defmodule NervesGate.Simulator.Network do
       "user,id=mgmt,net=192.168.77.0/24,host=192.168.77.1,ipv6=off,restrict=on" <>
         forward(address, forwards.epmd, "192.168.77.2", 4369) <>
         forward(address, forwards.distribution, "192.168.77.2", 9100) <>
-        forward(address, forwards.http, "192.168.77.2", 4000) <>
+        forward("127.0.0.1", forwards.http, "192.168.77.2", 4000) <>
         forward(address, forwards.ssh, "192.168.77.2", 22)
 
     # VintageNetDirect runs in the guest, including its DHCP server. Libslirp is

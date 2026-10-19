@@ -210,12 +210,20 @@ defmodule NervesGate.Simulator.Device do
     }
   end
 
+  # The gateway UI forward listens on 127.0.0.1, which VM hosts such as OrbStack
+  # forward to the workstation. The others need the device's own address.
   defp forward_ports(address) do
     {:ok, ip} = :inet.parse_address(String.to_charlist(address))
     epmd = System.fetch_env!("ERL_EPMD_PORT") |> String.to_integer()
 
     sockets =
-      for {name, port} <- [epmd: epmd, distribution: 9100, http: 0, ssh: 0, usb: 0] do
+      for {name, ip, port} <- [
+            {:epmd, ip, epmd},
+            {:distribution, ip, 9100},
+            {:http, {127, 0, 0, 1}, 0},
+            {:ssh, ip, 0},
+            {:usb, ip, 0}
+          ] do
         {:ok, socket} = :gen_tcp.listen(port, ip: ip, reuseaddr: true)
         {name, socket}
       end

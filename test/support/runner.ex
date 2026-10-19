@@ -428,7 +428,7 @@ defmodule NervesGate.QemuTests do
       id: vm.id,
       node: vm.node,
       address: vm.address,
-      ui: "http://#{vm.address}:#{vm.forwards.http}",
+      ui: "http://127.0.0.1:#{vm.forwards.http}",
       # The configured wiring the device booted with; scenarios use the baseline.
       wiring: topology,
       topology: topology,
