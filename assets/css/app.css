@@ -109,9 +109,10 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 .ui-icon-button .ui-icon { width: 18px; height: 18px; }
 .ui-button:disabled { opacity: .5; }
 .ui-spinner { display: none; width: 16px; height: 16px; flex: none; border: 2px solid currentColor; border-radius: 50%; }
-/* aria-busy marks long operations; phx-click-loading covers the wait for the server reply. */
-.ui-button[aria-busy="true"] .ui-spinner, .ui-button.phx-click-loading .ui-spinner, .phx-submit-loading button[type="submit"] .ui-spinner { display: inline-block; }
-.ui-button.phx-click-loading { pointer-events: none; opacity: .8; }
+/* aria-busy marks long operations and forms spin their submit button. A plain click only
+   blocks repeats until the reply, so quick toggles keep their size and do not flash. */
+.ui-button[aria-busy="true"] .ui-spinner, .phx-submit-loading button[type="submit"] .ui-spinner { display: inline-block; }
+.ui-button.phx-click-loading { pointer-events: none; }
 .ui-button[aria-busy="true"]:disabled { opacity: .8; }
 .ui-progress { height: 4px; border-radius: 999px; background: var(--ui-accent); }
 
