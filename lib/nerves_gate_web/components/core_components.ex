@@ -1,6 +1,7 @@
 defmodule NervesGateWeb.CoreComponents do
   @moduledoc "Reusable, stateless controls and surfaces for the local gateway UI."
   use Phoenix.Component
+  alias Phoenix.LiveView.JS
 
   @icons %{
     "overview" => "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
@@ -13,6 +14,12 @@ defmodule NervesGateWeb.CoreComponents do
     "usb" =>
       "M12 3v14 M9 6l3-3 3 3 M12 13l-5-3V7 M12 16l5-3V9 M15 6h4v3h-4z M14 19a2 2 0 1 1-4 0 2 2 0 0 1 4 0",
     "arrow" => "M4 12h16 m-6-6 6 6-6 6",
+    "back" => "M20 12H4 m6-6-6 6 6 6",
+    "trash" => "M4 7h16 M10 11v6 M14 11v6 M6 7l1 13h10l1-13 M9 7V4h6v3",
+    "external" => "M14 4h6v6 M20 4l-9 9 M18 14v6H4V6h6",
+    "more" =>
+      "M6.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0 M13.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0 M20.5 12a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0",
+    "theme" => "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 3v18 M12 7h5 M12 11h8 M12 15h7 M12 19h3",
     "check" => "m5 12 4 4L19 6",
     "info" => "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 11v6 M12 7v.01",
     "clock" => "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 7v5l3 2",
@@ -40,6 +47,54 @@ defmodule NervesGateWeb.CoreComponents do
     >
       <path d={@path} />
     </svg>
+    """
+  end
+
+  attr(:navigate, :string, required: true)
+  slot(:inner_block, required: true)
+
+  def back_link(assigns) do
+    ~H"""
+    <.link navigate={@navigate} class="ui-back-link"><.icon name="back" />{render_slot(@inner_block)}</.link>
+    """
+  end
+
+  @doc "Switches between light and dark. app.js stores the choice in the `theme` cookie."
+  def theme_toggle(assigns) do
+    ~H"""
+    <.button
+      variant="quiet"
+      class="ui-icon-button"
+      icon="theme"
+      data-theme-toggle
+      aria-label="Switch light or dark theme"
+      title="Switch light or dark theme"
+    />
+    """
+  end
+
+  @doc "An icon button that opens a short list of buttons or links. LiveView closes it."
+  attr(:id, :string, required: true)
+  attr(:label, :string, required: true)
+  slot(:inner_block, required: true)
+
+  def menu(assigns) do
+    ~H"""
+    <details
+      id={@id}
+      class="ui-menu"
+      phx-mounted={JS.ignore_attributes(["open"])}
+      phx-click-away={JS.remove_attribute("open")}
+      phx-window-keydown={JS.remove_attribute("open")}
+      phx-key="Escape"
+    >
+      <summary class="ui-button ui-button--quiet ui-icon-button" aria-label={@label} title={@label}>
+        <.icon name="more" />
+      </summary>
+      <div class="ui-menu-list" phx-click={JS.remove_attribute("open", to: "##{@id}")}>
+        {render_slot(@inner_block)}
+      </div>
+    </details>
     """
   end
 
@@ -90,22 +145,23 @@ defmodule NervesGateWeb.CoreComponents do
 
   attr(:href, :string, default: nil)
   attr(:type, :string, default: "button")
-  attr(:variant, :string, values: ["primary", "secondary", "quiet"], default: "primary")
+  attr(:variant, :string, values: ["primary", "secondary", "quiet", "danger"], default: "primary")
   attr(:icon, :string, default: nil)
+  attr(:class, :string, default: nil)
   attr(:loading, :boolean, default: false)
   attr(:disabled, :boolean, default: false)
   attr(:rest, :global, include: ~w(form name value target rel referrerpolicy))
-  slot(:inner_block, required: true)
+  slot(:inner_block)
 
   def button(assigns) do
     ~H"""
-    <a :if={@href} href={@href} class={["ui-button", "ui-button--#{@variant}"]} {@rest}>
+    <a :if={@href} href={@href} class={["ui-button", "ui-button--#{@variant}", @class]} {@rest}>
       {render_slot(@inner_block)}<.icon :if={@icon} name={@icon} />
     </a>
     <button
       :if={!@href}
       type={@type}
-      class={["ui-button", "ui-button--#{@variant}"]}
+      class={["ui-button", "ui-button--#{@variant}", @class]}
       disabled={@disabled or @loading}
       aria-busy={@loading && "true"}
       {@rest}
@@ -116,7 +172,7 @@ defmodule NervesGateWeb.CoreComponents do
     """
   end
 
-  attr(:tone, :string, values: ["neutral", "good", "warning"], default: "neutral")
+  attr(:tone, :string, values: ["neutral", "good", "warning", "busy"], default: "neutral")
   slot(:inner_block, required: true)
 
   def status(assigns) do

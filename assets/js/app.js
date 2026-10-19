@@ -17,3 +17,18 @@ const liveSocket = new LiveSocket("/live", Socket, {
   }
 })
 liveSocket.connect()
+
+// The server renders the saved theme from this cookie on the next page load.
+function toggleTheme() {
+  const root = document.documentElement
+  const dark = root.dataset.theme
+    ? root.dataset.theme === "dark"
+    : window.matchMedia("(prefers-color-scheme: dark)").matches
+  const theme = dark ? "light" : "dark"
+  root.dataset.theme = theme
+  document.cookie = `theme=${theme}; path=/; max-age=31536000; SameSite=Lax`
+}
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-theme-toggle]")) toggleTheme()
+})

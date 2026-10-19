@@ -119,7 +119,7 @@ defmodule NervesGateWeb.BusesLive do
       )
 
     ~H"""
-    <.link navigate="/equipment" class="ui-text-link">Back to Equipment</.link>
+    <.back_link navigate="/equipment">Equipment</.back_link>
     <.page_header title={@title} description={@port_name} />
     <.notice :if={@buses.simulated}>
       Preview mode · simulated buses. Workstation hardware is never opened.

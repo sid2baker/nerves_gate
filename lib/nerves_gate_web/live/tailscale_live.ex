@@ -249,7 +249,7 @@ defmodule NervesGateWeb.TailscaleLive do
     assigns = assign(assigns, remote: remote, busy: busy, waiting: assigns.login_requested)
 
     ~H"""
-    <.link navigate="/" class="ui-text-link">Back to Overview</.link>
+    <.back_link navigate="/">Overview</.back_link>
     <.page_header title="Remote access" description="Connect this gateway to your private network." />
     <RemoteStatus.connection remote={@remote} title="Connection" />
     <.notice :if={@remote.simulated}>
@@ -260,6 +260,7 @@ defmodule NervesGateWeb.TailscaleLive do
         <.field
           field={@form[:hostname]}
           label="Device name"
+          help="Name of this gateway in your tailnet."
           phx-change="change"
           disabled={@busy or @waiting}
           required
@@ -276,6 +277,12 @@ defmodule NervesGateWeb.TailscaleLive do
             <option value="link" selected={@method == "link"}>Sign-in link</option>
             <option value="auth_key" selected={@method == "auth_key"}>Auth key</option>
           </select>
+          <p class="ui-help">
+            {if @method == "link",
+              do:
+                "Shows a private sign-in link on this page. Sign in with an account in your tailnet.",
+              else: "Create a key in the Tailscale admin console under Settings, Keys."}
+          </p>
         </div>
         <div :if={@remote.state != "online" and @method == "auth_key"} class="ui-field">
           <label for={"remote-auth-key-#{@key_revision}"}>Auth key</label>
@@ -344,7 +351,7 @@ defmodule NervesGateWeb.TailscaleLive do
           target="_blank"
           rel="noopener noreferrer"
           class="ui-text-link"
-        >Open Tailscale admin console</a>
+        >Open Tailscale admin console<.icon name="external" /></a>
       </p>
     </.panel>
     <div

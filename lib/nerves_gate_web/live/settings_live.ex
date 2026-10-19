@@ -73,7 +73,7 @@ defmodule NervesGateWeb.SettingsLive do
         {@projection.ssh.error.message}
       </.notice>
       <p :if={@projection.ssh.available and @projection.ssh.keys == []} class="ui-help">
-        No SSH keys saved. Add a key to enable SSH over Ethernet or Tailscale.
+        No SSH keys saved.
       </p>
       <ul id="ssh-keys" class="ui-ssh-keys">
         <li :for={key <- @projection.ssh.keys}>
@@ -82,13 +82,16 @@ defmodule NervesGateWeb.SettingsLive do
             <code>{key.fingerprint}</code>
           </div>
           <.button
-            variant="quiet"
+            variant="danger"
+            class="ui-icon-button"
+            icon="trash"
+            title="Remove SSH key"
             phx-click="remove-key"
             phx-value-fingerprint={key.fingerprint}
             data-confirm="Remove this SSH key? New logins using it will be denied. Removing the last key leaves USB password access only."
             disabled={!@projection.actions["ssh.remove_key"].enabled}
             aria-label={"Remove SSH key #{key.fingerprint}"}
-          >Remove</.button>
+          />
         </li>
       </ul>
       <.form
@@ -113,8 +116,7 @@ defmodule NervesGateWeb.SettingsLive do
             disabled={!@projection.actions["ssh.add_key"].enabled}
           >{@key_form[:public_key].value}</textarea>
           <p id="ssh-key-help" class="ui-help">
-            Paste one Ed25519, RSA or ECDSA public key (the .pub file), never a private key.
-            Keys are saved on this device and survive reboots and firmware updates.
+            Paste one public key (the .pub file), never a private key. Keys survive reboots and firmware updates.
           </p>
         </div>
         <.button
