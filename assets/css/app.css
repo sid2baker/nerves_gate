@@ -108,7 +108,7 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 .ui-icon-button { width: 40px; min-height: 40px; padding: 0; }
 .ui-icon-button .ui-icon { width: 18px; height: 18px; }
 .ui-button:disabled { opacity: .5; }
-.ui-spinner { display: none; width: 16px; height: 16px; flex: none; border: 2px solid currentColor; border-radius: 50%; }
+.ui-spinner { display: none; width: 16px; height: 16px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; }
 /* aria-busy marks long operations and forms spin their submit button. A plain click only
    blocks repeats until the reply, so quick toggles keep their size and do not flash. */
 .ui-button[aria-busy="true"] .ui-spinner, .phx-submit-loading button[type="submit"] .ui-spinner { display: inline-block; }
@@ -264,6 +264,16 @@ details[open] > summary { margin-bottom: 16px; }
   .ui-setting-row { align-items: flex-start; flex-direction: column; gap: 8px; }
   .ui-setting-value { text-align: left; }
 }
+/* Busy indicators move only when motion is allowed; their static forms still read as busy. */
+@media (prefers-reduced-motion: no-preference) {
+  .ui-spinner { animation: ui-spin .8s linear infinite; }
+  .ui-progress { position: relative; overflow: clip; background: var(--ui-accent-soft); }
+  .ui-progress::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: var(--ui-accent); animation: ui-progress 1.4s ease-in-out infinite; }
+  .ui-status--busy > span { animation: ui-pulse 1.2s ease-in-out infinite; }
+}
+@keyframes ui-spin { to { transform: rotate(360deg); } }
+@keyframes ui-progress { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@keyframes ui-pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
 }
