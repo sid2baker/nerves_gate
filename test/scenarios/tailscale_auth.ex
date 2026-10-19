@@ -14,12 +14,11 @@ defmodule NervesGate.Scenarios.TailscaleAuth do
       opt_in: true
     }
 
-  def run(%{device: primary, devices: devices}) do
+  def run(%{devices: devices}) do
     assert map_size(devices) == 3, "tailscale_auth requires the dedicated three-device config"
-    client = TailnetAuth.client()
-    prefix = TailnetAuth.prefix()
+    prefix = "ng-test-#{Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)}"
+    IO.puts("Tailscale test nodes: #{prefix}-[1-3]")
     guests = devices |> Enum.sort_by(&elem(&1, 0)) |> Enum.map(&elem(&1, 1))
-    Qemu.on_exit({primary.id, :tailnet}, &TailnetAuth.cleanup/0)
 
     enrolled =
       guests
@@ -30,12 +29,21 @@ defmodule NervesGate.Scenarios.TailscaleAuth do
         Qemu.await(vm, "#{vm.id}: Internet reachable for enrollment", &internet?/1, 60_000)
         Qemu.await(vm, "#{vm.id}: Tailscale ready", & &1.actions["remote.connect"].enabled)
         name = "#{prefix}-#{index}"
-        TailnetAuth.enroll(client, vm, name)
-        status = Qemu.await(vm, "#{vm.id}: real Tailscale authentication", &online?/1, 60_000)
+        Qemu.on_exit({vm.id, :tailnet}, fn -> logout(vm) end)
+        TailnetAuth.enroll(vm, name)
+
+        status =
+          Qemu.await(
+            vm,
+            "#{vm.id}: real Tailscale authentication",
+            fn status -> online?(status) and status.remote_access.hostname == name end,
+            60_000
+          )
+
         address = status.remote_access.ipv4
         assert tailnet_address?(address), "Authenticated guest has no Tailscale IPv4 address"
-        registration = registration(vm, client, name, address)
-        %{vm: vm, name: name, address: address, registration: registration}
+        registration = registration(vm)
+        %{vm: vm, address: address, registration: registration}
       end)
 
     assert MapSet.size(MapSet.new(enrolled, & &1.address)) == 3
@@ -54,16 +62,16 @@ defmodule NervesGate.Scenarios.TailscaleAuth do
       90_000
     )
 
-    assert registration(first.vm, client, first.name, first.address) == first.registration
+    assert registration(first.vm) == first.registration
     peer_http(enrolled)
+  end
 
-    for %{vm: vm} <- enrolled do
-      assert :ok = :erpc.call(vm.node, Tailscaled, :logout, [], 10_000)
+  defp logout(vm) do
+    assert :ok = :erpc.call(vm.node, Tailscaled, :logout, [], 10_000)
 
-      Qemu.await(vm, "#{vm.id}: Tailscale logged out", fn status ->
-        not online?(status) and status.remote_access.auth_state == "needs_login"
-      end)
-    end
+    Qemu.await(vm, "#{vm.id}: Tailscale logged out", fn status ->
+      not online?(status) and status.remote_access.auth_state == "needs_login"
+    end)
   end
 
   defp online?(status),
@@ -80,19 +88,33 @@ defmodule NervesGate.Scenarios.TailscaleAuth do
 
   defp tailnet_address?(_), do: false
 
-  defp registration(vm, client, name, address) do
-    Qemu.await(
-      vm,
-      "#{vm.id}: ephemeral tagged node registered in the real tailnet",
-      fn _ ->
-        is_binary(TailnetAuth.node_id(client, name, address))
-      end,
-      60_000
-    )
-
-    id = TailnetAuth.node_id(client, name, address)
-    assert is_binary(id), "The test node registration disappeared"
+  defp registration(vm) do
+    Qemu.await(vm, "#{vm.id}: tagged Tailscale identity", fn _ -> is_binary(node_id(vm)) end)
+    id = node_id(vm)
+    assert is_binary(id), "The test node identity disappeared"
     id
+  end
+
+  # Read only our guest's daemon. Never assert on raw status: it can contain a login URL.
+  defp node_id(vm) do
+    socket = :erpc.call(vm.node, Application, :fetch_env!, [:tailscaled_ex, :socket], 5_000)
+
+    case :erpc.call(
+           vm.node,
+           Tailscaled.LocalAPI,
+           :request,
+           [[socket: socket], "GET", "status?peers=false"],
+           7_000
+         ) do
+      {:ok, %{"Self" => %{"ID" => id, "Online" => true, "Tags" => tags}}, _}
+      when is_binary(id) and is_list(tags) ->
+        if "tag:ci" in tags, do: id
+
+      _ ->
+        nil
+    end
+  catch
+    :error, {:erpc, _} -> nil
   end
 
   defp peer_http(enrolled) do

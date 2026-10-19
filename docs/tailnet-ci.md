@@ -1,24 +1,22 @@
 # Real Tailscale authentication in QEMU
 
-**Simulator CI** runs the **Tailscale authentication** job automatically on pushes
-to `main`, after the ordinary simulator checks pass. The job uses the protected
-`tailnet-ci` GitHub environment and never runs for pull requests. No separate
-workflow or manual trigger is needed.
+**Simulator CI** has a main-branch **Tailscale authentication** job using the
+protected `tailnet-ci` GitHub environment. It never runs for pull requests.
+Ordinary **Run all**, `mix test` and `mix ci` selections exclude `tailscale_auth`;
+select it explicitly to enroll real test devices.
 
-Local `mix test` / `mix ci` selections remain credential-free and exclude
-`tailscale_auth`; the CI job selects it explicitly.
+The scenario uses the three-device configuration in `dev/tailnet.exs`. Each guest
+enrolls through `NervesGate.remote_connect/2`. In CI,
+`Tailscaled.Testing.auth_key/1` creates a different single-use, ephemeral,
+pre-approved key for each guest through GitHub OIDC. Unused keys expire after ten
+minutes. No reusable auth key or OAuth secret is stored in GitHub or simulator
+configuration. The runner never joins the tailnet or changes its networking.
 
-It starts the dedicated three-device configuration in `dev/tailnet.exs`. Each
-guest enrolls through `NervesGate.remote_connect/2` with a different single-use,
-ephemeral, pre-approved auth key that expires after ten minutes. GitHub OIDC
-creates a temporary Tailscale API token; no reusable auth key or OAuth client secret
-is stored in GitHub or simulator configuration. The runner itself never joins
-the tailnet or changes its networking.
-
-The scenario checks authenticated/online device state, three distinct Tailscale
-IPv4 addresses and node registrations, all six directed guest-to-guest HTTP paths
-to port 4000, and retained identity/connectivity after one guest power cycle.
-This is not a test of HTTPS Serve certificates, subnet routing/NAT, IPv6, or direct
+The scenario checks authenticated/online state, three distinct Tailscale IPv4
+addresses and tagged node IDs, all six directed guest-to-guest HTTP paths to port
+4000, and the same IP/node ID and working peer HTTP after one guest power cycle.
+Node IDs come from each owned guest's LocalAPI, not the tailnet management API.
+This does not test HTTPS Serve certificates, subnet routing/NAT, IPv6, or direct
 versus DERP path selection. The ordinary `tailscale_login` scenario remains an
 unenrolled URL/invalid-key check.
 
@@ -29,9 +27,8 @@ these test nodes must not have access to production devices.
 
 ### 1. Restrict the test tag
 
-In the test tailnet's access-control policy, define `tag:ci` and allow only the
-traffic needed by this scenario. For a new isolated test tailnet, the relevant
-policy is:
+Define `tag:ci` and allow only the traffic needed by this scenario. For a new
+isolated test tailnet, the relevant policy is:
 
 ```json
 {
@@ -57,7 +54,7 @@ credentials**, configure its OpenID Connect trust as:
 | Issuer | GitHub Actions (`https://token.actions.githubusercontent.com`) |
 | Subject | `repo:*` |
 | **Required custom claim** `repository_owner_id` | `79519556` |
-| Scopes | **Auth keys: write** (`auth_keys`) and **Devices → Core: write** (`devices:core`) |
+| Scope | **Auth keys: write** (`auth_keys`) |
 | Permitted tag | `tag:ci` |
 
 The owner-ID claim restricts the wildcard to repositories owned by `sid2baker`.
@@ -70,9 +67,10 @@ Do not add `nerves_gate`-specific repository or workflow-path claims to this sha
 credential: they would exclude other repositories. Remove any old
 `event_name: workflow_dispatch` restriction: automatic CI uses the `push` event.
 Every consuming repository must protect its own credential-bearing jobs; this
-workflow limits the job to `main` and the protected `tailnet-ci` environment. Do not
-grant `all`, policy editing, or route-management scopes. Device-core permission is needed to verify registrations
-and delete test nodes deterministically.
+workflow limits the job to `main` and the protected `tailnet-ci` environment.
+Do not grant `all`, policy editing, or route-management scopes. This scenario needs
+no `devices:core` permission; remove it from the shared credential only if no other
+consumer needs it.
 
 Copy the credential's **Client ID** and **Audience**. They are identifiers, not
 long-lived authentication secrets. If token exchange fails, the credential details
@@ -88,47 +86,62 @@ In `sid2baker/nerves_gate`, open **Settings → Environments**:
    - `TS_OAUTH_CLIENT_ID`: the generated Client ID.
    - `TS_AUDIENCE`: the generated Audience.
 
-Do not add an auth key, OAuth secret or reusable API token. OIDC token issuance is
-enabled only in this workflow's job with `id-token: write`.
+The job sets `TS_TAGS: tag:ci`. Do not add an auth key, OAuth secret or reusable API
+token. OIDC token issuance is enabled only in this job with `id-token: write`.
+Inspect **Actions → Simulator CI → Tailscale authentication**, and approve the
+environment if required. The complete CI also supports manual dispatch on `main`.
+Missing credentials or failed enrollment fail the scenario rather than skipping it.
 
-## Run and inspect
+## Run locally
 
-Push to `main` and inspect **Actions → Simulator CI → Tailscale authentication**.
-Approve the environment if required. To start the complete CI manually, use
-**Actions → Simulator CI → Run workflow** with `main` selected.
+In the test tailnet's **Settings → Keys**, create a **Reusable**, **Ephemeral**,
+**Pre-approved** key with `tag:ci`. Reusable is needed because three guests enroll
+with it. Choose the shortest practical expiry and revoke it when finished; logout
+does not revoke a reusable key.
 
-The OIDC preflight runs before the Tailscale job builds firmware or enrolls guests.
-Missing settings, claim mismatches and insufficient permissions fail the job,
-never silently skip it.
+Load it securely into `TAILSCALED_TEST_AUTH_KEY` in the shell that starts `mix dev`.
+Do not put its value in shell history, simulator configuration or a committed file.
+Start the session with the three-device configuration:
 
-The scenario is shared with the existing runner, but credential acquisition is
-intentionally limited to GitHub Actions. Do not run `--ci` locally or paste keys
-into the simulator. Local manual enrollment can still use the gateway UI's browser
-login or a separately generated one-off key.
+```sh
+mix dev --config dev/tailnet.exs
+```
+
+Choose **Start devices** on the overview. In another terminal:
+
+```sh
+mix test --only tailscale_auth
+```
+
+The scenario uses fresh disks and reserves all three devices. The key is read by
+the running session, not the attaching `mix test` client: restart `mix dev` after
+changing its key or configuration. With no local key, the helper attempts GitHub
+OIDC and reports missing settings outside CI. Do not use `--ci` to start another
+local bench.
 
 ## Cleanup and safety
 
-The scenario's cleanup callback and an `always()` workflow step delete only its
-recorded ephemeral `tag:ci` nodes and revoke its recorded auth keys. Names include
-the GitHub run ID/attempt, and `_build/qemu-tests/ng-ci-<run>-<attempt>.json` records
-only those names and key IDs, never credential values. Failed cleanup fails CI and
-keeps this journal for inspection. Key creation and enrollment are never automatically
-replayed after an unknown outcome; cleanup can safely repeat deletion of these exact
-owned resources.
+Before attempting each enrollment, the scenario registers a cleanup callback for
+that guest. On normal completion or a test failure, cleanup calls
+`Tailscaled.logout/0` and waits for `needs_login`. Logout removes an ephemeral node
+immediately. A cleanup failure fails the run and blocks the devices until Reset.
+There is no management-API deletion, resource journal or key revocation step.
 
-Abrupt runner loss or forced cancellation can prevent cleanup. Ephemeral nodes
-then expire after inactivity, and unused auth keys expire after ten minutes. An
-unknown key-creation response can also leave an unrecorded key until that expiry;
-creation is never replayed to discover its value.
-Inspect nodes with the run's `ng-ci-<run>-<attempt>-` prefix in Tailscale if needed;
-never delete unrelated CI nodes or assume revoking a key deletes its devices.
+Forced cancellation or a killed worker can prevent cleanup. Reset the disposable
+devices to erase enrollment, or stop them to take them offline. Tailscale normally
+removes offline ephemeral nodes after 30–60 minutes; still-online nodes do not age
+out. Unused CI auth keys expire after ten minutes. Nodes use a random `ng-test-`
+prefix printed by the scenario; inspect that run's nodes if cleanup was interrupted,
+and never delete unrelated devices. Key creation and enrollment are never retried
+after an unknown outcome.
 
-Generated JWTs, API tokens and auth keys stay in process memory and are masked in
-GitHub logs. Do not enable HTTP/request tracing or tee the Tailscale job's stdout
-into files: GitHub masking commands themselves contain credential values. This job
-uploads no raw daemon logs, VM disks, or identity files, and caches only verified
-downloads. The ordinary simulator job retains its credential-free diagnostics.
+Generated JWTs, API tokens and CI auth keys stay in process memory and are masked
+by `Tailscaled.Testing` in GitHub logs. Do not enable HTTP/request tracing or tee
+this job's stdout into files: masking commands themselves contain credential values.
+The job uploads no raw daemon logs, VM disks, or identity files, and caches only
+verified downloads. Ordinary simulator diagnostics remain credential-free.
 
-References: [workload identity federation](https://tailscale.com/kb/1581/workload-identity-federation),
-[trust-credential scopes](https://tailscale.com/kb/1623/trust-credentials),
+References: [Tailscaled.Testing](https://hexdocs.pm/tailscaled_ex/Tailscaled.Testing.html),
+[ephemeral nodes](https://tailscale.com/kb/1111/ephemeral-nodes),
+[workload identity federation](https://tailscale.com/kb/1581/workload-identity-federation),
 [GitHub immutable subject claims](https://docs.github.com/en/actions/reference/security/oidc#immutable-subject-claims).

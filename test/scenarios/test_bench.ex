@@ -156,38 +156,21 @@ defmodule NervesGate.Scenarios.TestBench do
 
     assert [] = QemuTests.scenarios("unknown")
 
-    request = TailnetAuth.key_request("ng-ci-1-1-1")
-    assert request.expirySeconds == 600
+    # Use a non-secret fixture: this contract never requests a real CI key.
+    previous =
+      Map.new(~w(TAILSCALED_TEST_AUTH_KEY TS_OAUTH_CLIENT_ID), &{&1, System.get_env(&1)})
 
-    assert request.capabilities.devices.create == %{
-             reusable: false,
-             ephemeral: true,
-             preauthorized: true,
-             tags: ["tag:ci"]
-           }
-
-    resources = %{"names" => ["ng-ci-1-1-1"], "keys" => ["key-id"]}
-    assert TailnetAuth.resources!(JSON.encode!(resources), "ng-ci-1-1") == resources
-
-    for invalid <- [
-          %{resources | "names" => ["ng-ci-other-1"]},
-          %{resources | "keys" => ["../other-key"]},
-          %{resources | "keys" => List.duplicate("key-id", 4)}
-        ] do
-      assert_raise RuntimeError, fn ->
-        TailnetAuth.resources!(JSON.encode!(invalid), "ng-ci-1-1")
+    try do
+      System.put_env("TAILSCALED_TEST_AUTH_KEY", "local-test-key")
+      assert TailnetAuth.auth_key() == {:ok, "local-test-key"}
+      System.put_env("TAILSCALED_TEST_AUTH_KEY", "")
+      assert {:error, _} = TailnetAuth.auth_key()
+      for name <- Map.keys(previous), do: System.delete_env(name)
+      assert TailnetAuth.auth_key() == {:error, "TS_OAUTH_CLIENT_ID is not set"}
+    after
+      for {name, value} <- previous do
+        if value, do: System.put_env(name, value), else: System.delete_env(name)
       end
-    end
-
-    node = %{"hostname" => "ng-ci-1-1-1", "isEphemeral" => true, "tags" => ["tag:ci"]}
-    assert TailnetAuth.owned_node?(node, resources["names"])
-
-    for other <- [
-          %{node | "hostname" => "ng-ci-2-1-1"},
-          %{node | "isEphemeral" => false},
-          %{node | "tags" => ["tag:production"]}
-        ] do
-      refute TailnetAuth.owned_node?(other, resources["names"])
     end
   end
 

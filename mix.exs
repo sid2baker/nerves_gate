@@ -4,7 +4,7 @@ case List.first(System.argv()) do
     Mix.env(:dev)
     Mix.target(:host)
 
-  command when command in ["test", "test.qemu", "qemu.test", "qemu.tailnet", "ci"] ->
+  command when command in ["test", "test.qemu", "qemu.test", "ci"] ->
     Mix.env(:test)
     Mix.target(:host)
 
@@ -82,7 +82,6 @@ defmodule NervesGate.MixProject do
         "dev.stop": :host,
         dev: :host,
         "qemu.test": :host,
-        "qemu.tailnet": :host,
         "assets.build": :host
       ],
       preferred_envs: [
@@ -93,7 +92,6 @@ defmodule NervesGate.MixProject do
         "dev.stop": :dev,
         dev: :dev,
         "qemu.test": :test,
-        "qemu.tailnet": :test,
         "assets.build": :dev
       ]
     ]
@@ -151,7 +149,7 @@ defmodule NervesGate.MixProject do
       {:s7, github: "sid2baker/s7"},
       {:ethercat, github: "sid2baker/ethercat"},
       # Host tooling must never start the workstation VPN.
-      {:tailscaled_ex, "~> 0.3.0", runtime: Mix.target() != :host},
+      {:tailscaled_ex, "~> 0.4.0", runtime: Mix.target() != :host},
       # Compiled on the host like VintageNet, but started only by firmware.
       {:nerves_runtime, "~> 0.13", runtime: Mix.target() != :host},
       {:nerves_motd, "~> 0.1", targets: @targets},
