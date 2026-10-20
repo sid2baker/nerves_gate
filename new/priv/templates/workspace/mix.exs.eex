@@ -1,0 +1,31 @@
+defmodule <%= module %>.Workspace.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :<%= name %>_workspace,
+      version: "0.1.0",
+      elixir: "~> 1.20",
+      deps: [
+        {:nerves_gate_new, "~> 0.1", only: [:dev, :test], runtime: false},
+        {:nerves_gate_sim, "~> 1.0", only: [:dev, :test], runtime: false}
+      ],
+      aliases: [
+        setup: ["deps.get", &workspace(:setup, &1)],
+        sim: &workspace(:sim, &1),
+        "app.new": &workspace(:new, &1),
+        "app.install": &workspace(:install, &1),
+        "app.package": &workspace(:package, &1),
+        test: &workspace(:test, &1),
+        format: ["format", &workspace(:format, &1)]
+      ]
+    ]
+  end
+
+  def application, do: []
+
+  defp workspace(command, args) do
+    Mix.Task.run("compile")
+    apply(NervesGateNew.Workspace, command, [args])
+  end
+end

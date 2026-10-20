@@ -1,48 +1,35 @@
 defmodule Mix.Tasks.NervesGate.New do
   use Mix.Task
-
-  @shortdoc "Generate a portable Nerves Gate OTP application"
+  @shortdoc "Generate a Nerves Gate app-development workspace"
   @moduledoc """
-  `mix nerves_gate.new my_app` creates an independent Mix project using the SDK,
-  with the QEMU simulator tools in development. It does not fetch dependencies,
-  install tools or start devices.
+  `mix nerves_gate.new my_workspace` creates a workspace with one independent
+  SDK application, simulator configuration, and short local Mix commands. It
+  never fetches dependencies, boots devices or formats cards.
   """
 
   @impl true
   def run([path]) do
-    app = Path.basename(Path.expand(path))
-
-    unless Regex.match?(~r/\A[a-z][a-z0-9_]*\z/, app),
-      do: Mix.raise("Application name must contain lowercase letters, digits and underscores")
-
-    if app in ~w(nerves_gate nerves_gate_sdk nerves_gate_sim nerves_gate_new),
-      do: Mix.raise("#{app} is a platform application name")
-
-    if File.exists?(path), do: Mix.raise("Refusing to overwrite #{path}")
-
-    binding = [app: app, module: Macro.camelize(app)]
-    templates = Application.app_dir(:nerves_gate_new, "priv/templates")
-
-    for template <- Path.wildcard(Path.join(templates, "**/*"), match_dot: true),
-        File.regular?(template) do
-      relative = template |> Path.relative_to(templates) |> String.trim_trailing(".eex")
-      destination = Path.join(path, String.replace(relative, "app_name", app))
-      File.mkdir_p!(Path.dirname(destination))
-      File.write!(destination, EEx.eval_file(template, binding))
-      Mix.shell().info([:green, "* creating ", :reset, destination])
-    end
+    NervesGateNew.workspace(path)
 
     Mix.shell().info("""
 
     Next:
       cd #{path}
-      mix deps.get
+      mix setup
+
+    Copy a compatible x86_64 QEMU image to firmware/nerves_gate.fw,
+    or edit config/simulator.exs to select your image. Then:
+      mix sim
+
+    Start devices on the site, open the gateway UI, and choose
+    Application storage → Use this card. In another terminal:
+      mix app.install my_app
+      mix app.package my_app
+      mix app.new telemetry
+      mix setup
       mix test
-      mix nerves_gate.sim --firmware path/to/nerves_gate.fw
-      mix nerves_gate.sim.install
-      mix nerves_gate.package
     """)
   end
 
-  def run(_), do: Mix.raise("Usage: mix nerves_gate.new my_app")
+  def run(_), do: Mix.raise("Usage: mix nerves_gate.new my_workspace")
 end

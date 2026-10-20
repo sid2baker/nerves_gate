@@ -4,6 +4,68 @@ Applications are trusted OTP applications in the firmware's BEAM. They can crash
 or block the VM; the SDK is an API boundary, not a security sandbox. There is no
 hot-code upgrade or dependency solver.
 
+## Application development
+
+The app developer uses a generated workspace, not this product repository.
+After the packages are published to Hex, install the generator once:
+
+```sh
+mix archive.install hex nerves_gate_new
+mix nerves_gate.new my_workspace
+cd my_workspace
+mix setup
+```
+
+The workspace starts with one independent application and owns the simulator:
+
+```text
+my_workspace/
+  mix.exs
+  config/simulator.exs
+  firmware/                 # prebuilt QEMU image, not product source
+  apps/my_app/              # independent SDK application
+```
+
+The workspace depends on the simulator and generator tools (`runtime: false`,
+development/test only). Each app depends only on `nerves_gate_sdk` and has its
+own Mix project, dependency closure, unit tests and deployable package. This is
+not an umbrella. Installing the generator does not install QEMU or firmware.
+
+Place a compatible **x86_64 QEMU firmware image** at `firmware/nerves_gate.fw`,
+or select another path in `config/simulator.exs`. Then run:
+
+```sh
+mix sim
+```
+
+On the site, start devices, open a gateway UI and choose
+**Application storage → Use this card**. In another terminal in the workspace:
+
+```sh
+mix app.install my_app                 # package, install and start on a guest
+mix app.new telemetry                 # scaffold a second independent app
+mix setup                             # fetch all apps' dependencies
+mix test                              # all apps' host unit tests; no devices
+mix app.install telemetry --device gateway_a
+mix app.package telemetry             # packages/telemetry-1.0.0.ez
+mix format                            # workspace and app formatters
+```
+
+App selection is optional when only one app exists. With multiple apps, install
+and package require a name. `--output path.ez` selects a package destination;
+existing files are never overwritten. Installation uses a temporary package.
+All commands use native Mix project entry, not subprocess Mix orchestration.
+
+The simulator requires the Linux/QEMU tools described in
+[its README](../sim/README.md). Workspace `mix setup` fetches dependencies only;
+it does not build platform firmware, boot devices or format cards. A real gateway
+uses the same SDK and package; install its archive through the administrative
+application API after commissioning its SD card. Each app also works on its own:
+`cd apps/my_app && mix test` or `mix nerves_gate.package`.
+
+Repository-local development of the platform itself is a different workflow:
+see [Development](development.md). Firmware builds run from `firmware/`.
+
 ## Storage
 
 - `/data/nerves_gate/apps.term` contains only each application's enabled flag,

@@ -1,0 +1,9 @@
+**/_build/
+**/deps/
+**/cover/
+**/doc/
+*.ez
+firmware/*.fw
+.env
+.env.*
+erl_crash.dump

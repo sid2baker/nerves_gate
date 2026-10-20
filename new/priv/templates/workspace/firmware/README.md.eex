@@ -1,0 +1,3 @@
+Place a compatible x86_64 QEMU firmware image here as `nerves_gate.fw`,
+or change `config/simulator.exs` to point at your image. This directory contains
+firmware artifacts, not product source. Do not use an EC100 image for QEMU.

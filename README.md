@@ -4,7 +4,7 @@ An Ethernet gateway built with Nerves, Phoenix LiveView and ordinary Elixir/OTP,
 plus an SDK for trusted OTP applications that run on it. EC100 and the QEMU
 development devices run the same firmware and gateway UI.
 
-## Develop
+## Develop the product
 
 On a [prepared Linux workstation](docs/development.md#prerequisites):
 
@@ -31,8 +31,26 @@ Development needs no physical gateway or workstation network changes. See
 
 ```sh
 mix archive.install hex nerves_gate_new
-mix nerves_gate.new my_app
+mix nerves_gate.new my_workspace
+cd my_workspace
+mix setup
+# Place an x86_64 QEMU image at firmware/nerves_gate.fw, or edit config/simulator.exs.
+mix sim
+# Start devices on the site, then choose Application storage → Use this card.
+# In another terminal in the workspace:
+mix app.install my_app
+mix app.new telemetry
+mix setup
+mix test
+mix app.package telemetry
 ```
+
+The workspace contains one initial app at `apps/my_app/` and can create more
+independent apps with `mix app.new`. It owns simulator configuration and tools;
+each app depends only on the SDK. This workflow does not require cloning this
+repository or building firmware. Supply a compatible **x86_64 QEMU firmware
+image**, not an EC100 image. These installation commands require the packages to
+be published to Hex; package publication is separate from repository setup.
 
 Applications depend only on [`nerves_gate_sdk`](sdk/README.md), run on real
 firmware (including the [QEMU simulator](sim/README.md)) and ship as standard OTP
@@ -84,8 +102,12 @@ Supply a checksum-verified, executable static ARM `tailscaled` at
 the x86 daemon.
 
 ```sh
-MIX_ENV=prod mix firmware ec100 --overwrite
+cd firmware
+NERVES_GATE_LOCAL_DEPS=1 MIX_ENV=prod MIX_TARGET=ec100 mix firmware --overwrite
 ```
+
+Firmware commands run inside `firmware/`, not at the repository root. Use
+`MIX_TARGET=x86_64` there for a QEMU firmware build.
 
 All firmware targets share `firmware/mix.lock`. Firmware combines
 `rootfs_overlay/common` with the target overlay. Set `SOURCE_DATE_EPOCH` when

@@ -70,14 +70,26 @@ using local path dependencies (`NERVES_GATE_LOCAL_DEPS=1`):
 | `mix check` | Warnings-as-errors, formatting and unit tests for those packages |
 | `mix ci` | Each SDK, simulator, generator and firmware project's CI, in test mode |
 | `mix dev`, `mix dev.status`, `mix dev.stop`, `mix dev.ui` | The simulator session |
-| `mix firmware ec100\|x86_64` | Firmware for one target |
 | `mix test.sdk`, `mix test.sim` | One package's unit tests |
 | `mix test.firmware` | Firmware integration scenarios on the running session |
 
-Inside a project, use its own tasks with `NERVES_GATE_LOCAL_DEPS=1`, for example
-`mix ci` for all application-project quality gates. Each project also provides its
-own `mix ci`. System artifact builds remain in their dedicated workflows; QEMU
-scenarios are explicit and are not launched by `mix ci`.
+Root commands are product-maintainer orchestration, not the app-development
+interface. Root `mix ci` runs all application-project quality gates; each project
+also provides its own `mix ci`. System artifact builds remain in dedicated
+workflows; QEMU scenarios are explicit and are not launched by `mix ci`.
+
+Run firmware-specific commands inside `firmware/`, using local repository
+dependencies:
+
+```sh
+cd firmware
+NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=ec100 MIX_ENV=prod mix firmware
+NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=x86_64 mix firmware
+```
+
+There is no root `mix firmware` alias. App developers consume a compatible
+firmware image rather than building the product; see
+[Application development](applications.md#application-development).
 
 ## Daily workflow
 
@@ -141,12 +153,12 @@ another UI during scenarios.
 
 ### Applications on simulated devices
 
-Each device has a sparse ext4 virtual SD card (`/dev/vdb`). Firmware mounts it at
-`/mnt/apps` like a configured physical card. In an application project, with a
-`mix nerves_gate.sim` session in that directory:
+Each device has a sparse ext4 virtual SD card (`/dev/vdb`). Open its gateway UI,
+choose **Application storage → Use this card**, then firmware mounts it at
+`/mnt/apps` like a commissioned physical card. In a generated app-development workspace, with its `mix sim` session running:
 
 ```sh
-mix nerves_gate.sim.install [device]
+mix app.install my_app [--device gateway_a]
 ```
 
 packages the application, then installs and starts it through the device's own

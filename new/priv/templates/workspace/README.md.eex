@@ -1,0 +1,47 @@
+# <%= module %> — Nerves Gate app development
+
+This workspace owns simulator configuration and tools. Each directory in `apps/`
+is an independent, deployable OTP application, not an umbrella child. `my_app` is
+created for you. Applications depend only on the SDK; simulator and generator
+dependencies belong to this workspace and are never packaged with your apps.
+
+```sh
+mix setup                       # fetch workspace and app dependencies
+mix test                        # all app unit tests; no hardware starts
+mix app.new telemetry           # create another independent app
+mix setup                       # fetch dependencies for new apps
+```
+
+Place a compatible **x86_64 QEMU firmware image** at `firmware/nerves_gate.fw`,
+or edit `config/simulator.exs`. Then:
+
+```sh
+mix sim                         # simulator site at http://localhost:4000
+```
+
+Linux, QEMU 8.2+ with user/stream networking, fwup, flock and mkfs.ext4 are
+required. No product-repository checkout or firmware build is needed.
+Generation and `mix setup` do not boot devices or format media.
+
+Start the device on the site, open its Gateway UI and choose
+**Application storage → Use this card**. The virtual SD card is already ext4;
+using it preserves data. In another terminal in this workspace:
+
+```sh
+mix app.install my_app           # package, install and start on a running guest
+mix app.install telemetry --device gateway_a
+mix app.package telemetry       # packages/telemetry-1.0.0.ez
+mix format                      # workspace and all apps
+```
+
+An app name is optional when only one app exists. Packaging refuses overwriting
+an existing output; use `--output another.ez` or remove the old file explicitly.
+Installing uses a temporary package and preserves application data. Stop the
+simulator with Ctrl+C in its original terminal. Reset erases disposable device
+disks, SD cards and enrollment. Manual controls operate only on owned QEMU guests.
+
+Each app can also be developed independently: `cd apps/my_app && mix test`.
+For deployment to a real device, commission its SD card and install the `.ez`
+archive through its administrative application API. Apps are trusted code in the
+firmware BEAM, not a sandbox; use only the public SDK, and handle missing storage.
+Native dependencies must be built for the device architecture.

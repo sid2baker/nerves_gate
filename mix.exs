@@ -17,7 +17,6 @@ defmodule NervesGate.Repository do
         "dev.status": &run("sim", ["qemu.status" | &1]),
         "dev.stop": &run("sim", ["qemu.stop" | &1]),
         "dev.ui": &run("sim", ["dev.ui" | &1]),
-        firmware: &firmware/1,
         "test.sdk": &run("sdk", ["test" | &1]),
         "test.sim": &run("sim", ["test" | &1]),
         "test.firmware": &run("sim", ["qemu.test" | &1])
@@ -75,11 +74,6 @@ defmodule NervesGate.Repository do
   end
 
   defp ci(_), do: Mix.raise("Usage: mix ci")
-
-  defp firmware([target | args]) when target in ["ec100", "x86_64"],
-    do: run("firmware", ["firmware" | args], target: target)
-
-  defp firmware(_), do: Mix.raise("Usage: mix firmware ec100|x86_64")
 
   defp put_env(env) do
     Enum.each(env, fn
