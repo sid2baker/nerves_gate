@@ -1,0 +1,38 @@
+--- a/include/configs/rk3506_common.h
++++ b/include/configs/rk3506_common.h
+@@ -11,6 +11,12 @@
+ 
+ #include "rockchip-common.h"
+ 
++/* EC100 Nerves: these legacy options are not exposed by this BSP's Kconfig. */
++#define CONFIG_ENV_OFFSET_REDUND 0x00c20000
++#define CONFIG_BOOTCOUNT_LIMIT
++#define CONFIG_BOOTCOUNT_ENV
++#define CONFIG_SYS_MMC_ENV_DEV 0
++
+ #define COUNTER_FREQUENCY		24000000
+ #define CONFIG_SYS_MALLOC_LEN		(16 << 20)
+ #define CONFIG_SYS_CBSIZE		1024
+@@ -85,9 +91,7 @@
+ #define RKIMG_BOOTCOMMAND		\
+ 	"boot_fit;"
+ #else
+-#define RKIMG_BOOTCOMMAND		\
+-	"boot_fit;"			\
+-	"boot_android ${devtype} ${devnum};"
++#define RKIMG_BOOTCOMMAND "echo EC100: no factory environment - refusing vendor boot"
+ #endif
+ 
+ #endif
+--- a/Makefile
++++ b/Makefile
+@@ -367,7 +367,8 @@
+ KBUILD_CFLAGS   := -Wall -Wstrict-prototypes \
+ 		   -Wno-format-security \
+ 		   -fno-builtin -ffreestanding
+-KBUILD_CFLAGS	+= -fshort-wchar -Werror
++# Keep legacy BSP warnings visible with the current Nerves GCC.
++KBUILD_CFLAGS	+= -fshort-wchar
+ KBUILD_AFLAGS   := -D__ASSEMBLY__
+ 
+ # Read UBOOTRELEASE from include/config/uboot.release (if it exists)

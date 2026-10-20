@@ -69,7 +69,7 @@ peripherals as unavailable. The UI has no sign-in; see
 
 ## Simulator site
 
-`mix dev` serves `dev/simulator_web/` at localhost:4000. The overview (`/`) manages
+`mix dev` serves `sim/lib/nerves_gate_web/simulator/` at localhost:4000. The overview (`/`) manages
 devices, default wiring and lifecycle. Each `/devices/:id` page shows one device's
 observations, injected faults and scenario results, with a link to its gateway UI.
 See [development](development.md).

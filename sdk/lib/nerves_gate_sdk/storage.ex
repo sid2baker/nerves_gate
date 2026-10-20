@@ -1,0 +1,24 @@
+defmodule NervesGateSDK.Storage do
+  @moduledoc "SD storage observations and application-owned data directories."
+  alias NervesGateSDK.Backend
+
+  defmodule Status do
+    @moduledoc "Availability of application storage. Platform state does not require an SD card."
+    @enforce_keys [:available?]
+    defstruct [:available?, :free_bytes]
+    @type t :: %__MODULE__{available?: boolean(), free_bytes: non_neg_integer() | nil}
+  end
+
+  @spec status() :: {:ok, Status.t()} | {:error, term()}
+  def status, do: Backend.call(:storage_status, [])
+
+  @doc "Returns this application's data directory, or an error when the SD card is unavailable."
+  @spec data_dir(atom()) :: {:ok, Path.t()} | {:error, term()}
+  def data_dir(app) when is_atom(app) do
+    if Regex.match?(~r/\A[a-z][a-z0-9_]*\z/, Atom.to_string(app)),
+      do: Backend.call(:storage_data_dir, [app]),
+      else: {:error, :invalid_application}
+  end
+
+  def data_dir(_), do: {:error, :invalid_application}
+end

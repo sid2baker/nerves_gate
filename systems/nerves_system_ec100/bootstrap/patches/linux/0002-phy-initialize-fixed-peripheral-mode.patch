@@ -1,0 +1,108 @@
+Subject: [PATCH] phy: rockchip-inno-usb2: initialize fixed peripheral mode
+
+The vendor PHY driver can select host mode from ID even when the consuming
+controller is configured as a fixed peripheral. On EC100 this conflicts
+with the USB0 Type-C setup port.
+
+Initialize fixed peripherals using the existing device-mode transition,
+then override ID to device. Ignore ID-driven host selection for this mode,
+including ID interrupts and system resume. Keep resume ID bookkeeping,
+IRQ restoration, BVALID handling and low-power exit unchanged.
+Propagate the VBUS detector callback result. Do not override BVALID or
+provide a host VBUS supply.
+
+The upstream PR covers the ID-based role guards only. This local patch
+also retains device-mode initialization, forced device ID and VBUS
+detector error propagation. Keep it until the pinned kernel includes the
+upstream fix, then reassess these local additions before removing it.
+
+Link: https://github.com/armbian/linux-rockchip/pull/578
+
+---
+diff --git a/drivers/phy/rockchip/phy-rockchip-inno-usb2.c b/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
+--- a/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
++++ b/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
+@@ -1104,8 +1104,8 @@
+ 	}
+ 
+ 	if (rphy->phy_cfg->vbus_detect)
+-		rphy->phy_cfg->vbus_detect(rphy, &rport->port_cfg->vbus_det_en,
+-					   vbus_det_en);
++		ret = rphy->phy_cfg->vbus_detect(rphy, &rport->port_cfg->vbus_det_en,
++					       vbus_det_en);
+ 	else
+ 		ret = property_enable(rphy->grf, &rport->port_cfg->vbus_det_en,
+ 				      vbus_det_en);
+@@ -1868,6 +1868,10 @@
+ 		cable_vbus_state = false;
+ 	}
+ 
++	/* A fixed peripheral must not request host role or source VBUS. */
++	if (rport->mode == USB_DR_MODE_PERIPHERAL)
++		goto out;
++
+ 	extcon_set_state(rphy->edev, EXTCON_USB_HOST, cable_vbus_state);
+ 	extcon_set_state(rphy->edev, EXTCON_USB_VBUS_EN, cable_vbus_state);
+ 
+@@ -2348,7 +2352,8 @@
+ 	rport->mode = of_usb_get_dr_mode_by_phy(child_np, -1);
+ 	iddig = property_enabled(rphy->grf, &rport->port_cfg->utmi_iddig);
+ 	if (rphy->edev_self && (rport->mode == USB_DR_MODE_HOST ||
+-	    rport->mode == USB_DR_MODE_UNKNOWN || !iddig)) {
++	    rport->mode == USB_DR_MODE_UNKNOWN ||
++	    (rport->mode == USB_DR_MODE_OTG && !iddig))) {
+ 		/* Enable VBUS supply for otg port */
+ 		extcon_set_state(rphy->edev, EXTCON_USB, false);
+ 		extcon_set_state(rphy->edev, EXTCON_USB_HOST, true);
+@@ -2432,6 +2437,24 @@
+ 
+ out:
+ 	/*
++	 * Match the vendor's explicit device-mode transition at startup too.
++	 * This enables real VBUS detection; it does not override BVALID.
++	 */
++	if (rport->mode == USB_DR_MODE_PERIPHERAL) {
++		ret = rockchip_usb2phy_set_mode(rport->phy, PHY_MODE_USB_DEVICE, 0);
++		if (ret)
++			return ret;
++		if (rport->port_cfg->iddig_en.enable) {
++			ret = property_enable(base, &rport->port_cfg->iddig_output, true);
++			if (ret)
++				return ret;
++			ret = property_enable(base, &rport->port_cfg->iddig_en, true);
++			if (ret)
++				return ret;
++		}
++	}
++
++	/*
+ 	 * Let us put phy-port into suspend mode here for saving power
+ 	 * consumption, and usb controller will resume it during probe
+ 	 * time if needed.
+@@ -3583,15 +3606,17 @@ static int rockchip_usb2phy_pm_resume(struct device *dev)
+ 				dev_dbg(&rport->phy->dev,
+ 					"iddig changed during resume\n");
+ 				rport->prev_iddig = iddig;
+-				extcon_set_state_sync(rphy->edev,
+-						      EXTCON_USB_HOST,
+-						      !iddig);
+-				extcon_set_state_sync(rphy->edev,
+-						      EXTCON_USB_VBUS_EN,
+-						      !iddig);
+-				ret = rockchip_set_vbus_power(rport, !iddig);
+-				if (ret)
+-					return ret;
++				if (rport->mode != USB_DR_MODE_PERIPHERAL) {
++					extcon_set_state_sync(rphy->edev,
++							      EXTCON_USB_HOST,
++							      !iddig);
++					extcon_set_state_sync(rphy->edev,
++							      EXTCON_USB_VBUS_EN,
++							      !iddig);
++					ret = rockchip_set_vbus_power(rport, !iddig);
++					if (ret)
++						return ret;
++				}
+ 			}
+ 		}
+ 

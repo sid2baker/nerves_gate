@@ -1,0 +1,102 @@
+name: EC100 system
+
+# Builds systems/nerves_system_ec100. A system-ec100/vX.Y.Z tag creates a draft
+# release for review; nothing is published automatically.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'system-ec100/v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-ec100-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    defaults:
+      run:
+        working-directory: systems/nerves_system_ec100
+    env:
+      NERVES_CONTAINER_TOOL: docker
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: '29.0.6'
+          elixir-version: '1.20.3'
+      - name: Test release notes extraction
+        run: elixir -r test/test_helper.exs test/release_notes_test.exs
+      - name: Check tag and prepare release notes
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: elixir scripts/release_notes.exs "$RELEASE_TAG" > release-notes.md
+      - name: Install Nerves tooling
+        run: |
+          echo "NERVES_DL_DIR=$RUNNER_TEMP/nerves-dl" >> "$GITHUB_ENV"
+          mix local.hex --force
+          mix local.rebar --force
+          mix archive.install hex nerves_bootstrap 1.17.3 --force
+          mix deps.get
+          git diff --exit-code -- mix.lock
+      - name: Build system
+        # Nerves 2 pre.3 uses an interactive container runner, even for builds.
+        # Start with a clean checkout; do not restore host Buildroot/deps caches.
+        run: script -q -e -c 'mix nerves.artifact.build' /dev/null < /dev/null
+      - name: Collect system, notices, and sources
+        run: |
+          mix ec100.release
+          (cd dist && sha256sum --check SHA256SUMS)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ec100-system
+          path: systems/nerves_system_ec100/dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: github.ref_type == 'tag'
+        with:
+          name: release-notes
+          path: systems/nerves_system_ec100/release-notes.md
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ec100-system
+          path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-notes
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          (cd dist && sha256sum --check SHA256SUMS)
+          options=(--draft --latest=false)
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            options+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" dist/* \
+            --verify-tag --title "$RELEASE_TAG" \
+            --notes-file release-notes.md "${options[@]}"

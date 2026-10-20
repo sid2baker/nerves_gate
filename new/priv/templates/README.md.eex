@@ -1,0 +1,28 @@
+# <%= module %>
+
+```console
+mix deps.get
+mix test
+mix nerves_gate.sim --firmware path/to/nerves_gate.fw
+mix nerves_gate.sim.install
+mix nerves_gate.package
+```
+
+`mix test` runs ordinary host unit tests. Device services come only from a real
+gateway: there is no fake SDK backend. `mix nerves_gate.sim` starts disposable
+QEMU gateways running real Nerves Gate firmware (Linux, QEMU, `fwup` and
+`mkfs.ext4` required). Start the devices on the simulator site, then run
+`mix nerves_gate.sim.install` in another terminal to package this application
+and run it through the device's application manager and virtual SD card. Use the
+site's manual controls to unplug cables or disturb the uplink.
+
+Packaging builds production code (without the simulator) into
+`<%= app %>-1.0.0.ez`. Install it through the device's administrative
+`NervesGate.Apps.install/1` API, then `NervesGate.Apps.start(:<%= app %>)`.
+Application code and `NervesGateSDK.Storage.data_dir(:<%= app %>)` live on SD;
+platform configuration does not. Handle unavailable storage explicitly.
+
+Packages run trusted code in the firmware BEAM, not a sandbox. Do not bundle
+platform libraries or use internal firmware modules. Private dependencies are
+bundled; native code must be built for the device architecture. Upgrades are
+cold restarts with a bounded `health_check/0`, not OTP hot-code upgrades.

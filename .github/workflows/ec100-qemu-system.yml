@@ -20,9 +20,14 @@ jobs:
     if: github.repository == 'sid2baker/nerves_gate' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    # The release tool resolves the system through firmware's Nerves build plan.
+    defaults:
+      run:
+        working-directory: firmware
     env:
       MIX_TARGET: x86_64
       MIX_ENV: dev
+      NERVES_GATE_LOCAL_DEPS: '1'
       GH_TOKEN: ${{ github.token }}
       NERVES_DL_DIR: ${{ github.workspace }}/_build/system-release-${{ github.run_id }}-${{ github.run_attempt }}/downloads
       NERVES_ARTIFACTS_DIR: ${{ github.workspace }}/_build/system-release-${{ github.run_id }}-${{ github.run_attempt }}/artifacts
@@ -60,7 +65,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.NERVES_DL_DIR }}
-          key: ec100-qemu-downloads-v1-${{ hashFiles('systems/nerves_system_ec100_qemu/**', 'mix.lock') }}
+          key: ec100-qemu-downloads-v1-${{ hashFiles('systems/nerves_system_ec100_qemu/**', 'firmware/mix.lock') }}
           restore-keys: ec100-qemu-downloads-v1-
       - name: Build the system artifact
         if: steps.release.outputs.publish == 'true'

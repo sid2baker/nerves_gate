@@ -1,22 +1,28 @@
 # Architecture
 
 Device domains own commands, admission, deadlines and persistence. The gateway UI
-reads a device-owned projection and submits commands through [`NervesGate`](../lib/nerves_gate.ex).
-EC100 and QEMU run the same application. Workstation UIs connect over Erlang distribution.
+reads a device-owned projection and submits commands through
+[`NervesGate`](../firmware/lib/nerves_gate.ex). EC100 and QEMU run the same
+firmware. Workstation UIs connect over Erlang distribution. Third-party OTP
+applications run in the same BEAM and use only the SDK.
 
 ## Source map
 
 | Path | Responsibility |
 | --- | --- |
-| `lib/nerves_gate.ex` | Public commands, status and subscriptions |
-| `lib/nerves_gate/` | Device domains, adapters and projection |
-| `lib/nerves_gate_web/` | Gateway endpoint, LiveViews and components |
-| `dev/simulator.ex`, `dev/simulator/` | Simulator lifecycle and owned virtual hardware |
-| `dev/simulator_web/` | Simulator endpoint, overview, device tests and CLI API |
-| `dev/mix/tasks/`, `dev/*.exs` | Setup, session startup, UI launcher and scenario CLI |
-| `test/support/runner.ex` | Shared runner and device reservations |
-| `test/scenarios/` | Real-device integration scenarios |
-| `config/` | Common, host and firmware profiles |
+| `mix.exs` | Orchestration only: runs the independent projects natively |
+| `firmware/lib/nerves_gate.ex` | Public commands, status and subscriptions |
+| `firmware/lib/nerves_gate/` | Device domains, adapters, projection, SDK backend, storage and apps |
+| `firmware/lib/nerves_gate_web/` | Gateway endpoint, LiveViews and components |
+| `firmware/config/` | Firmware profiles; `host.exs` is for checks and assets only |
+| `firmware/test/scenarios/` | Real-device integration scenarios |
+| `sdk/lib/nerves_gate_sdk/` | Application API, SDK structs, backend behaviour and package validation |
+| `sim/lib/nerves_gate/simulator.ex`, `simulator/` | QEMU lifecycle and owned virtual hardware |
+| `sim/lib/nerves_gate_web/simulator/` | Simulator endpoint, overview, device tests and CLI API |
+| `sim/lib/nerves_gate/qemu_tests.ex` | Shared runner and device reservations |
+| `sim/lib/mix/tasks/`, `sim/priv/qemu/` | Session startup, UI launcher, setup, scenario CLI and app install |
+| `new/` | Application generator templates |
+| `systems/` | EC100 and QEMU Nerves systems |
 
 ## Data flow
 
@@ -48,11 +54,11 @@ snapshot. Commands return their result without a status read. See the
 | ProjectionServer | Shared sanitized UI read model |
 | LiveView | Drafts, presentation, subscriptions and command submission |
 
-`config/firmware.exs` defines the shared device services. The application's
+`firmware/config/firmware.exs` defines the shared device services. The application's
 `rest_for_one` order is PubSub, routing setup, workflow PropertyTable, SSH, Network,
-Remote, Equipment, Indicators, Buses, ProjectionServer and Endpoint. Dependencies
-supervise VintageNet, tailscaled and Alarmist. Workstation UIs (`config/host.exs`)
-start no device domains.
+Remote, Equipment, Indicators, Buses, ProjectionServer, SDKBackend, the app task
+supervisor, Apps and Endpoint. Dependencies supervise VintageNet, tailscaled and
+Alarmist. Workstation UIs (`sim/config/`) start no device domains.
 
 Firmware starts `nerves_gate` as `transient`: ordinary child failures recover under
 supervision; abnormal application exit, including an exhausted restart limit,
@@ -87,10 +93,10 @@ See [reset safety](indicators.md#recovery).
 
 ## UI projection
 
-[`ProjectionServer`](../lib/nerves_gate/projection_server.ex) coalesces subsystem
+[`ProjectionServer`](../firmware/lib/nerves_gate/projection_server.ex) coalesces subsystem
 observations for 20 ms, reads dirty domains and broadcasts changed sanitized inputs
 as `{:replace, domain, snapshot}`. Remote changes also invalidate Network.
-[`Projection`](../lib/nerves_gate/projection.ex) and [`Status`](../lib/nerves_gate/status.ex)
+[`Projection`](../firmware/lib/nerves_gate/projection.ex) and [`Status`](../firmware/lib/nerves_gate/status.ex)
 derive the same status on the device and clients.
 
 Subscribing registers the LiveView and returns `{:ok, server_pid, projection}`.
@@ -113,8 +119,19 @@ stay unknown; rejected commands are not availability alarms.
 Alarmist owns timing and subscriptions; Indicators derives LED policy. Alarms never
 admit commands or trigger automatic remedies. See [LED policy](indicators.md#leds).
 
-## QEMU bench
+## Applications and SDK
 
+`NervesGate.SDKBackend` translates domain state into SDK-owned structs and
+delivers events to subscribing processes; it never exposes status maps or
+administrative commands. `NervesGate.Buses` owns CAN/RS485 access for both
+diagnostics and the SDK, so an application claim and a diagnostic cannot use the
+same port. `NervesGate.Apps` installs, starts, upgrades and rolls back standard
+`.ez` OTP archives from the SD card, persisting only each application's selection
+under `/data/nerves_gate/apps.term`. See [applications](applications.md).
+
+## QEMU simulator
+
+There is one simulator: `sim/`, which runs real firmware in QEMU and requires it.
 `mix dev` serves the simulator site and supervises a separate Simulator BEAM.
 `Simulator` owns build, start, stop and reset; `Simulator.Device` owns each QEMU
 process, disk, QMP socket and Ethernet relay. `QemuTests` admits lifecycle,

@@ -1,7 +1,8 @@
 # Nerves Gate
 
-An Ethernet gateway built with Nerves, Phoenix LiveView and ordinary Elixir/OTP.
-EC100 and the QEMU development devices run the same application and gateway UI.
+An Ethernet gateway built with Nerves, Phoenix LiveView and ordinary Elixir/OTP,
+plus an SDK for trusted OTP applications that run on it. EC100 and the QEMU
+development devices run the same firmware and gateway UI.
 
 ## Develop
 
@@ -13,17 +14,29 @@ mix dev
 ```
 
 Open **http://localhost:4000** and choose **Start devices**. The simulator site
-manages devices and tests; each device has a tests page at `/devices/:id` and a
-link to its gateway UI. Keep `mix dev` running and use another terminal:
+manages QEMU devices and tests; each device has a tests page at `/devices/:id` and
+a link to its gateway UI. Keep `mix dev` running and use another terminal:
 
 ```sh
-mix test --only cable_loss --device gateway_a
+mix test.firmware --only cable_loss --device gateway_a
 mix dev.ui gateway_a                       # gateway UI with reload, localhost:4001
 mix dev.ui nerves_gate@100.101.102.103      # same UI against a real gateway
+mix ci                                     # SDK, simulator, generator and firmware CI
 ```
 
 Development needs no physical gateway or workstation network changes. See
 [development](docs/development.md).
+
+## Write an application
+
+```sh
+mix archive.install hex nerves_gate_new
+mix nerves_gate.new my_app
+```
+
+Applications depend only on [`nerves_gate_sdk`](sdk/README.md), run on real
+firmware (including the [QEMU simulator](sim/README.md)) and ship as standard OTP
+`.ez` archives on the gateway's SD card. See [applications](docs/applications.md).
 
 ## Use a gateway
 
@@ -43,50 +56,40 @@ full VM access through the distribution page. Use trusted networks and a
 restrictive Tailscale policy. Never expose the UI or distribution ports publicly.
 
 Tailscale can share the equipment IPv4 subnet; overlapping networks are unsupported.
-CAN/RS485 offer bounded diagnostics, not bus bridges. Cellular is disabled by default.
+CAN/RS485 offer bounded diagnostics and SDK access, not bus bridges. Cellular is
+disabled by default.
 
-## Source layout
+## Repository
 
-```text
-lib/
-├── nerves_gate.ex       Public API
-├── nerves_gate/         Device domains: networking, VPN, SSH, LEDs, buses
-└── nerves_gate_web/     Gateway UI
+| Project | Package | Purpose |
+| --- | --- | --- |
+| [`firmware/`](firmware/README.md) | `nerves_gate` | Device application, gateway UI, SDK backend, app runtime |
+| [`sdk/`](sdk/README.md) | `nerves_gate_sdk` | Application API and packaging |
+| [`sim/`](sim/README.md) | `nerves_gate_sim` | QEMU simulator and scenario runner |
+| [`new/`](new/README.md) | `nerves_gate_new` | Application generator |
+| `systems/` | `nerves_system_ec100`, `nerves_system_ec100_qemu` | Nerves systems |
 
-dev/
-├── simulator.ex        Simulated device lifecycle
-├── simulator/          Virtual hardware and networks
-├── simulator_web/      Simulator site
-└── mix/tasks/          Development commands
-
-test/
-├── scenarios/          QEMU scenarios: cables, reboot, update…
-└── support/            Shared runner and device controls
-
-config/                 Workstation and firmware settings
-assets/                 CSS and JavaScript sources
-priv/static/assets/     Built browser assets
-rootfs_overlay/         Extra firmware files
-systems/                QEMU system package
-```
+Each project is an independent Mix project with its own version, changelog and
+namespaced release tags. The root `mix.exs` only orchestrates them.
 
 Guides: [Development](docs/development.md) · [Architecture](docs/architecture.md) ·
-[Public API](docs/action-api.md) · [Networking](docs/networking.md) ·
-[UI](docs/ui.md) · [LEDs and button](docs/indicators.md) · [Buses](docs/buses.md).
+[Public API](docs/action-api.md) · [Applications](docs/applications.md) ·
+[Networking](docs/networking.md) · [UI](docs/ui.md) ·
+[LEDs and button](docs/indicators.md) · [Buses](docs/buses.md).
 
 ## Build EC100 firmware
 
-The EC100 system is pinned to a release tag in `mix.exs`. Supply a checksum-verified,
-executable static ARM `tailscaled` at `rootfs_overlay/ec100/usr/sbin/tailscaled`;
-`mix setup` prepares only the x86 daemon.
+Supply a checksum-verified, executable static ARM `tailscaled` at
+`firmware/rootfs_overlay/ec100/usr/sbin/tailscaled`; `mix setup` prepares only
+the x86 daemon.
 
 ```sh
-MIX_TARGET=ec100 MIX_ENV=prod mix deps.get
-MIX_TARGET=ec100 MIX_ENV=prod mix firmware --overwrite
+MIX_ENV=prod mix firmware ec100 --overwrite
 ```
 
-All targets share `mix.lock`. Firmware combines `rootfs_overlay/common` with the
-target overlay. Set `SOURCE_DATE_EPOCH` when building without Git history.
+All firmware targets share `firmware/mix.lock`. Firmware combines
+`rootfs_overlay/common` with the target overlay. Set `SOURCE_DATE_EPOCH` when
+building without Git history.
 
 Before updating, verify device identity, firmware platform and recovery access.
 Update in place to preserve `/data` and enrollment, and keep the Nerves startup

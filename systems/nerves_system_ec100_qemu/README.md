@@ -9,11 +9,14 @@ application, Buildroot and upstream Nerves system versions. See
 [CHANGELOG.md](CHANGELOG.md) for this system's releases and
 [GATEWAY.md](GATEWAY.md) for alignment and hardware differences.
 
-`mix setup` in the application root downloads the matching prebuilt system from
+`mix setup` in the repository root downloads the matching prebuilt system from
 GitHub Releases. Maintainers bump `VERSION` and add a dated changelog section when
-build inputs change. The main-branch workflow builds and publishes
-`ec100-qemu-v<VERSION>` automatically; it never replaces a published artifact.
-See the [release workflow](../../docs/development.md#maintaining-the-qemu-system).
+build inputs change. The main-branch workflow builds and publishes the tag named
+in `artifact_sites` automatically; it never replaces a published artifact.
+Published versions use `ec100-qemu-v<VERSION>`; the next release switches
+`artifact_sites` to the monorepo tag `system-ec100-qemu/v<VERSION>` as part of
+its version bump. See the
+[release workflow](../../docs/development.md#maintaining-the-qemu-system).
 
 The source is based on `nerves-project/nerves_system_x86_64` commit
 `5d755dba94fff478eac2bfd90ba91d2e0025d4eb` (1.34.2). Original

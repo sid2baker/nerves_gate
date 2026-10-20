@@ -1,11 +1,11 @@
 # Real Tailscale authentication in QEMU
 
-**Simulator CI** has a main-branch **Tailscale authentication** job using the
+**CI** has a main-branch **Tailscale authentication** job using the
 protected `tailnet-ci` GitHub environment. It never runs for pull requests.
-Ordinary **Run all**, `mix test` and `mix ci` selections exclude `tailscale_auth`;
+Ordinary **Run all** and `mix test.firmware` selections exclude `tailscale_auth`;
 select it explicitly to enroll real test devices.
 
-The scenario uses the three-device configuration in `dev/tailnet.exs`. Each guest
+The scenario uses the three-device configuration in `sim/priv/qemu/tailnet.exs`. Each guest
 enrolls through `NervesGate.remote_connect/2`. In CI,
 `Tailscaled.Testing.auth_key/1` creates a different single-use, ephemeral,
 pre-approved key for each guest through GitHub OIDC. Unused keys expire after ten
@@ -104,17 +104,17 @@ Do not put its value in shell history, simulator configuration or a committed fi
 Start the session with the three-device configuration:
 
 ```sh
-mix dev --config dev/tailnet.exs
+mix dev --config priv/qemu/tailnet.exs   # relative to sim/
 ```
 
 Choose **Start devices** on the overview. In another terminal:
 
 ```sh
-mix test --only tailscale_auth
+mix test.firmware --only tailscale_auth
 ```
 
 The scenario uses fresh disks and reserves all three devices. The key is read by
-the running session, not the attaching `mix test` client: restart `mix dev` after
+the running session, not the attaching `mix test.firmware` client: restart `mix dev` after
 changing its key or configuration. With no local key, the helper attempts GitHub
 OIDC and reports missing settings outside CI. Do not use `--ci` to start another
 local bench.

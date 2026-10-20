@@ -1,0 +1,2 @@
+This filesystem is immutable. Persistent application state belongs in /root
+(or /data, which is a symlink to /root).

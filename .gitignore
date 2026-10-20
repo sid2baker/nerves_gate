@@ -2,13 +2,13 @@
 **/_build/
 
 # If you run "mix test --cover", coverage assets end up here.
-/cover/
+**/cover/
 
 # The directory Mix downloads your dependencies sources to.
 **/deps/
 
 # Where third-party dependencies like ExDoc output generated docs.
-/doc/
+**/doc/
 
 # Temporary files, for example, from tests.
 /tmp/
@@ -16,8 +16,8 @@
 # Local credentials, upload scripts and asset tooling.
 .env
 .env.*
-/upload.sh
-/assets/node_modules/
+/firmware/upload.sh
+**/node_modules/
 
 # Local Nerves system build artifacts and device backups.
 **/.nerves/
@@ -25,8 +25,11 @@
 /ec100-backups/
 
 # Tailscale binaries installed explicitly for each firmware architecture.
-/rootfs_overlay/ec100/usr/sbin/tailscaled
-/rootfs_overlay/x86_64/usr/sbin/tailscaled
+/firmware/rootfs_overlay/ec100/usr/sbin/tailscaled
+/firmware/rootfs_overlay/x86_64/usr/sbin/tailscaled
 
 # If the VM crashes, it generates a dump, let's ignore it too.
 erl_crash.dump
+
+# ExUnit tmp_dir output in each project.
+/*/tmp/

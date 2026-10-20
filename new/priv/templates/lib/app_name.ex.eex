@@ -1,0 +1,11 @@
+defmodule <%= module %> do
+  @moduledoc "A portable Nerves Gate application."
+
+  def system_info, do: NervesGateSDK.System.info()
+
+  # Called after a cold start, before the device commits an upgrade.
+  # Add checks for the application's own readiness here. Return :ok to accept.
+  def health_check do
+    if Process.whereis(<%= module %>.Supervisor), do: :ok, else: {:error, :not_running}
+  end
+end

@@ -1,0 +1,13 @@
+defmodule <%= module %>Test do
+  use ExUnit.Case
+
+  test "declares the SDK range and health check the device validates" do
+    env = Application.get_all_env(:<%= app %>)
+    assert env[:nerves_gate_sdk_requirement] == "~> 1.0"
+    assert env[:nerves_gate_health_check] == {<%= module %>, :health_check, []}
+  end
+
+  test "reports healthy while its supervisor runs" do
+    assert :ok = <%= module %>.health_check()
+  end
+end

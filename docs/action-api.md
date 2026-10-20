@@ -1,6 +1,6 @@
 # Public API
 
-[`NervesGate`](../lib/nerves_gate.ex) exposes named, documented, typed functions
+[`NervesGate`](../firmware/lib/nerves_gate.ex) exposes named, documented, typed functions
 for LiveView, IEx/SSH and other interfaces. Commands return results; queries return
 status. No client object or dispatcher is needed.
 
@@ -124,7 +124,7 @@ Modbus. See [bus operations](buses.md).
 ## Status
 
 `status/1` reads domains independently; it is **not an atomic snapshot**.
-[`Status`](../lib/nerves_gate/status.ex) builds the JSON-encodable v6 map:
+[`Status`](../firmware/lib/nerves_gate/status.ex) builds the JSON-encodable v6 map:
 
 - `version`, `system`: shape version and firmware/runtime information.
 - `network`: saved settings, trial, observations, readiness, recovery and errors.
@@ -155,9 +155,9 @@ LiveViews use the device-owned projection stream instead; see
 ## Domain APIs and explicit instances
 
 Each domain documents its own commands and accepts a server reference:
-[Network](../lib/nerves_gate/network.ex), [Remote](../lib/nerves_gate/remote.ex),
-[Equipment](../lib/nerves_gate/equipment.ex), [Indicators](../lib/nerves_gate/indicators.ex)
-and [Buses](../lib/nerves_gate/buses.ex). Direct calls use ordinary OTP exit
+[Network](../firmware/lib/nerves_gate/network.ex), [Remote](../firmware/lib/nerves_gate/remote.ex),
+[Equipment](../firmware/lib/nerves_gate/equipment.ex), [Indicators](../firmware/lib/nerves_gate/indicators.ex)
+and [Buses](../firmware/lib/nerves_gate/buses.ex). Direct calls use ordinary OTP exit
 behavior; the facade normalizes process-call failures.
 
 Facade options select instances:
@@ -169,5 +169,5 @@ status = NervesGate.status(opts)
 ```
 
 Other options are `:equipment`, `:indicators` and `:buses`.
-[SSH](../lib/nerves_gate/ssh.ex) is a single device-owned store. See the
-[QEMU scenarios](../test/scenarios) for examples against real devices.
+[SSH](../firmware/lib/nerves_gate/ssh.ex) is a single device-owned store. See the
+[QEMU scenarios](../firmware/test/scenarios) for examples against real devices.

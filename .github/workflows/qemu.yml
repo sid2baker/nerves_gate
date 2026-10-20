@@ -1,4 +1,4 @@
-name: Simulator CI
+name: CI
 
 on:
   push:
@@ -10,10 +10,31 @@ permissions:
   contents: read
 
 concurrency:
-  group: simulator-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Pure Elixir packages: no Nerves, QEMU or local path dependencies.
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        package: [sdk, new]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - name: Compile, format and test
+        run: |
+          mise exec -- mix local.hex --force --if-missing
+          mise exec -- mix deps.get
+          mise exec -- mix compile --warnings-as-errors
+          mise exec -- mix format --check-formatted
+          mise exec -- mix test
+
   changes:
     runs-on: ubuntu-24.04
     outputs:
@@ -60,8 +81,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
-      MIX_TARGET: host
-      MIX_ENV: test
       NERVES_SYSTEM: ''
       NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
     steps:
@@ -74,7 +93,7 @@ jobs:
           gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
           printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
           sudo apt-get update
-          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools squashfs-tools "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
+          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools squashfs-tools e2fsprogs "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
       - name: Install Mix tooling outside the project
         run: |
           # shellcheck disable=SC2016
@@ -89,22 +108,24 @@ jobs:
         with:
           path: |
             ${{ env.NERVES_DL_DIR }}
-            _build/setup
-          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'dev/setup.exs') }}
+            firmware/_build/setup
+          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'sim/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/dev/tailscaled.ex') }}
           restore-keys: simulator-downloads-${{ runner.os }}-
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
-      - name: Quality gate and two-device simulator scenarios
+      - name: Repository quality gates
+        run: mise exec -- mix ci
+      - name: Two-device simulator scenarios
         run: |
-          mkdir -p _build/qemu-tests
+          mkdir -p sim/_build/qemu-tests
           set -o pipefail
-          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix ci 2>&1 | tee _build/qemu-tests/suite.log
+          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.firmware --ci 2>&1 | tee sim/_build/qemu-tests/suite.log
       - name: Retain diagnostics (never VM disks)
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: simulator-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: _build/qemu-tests/**/*.log
+          path: sim/_build/qemu-tests/**/*.log
           if-no-files-found: ignore
           retention-days: 14
 
@@ -121,8 +142,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      MIX_TARGET: host
-      MIX_ENV: test
       NERVES_SYSTEM: ''
       NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
     steps:
@@ -135,7 +154,7 @@ jobs:
           gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
           printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
           sudo apt-get update
-          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools squashfs-tools "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
+          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools squashfs-tools e2fsprogs "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
       - name: Install Mix tooling outside the project
         run: |
           # shellcheck disable=SC2016
@@ -150,8 +169,8 @@ jobs:
         with:
           path: |
             ${{ env.NERVES_DL_DIR }}
-            _build/setup
-          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'dev/setup.exs') }}
+            firmware/_build/setup
+          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'sim/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/dev/tailscaled.ex') }}
           restore-keys: simulator-downloads-${{ runner.os }}-
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
@@ -162,4 +181,5 @@ jobs:
           TS_TAGS: tag:ci
         # Never tee stdout: GitHub masking commands contain generated credentials.
         # No raw daemon logs, identity disks or credentials are uploaded as artifacts.
-        run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test --ci --only tailscale_auth --config dev/tailnet.exs
+        # --config is relative to sim/.
+        run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.firmware --ci --only tailscale_auth --config priv/qemu/tailnet.exs

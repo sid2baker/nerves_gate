@@ -1,169 +1,142 @@
-# Select host tooling before Nerves reads the project, even after firmware builds.
-case List.first(System.argv()) do
-  command when command in ["setup", "dev.ui", "dev", "dev.status", "dev.stop", "assets.build"] ->
-    Mix.env(:dev)
-    Mix.target(:host)
-
-  command when command in ["test", "test.qemu", "qemu.test", "ci"] ->
-    Mix.env(:test)
-    Mix.target(:host)
-
-  _ ->
-    :ok
-end
-
-defmodule NervesGate.MixProject do
+defmodule NervesGate.Repository do
   use Mix.Project
-  @targets [:ec100, :x86_64]
+
+  # Nerves systems are not formatted here: their mix.exs files are artifact inputs.
+  @projects ~w(sdk sim new firmware)
 
   def project do
     [
-      app: :nerves_gate,
-      version: "0.1.0",
       elixir: "~> 1.20",
-      archives: [nerves_bootstrap: "~> 1.17"],
-      start_permanent: Mix.env() == :prod,
-      listeners: [Phoenix.CodeReloader],
-      elixirc_paths: elixirc_paths(),
-      deps: deps(),
-      releases: [
-        nerves_gate: [
-          include_erts: &Nerves.erts/0,
-          applications: if(Mix.target() in @targets, do: [nerves_runtime: :transient], else: []),
-          steps: [&Nerves.init_release/1, &gateway_restart_policy/1, :assemble]
-        ]
-      ],
-      dialyzer: [
-        plt_add_apps: [
-          :mix,
-          :nerves,
-          :nerves_runtime,
-          :muontrap,
-          :one_dhcpd,
-          :ssh,
-          :ex_unit,
-          :tailscaled_ex,
-          :vintage_net,
-          :vintage_net_bridge,
-          :vintage_net_ethernet
-        ]
-      ],
       aliases: [
         setup: &setup/1,
-        "assets.build": ["volt.build --tailwind"],
-        test: ["qemu.test"],
-        "test.qemu": ["qemu.test"],
-        ci: [
-          "compile --warnings-as-errors",
-          "format --check-formatted",
-          "volt.js.check",
-          "credo --strict",
-          "dialyzer",
-          "ex_dna --max-clones 0",
-          "reach.check --arch --smells",
-          "qemu.test --ci"
-        ]
+        format: &format/1,
+        test: &test/1,
+        check: &check/1,
+        ci: &ci/1,
+        dev: &run("sim", ["qemu.dev" | &1]),
+        "dev.status": &run("sim", ["qemu.status" | &1]),
+        "dev.stop": &run("sim", ["qemu.stop" | &1]),
+        "dev.ui": &run("sim", ["dev.ui" | &1]),
+        firmware: &firmware/1,
+        "test.sdk": &run("sdk", ["test" | &1]),
+        "test.sim": &run("sim", ["test" | &1]),
+        "test.firmware": &run("sim", ["qemu.test" | &1])
       ]
     ]
   end
 
-  def application,
-    do: [extra_applications: [:logger, :crypto, :ssh], mod: {NervesGate.Application, []}]
+  # Prepares every project and the QEMU firmware inputs. Never boots a device.
+  defp setup([]) do
+    Mix.Task.run("local.hex", ["--force", "--if-missing"])
+    Mix.Task.run("local.rebar", ["--force", "--if-missing"])
+    Application.load(:nerves_bootstrap)
+    bootstrap = Application.spec(:nerves_bootstrap, :vsn)
 
-  def cli do
-    [
-      preferred_targets: [
-        run: :host,
-        setup: :host,
-        test: :host,
-        ci: :host,
-        "dev.ui": :host,
-        "dev.status": :host,
-        "dev.stop": :host,
-        dev: :host,
-        "qemu.test": :host,
-        "assets.build": :host
-      ],
-      preferred_envs: [
-        setup: :dev,
-        ci: :test,
-        "dev.ui": :dev,
-        "dev.status": :dev,
-        "dev.stop": :dev,
-        dev: :dev,
-        "qemu.test": :test,
-        "assets.build": :dev
-      ]
-    ]
+    unless bootstrap && Version.match?(to_string(bootstrap), "~> 1.17"),
+      do: Mix.Task.run("archive.install", ["hex", "nerves_bootstrap", "~> 1.17", "--force"])
+
+    for project <- ~w(sdk new sim), do: run(project, ["deps.get"])
+    run("sim", ["qemu.setup"])
+    run("firmware", ["deps.get"], target: "x86_64")
+    run("firmware", ["tailscaled.install"], target: "x86_64")
+    Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached afterwards).")
+    run("firmware", ["nerves.artifact.get"], target: "x86_64")
+    Mix.shell().info("Ready. Run mix dev, then start devices at http://localhost:4000.")
   end
 
-  # Setting the app mode in applications: also changes its dependencies' modes.
-  # Change only the gateway's boot entry; Nerves preserves explicit transient modes.
-  defp gateway_restart_policy(release) do
-    if Mix.target() in @targets do
-      scripts =
-        Map.update!(release.boot_scripts, :start, &Keyword.replace!(&1, :nerves_gate, :transient))
+  defp setup(_), do: Mix.raise("Usage: mix setup")
 
-      %{release | boot_scripts: scripts}
-    else
-      release
+  defp format(args) do
+    Mix.Task.run("format", ["mix.exs", ".formatter.exs" | args])
+    for project <- @projects, do: run(project, ["format" | args])
+  end
+
+  defp test(args) do
+    for project <- ~w(sdk sim new), do: run(project, ["test" | args])
+  end
+
+  defp check([]) do
+    for project <- ~w(sdk sim new) do
+      run(project, ["compile", "--warnings-as-errors"])
+      run(project, ["format", "--check-formatted"])
+      run(project, ["test"])
     end
   end
 
-  # Setup must be available before dependencies or ordinary dev tasks can compile.
-  defp setup(args) do
-    Code.require_file("dev/setup.exs", __DIR__)
-    Mix.Task.run("setup.qemu", args)
+  defp check(_), do: Mix.raise("Usage: mix check")
+
+  defp ci([]) do
+    for project <- @projects do
+      Mix.shell().info("==> #{project}: mix ci")
+      run(project, ["ci"])
+    end
   end
 
-  defp elixirc_paths do
-    if Mix.target() == :host,
-      do: ["lib", "dev", "test/support", "test/scenarios"],
-      else: ["lib"]
+  defp ci(_), do: Mix.raise("Usage: mix ci")
+
+  defp firmware([target | args]) when target in ["ec100", "x86_64"],
+    do: run("firmware", ["firmware" | args], target: target)
+
+  defp firmware(_), do: Mix.raise("Usage: mix firmware ec100|x86_64")
+
+  defp put_env(env) do
+    Enum.each(env, fn
+      {key, nil} -> System.delete_env(key)
+      {key, value} -> System.put_env(key, value)
+    end)
   end
 
-  defp deps do
-    [
-      {:volt, "~> 0.23.0", only: [:dev, :test], targets: :host},
-      {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
-      {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
-      {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:nerves, "~> 2.0.0-pre.4", runtime: false},
-      {:bandit, "~> 1.12"},
-      {:jason, "~> 1.4"},
-      {:phoenix, "~> 1.8"},
-      {:phoenix_live_reload, "~> 1.5", only: :dev, targets: :host},
-      {:tidewave, "~> 0.9", only: :dev, targets: :host},
-      {:req, "~> 0.7", only: [:dev, :test], targets: :host},
-      # PR #4441: lifecycle-managed LiveView/LiveComponent PubSub subscriptions.
-      {:phoenix_live_view, github: "phoenixframework/phoenix_live_view", branch: "main"},
-      {:phoenix_pubsub, "~> 2.4"},
-      {:alarmist, "~> 0.4.2"},
-      {:property_table, "~> 0.3.4"},
-      {:circuits_uart, "~> 1.6"},
-      {:input_event, "~> 1.4"},
-      {:yaopcua, github: "tallakt/yaopcua"},
-      {:yamodbus, github: "tallakt/yamodbus"},
-      {:s7, github: "sid2baker/s7"},
-      {:ethercat, github: "sid2baker/ethercat"},
-      # Host tooling must never start the workstation VPN.
-      {:tailscaled_ex, "~> 0.4.0", runtime: Mix.target() != :host},
-      # Compiled on the host like VintageNet, but started only by firmware.
-      {:nerves_runtime, "~> 0.13", runtime: Mix.target() != :host},
-      {:nerves_motd, "~> 0.1", targets: @targets},
-      {:ring_logger, "~> 0.11", targets: @targets},
-      {:nerves_ssh, "~> 1.3", targets: @targets},
-      {:nerves_time, "~> 0.4", targets: @targets},
-      {:vintage_net, "~> 0.13", runtime: Mix.target() != :host},
-      {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
-      {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
-      {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
-      {:nerves_system_ec100,
-       github: "sid2baker/nerves_system_ec100", tag: "v0.2.0", runtime: false, targets: :ec100},
-      {:nerves_system_ec100_qemu,
-       path: "systems/nerves_system_ec100_qemu", runtime: false, targets: :x86_64}
-    ]
+  defp run(project, [task | args], options \\ []) do
+    apps = %{
+      "sdk" => :nerves_gate_sdk,
+      "sim" => :nerves_gate_sim,
+      "new" => :nerves_gate_new,
+      "firmware" => :nerves_gate,
+      "systems/nerves_system_ec100" => :nerves_system_ec100,
+      "systems/nerves_system_ec100_qemu" => :nerves_system_ec100_qemu
+    }
+
+    previous_env = Mix.env()
+    previous_target = Mix.target()
+    # These are independent projects, not dependencies of the orchestration root.
+    root = Mix.Project.pop()
+
+    env = %{
+      "NERVES_GATE_LOCAL_DEPS" => "1",
+      "NERVES_GATE_DEVICE_NODE" => nil
+    }
+
+    previous = Map.new(env, fn {key, _} -> {key, System.get_env(key)} end)
+
+    # Compilation prunes code paths to the project's own dependencies (dropping
+    # OTP apps such as ssl and archives such as nerves_bootstrap). Restore them.
+    code_path = :code.get_path()
+
+    try do
+      put_env(env)
+
+      # Tests use :test; everything else follows the root (MIX_ENV, default dev).
+      Mix.env(if task in ["test", "qemu.test", "ci"], do: :test, else: previous_env)
+
+      Mix.target(
+        case options[:target] do
+          "ec100" -> :ec100
+          "x86_64" -> :x86_64
+          _ -> :host
+        end
+      )
+
+      Mix.Project.in_project(Map.fetch!(apps, project), Path.join(__DIR__, project), fn _ ->
+        Mix.Task.clear()
+        Mix.Task.run("loadconfig")
+        Mix.Task.run(task, args)
+      end)
+    after
+      :code.set_path(code_path)
+      Mix.env(previous_env)
+      Mix.target(previous_target)
+      put_env(previous)
+      Mix.Project.push(root.name, root.file)
+    end
   end
 end

@@ -1,0 +1,40 @@
+/dts-v1/;
+
+/ {
+    description = "Nerves EC100 RK3506J FIT";
+    #address-cells = <1>;
+
+    images {
+        kernel {
+            description = "Linux kernel";
+            data = /incbin/("zImage");
+            type = "kernel";
+            arch = "arm";
+            os = "linux";
+            compression = "none";
+            load = <0x02080000>;
+            entry = <0x02080000>;
+            hash-1 { algo = "sha256"; };
+        };
+
+        fdt {
+            description = "IOTRouter EC100 RK3506J device tree";
+            data = /incbin/("rk3506-ec100.dtb");
+            type = "flat_dt";
+            arch = "arm";
+            compression = "none";
+            // This BSP requires a load address even for the FDT subimage.
+            load = <0x06000000>;
+            hash-1 { algo = "sha256"; };
+        };
+    };
+
+    configurations {
+        default = "conf";
+        conf {
+            description = "EC100 Nerves";
+            kernel = "kernel";
+            fdt = "fdt";
+        };
+    };
+};

@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/dts-v1/;
+#include "rk3506.dtsi"
+#include "rk3506-u-boot.dtsi"
+
+/ {
+    model = "IOTRouter EC100 Nerves bootloader";
+    compatible = "iotrouter,ec100", "rockchip,rk3506";
+    aliases { serial0 = &uart0; mmc0 = &mmc; };
+    chosen {
+        stdout-path = "serial0:115200n8";
+        u-boot,spl-boot-order = &mmc;
+    };
+    memory@0 {
+        device_type = "memory";
+        reg = <0 0x20000000>;
+    };
+    /* Keep vendor memory handling; dynamic TEE memory tags are optional.
+     * Linux separately retains its SoC trust@0 reservation.
+     */
+};
+
+&uart0 { status = "okay"; };
+
+/* EC100 live DT: four-bit eMMC on GPIO3_A0..A5. Keep boot I/O slow. */
+&mmc {
+    bus-width = <4>;
+    max-frequency = <25000000>;
+    non-removable;
+    cap-mmc-highspeed;
+    pinctrl-names = "default";
+    pinctrl-0 = <&sdmmc_clk_pins &sdmmc_cmd_pins &sdmmc_bus4_pins>;
+    status = "okay";
+};
+
+/* No reference-board keys, SPI boot or USB drivers needed for raw MMC boot. */
+&saradc { status = "disabled"; };
+&fspi { status = "disabled"; };
+&usb2phy { status = "disabled"; };
+&u2phy_otg0 { status = "disabled"; };
+&usb20_otg0 { status = "disabled"; };

@@ -1,0 +1,30 @@
+defmodule <%= module %>.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :<%= app %>,
+      version: "1.0.0",
+      elixir: "~> 1.20",
+      start_permanent: Mix.env() == :prod,
+      deps: [
+        {:nerves_gate_sdk, "~> 1.0"},
+        # QEMU development tools; never part of the application or its package.
+        {:nerves_gate_sim, "~> 1.0", only: :dev, runtime: false}
+      ]
+    ]
+  end
+
+  def cli, do: [preferred_envs: ["nerves_gate.package": :prod]]
+
+  def application do
+    [
+      extra_applications: [:logger],
+      mod: {<%= module %>.Application, []},
+      env: [
+        nerves_gate_sdk_requirement: "~> 1.0",
+        nerves_gate_health_check: {<%= module %>, :health_check, []}
+      ]
+    ]
+  end
+end
