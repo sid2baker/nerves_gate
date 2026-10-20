@@ -108,7 +108,9 @@ defmodule NervesGate.Repository do
       "NERVES_GATE_DEVICE_NODE" => nil
     }
 
-    previous = Map.new(env, fn {key, _} -> {key, System.get_env(key)} end)
+    # Nerves exports toolchain variables while preparing a target. None may
+    # leak into the next independent project's host compilation.
+    previous = System.get_env()
 
     # Compilation prunes code paths to the project's own dependencies (dropping
     # OTP apps such as ssl and archives such as nerves_bootstrap). Restore them.
@@ -137,7 +139,12 @@ defmodule NervesGate.Repository do
       :code.set_path(code_path)
       Mix.env(previous_env)
       Mix.target(previous_target)
-      put_env(previous)
+
+      for key <- Map.keys(System.get_env()),
+          not Map.has_key?(previous, key),
+          do: System.delete_env(key)
+
+      System.put_env(previous)
       Mix.Project.push(root.name, root.file)
     end
   end
