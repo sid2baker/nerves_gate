@@ -35,12 +35,14 @@ defmodule NervesGate.Repository do
     unless bootstrap && Version.match?(to_string(bootstrap), "~> 1.17"),
       do: Mix.Task.run("archive.install", ["hex", "nerves_bootstrap", "~> 1.17", "--force"])
 
+    # Fetch every dependency graph before loading compiled project tasks: their
+    # consolidated protocols must not replace the protocols used by Hex.
     for project <- ~w(sdk new sim), do: run(project, ["deps.get"])
-    run("sim", ["qemu.setup"])
     run("firmware", ["deps.get"], target: "x86_64")
     run("firmware", ["tailscaled.install"], target: "x86_64")
     Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached afterwards).")
     run("firmware", ["nerves.artifact.get"], target: "x86_64")
+    run("sim", ["qemu.setup"])
     Mix.shell().info("Ready. Run mix dev, then start devices at http://localhost:4000.")
   end
 
