@@ -24,6 +24,10 @@ defmodule NervesGateWeb.DashboardLive do
     <p :if={@projection.network.observed && @projection.network.observed.simulated} class="ui-help">
       Preview mode · simulated connections
     </p>
+    <.notice :if={@projection.storage.available && @projection.storage.choice == :pending}>
+      Application storage is not set up yet.
+      <.link navigate="/storage" class="ui-text-link">Set up an SD card or continue without apps →</.link>
+    </.notice>
     <section class="ui-connections" aria-label="Gateway connections">
       <.navigation_card
         title="Internet"
@@ -56,6 +60,16 @@ defmodule NervesGateWeb.DashboardLive do
         {if @distribution_node == :nonode@nohost,
           do: "Connect an Erlang or Elixir node",
           else: Atom.to_string(@distribution_node)}
+      </.navigation_card>
+      <.navigation_card
+        title="Application storage"
+        icon="equipment"
+        href="/storage"
+        id="connection-storage"
+        status={NervesGateWeb.StorageLive.label(@projection.storage)}
+        tone={if @projection.storage.ready, do: "good", else: "neutral"}
+      >
+        SD card setup · applications and their data
       </.navigation_card>
     </section>
     """

@@ -12,17 +12,56 @@ hot-code upgrade or dependency solver.
   directories from its `.ez` archive.
 - `/mnt/apps/data/<app>/` contains application-owned data.
 
-`/mnt/apps` must be a separately mounted, writable filesystem. `NervesGate.Storage`
-checks the Linux mount table; an empty mountpoint on the root filesystem is not
-an SD card. It never formats media. With `:nerves_gate, :apps_device` configured,
-it mounts that prepared ext4 device (`nodev,nosuid`) and lazily detaches it once
-the device disappears. QEMU configures its virtual card, `/dev/vdb`; EC100 leaves
-it unset until the physical card path is qualified, so provisioning must mount the
-card there (or configure `:apps_mount`). No card is required to boot or administer
-the gateway. Storage APIs return
-`{:error, :storage_unavailable}` when media is absent. Removal stops managed apps;
-reinsertion restores enabled selections. Previously opened file handles cannot
-be revoked by an SDK, so applications must handle filesystem errors too.
+### Commissioning
+
+Open **Application storage** from Overview or Settings (`/storage`). No card is
+required to commission networking or administer the gateway.
+
+- **No card:** continue without apps; insert a card and return here later.
+- **Prepared ext4 card:** choose **Use this card — keep data**. Existing apps and
+  data are preserved; nothing is formatted.
+- **FAT or unprepared card:** back it up, then choose **Format for applications**
+  and explicitly confirm the data-loss warning, or continue without apps.
+- **Failure:** the page reports the result and offers retry or skip. Formatting
+  may already have erased data even if it fails; never retry blindly.
+
+The choice is saved in `/data/nerves_gate/storage`. A prepared QEMU card also
+requires a choice on first commissioning. Once use is selected, compatible cards
+mount on insertion and enabled apps are restored. Selecting skip leaves storage
+unavailable until the user chooses to use or format a card later.
+
+### Ownership and safety
+
+`NervesGate.Storage` owns detection, setup operations, mounting and the device's
+storage projection. Apps owns only application lifecycle and excludes erase/skip
+while applications are installed (even stopped apps). Uninstalling apps preserves
+their data; formatting does not. Storage setup is administrative, not an SDK API.
+
+`/mnt/apps` must be a separately mounted writable filesystem; an empty directory
+on the firmware root is not a card. Platform configuration selects the device:
+EC100 uses `/dev/mmcblk1p1`; QEMU uses a prepared 256 MiB virtual disk `/dev/vdb`.
+There is no separate target-to-device mapping and callers cannot supply a path.
+
+Insertion never formats media. Explicitly confirmed formatting runs `mke2fs` with
+a deadline, creates ext4, then mounts it with `nodev,nosuid`. The backend rechecks
+card identity after confirmation and unmounting. Mounted system disks, their
+partitions, other mount locations and busy filesystems are rejected. Removal
+stops managed apps and detaches the stale mount; apps must still handle errors
+on previously opened file handles.
+
+For administrative automation, read the detected card ID, then make a choice:
+
+```elixir
+storage = NervesGate.status().storage
+NervesGate.storage_setup(:use, storage.card_id) # preserves data
+NervesGate.storage_setup(:skip)                 # no card required
+# Destructive, only after explicit user consent:
+NervesGate.storage_setup(:format, storage.card_id, :erase_all_data)
+```
+
+Commands acknowledge admission promptly. Observe `NervesGate.status().storage`
+for `operation`, `ready` and `error`; the UI uses the device-owned projection.
+A missing formatter is reported without erasing the card.
 
 ## Packages
 

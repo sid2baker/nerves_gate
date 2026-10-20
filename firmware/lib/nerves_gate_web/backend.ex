@@ -39,6 +39,9 @@ defmodule NervesGateWeb.Backend do
     call(:remote_login_url, [], backend)
   end
 
+  def storage_setup(action, card_id \\ nil, confirmation \\ nil),
+    do: call(:storage_setup, [action, card_id, confirmation])
+
   def identify, do: call(:identify, [])
   def ssh_add_key(key), do: call(:ssh_add_key, [key])
   def ssh_remove_key(fingerprint), do: call(:ssh_remove_key, [fingerprint])

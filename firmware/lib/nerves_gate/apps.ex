@@ -56,6 +56,15 @@ defmodule NervesGate.Apps do
     {:reply, {:ok, Enum.sort_by(apps, & &1.app)}, state}
   end
 
+  def handle_call({:storage_setup, action, card_id, confirmation}, _, state) do
+    if action in [:format, :skip] and
+         (map_size(state.entries) != 0 or map_size(state.running) != 0) do
+      {:reply, {:error, :applications_installed}, state}
+    else
+      {:reply, Storage.admit(action, card_id, confirmation), state}
+    end
+  end
+
   def handle_call({:install, path}, _, state) do
     {reply, state} = install_package(path, state)
     {:reply, reply, state}
@@ -87,7 +96,6 @@ defmodule NervesGate.Apps do
   @impl true
   def handle_info(:storage, state) do
     Process.send_after(self(), :storage, 1_000)
-    Storage.mount()
     available? = match?({:ok, _}, Storage.root())
 
     next =

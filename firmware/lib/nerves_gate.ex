@@ -155,7 +155,8 @@ defmodule NervesGate do
         indicators_status(indicators(opts)),
         buses_status(buses(opts)),
         status_input(:ssh),
-        status_input(:system)
+        status_input(:system),
+        status_input(:storage)
       )
 
   # Sanitized inputs shared by direct status queries and the device read model.
@@ -165,6 +166,13 @@ defmodule NervesGate do
   def status_input(:equipment), do: equipment_status(Equipment)
   def status_input(:indicators), do: indicators_status(Indicators)
   def status_input(:buses), do: buses_status(Buses)
+
+  def status_input(:storage) do
+    case invoke(fn -> NervesGate.Storage.commissioning() end) do
+      {:error, _} -> NervesGate.Storage.unavailable()
+      status -> status
+    end
+  end
 
   def status_input(:ssh) do
     case invoke(fn -> NervesGate.SSH.status() end) do
@@ -191,7 +199,8 @@ defmodule NervesGate do
          :ok <- observe(Equipment, equipment(opts)),
          :ok <- observe(Indicators, indicators(opts)),
          :ok <- observe(Buses, buses(opts)),
-         do: NervesGate.SSH.observe()
+         :ok <- NervesGate.SSH.observe(),
+         do: invoke(fn -> NervesGate.Storage.observe() end)
   end
 
   @doc "Run one explicit ARP-only scan of the confirmed equipment subnet (at most /24 and five seconds)."
@@ -217,6 +226,10 @@ defmodule NervesGate do
   def equipment_unshare(opts \\ []) do
     invoke(fn -> Network.sharing(:sharing_disable, %{}, network(opts)) end) |> result()
   end
+
+  @doc "Commission application storage: use a card, explicitly format it, or skip."
+  def storage_setup(action, card_id \\ nil, confirmation \\ nil),
+    do: invoke(fn -> NervesGate.Storage.setup(action, card_id, confirmation) end) |> result()
 
   @doc "Read the private distribution cookie. Never include it in status, notifications or logs."
   def distribution_cookie, do: {:ok, Node.get_cookie()}

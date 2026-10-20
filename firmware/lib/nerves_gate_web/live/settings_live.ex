@@ -128,6 +128,10 @@ defmodule NervesGateWeb.SettingsLive do
         </.button>
       </.form>
     </.panel>
+    <.panel title="Application storage" icon="equipment" id="storage-settings">
+      <p>{NervesGateWeb.StorageLive.label(@projection.storage)}</p>
+      <.link navigate="/storage" class="ui-text-link">Set up or manage the SD card →</.link>
+    </.panel>
     <.panel title="Device information" icon="info">
       <.setting_row label="Firmware">{@projection.system.firmware}</.setting_row>
       <.setting_row label="Target">{@projection.system.target}</.setting_row>

@@ -15,10 +15,11 @@ config :nerves_gate,
     NervesGate.Equipment,
     NervesGate.Indicators,
     NervesGate.Buses,
+    {Task.Supervisor, name: NervesGate.AppTasks},
+    NervesGate.Storage,
+    NervesGate.Apps,
     NervesGate.ProjectionServer,
     NervesGate.SDKBackend,
-    {Task.Supervisor, name: NervesGate.AppTasks},
-    NervesGate.Apps,
     NervesGateWeb.Endpoint
   ],
   # Disabled until the real modem is identified; QEMU does not emulate one.

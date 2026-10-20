@@ -291,6 +291,75 @@ defmodule NervesGate.Error do
   def from(:button_unavailable),
     do: new("button_unavailable", "The EC100 user button is unavailable.")
 
+  def from(:applications_installed),
+    do:
+      new(
+        "applications_installed",
+        "Uninstall applications before skipping or formatting their storage. Uninstalling preserves data; formatting erases it."
+      )
+
+  def from(:storage_card_changed),
+    do:
+      new(
+        "storage_card_changed",
+        "The card is missing or has changed. Review the detected card before continuing."
+      )
+
+  def from(:storage_confirmation_required),
+    do: new("storage_confirmation_required", "Confirm that all data on this card will be erased.")
+
+  def from(:storage_filesystem),
+    do:
+      new(
+        "storage_filesystem",
+        "This card cannot be used as-is. Application storage needs ext4; formatting erases all existing card data."
+      )
+
+  def from(:storage_in_use),
+    do:
+      new(
+        "storage_in_use",
+        "The disk is used by another filesystem. System storage and busy cards cannot be formatted."
+      )
+
+  def from(:storage_mount_failed),
+    do:
+      new(
+        "storage_mount_failed",
+        "Could not mount or unmount the card. It may be busy, damaged or have unsupported filesystem features."
+      )
+
+  def from(:storage_format_unavailable),
+    do:
+      new(
+        "storage_format_unavailable",
+        "This firmware does not include mke2fs. Prepare the card externally or install firmware with the formatting tool."
+      )
+
+  def from(:storage_format_failed),
+    do:
+      new(
+        "storage_format_failed",
+        "Formatting failed. Card data may have been erased. Check the card before retrying."
+      )
+
+  def from(:storage_format_timeout),
+    do:
+      new(
+        "storage_format_timeout",
+        "Formatting timed out. Card data may have been erased; inspect storage before retrying."
+      )
+
+  def from(:storage_save_failed),
+    do: new("storage_save_failed", "Could not save the storage setup choice.")
+
+  def from(:storage_setup_failed),
+    do:
+      new(
+        "storage_setup_failed",
+        "Storage setup failed. Inspect the card before retrying; formatting may have erased data."
+      )
+
   def from(reason) when is_binary(reason) do
     new("invalid_parameters", reason)
   end

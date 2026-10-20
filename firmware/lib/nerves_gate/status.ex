@@ -13,7 +13,8 @@ defmodule NervesGate.Status do
         indicators,
         buses,
         ssh,
-        system
+        system,
+        storage \\ NervesGate.Storage.unavailable()
       ) do
     cellular = cellular_supported?(status)
 
@@ -35,6 +36,7 @@ defmodule NervesGate.Status do
       indicators: indicators,
       buses: buses,
       ssh: ssh,
+      storage: storage,
       actions: actions(status, remote, equipment, indicators, buses, ssh)
     }
   end

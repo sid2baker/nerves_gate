@@ -40,6 +40,7 @@ defmodule NervesGateWeb.Router do
       live("/equipment/rs485/:id", BusesLive, :rs485)
       live("/equipment/can/:id", BusesLive, :can)
       live("/settings", SettingsLive, :settings)
+      live("/storage", StorageLive, :storage)
     end
   end
 end

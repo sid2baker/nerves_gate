@@ -51,13 +51,15 @@ snapshot. Commands return their result without a status read. See the
 | Indicators | LED/button policy, identification and recovery |
 | Buses | One diagnostic worker, opt-in and bounded results |
 | SSH | Public-key validation, persistence and authentication |
+| Storage | SD-card commissioning, detection, mounting and explicit formatting |
+| Apps | Trusted OTP application admission, lifecycle and version selection |
 | ProjectionServer | Shared sanitized UI read model |
 | LiveView | Drafts, presentation, subscriptions and command submission |
 
 `firmware/config/firmware.exs` defines the shared device services. The application's
 `rest_for_one` order is PubSub, routing setup, workflow PropertyTable, SSH, Network,
-Remote, Equipment, Indicators, Buses, ProjectionServer, SDKBackend, the app task
-supervisor, Apps and Endpoint. Dependencies supervise VintageNet, tailscaled and
+Remote, Equipment, Indicators, Buses, the app task supervisor, Storage, Apps,
+ProjectionServer, SDKBackend and Endpoint. Dependencies supervise VintageNet, tailscaled and
 Alarmist. Workstation UIs (`sim/config/`) start no device domains.
 
 Firmware starts `nerves_gate` as `transient`: ordinary child failures recover under

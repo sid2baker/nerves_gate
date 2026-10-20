@@ -7,9 +7,7 @@ defmodule NervesGate.Scenarios.Apps do
   end
 
   def run(%{device: vm}) do
-    # The simulator's virtual SD card is mounted by the firmware itself.
-    await(fn -> match?({:ok, "/mnt/apps"}, call(vm, NervesGate.Storage, :root, [])) end)
-    assert {:ok, %{available?: true}} = call(vm, NervesGateSDK.Storage, :status, [])
+    commission_storage(vm)
 
     # Card removal uses a disposable Linux mount inside the supervised guest. No
     # host mounts, arbitrary VMs, hardware adapters or physical cards are involved.
@@ -27,6 +25,10 @@ defmodule NervesGate.Scenarios.Apps do
       broken = upload(vm, "1.2.0", false)
       assert {:ok, %{app: :gate_fixture, version: "1.0.0"}} = apps(vm, :install, [first])
       assert [{:gate_fixture, "1.0.0", false}] == selection(vm)
+
+      assert {:error, :applications_installed} =
+               call(vm, NervesGate.Storage, :setup, [:format, nil, :erase_all_data])
+
       assert :ok = apps(vm, :start, [:gate_fixture])
       assert [{:gate_fixture, "1.0.0", true}] == selection(vm)
       assert {:ok, data} = call(vm, NervesGate.Storage, :data_dir, [:gate_fixture])
@@ -75,6 +77,83 @@ defmodule NervesGate.Scenarios.Apps do
       for version <- ~w(1.0.0 1.1.0 1.2.0),
           do: call(vm, File, :rm, ["/tmp/gate_fixture-#{version}.ez"])
     end
+  end
+
+  defp commission_storage(vm) do
+    storage = fn -> call(vm, NervesGate.Storage, :commissioning, []) end
+    await(fn -> storage.().present end)
+    assert storage.().choice == :pending
+    assert {:error, :storage_unavailable} = call(vm, NervesGate.Storage, :root, [])
+
+    assert :ok = call(vm, NervesGate.Storage, :setup, [:skip])
+
+    assert :ok =
+             call(vm, Supervisor, :terminate_child, [NervesGate.Supervisor, NervesGate.Storage])
+
+    assert {:ok, _} =
+             call(vm, Supervisor, :restart_child, [NervesGate.Supervisor, NervesGate.Storage])
+
+    assert storage.().choice == :skip
+
+    id = storage.().card_id
+    assert {:error, :storage_card_changed} = call(vm, NervesGate.Storage, :setup, [:use, "stale"])
+
+    assert {:error, :storage_confirmation_required} =
+             call(vm, NervesGate.Storage, :setup, [:format, id])
+
+    # The preformatted QEMU card still requires a commissioning choice.
+    assert :ok = call(vm, NervesGate.Storage, :setup, [:use, id])
+    await(fn -> storage.().ready end)
+    assert {:ok, data} = call(vm, NervesGate.Storage, :data_dir, [:format_fixture])
+    marker = Path.join(data, "preserve-or-erase")
+    assert :ok = call(vm, File, :write, [marker, "preserved"])
+    assert :ok = call(vm, NervesGate.Storage, :setup, [:skip])
+    assert :ok = call(vm, NervesGate.Storage, :setup, [:use, storage.().card_id])
+    await(fn -> storage.().ready end)
+    assert "preserved" = call(vm, File, :read!, [marker])
+
+    # Refuse the mounted firmware disk, without a platform/target switch.
+    call(vm, Application, :put_env, [:nerves_gate, :apps_device, "/dev/vda"])
+
+    try do
+      await(fn -> storage.().card_id != id end)
+
+      assert {:error, :storage_in_use} =
+               call(vm, NervesGate.Storage, :setup, [:format, storage.().card_id, :erase_all_data])
+    after
+      call(vm, Application, :put_env, [:nerves_gate, :apps_device, "/dev/vdb"])
+    end
+
+    await(fn -> storage.().filesystem == "ext4" end)
+    assert :ok = call(vm, NervesGate.Storage, :setup, [:skip])
+
+    # Make the disposable card unprepared by clearing its ext magic. No host
+    # block device is opened; setup must reject using this card without erasing.
+    {result, _} =
+      call(vm, Code, :eval_string, [
+        """
+        {:ok, fd} = :file.open(~c"/dev/vdb", [:read, :write, :binary, :raw])
+        try do
+          :file.pwrite(fd, 1080, <<0, 0>>)
+        after
+          :file.close(fd)
+        end
+        """
+      ])
+
+    assert result == :ok
+    await(fn -> storage.().filesystem == "Unknown" end)
+
+    assert {:error, :storage_filesystem} =
+             call(vm, NervesGate.Storage, :setup, [:use, storage.().card_id])
+
+    assert :ok =
+             call(vm, NervesGate.Storage, :setup, [:format, storage.().card_id, :erase_all_data])
+
+    await(fn -> storage.().operation == nil end, 1_300)
+    assert storage.().error == nil
+    assert storage.().ready
+    refute call(vm, File, :exists?, [marker])
   end
 
   defp selection(vm) do

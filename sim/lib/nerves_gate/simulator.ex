@@ -420,12 +420,15 @@ defmodule NervesGate.Simulator do
     NervesGateSim.Prerequisites.check!()
 
     if project = config[:firmware_project] do
-      {_, status} =
-        MuonTrap.cmd("mix", ["firmware", "--overwrite"],
-          cd: project,
-          env: [{"MIX_TARGET", "x86_64"}, {"MIX_ENV", "dev"}, {"NERVES_GATE_DEVICE_NODE", nil}],
-          into: BuildOutput.new(report),
-          stderr_to_stdout: true
+      status =
+        BuildOutput.run(
+          "mix",
+          ["firmware", "--overwrite"],
+          [
+            cd: project,
+            env: [{"MIX_TARGET", "x86_64"}, {"MIX_ENV", "dev"}, {"NERVES_GATE_DEVICE_NODE", nil}]
+          ],
+          report
         )
 
       if status != 0 do
