@@ -101,15 +101,23 @@ defmodule NervesGate.Simulator.Qemu do
   def await_boot(vm) do
     node = vm.node
 
+    Process.delete(:qemu_status_error)
+
     poll(vm, "device boot", 180_000, fn ->
       match?(%{system: %{target: "x86_64", node: ^node}}, status(vm))
     end)
+  rescue
+    error in RuntimeError ->
+      reason = inspect(Process.get(:qemu_status_error))
+      reraise "#{error.message}; last status error: #{reason}", __STACKTRACE__
   end
 
   def status(vm) do
     :erpc.call(vm.node, NervesGate, :status, [], 2000)
   catch
-    :error, {:erpc, _} -> nil
+    :error, {:erpc, reason} ->
+      Process.put(:qemu_status_error, reason)
+      nil
   end
 
   def network(vm, patch) do
