@@ -1,7 +1,7 @@
 defmodule NervesGate.Simulator do
   @moduledoc "Host-only lifecycle owner of disposable QEMU devices. No devices start with this server."
   use GenServer
-  alias NervesGate.Simulator.{Device, Qemu}
+  alias NervesGate.Simulator.{BuildOutput, Device, Qemu}
 
   @config_header """
   # Ordinary data, not a scenario DSL. The simulator site edits the devices and
@@ -55,6 +55,7 @@ defmodule NervesGate.Simulator do
       phase: "Simulator empty. Start configured devices to build firmware and boot.",
       devices: device_views(config),
       progress: %{},
+      output: nil,
       reset_required: false,
       prepared: false
     }
@@ -66,6 +67,7 @@ defmodule NervesGate.Simulator do
        devices: %{},
        supervisor: nil,
        worker: nil,
+       output_timer: nil,
        token: nil,
        subscriber: nil,
        prepared: false
@@ -91,7 +93,7 @@ defmodule NervesGate.Simulator do
 
     worker =
       spawn_worker(fn ->
-        unless prepared, do: build!(config)
+        unless prepared, do: build!(config, &send(owner, {:output, token, &1}))
 
         phase =
           if prepared, do: "Booting preserved devices", else: "Bootstrapping configured devices"
@@ -115,12 +117,15 @@ defmodule NervesGate.Simulator do
         send(owner, {:started, token, handles})
       end)
 
-    view = %{
-      state.view
-      | status: :starting,
-        progress: %{},
-        phase: if(prepared, do: "Resuming preserved disks", else: "Building shared firmware")
-    }
+    # Map.put: code reload can leave a running simulator with a view from before :output.
+    view =
+      %{
+        state.view
+        | status: :starting,
+          progress: %{},
+          phase: if(prepared, do: "Resuming preserved disks", else: "Building shared firmware")
+      }
+      |> Map.put(:output, nil)
 
     {:reply, :ok,
      publish(%{state | view: view, supervisor: supervisor, worker: worker, token: token})}
@@ -167,8 +172,19 @@ defmodule NervesGate.Simulator do
        state}
 
   @impl true
-  def handle_info({:phase, token, phase}, %{token: token} = state),
-    do: {:noreply, publish(%{state | view: %{state.view | phase: phase}})}
+  def handle_info({:phase, token, phase}, %{token: token} = state) do
+    state = cancel_output_timer(state)
+    {:noreply, publish(%{state | view: Map.put(%{state.view | phase: phase}, :output, nil)})}
+  end
+
+  # Keep the latest line even before publishing, so failure cleanup preserves it.
+  def handle_info({:output, token, line}, %{token: token} = state) do
+    timer = state.output_timer || :erlang.start_timer(250, self(), :build_output)
+    {:noreply, %{state | view: Map.put(state.view, :output, line), output_timer: timer}}
+  end
+
+  def handle_info({:timeout, timer, :build_output}, %{output_timer: timer} = state),
+    do: {:noreply, publish(%{state | output_timer: nil})}
 
   def handle_info(
         {:device_phase, token, id, phase},
@@ -260,6 +276,7 @@ defmodule NervesGate.Simulator do
     }
 
   defp cleanup(state, result, reset?) do
+    state = cancel_output_timer(state)
     kill_worker(state)
     token = make_ref()
     owner = self()
@@ -311,6 +328,11 @@ defmodule NervesGate.Simulator do
   defp kill_worker(%{worker: {pid, _}} = state) do
     clear_worker(state)
     Process.exit(pid, :kill)
+  end
+
+  defp cancel_output_timer(state) do
+    if state.output_timer, do: Process.cancel_timer(state.output_timer)
+    %{state | output_timer: nil}
   end
 
   defp publish(state) do
@@ -394,7 +416,7 @@ defmodule NervesGate.Simulator do
     end)
   end
 
-  defp build!(config) do
+  defp build!(config, report) do
     NervesGateSim.Prerequisites.check!()
 
     if project = config[:firmware_project] do
@@ -402,7 +424,7 @@ defmodule NervesGate.Simulator do
         MuonTrap.cmd("mix", ["firmware", "--overwrite"],
           cd: project,
           env: [{"MIX_TARGET", "x86_64"}, {"MIX_ENV", "dev"}, {"NERVES_GATE_DEVICE_NODE", nil}],
-          into: IO.stream(),
+          into: BuildOutput.new(report),
           stderr_to_stdout: true
         )
 

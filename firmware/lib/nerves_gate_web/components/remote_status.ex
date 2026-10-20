@@ -27,19 +27,15 @@ defmodule NervesGateWeb.RemoteStatus do
         <.setting_row label="Device name">
           <code>{if @remote.hostname in [nil, ""], do: "Not set", else: @remote.hostname}</code>
         </.setting_row>
-        <.setting_row label="Tailscale address">
-          <code>{@remote.ipv4 || "Not assigned"}</code>
+        <.setting_row :if={@remote.ipv4} label="Tailscale address">
+          <code>{@remote.ipv4}</code>
         </.setting_row>
-        <.setting_row label="DNS name">
-          <code>{@remote.dns_name || "Not assigned"}</code>
+        <.setting_row :if={@remote.dns_name} label="DNS name">
+          <code>{@remote.dns_name}</code>
         </.setting_row>
         <.setting_row label="Tailscale version">{@remote.version || "Unknown"}</.setting_row>
-        <.setting_row label="Advertised routes">
-          {case @remote.advertised_routes do
-            nil -> "Unknown"
-            [] -> "None"
-            routes -> Enum.join(routes, ", ")
-          end}
+        <.setting_row :if={@remote.advertised_routes not in [nil, []]} label="Advertised routes">
+          {Enum.join(@remote.advertised_routes, ", ")}
         </.setting_row>
       </div>
       <p :for={warning <- @remote.health} class="ui-help">{warning}</p>

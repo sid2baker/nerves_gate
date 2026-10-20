@@ -31,7 +31,7 @@ defmodule NervesGateWeb.DistributionLive do
 
   def render(assigns) do
     ~H"""
-    <.link navigate="/" class="ui-text-link">Back to Overview</.link>
+    <.back_link navigate="/">Overview</.back_link>
     <.page_header
       title="Erlang distribution"
       description="Connect directly to this gateway’s runtime."

@@ -170,7 +170,7 @@ defmodule NervesGateWeb.LanLive do
       )
 
     ~H"""
-    <.link navigate="/equipment" class="ui-text-link">Back to Equipment</.link>
+    <.back_link navigate="/equipment">Equipment</.back_link>
     <.page_header title={port_label(@name)} description="Local equipment connection." />
     <.notice :if={@projection.network.observed && @projection.network.observed.simulated}>
       Preview mode · simulated connections

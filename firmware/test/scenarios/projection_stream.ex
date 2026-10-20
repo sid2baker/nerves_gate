@@ -176,15 +176,17 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   def assert_bench_controls(vm) do
     bench = put_in(NervesGate.QemuTests.snapshot(), [:devices, vm.id, :owner], :manual)
 
+    id = Atom.to_string(vm.id)
+
     page =
       %{
         __changed__: nil,
         projection: NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node}).status,
-        bench: bench,
-        id: Atom.to_string(vm.id),
+        id: id,
         error: nil,
         confirm_run: nil
       }
+      |> Map.merge(NervesGateWeb.Simulator.DeviceLive.bench_assigns(bench, id))
       |> NervesGateWeb.Simulator.DeviceLive.render()
       |> Phoenix.HTML.Safe.to_iodata()
       |> IO.iodata_to_binary()
@@ -432,7 +434,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   # forward. That peer is not USB and must never count as USB management access.
   # The device serves the release UI; it has no development pages.
   defp assert_http_pages(vm) do
-    device = Req.new(base_url: "http://#{vm.address}:#{vm.forwards.http}", retry: false)
+    device = Req.new(base_url: Qemu.ui_url(vm), retry: false)
     assert Req.get!(device, url: "/tests").status == 404
 
     for path <- [

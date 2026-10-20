@@ -39,7 +39,8 @@ sudo apt install git build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu
 
 On Apple Silicon, use an arm64 Ubuntu [OrbStack](https://orbstack.dev) machine
 (`orb create --arch arm64 ubuntu nerves-gate`) with fwup's arm64 package, and clone
-inside the Linux filesystem. OrbStack forwards localhost:4000 to the Mac. Avoid
+inside the Linux filesystem. OrbStack forwards localhost:4000 and the Gateway UI links
+to the Mac. Avoid
 amd64/Rosetta machines: the BEAM JIT fails there.
 
 Normal setup needs neither Docker nor privileged networking. Docker is needed only
@@ -237,7 +238,8 @@ device IDs determine serials and management addresses. Keep the default two
 unprovisioned devices for the full suite.
 
 Each device gets its own disk, SD card, relay, QEMU process (1 GiB RAM), serial and
-`127.0.0.N` management address. Optional settings:
+`127.0.0.N` management address. Its Gateway UI link uses a random port on 127.0.0.1.
+Optional settings:
 
 - `factory_firmware`: compatible factory artifact; defaults to `firmware`.
 - Per-device `provision: %{ssh_keys: [public_key_line], network: settings}`, applied
@@ -289,7 +291,7 @@ Useful focused checks:
 | `sdk` | Typed SDK observations, caller-owned subscriptions and unavailable buses |
 | `system_artifact` | System version, firmware validation, USB/hostname contract, data mount and release contracts |
 | `frontend_assets` | Host/firmware assets, CSP, CSRF and development tooling boundaries |
-| `test_bench` | Configuration, reservations and manual cleanup |
+| `test_bench` | Build progress, configuration, reservations and manual cleanup |
 | `process_crash` | Gateway process restarts, restart scope, saved settings and fresh local HTTP |
 | `restart_intensity` | Four rapid crashes exhaust supervision; firmware reboots without harness rescue |
 | `alarm_recovery` | Two-second debounce, immediate critical alarms, timer preservation and clearing after owner restart |

@@ -1,7 +1,9 @@
 defmodule NervesGateWeb.Layouts do
   use Phoenix.Component
   import Phoenix.Controller, only: [get_csrf_token: 0]
-  import NervesGateWeb.CoreComponents, only: [icon: 1, notice: 1, notifications: 1]
+
+  import NervesGateWeb.CoreComponents,
+    only: [icon: 1, notice: 1, notifications: 1, theme_toggle: 1]
 
   def root(assigns) do
     ~H"""
@@ -14,6 +16,25 @@ defmodule NervesGateWeb.Layouts do
         <title>Nerves Gate</title>
         <link phx-track-static rel="stylesheet" href="/assets/css/app.css" />
         <script phx-track-static type="module" src="/assets/js/app.js">
+        </script>
+        <%!-- Phoenix's generated theme switcher: system unless chosen, shared across tabs. --%>
+        <script>
+          (() => {
+            const setTheme = (theme) => {
+              if (theme === "system") {
+                localStorage.removeItem("phx:theme");
+                document.documentElement.removeAttribute("data-theme");
+              } else {
+                localStorage.setItem("phx:theme", theme);
+                document.documentElement.setAttribute("data-theme", theme);
+              }
+            };
+            if (!document.documentElement.hasAttribute("data-theme")) {
+              setTheme(localStorage.getItem("phx:theme") || "system");
+            }
+            window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
+            window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
+          })();
         </script>
       </head>
       <body>{@inner_content}</body>
@@ -28,14 +49,17 @@ defmodule NervesGateWeb.Layouts do
     <a href="#main-content" class="ui-skip-link">Skip to content</a>
     <header class="ui-header">
       <.link navigate="/" class="ui-brand"><.icon name="network" />Nerves Gate</.link>
-      <nav aria-label="Main navigation" class="ui-navigation">
-        <.link navigate="/" aria-current={if @section == :overview, do: "page"}>Overview</.link>
-        <.link navigate="/equipment" aria-current={if @section == :equipment, do: "page"}>Equipment</.link>
-        <.link
-          navigate="/settings"
-          aria-current={if @section == :settings, do: "page"}
-        >Settings</.link>
-      </nav>
+      <div class="ui-header-end">
+        <nav aria-label="Main navigation" class="ui-navigation">
+          <.link navigate="/" aria-current={if @section == :overview, do: "page"}>Overview</.link>
+          <.link navigate="/equipment" aria-current={if @section == :equipment, do: "page"}>Equipment</.link>
+          <.link
+            navigate="/settings"
+            aria-current={if @section == :settings, do: "page"}
+          >Settings</.link>
+        </nav>
+        <.theme_toggle />
+      </div>
     </header>
     <main id="main-content" class="ui-main ui-stack" tabindex="-1">
       <div class="ui-disconnected">

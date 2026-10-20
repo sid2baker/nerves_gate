@@ -8,7 +8,7 @@ defmodule NervesGateWeb.NetworkLive do
 
   def render(assigns) do
     ~H"""
-    <.link navigate="/" class="ui-text-link">Back to Overview</.link>
+    <.back_link navigate="/">Overview</.back_link>
     <.page_header
       title="Internet"
       description="Choose your Internet source. USB stays independent for recovery."

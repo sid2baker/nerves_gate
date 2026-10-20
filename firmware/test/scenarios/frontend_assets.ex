@@ -33,7 +33,7 @@ defmodule NervesGate.Scenarios.FrontendAssets do
 
     firmware =
       Req.new(
-        base_url: "http://#{vm.address}:#{vm.forwards.http}",
+        base_url: Qemu.ui_url(vm),
         headers: [connection: "close"],
         retry: false
       )
@@ -191,7 +191,7 @@ defmodule NervesGate.Scenarios.FrontendAssets do
     assert [_] = Floki.find(device, "#test-results")
 
     assert Floki.attribute(device, "#device-ui-link", "href") ==
-             ["http://#{vm.address}:#{vm.forwards.http}"]
+             [Qemu.ui_url(vm)]
 
     assert Floki.text(device) =~ "mix dev.ui #{vm.id}"
   end

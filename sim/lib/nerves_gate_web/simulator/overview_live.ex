@@ -40,8 +40,9 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
       <.page_header
         eyebrow="Development · owned QEMU only"
         title="Device simulator"
-        description="Configure and start disposable gateways, then test each one on its own page."
-      />
+      >
+        <:actions><.theme_toggle /></:actions>
+      </.page_header>
       <div class="ui-disconnected">
         <.notice tone="warning" role="alert">
           Connection to the simulator lost. Observations may be stale; connections and faults remain active.
@@ -59,32 +60,38 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
 
       <.panel title="Lifecycle" icon="settings" id="simulator-lifecycle">
         <p role="status" aria-live="polite" id="simulator-phase">{@bench.lifecycle.phase}</p>
-        <ul :if={@bench.lifecycle.progress != %{}} class="ui-help" id="device-progress">
-          <li :for={{id, phase} <- Enum.sort(@bench.lifecycle.progress)}>{id}: {phase}</li>
-        </ul>
+        <div :if={@bench.lifecycle.status in [:starting, :stopping]} class="ui-progress"></div>
+        <code
+          :if={@bench.lifecycle[:output] && @bench.lifecycle.status in [:starting, :failed]}
+          class="bench-output"
+          id="build-output"
+          title={@bench.lifecycle[:output]}
+        >{@bench.lifecycle[:output]}</code>
         <div class="ui-actions">
           <.button
             id="start-devices"
             phx-click="lifecycle"
             phx-value-action="start"
+            loading={@bench.lifecycle.status == :starting}
             disabled={
               @bench.lifecycle.status != :stopped || @bench.lifecycle.reset_required ||
                 @bench.blocked
             }
           >
-            Start devices
+            {if @bench.lifecycle.status == :starting, do: "Starting…", else: "Start devices"}
           </.button>
           <.button
             id="stop-devices"
             variant="secondary"
             phx-click="lifecycle"
             phx-value-action="stop"
+            loading={@bench.lifecycle.status == :stopping}
             disabled={
               @bench.lifecycle.status not in [:starting, :ready] ||
                 (@bench.lifecycle.status == :ready && (@bench.blocked || held?(@bench)))
             }
           >
-            Stop · preserve disks
+            {if @bench.lifecycle.status == :stopping, do: "Stopping…", else: "Stop"}
           </.button>
           <.button
             id="reset-devices"
@@ -92,12 +99,11 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
             phx-click="prepare_reset"
             disabled={@bench.lifecycle.status not in [:stopped, :ready, :failed] || held?(@bench)}
           >
-            Reset · erase disks
+            Reset…
           </.button>
         </div>
         <p class="ui-help">
-          Start builds one shared firmware image and bootstraps every device. Stop is a power-off
-          and preserves disks; interrupted startup requires Reset. Device-code changes require Reset and Start.
+          Stop keeps disks; Reset erases them. Device-code changes need Reset, then Start.
         </p>
         <.notice :if={@confirm_reset} tone="warning" id="confirm-reset" role="alert">
           <p>Erase every device's disk and enrollment? This cannot be undone.</p>
@@ -110,28 +116,26 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
         </.notice>
       </.panel>
 
-      <.panel
-        title="Devices"
-        description="Each device runs the release firmware and serves its own gateway UI"
-        icon="network"
-        id="simulator-devices"
-      >
+      <.panel title="Devices" icon="network" id="simulator-devices">
         <div class="ui-settings-list">
-          <.setting_row
+          <div
             :for={config <- @bench.lifecycle.devices}
-            label={to_string(config.id)}
-            description={"#{config.node} · #{device_state(@bench, config.id)}"}
+            :key={config.id}
+            class="ui-setting-row bench-device"
+            id={"device-#{config.id}"}
           >
-            <div class="ui-actions" id={"device-#{config.id}"}>
-              <.link navigate={"/devices/#{config.id}"} class="ui-text-link">Tests</.link>
-              <a
-                :if={@bench.devices[config.id]}
-                href={@bench.devices[config.id].ui}
-                target="_blank"
-                rel="noreferrer"
-                class="ui-text-link"
-              >Gateway UI</a>
-              <div class="ui-actions" role="group" aria-label={"#{config.id} Internet wiring"}>
+            <div>
+              <h3>
+                <.link navigate={"/devices/#{config.id}"}>{config.id}</.link>
+              </h3>
+              <p class="ui-muted">{config.node}</p>
+            </div>
+            <div class="ui-setting-value">
+              <.status tone={device_tone(@bench, config.id)}>
+                {device_state(@bench, config.id)}
+              </.status>
+              <span class="ui-help" id={"wiring-label-#{config.id}"}>Internet</span>
+              <div class="ui-segmented" role="group" aria-labelledby={"wiring-label-#{config.id}"}>
                 <.button
                   :for={port <- [:lan1, :lan2]}
                   id={"wiring-#{config.id}-#{port}"}
@@ -141,50 +145,56 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
                   phx-value-internet={port}
                   aria-pressed={to_string(config.internet == port)}
                   disabled={@bench.lifecycle.status != :stopped || @bench.lifecycle.reset_required}
-                >Internet on {String.upcase(to_string(port))}</.button>
+                >{port_label(port)}</.button>
               </div>
-              <.button
-                id={"remove-#{config.id}"}
-                variant="quiet"
-                phx-click="remove"
-                phx-value-device={config.id}
-                disabled={!addable?(@bench) || length(@bench.lifecycle.devices) == 1}
-              >Remove</.button>
+              <.menu id={"device-menu-#{config.id}"} label={"#{config.id} actions"}>
+                <.button
+                  :if={@bench.devices[config.id]}
+                  href={@bench.devices[config.id].ui}
+                  target="_blank"
+                  rel="noreferrer"
+                  variant="quiet"
+                  icon="external"
+                >Gateway UI</.button>
+                <.button
+                  id={"remove-#{config.id}"}
+                  variant="danger"
+                  phx-click="remove"
+                  phx-value-device={config.id}
+                  disabled={!addable?(@bench) || length(@bench.lifecycle.devices) == 1}
+                >Remove</.button>
+              </.menu>
             </div>
-          </.setting_row>
+          </div>
         </div>
-        <form id="add-device" phx-submit="add" class="ui-actions">
+        <form id="add-device" phx-submit="add" class="bench-add">
           <input
             type="text"
             name="device[id]"
             aria-label="New device name"
-            placeholder="gateway_c"
+            placeholder="New device, e.g. gateway_c"
             pattern="[a-z][a-z0-9_]{0,31}"
+            title="Lowercase letters, digits and underscores, starting with a letter"
             required
+            autocomplete="off"
             disabled={!addable?(@bench)}
           />
-          <select name="device[internet]" aria-label="Internet wiring" disabled={!addable?(@bench)}>
-            <option value="lan1">Internet on LAN1</option>
-            <option value="lan2">Internet on LAN2</option>
+          <select name="device[internet]" aria-label="Internet port" disabled={!addable?(@bench)}>
+            <option value="lan1">Internet on {port_label(:lan1)}</option>
+            <option value="lan2">Internet on {port_label(:lan2)}</option>
           </select>
           <.button type="submit" variant="secondary" disabled={!addable?(@bench)}>Add device</.button>
         </form>
         <p class="ui-help">
-          Configuration is saved to the simulator file. Wiring applies at the next Start; scenarios
-          move the Internet to LAN1. Adding or removing devices changes their addresses and needs Reset first.
+          Wiring applies at the next Start. Adding or removing devices needs Reset first.
         </p>
       </.panel>
 
       <div class="bench-workspace">
-        <.panel
-          title="Runs"
-          description="Active runs and the latest 20 completed runs across all devices"
-          icon="check"
-          id="simulator-runs"
-        >
-          <p :if={@bench.runs == []} class="ui-help">No runs yet. Open a device to run scenarios.</p>
+        <.panel title="Runs" icon="check" id="simulator-runs">
+          <p :if={@bench.runs == []} class="ui-help">No runs yet.</p>
           <ul class="bench-scenarios" id="runs">
-            <li :for={run <- @bench.runs} id={"run-#{run.id}"}>
+            <li :for={run <- @bench.runs} :key={run.id} id={"run-#{run.id}"}>
               <div class="bench-scenario-heading">
                 <div>
                   <h3>Run #{run.id} · {run.selection}</h3>
@@ -199,12 +209,7 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
             </li>
           </ul>
         </.panel>
-        <.panel
-          title="Action log"
-          description="Last 100 actions and runner events · oldest first · UTC"
-          icon="clock"
-          id="bench-events"
-        >
+        <.panel title="Action log" description="UTC" icon="clock" id="bench-events">
           <p :if={@bench.events == []} class="ui-help">No actions yet.</p>
           <ol
             class="bench-log"
@@ -213,7 +218,7 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
             tabindex="0"
             aria-label="Chronological simulator events"
           >
-            <li :for={event <- @bench.events} id={"event-#{event.id}"}>
+            <li :for={event <- @bench.events} :key={event.id} id={"event-#{event.id}"}>
               <time datetime={event.at}>{String.slice(event.at, 11, 8)}</time>
               <span>{event.message}</span>
             </li>
@@ -222,8 +227,8 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
       </div>
       <footer class="ui-help">
         <p>
-          CLI: <code>mix test.firmware --only cable_loss --device gateway_a</code>
-          · gateway UI with code reload: <code>mix dev.ui gateway_a</code>
+          CLI: <code>mix test.firmware --only cable_loss --device {example_device(@bench)}</code>
+          · gateway UI with code reload: <code>mix dev.ui {example_device(@bench)}</code>
           · diagnostics: <code>_build/qemu-tests/</code>
         </p>
       </footer>
@@ -240,15 +245,33 @@ defmodule NervesGateWeb.Simulator.OverviewLive do
 
   defp device_state(bench, id) do
     case bench.devices[id] do
-      nil -> to_string(bench.lifecycle.status)
-      %{blocked: true} -> "blocked · Reset required"
-      %{owner: :manual} -> "manual control"
-      %{owner: nil} -> "ready"
-      %{owner: run} -> "run ##{run}"
+      nil -> bench.lifecycle.progress[id] || String.capitalize(to_string(bench.lifecycle.status))
+      %{blocked: true} -> "Blocked · Reset required"
+      %{owner: :manual} -> "Manual control"
+      %{owner: nil} -> "Ready"
+      %{owner: run} -> "Run ##{run}"
     end
   end
 
+  defp device_tone(bench, id) do
+    case bench.devices[id] do
+      nil when bench.lifecycle.status in [:starting, :stopping] -> "busy"
+      %{blocked: true} -> "warning"
+      %{owner: nil} -> "good"
+      %{owner: run} when is_integer(run) -> "busy"
+      %{manual_action: action} when action != nil -> "busy"
+      _ -> "neutral"
+    end
+  end
+
+  defp example_device(%{lifecycle: %{devices: [config | _]}}), do: config.id
+  defp example_device(_), do: "gateway_a"
+
+  def port_label(:lan1), do: "LAN1"
+  def port_label(:lan2), do: "LAN2"
+
   def result_tone(:passed), do: "good"
   def result_tone(:failed), do: "warning"
+  def result_tone(:running), do: "busy"
   def result_tone(_), do: "neutral"
 end

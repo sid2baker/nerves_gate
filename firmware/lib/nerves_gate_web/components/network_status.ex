@@ -121,8 +121,8 @@ defmodule NervesGateWeb.NetworkStatus do
   end
 
   def port_label(_), do: "Ethernet"
-  defp role_label("internet"), do: "Internet"
-  defp role_label("equipment"), do: "Equipment"
-  defp role_label("shared"), do: "Shared network"
-  defp role_label(_), do: "Unassigned"
+  def role_label("internet"), do: "Internet"
+  def role_label("equipment"), do: "Equipment"
+  def role_label("shared"), do: "Shared network"
+  def role_label(_), do: "Unassigned"
 end
