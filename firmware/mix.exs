@@ -96,6 +96,22 @@ defmodule NervesGate.MixProject do
     {app, requirement, options}
   end
 
+  defp system_dependency(app, version, target) do
+    source = "systems/#{app}"
+
+    tag =
+      app |> Atom.to_string() |> String.replace_prefix("nerves_", "") |> String.replace("_", "-")
+
+    options =
+      if System.get_env("NERVES_GATE_LOCAL_DEPS") == "1" do
+        [path: "../#{source}"]
+      else
+        [github: "sid2baker/nerves_gate", tag: "#{tag}/v#{version}", subdir: source]
+      end
+
+    {app, version, options ++ [runtime: false, targets: target]}
+  end
+
   defp deps do
     [
       # Optional host tools: the simulator declares them to serve this UI with
@@ -136,17 +152,8 @@ defmodule NervesGate.MixProject do
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
       local_dependency(:nerves_gate_sdk, "~> 1.0", "../sdk", []),
-      local_dependency(:nerves_system_ec100, "~> 0.2", "../systems/nerves_system_ec100",
-        runtime: false,
-        targets: :ec100
-      ),
-      local_dependency(
-        :nerves_system_ec100_qemu,
-        "~> 0.2.1",
-        "../systems/nerves_system_ec100_qemu",
-        runtime: false,
-        targets: :x86_64
-      )
+      system_dependency(:nerves_system_ec100, "0.2.1", :ec100),
+      system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)
     ]
   end
 end

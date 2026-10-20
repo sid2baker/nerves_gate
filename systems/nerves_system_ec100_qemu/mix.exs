@@ -31,7 +31,7 @@ defmodule NervesSystemEC100Qemu.MixProject do
     [
       type: :system,
       artifact_sites: [
-        {:github_releases, "sid2baker/nerves_gate", tag: "ec100-qemu-v#{@version}"}
+        {:github_releases, "sid2baker/nerves_gate", tag: "system-ec100-qemu/v#{@version}"}
       ],
       platform: Nerves.System.BR,
       platform_config: [defconfig: "nerves_defconfig"],

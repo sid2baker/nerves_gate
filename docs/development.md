@@ -421,14 +421,26 @@ Internet outages fail checks. See the
 - Distribution conflict: free port 9100 on the device's loopback address. The
   launcher never stops other processes.
 
-## Maintaining the QEMU system
+## System artifacts
 
-`systems/nerves_system_ec100_qemu/` supplies the `x86_64` system artifact.
+Both systems live in this repository. Firmware consumes their source with Git
+subdirectory dependencies pinned to `system-ec100/v<VERSION>` or
+`system-ec100-qemu/v<VERSION>`. Their `artifact_sites` download fingerprinted
+binaries from GitHub Releases in `sid2baker/nerves_gate`; no system Hex packages
+are needed. `NERVES_GATE_LOCAL_DEPS=1` selects the checked-out system sources.
 
-1. For build-input changes, bump its `VERSION` and add a dated changelog section.
+1. For build-input changes, bump the system's `VERSION`, update firmware's pinned
+   dependency in `firmware/mix.exs`, and add a dated changelog section.
 2. Align system dependencies in its `mix.lock` and `firmware/mix.lock`.
-3. Push to `main`. The system workflow publishes and verifies the artifact before
-   simulator CI uses it.
+3. Push to `main`. CI detects each system directory independently and calls
+   `.github/workflows/system-artifact.yml`. It builds the system, creates the
+   namespaced tag, publishes the artifact, and verifies a fresh download. QEMU
+   tests wait for the QEMU artifact; EC100 publication runs independently.
+
+EC100 publication includes the corresponding-source archive and `SHA256SUMS`.
+The publisher verifies all required assets and hashes before making a draft
+public. Manual dispatch selects `ec100` or `x86_64` and can resume a release.
+Release title is exactly the tag; notes are exactly the dated changelog body.
 
 The release tag is read from the system's `artifact_sites`, so downloads and
 publication agree. Published tags and assets are immutable; matching releases are
@@ -446,19 +458,24 @@ mix nerves.artifact.build nerves_system_ec100_qemu
 elixir -r dev/artifact_release.ex -S mix nerves.artifact.release plan
 ```
 
-After changing the system, Reset and Start devices and run
-`mix test.firmware --only system_artifact`.
+For EC100, select `MIX_TARGET=ec100` and build `nerves_system_ec100` instead;
+collect its sources with
+`elixir -r ../systems/nerves_system_ec100/lib/mix/tasks/ec100.release.ex -S mix ec100.release`.
+Neither command flashes hardware. Local `plan` is read-only and never publishes.
+
+After changing the QEMU system, the operator resets and starts devices and runs
+`mix test.firmware --only system_artifact` against the new system. Release metadata
+and immutability checks also run as ordinary simulator unit tests.
 
 ## Package releases
 
-Each project has its own `VERSION`, `CHANGELOG.md` and Hex metadata, with
-namespaced tags: `firmware/vX.Y.Z`, `sdk/vX.Y.Z`, `sim/vX.Y.Z`, `new/vX.Y.Z`,
-`system-ec100/vX.Y.Z` and `system-ec100-qemu/vX.Y.Z`. Path dependencies exist only
-with `NERVES_GATE_LOCAL_DEPS=1`; without it, packages depend on published Hex
-versions, so publish in dependency order (SDK, systems, firmware, simulator,
-generator). Already-published system artifacts keep their original tags
-(`ec100-qemu-v*`, and `v*` in `sid2baker/nerves_system_ec100`); switching a
-system's `artifact_sites` to its namespaced tag is part of its next version bump.
+Each project has its own `VERSION` and `CHANGELOG.md`, with namespaced tags:
+`firmware/vX.Y.Z`, `sdk/vX.Y.Z`, `sim/vX.Y.Z`, `new/vX.Y.Z`,
+`system-ec100/vX.Y.Z` and `system-ec100-qemu/vX.Y.Z`. Systems use Git source
+packages and GitHub binary releases, not Hex. Other packages consume Hex
+dependencies unless `NERVES_GATE_LOCAL_DEPS=1` selects repository-local paths.
+Publish SDK before firmware, then simulator and generator tooling. System
+artifacts must be published before firmware builds can download them.
 
 ## CI
 
@@ -466,11 +483,11 @@ system's `artifact_sites` to its namespaced tag is part of its next version bump
 then runs `mix setup`, the root `mix ci` quality gates and
 `mix test.firmware --ci` on disposable GitHub-hosted Ubuntu runners: it builds
 firmware, bootstraps both default devices, runs the shared scenarios and uploads
-only diagnostic `.log` files (14 days). Main-branch QEMU system changes first run
-`.github/workflows/ec100-qemu-system.yml`, which publishes with trusted main code;
-PRs cannot publish. Setup fails if a required artifact is unpublished.
-`.github/workflows/system-ec100.yml` builds the EC100 system and creates a draft
-release for `system-ec100/v*` tags.
+only diagnostic `.log` files (14 days). Main-branch system changes invoke the
+shared `.github/workflows/system-artifact.yml` for each changed target; PRs
+cannot publish. QEMU setup waits for its system release and fails if a required
+artifact is unpublished. EC100 source and binary assets publish through the same
+immutable release process.
 
 For an operator-owned standalone run, stop the development session first:
 

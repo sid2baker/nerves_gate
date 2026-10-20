@@ -39,39 +39,37 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       system: ${{ steps.changes.outputs.system }}
+      ec100: ${{ steps.changes.outputs.ec100 }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - name: Detect QEMU system changes
+      - uses: jdx/mise-action@v5
+      - name: Detect system changes
         id: changes
         env:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BASE_SHA: ${{ github.event.before }}
-        run: |
-          case "$EVENT_NAME" in
-            pull_request) base="$PR_BASE_SHA" ;;
-            push) base="$PUSH_BASE_SHA" ;;
-            *) base=HEAD ;;
-          esac
-          if [ "$base" = 0000000000000000000000000000000000000000 ]; then
-            echo 'system=true' >> "$GITHUB_OUTPUT"
-          else
-            git diff --name-only "$base" HEAD -- systems/nerves_system_ec100_qemu/ > "$RUNNER_TEMP/system-changes"
-            if [ -s "$RUNNER_TEMP/system-changes" ]; then
-              echo 'system=true' >> "$GITHUB_OUTPUT"
-            else
-              echo 'system=false' >> "$GITHUB_OUTPUT"
-            fi
-          fi
+        run: mise exec -- elixir .github/scripts/system_changes.exs
 
   system:
     needs: changes
     if: github.event_name == 'push' && needs.changes.outputs.system == 'true'
     permissions:
       contents: write
-    uses: ./.github/workflows/ec100-qemu-system.yml
+    uses: ./.github/workflows/system-artifact.yml
+    with:
+      target: x86_64
+
+  system_ec100:
+    needs: changes
+    if: github.event_name == 'push' && needs.changes.outputs.ec100 == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/system-artifact.yml
+    with:
+      target: ec100
 
   qemu:
     needs: [changes, system]

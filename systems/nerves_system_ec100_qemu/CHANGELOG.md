@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.2 - 2026-10-20
+
+### Changed
+
+- System sources and prebuilt artifacts use the monorepo release tag
+  `system-ec100-qemu/v0.2.2`; older releases retain their `ec100-qemu-v*` tags.
+
 ## 0.2.1 - 2026-10-17
 
 ### Fixed

@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Nerves.Artifact.Release do
   @moduledoc """
-  Release tooling for the EC100 QEMU system, without compiling gateway firmware.
+  Release tooling for both systems, without compiling gateway firmware.
 
   Preload this host-only task so Nerves can run it before resolving artifacts:
 
@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   @compile {:no_warn_undefined, [Nerves, Nerves.Artifact.Archive]}
 
   @repo "sid2baker/nerves_gate"
-  @app :nerves_system_ec100_qemu
+  @systems [ec100: :nerves_system_ec100, x86_64: :nerves_system_ec100_qemu]
   @notes_path "_build/system-release/notes.md"
 
   @impl true
@@ -45,7 +45,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     unless System.get_env("GITHUB_ACTIONS") == "true" and
              System.get_env("GITHUB_REPOSITORY") == @repo and
              System.get_env("GITHUB_REF") == "refs/heads/main" do
-      Mix.raise("Publication is restricted to the main-branch EC100 QEMU system workflow.")
+      Mix.raise("Publication is restricted to the main-branch system workflow.")
     end
 
     info = metadata!()
@@ -62,11 +62,9 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   def run(_), do: Mix.raise("Usage: nerves.artifact.release plan | check | publish")
 
   defp metadata! do
-    unless Mix.target() == :x86_64,
-      do: Mix.raise("Use MIX_TARGET=x86_64 from the application root.")
-
-    package = Enum.find(Nerves.build_plan().packages, &(&1.app == @app))
-    unless package, do: Mix.raise("EC100 QEMU system is missing from the Nerves build plan.")
+    app = @systems[Mix.target()] || Mix.raise("Use MIX_TARGET=ec100 or x86_64 from firmware/.")
+    package = Enum.find(Nerves.build_plan().packages, &(&1.app == app))
+    unless package, do: Mix.raise("#{app} is missing from the Nerves build plan.")
     [download] = package.downloads
     notes = release_notes!(File.read!(Path.join(package.path, "CHANGELOG.md")), package.version)
 
@@ -74,6 +72,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       tag: tag!(download.sites),
       package: package,
       download: download,
+      assets: asset_names(package.app, download.filename),
       notes: notes
     }
   end
@@ -140,17 +139,17 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       release ->
         verify_release!(release, info)
 
-        case {release["draft"], asset(release, info)} do
-          {true, _} ->
+        cond do
+          release["draft"] ->
             ensure_pending_sources!(info)
             :draft
 
-          {false, %{"state" => "uploaded", "digest" => "sha256:" <> _}} ->
+          assets_uploaded?(release, info.assets) ->
             :published
 
-          _ ->
+          true ->
             Mix.raise(
-              "#{info.tag} has no matching artifact. Bump VERSION and add release notes for changed build inputs."
+              "#{info.tag} is missing required artifacts. Bump VERSION; never overwrite a published release."
             )
         end
     end
@@ -224,7 +223,8 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     archive = info.download.archive_path
     unless File.regular?(archive), do: Mix.raise("Build #{info.package.app} before publishing.")
     :ok = Nerves.Artifact.Archive.validate(archive)
-    digest = sha256(archive)
+    uploads = upload_paths!(info)
+    digests = Map.new(uploads, fn path -> {Path.basename(path), sha256(path)} end)
 
     unless tag_exists?(info.tag) do
       git!(["tag", info.tag, "HEAD"])
@@ -250,28 +250,34 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     end
 
     draft = await_release!(info.tag, "creation", fn _ -> true end)
-
-    case asset(draft, info) do
-      nil ->
-        gh!(["release", "upload", info.tag, archive])
-
-      %{"digest" => ^digest, "state" => "uploaded"} ->
-        :ok
-
-      _ ->
-        Mix.raise("The draft already contains different artifact bytes. Refusing to overwrite.")
-    end
-
-    uploaded =
-      await_release!(info.tag, "upload", &match?(%{"state" => "uploaded"}, asset(&1, info)))
-
-    unless asset(uploaded, info)["digest"] == digest,
-      do: Mix.raise("Uploaded artifact digest does not match the local build.")
-
+    upload_assets!(info, draft, uploads, digests)
     gh!(["release", "edit", info.tag, "--draft=false", "--latest=false"])
     await_release!(info.tag, "publication", &(&1["draft"] == false))
     unless release_state!(info) == :published, do: Mix.raise("Release verification failed.")
     Mix.shell().info("Published and verified #{info.tag}")
+  end
+
+  defp upload_assets!(info, draft, uploads, digests) do
+    # Validate every existing asset before uploading anything; resume only exact
+    # bytes, including EC100's source archive and checksum manifest.
+    for {name, digest} <- digests do
+      case asset(draft, name) do
+        nil -> :ok
+        %{"digest" => ^digest, "state" => "uploaded"} -> :ok
+        _ -> Mix.raise("The draft contains different bytes for #{name}. Refusing to overwrite.")
+      end
+    end
+
+    for path <- uploads, is_nil(asset(draft, Path.basename(path))) do
+      gh!(["release", "upload", info.tag, path])
+    end
+
+    uploaded = await_release!(info.tag, "upload", &assets_uploaded?(&1, info.assets))
+
+    for {name, digest} <- digests do
+      unless asset(uploaded, name)["digest"] == digest,
+        do: Mix.raise("Uploaded #{name} digest does not match the local build.")
+    end
   end
 
   defp sha256(path) do
@@ -285,8 +291,55 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     "sha256:" <> Base.encode16(:crypto.hash_final(hash), case: :lower)
   end
 
-  defp asset(release, info),
-    do: Enum.find(release["assets"], &(&1["name"] == info.download.filename))
+  @doc false
+  def asset_names(:nerves_system_ec100, filename) do
+    sources =
+      String.replace_prefix(
+        filename,
+        "nerves_system_ec100-portable-",
+        "nerves_system_ec100-sources-"
+      )
+
+    [filename, sources, "SHA256SUMS"]
+  end
+
+  def asset_names(:nerves_system_ec100_qemu, filename), do: [filename]
+
+  @doc false
+  def assets_uploaded?(release, names) do
+    Enum.all?(names, fn name ->
+      match?(%{"state" => "uploaded", "digest" => "sha256:" <> _}, asset(release, name))
+    end)
+  end
+
+  defp upload_paths!(info) do
+    paths =
+      if info.package.app == :nerves_system_ec100,
+        do: Enum.map(info.assets, &Path.expand("dist/#{&1}")),
+        else: [info.download.archive_path]
+
+    for path <- paths do
+      unless File.regular?(path), do: Mix.raise("Missing release asset #{path}")
+    end
+
+    if info.package.app == :nerves_system_ec100 do
+      [system, sources, checksums] = paths
+
+      expected =
+        Enum.map_join([system, sources], "\n", fn path ->
+          String.replace_prefix(sha256(path), "sha256:", "") <> "  " <> Path.basename(path)
+        end)
+
+      unless String.trim(File.read!(checksums)) == expected and
+               sha256(system) == sha256(info.download.archive_path),
+             do: Mix.raise("EC100 release assets or SHA256SUMS do not match the build.")
+    end
+
+    paths
+  end
+
+  defp asset(release, name),
+    do: Enum.find(release["assets"], &(&1["name"] == name))
 
   defp release(tag) do
     # The release-by-tag endpoint excludes drafts, including one just created.

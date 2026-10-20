@@ -1,0 +1,98 @@
+name: System artifact
+
+# Trusted main-branch sources only. CI calls this after system-directory changes;
+# manual dispatch can resume an interrupted release. Never overwrite a tag/asset.
+on:
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      target:
+        required: true
+        type: choice
+        options: [ec100, x86_64]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: system-release-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'sid2baker/nerves_gate' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: firmware
+    env:
+      MIX_TARGET: ${{ inputs.target }}
+      MIX_ENV: dev
+      NERVES_GATE_LOCAL_DEPS: '1'
+      NERVES_CONTAINER_TOOL: docker
+      GH_TOKEN: ${{ github.token }}
+      NERVES_DL_DIR: ${{ github.workspace }}/_build/system-release-${{ github.run_id }}-${{ inputs.target }}-${{ github.run_attempt }}/downloads
+      NERVES_ARTIFACTS_DIR: ${{ github.workspace }}/_build/system-release-${{ github.run_id }}-${{ inputs.target }}-${{ github.run_attempt }}/artifacts
+      NERVES_SYSTEM: ''
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Select system
+        run: |
+          case "$MIX_TARGET" in
+            ec100) echo 'SYSTEM_APP=nerves_system_ec100' >> "$GITHUB_ENV" ;;
+            x86_64) echo 'SYSTEM_APP=nerves_system_ec100_qemu' >> "$GITHUB_ENV" ;;
+            *) echo 'Unsupported system target' >&2; exit 1 ;;
+          esac
+      - uses: jdx/mise-action@v5
+      - name: Install Nerves host tools
+        run: |
+          gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
+          sudo apt-get update
+          sudo apt-get install --yes "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" squashfs-tools
+          docker info
+      - name: Install Mix tooling outside the project
+        run: |
+          # shellcheck disable=SC2016
+          mise exec -- sh -eu -c '
+            cd "$RUNNER_TEMP"
+            mix local.hex --force --if-missing
+            mix local.rebar --force --if-missing
+            mix archive.install hex nerves_bootstrap "~> 1.17" --force
+          '
+      - name: Fetch locked dependencies (no firmware or device startup)
+        run: mise exec -- mix deps.get --check-locked
+      - name: Check version, inputs and existing release
+        id: release
+        run: mise exec -- elixir -r dev/artifact_release.ex -S mix nerves.artifact.release check
+      - name: Cache system source downloads
+        if: steps.release.outputs.publish == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.NERVES_DL_DIR }}
+          key: system-downloads-${{ inputs.target }}-v1-${{ hashFiles(format('systems/{0}/**', env.SYSTEM_APP), 'firmware/mix.lock') }}
+          restore-keys: system-downloads-${{ inputs.target }}-v1-
+      - name: Build system artifact
+        if: steps.release.outputs.publish == 'true'
+        # Nerves 2's container runner requests a TTY, including noninteractive builds.
+        run: script -q -e -c "mise exec -- mix nerves.artifact.build $SYSTEM_APP" /dev/null < /dev/null
+      - name: Collect EC100 source archive and checksums
+        if: steps.release.outputs.publish == 'true' && inputs.target == 'ec100'
+        run: mise exec -- elixir -r ../systems/nerves_system_ec100/lib/mix/tasks/ec100.release.ex -S mix ec100.release
+      - name: Publish immutable system release
+        if: steps.release.outputs.publish == 'true'
+        run: mise exec -- elixir -r dev/artifact_release.ex -S mix nerves.artifact.release publish
+      - name: Verify download without the build cache
+        run: mise exec -- mix nerves.artifact.get
+        env:
+          NERVES_DL_DIR: ${{ runner.temp }}/system-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}/verify-downloads
+          NERVES_ARTIFACTS_DIR: ${{ runner.temp }}/system-${{ inputs.target }}-${{ github.run_id }}-${{ github.run_attempt }}/verify-artifacts

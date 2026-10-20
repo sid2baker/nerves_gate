@@ -29,7 +29,7 @@ defmodule NervesSystemEC100.MixProject do
     [
       type: :system,
       artifact_sites: [
-        {:github_releases, "sid2baker/nerves_system_ec100"}
+        {:github_releases, "sid2baker/nerves_gate", tag: "system-ec100/v#{@version}"}
       ],
       platform: Nerves.System.BR,
       platform_config: [defconfig: "nerves_defconfig"],
@@ -72,6 +72,7 @@ defmodule NervesSystemEC100.MixProject do
       "fwup-ops.conf",
       "fwup.conf",
       "mix.exs",
+      "mix.lock",
       "nerves_defconfig",
       "post-build.sh",
       "post-createfs.sh"

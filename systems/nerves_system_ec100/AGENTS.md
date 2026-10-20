@@ -48,9 +48,9 @@ Do not refactor working hardware code while bring-up is still in progress.
 ## Monorepo releases
 
 This system lives in the Nerves Gate monorepo with its own VERSION and CHANGELOG.
-Monorepo releases use `system-ec100/vX.Y.Z` tags (`.github/workflows/system-ec100.yml`
-creates a draft release). Published 0.2.0 artifacts remain in
-`sid2baker/nerves_system_ec100` under `v0.2.0`. Changing `artifact_sites` (to
-`{:github_releases, "sid2baker/nerves_gate", tag: "system-ec100/v#{@version}"}`)
-and README's workflow link changes the artifact fingerprint, so do it only as part
-of the next version bump.
+Monorepo releases use `system-ec100/vX.Y.Z` tags in `sid2baker/nerves_gate`.
+`.github/workflows/system-artifact.yml` automatically builds and publishes on
+main-branch system changes. It ships the binary, source archive and SHA256SUMS;
+never overwrite published tags or assets. Bump VERSION and update the changelog
+and firmware's pinned dependency for build-input changes, including artifact-site
+or package-file changes. Keep the system lock aligned with firmware's build tools.

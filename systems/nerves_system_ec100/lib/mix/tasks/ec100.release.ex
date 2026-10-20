@@ -9,6 +9,9 @@ defmodule Mix.Tasks.Ec100.Release do
   Nerves 2 pre.3 does not run the legacy build_runner_opts legal-info target.
   """
 
+  @requirements ["loadpaths"]
+  # CI preloads this task before Nerves dependencies enter the code path.
+  @compile {:no_warn_undefined, [Nerves, Nerves.BuildPlan, Nerves.Container, Nerves.Paths]}
   alias Nerves.Container
 
   @impl Mix.Task

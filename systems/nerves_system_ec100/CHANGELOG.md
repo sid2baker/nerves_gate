@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-20
+
+### Changed
+
+- System sources and prebuilt artifacts are now available from `sid2baker/nerves_gate`,
+  using `system-ec100/v0.2.1` instead of releases in the standalone system repository.
+
+### Compatibility
+
+- Uses Nerves `2.0.0-pre.4`, matching the gateway firmware build tools.
+
 ## 0.2.0 - 2026-10-15
 
 ### Added

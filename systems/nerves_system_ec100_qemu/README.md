@@ -13,10 +13,10 @@ application, Buildroot and upstream Nerves system versions. See
 GitHub Releases. Maintainers bump `VERSION` and add a dated changelog section when
 build inputs change. The main-branch workflow builds and publishes the tag named
 in `artifact_sites` automatically; it never replaces a published artifact.
-Published versions use `ec100-qemu-v<VERSION>`; the next release switches
-`artifact_sites` to the monorepo tag `system-ec100-qemu/v<VERSION>` as part of
-its version bump. See the
-[release workflow](../../docs/development.md#maintaining-the-qemu-system).
+The release tag is `system-ec100-qemu/v<VERSION>` in `sid2baker/nerves_gate`.
+Source packages can be consumed directly from that Git tag with
+`subdir: "systems/nerves_system_ec100_qemu"`; no Hex publication is required.
+See the [release workflow](../../docs/development.md#system-artifacts).
 
 The source is based on `nerves-project/nerves_system_x86_64` commit
 `5d755dba94fff478eac2bfd90ba91d2e0025d4eb` (1.34.2). Original

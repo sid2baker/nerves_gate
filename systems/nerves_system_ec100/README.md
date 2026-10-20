@@ -10,7 +10,7 @@ the Rockchip RK3506J (ARM Cortex-A7).
 
 ## Build
 
-This system requires Nerves 2 (currently `2.0.0-pre.3`). For an existing application,
+This system requires Nerves 2 (currently `2.0.0-pre.4`). For an existing application,
 update its Nerves dependency, remove `:shoehorn`, and replace
 `&Nerves.Release.init/1` with `&Nerves.init_release/1` in its release steps.
 
@@ -18,18 +18,24 @@ Add this system to your Nerves application's dependencies and target configurati
 
 ```elixir
 {:nerves_system_ec100,
- path: "../nerves_system_ec100",
+ github: "sid2baker/nerves_gate",
+ tag: "system-ec100/v0.2.1",
+ subdir: "systems/nerves_system_ec100",
  runtime: false,
  targets: [:ec100]}
 ```
 
-Adjust the path for your checkout. From the application directory:
+From the application directory:
 
 ```sh
-mix deps.get
-MIX_TARGET=ec100 mix nerves.artifact.build nerves_system_ec100
+MIX_TARGET=ec100 mix deps.get
 MIX_TARGET=ec100 mix firmware
 ```
+
+When developing the system, replace the Git options with a local `path:` to this
+directory and run `MIX_TARGET=ec100 mix nerves.artifact.build nerves_system_ec100`
+explicitly. In this monorepo, firmware selects that path with
+`NERVES_GATE_LOCAL_DEPS=1`.
 
 Nerves 2 does not automatically build custom systems. The artifact build requires
 a working Docker or Podman installation; rerun it after changing this system.
@@ -44,30 +50,18 @@ boot-image details are in [bootstrap/README.md](bootstrap/README.md).
 
 ## Prebuilt systems and releases
 
-The [System artifact workflow](.github/workflows/artifacts.yml) builds with Nerves 2
-from a clean checkout. Run it manually for an untagged development build; its
-`ec100-system` Actions artifact contains the system tarball, corresponding-source
-tarball, and `SHA256SUMS` and is retained for 14 days. It does not contain application firmware (`.fw`).
+Sources and binary artifacts live in `sid2baker/nerves_gate`. The
+[shared system workflow](../../.github/workflows/system-artifact.yml) builds and
+publishes a release automatically after system changes reach `main`. The release
+tag is `system-ec100/v<VERSION>`, read directly from `artifact_sites`. Hex
+publication is not required. Releases contain a fingerprinted system tarball,
+corresponding-source tarball and `SHA256SUMS`, not application firmware (`.fw`).
 
-Pushing a version tag builds the system and creates a **draft** GitHub release.
-Nothing publishes automatically. Release tarballs keep Nerves' generated name,
-including the source fingerprint. Nerves looks for them under `v<VERSION>`; do not
-rename a tarball or move a published tag.
-
-Once a release has been published, an application can replace its local path
-with a Git dependency pinned to that tag (Hex publication is not required):
-
-```elixir
-{:nerves_system_ec100,
- github: "sid2baker/nerves_system_ec100",
- tag: "v<release-version>",
- runtime: false,
- targets: [:ec100]}
-```
-
-Then run `mix deps.get` and `MIX_TARGET=ec100 mix firmware`. Nerves downloads the
-matching system artifact. Keep the path dependency and explicit artifact build
-when developing the system itself.
+Published tags and assets are immutable. Any build-input change requires a new
+`VERSION` and matching changelog section; CI refuses to overwrite a release.
+Manual dispatch with target `ec100` can resume an interrupted publication with
+identical inputs and artifact bytes. See [Development](../../docs/development.md#system-artifacts)
+for the shared publication process.
 
 ### Maintainer release checklist
 
@@ -78,32 +72,21 @@ command. When updating components, review the collected manifests, warnings, and
 notices, and update the pinned toolchain source list if needed. Always distribute
 the source tarball alongside the system tarball.
 
-1. Keep a `-dev` version during development. For a release, choose an unused
-   version such as `0.2.0`, update `VERSION`, and move the relevant
-   [changelog](CHANGELOG.md) entries into `## 0.2.0 - YYYY-MM-DD`, leaving
-   `Unreleased` at the top. Use `0.2.0-rc.1` instead when a prerelease is intended.
-   Release notes are copied from that section; missing, empty, or duplicate
-   sections fail before the build.
-2. Commit the final sources and push the matching `v0.2.0` tag. The workflow
-   refuses tags that disagree with `VERSION` and refuses `-dev` releases. It never
-   overwrites an existing release. Only the release job has `contents: write`;
-   no personal token or Hex credentials are needed.
-3. Verify `SHA256SUMS`, download the draft assets with maintainer credentials,
-   and test the exact artifact in a clean application environment. Supply a
-   maintainer token through `GH_TOKEN` or the GitHub CLI: Nerves 2 can fall back
-   to the authenticated API for draft assets. Do not edit `mix.exs` to test the
-   download, since that changes the fingerprint. Public downloads only work
-   after publication. Test firmware built from that artifact on EC100,
-   including boot, networking, factory recovery, and A/B update/rollback.
-4. Review the draft's title (exactly the tag), changelog notes, assets, and
-   prerelease flag before publishing. After publication, verify an unauthenticated
-   download and a fresh application build. Do not promote untested binaries.
+1. Choose an unused stable version, update `VERSION`, firmware's pinned system
+   dependency, and the dated [changelog](CHANGELOG.md) section. Release title and
+   body come exactly from the tag and matching changelog section.
+2. Review source notices and perform any authorized hardware qualification before
+   merging. Push the final sources to `main`; CI builds, collects all three assets,
+   creates the tag and publishes the release. Only trusted main-branch jobs have
+   write permissions. No personal token or Hex credentials are needed.
+3. CI verifies asset hashes and downloads the artifact into an empty cache. It
+   never flashes a physical device. Test firmware on EC100 only with explicit
+   hardware authorization, including boot, networking, recovery and A/B rollback.
 
-The workflow deliberately does not reuse host `deps/`, `.nerves/`, or Buildroot
-workspaces: Nerves `2.0.0-pre.3` can copy broken host symlinks into containers.
-Dependencies are locked, but the prerelease's default container uses a mutable
-base image, and the vendor loader tool embeds a timestamp. Builds are not claimed
-to be bit-for-bit reproducible.
+The workflow starts with clean dependencies and Buildroot workspaces; only source
+downloads are cached. The prerelease's default container uses a mutable base
+image and the vendor loader tool embeds a timestamp. Builds are not claimed to
+be bit-for-bit reproducible.
 
 ## Factory installation
 
