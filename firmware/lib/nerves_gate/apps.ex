@@ -112,6 +112,9 @@ defmodule NervesGate.Apps do
     {:noreply, %{next | available?: available?}}
   end
 
+  # Trapping exits lets terminate/2 stop apps; System.cmd ports also report exits.
+  def handle_info({:EXIT, port, _}, state) when is_port(port), do: {:noreply, state}
+
   @impl true
   def terminate(_, state) do
     for {app, _} <- state.running, do: halt(app, state)
