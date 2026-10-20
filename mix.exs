@@ -115,8 +115,13 @@ defmodule NervesGate.Repository do
     # Compilation prunes code paths to the project's own dependencies (dropping
     # OTP apps such as ssl and archives such as nerves_bootstrap). Restore them.
     code_path = :code.get_path()
+    compiler_options = Code.compiler_options()
 
     try do
+      # Independent builds can compile the same modules (firmware is also a
+      # simulator dependency). Replacing that loaded code is intentional here;
+      # all other compiler warnings still fail each project's CI.
+      Code.compiler_options(ignore_module_conflict: true)
       put_env(env)
 
       # Tests use :test; everything else follows the root (MIX_ENV, default dev).
@@ -136,6 +141,7 @@ defmodule NervesGate.Repository do
         Mix.Task.run(task, args)
       end)
     after
+      Code.compiler_options(compiler_options)
       :code.set_path(code_path)
       Mix.env(previous_env)
       Mix.target(previous_target)
