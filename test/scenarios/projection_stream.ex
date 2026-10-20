@@ -434,7 +434,7 @@ defmodule NervesGate.Scenarios.ProjectionStream do
   # forward. That peer is not USB and must never count as USB management access.
   # The device serves the release UI; it has no development pages.
   defp assert_http_pages(vm) do
-    device = Req.new(base_url: "http://#{vm.address}:#{vm.forwards.http}", retry: false)
+    device = Req.new(base_url: Qemu.ui_url(vm), retry: false)
     assert Req.get!(device, url: "/tests").status == 404
 
     for path <- [

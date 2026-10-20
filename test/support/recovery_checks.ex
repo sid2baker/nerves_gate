@@ -220,7 +220,7 @@ defmodule NervesGate.RecoveryChecks do
   # A fresh, bounded request on the private management forward. No body is logged,
   # even on failure: error pages can contain private state. Never follow redirects.
   def http_ready?(vm) do
-    case Req.get("http://127.0.0.1:#{vm.forwards.http}/",
+    case Req.get(Qemu.ui_url(vm) <> "/",
            retry: false,
            redirect: false,
            decode_body: false,
