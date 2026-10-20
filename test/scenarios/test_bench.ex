@@ -13,6 +13,7 @@ defmodule NervesGate.Scenarios.TestBench do
 
   def run(%{device: vm, devices: devices}) do
     assert_build_output()
+    assert_build_progress()
     assert_configuration(vm)
     assert_session_tools(vm)
     assert_tailnet_tools()
@@ -112,6 +113,63 @@ defmodule NervesGate.Scenarios.TestBench do
     assert_received {:build_output, "Compiling 12 files (.ex)"}
     assert_received {:build_output, "failed café"}
     refute_received {:build_output, _}
+  end
+
+  @doc false
+  def assert_build_progress do
+    {:ok, simulator} = GenServer.start_link(Simulator, %{devices: %{}})
+
+    try do
+      GenServer.call(simulator, {:subscribe, self()})
+      output = Simulator.BuildOutput.new(&send(simulator, {:output, nil, &1}))
+      {output, collect} = Collectable.into(output)
+      output = collect.(output, {:cont, "Compiling files\n"})
+      assert_receive {:simulator, %{output: "Compiling files"}}, 1_000
+
+      output = collect.(output, {:cont, "Linking firmware\n"})
+      output = collect.(output, {:cont, "Assembling firmware\n"})
+      assert_receive {:simulator, %{output: "Assembling firmware"}}, 1_000
+      refute_received {:simulator, _}
+
+      output = collect.(output, {:cont, "Build failed without a newline"})
+      collect.(output, :done)
+      assert_receive {:simulator, %{output: "Build failed without a newline"}}, 1_000
+
+      send(simulator, {:output, nil, "Finished"})
+      send(simulator, {:phase, nil, "Bootstrapping configured devices"})
+
+      assert_receive {:simulator, %{phase: "Bootstrapping configured devices", output: nil}},
+                     1_000
+
+      send(simulator, {:output, make_ref(), "Stale build output"})
+      refute_receive {:simulator, _}, 300
+
+      :sys.replace_state(simulator, fn state ->
+        owner = self()
+
+        worker =
+          :erlang.spawn_opt(
+            fn ->
+              send(owner, {:output, state.token, "Final failure diagnostics"})
+              exit(:build_failed)
+            end,
+            [:link, :monitor]
+          )
+
+        %{state | worker: worker, view: %{state.view | status: :starting}}
+      end)
+
+      assert_receive {:simulator, %{status: :stopping, output: "Final failure diagnostics"}},
+                     1_000
+
+      assert_receive {:simulator, %{status: :failed, output: "Final failure diagnostics"}},
+                     1_000
+
+      send(simulator, {:output, nil, "Stale failure diagnostics"})
+      refute_receive {:simulator, _}, 300
+    after
+      GenServer.stop(simulator)
+    end
   end
 
   @doc false

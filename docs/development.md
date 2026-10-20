@@ -233,7 +233,7 @@ Useful focused checks:
 | --- | --- |
 | `system_artifact` | System version, firmware validation, USB/hostname contract, data mount and release contracts |
 | `frontend_assets` | Host/firmware assets, CSP, CSRF and development tooling boundaries |
-| `test_bench` | Configuration, reservations and manual cleanup |
+| `test_bench` | Build progress, configuration, reservations and manual cleanup |
 | `process_crash` | Gateway process restarts, restart scope, saved settings and fresh local HTTP |
 | `restart_intensity` | Four rapid crashes exhaust supervision; firmware reboots without harness rescue |
 | `alarm_recovery` | Two-second debounce, immediate critical alarms, timer preservation and clearing after owner restart |

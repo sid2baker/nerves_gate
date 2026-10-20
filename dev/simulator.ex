@@ -65,6 +65,7 @@ defmodule NervesGate.Simulator do
        devices: %{},
        supervisor: nil,
        worker: nil,
+       output_timer: nil,
        token: nil,
        subscriber: nil,
        prepared: false
@@ -169,12 +170,19 @@ defmodule NervesGate.Simulator do
        state}
 
   @impl true
-  def handle_info({:phase, token, phase}, %{token: token} = state),
-    do: {:noreply, publish(%{state | view: Map.put(%{state.view | phase: phase}, :output, nil)})}
+  def handle_info({:phase, token, phase}, %{token: token} = state) do
+    state = cancel_output_timer(state)
+    {:noreply, publish(%{state | view: Map.put(%{state.view | phase: phase}, :output, nil)})}
+  end
 
-  # The latest build line; it stays after a failed build to show the error.
-  def handle_info({:output, token, line}, %{token: token} = state),
-    do: {:noreply, publish(%{state | view: Map.put(state.view, :output, line)})}
+  # Keep the latest line even before publishing, so failure cleanup preserves it.
+  def handle_info({:output, token, line}, %{token: token} = state) do
+    timer = state.output_timer || :erlang.start_timer(250, self(), :build_output)
+    {:noreply, %{state | view: Map.put(state.view, :output, line), output_timer: timer}}
+  end
+
+  def handle_info({:timeout, timer, :build_output}, %{output_timer: timer} = state),
+    do: {:noreply, publish(%{state | output_timer: nil})}
 
   def handle_info(
         {:device_phase, token, id, phase},
@@ -266,6 +274,7 @@ defmodule NervesGate.Simulator do
     }
 
   defp cleanup(state, result, reset?) do
+    state = cancel_output_timer(state)
     kill_worker(state)
     token = make_ref()
     owner = self()
@@ -315,6 +324,11 @@ defmodule NervesGate.Simulator do
   defp kill_worker(%{worker: {pid, _}} = state) do
     clear_worker(state)
     Process.exit(pid, :kill)
+  end
+
+  defp cancel_output_timer(state) do
+    if state.output_timer, do: Process.cancel_timer(state.output_timer)
+    %{state | output_timer: nil}
   end
 
   defp publish(state) do
