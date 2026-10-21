@@ -14,9 +14,9 @@ defmodule NervesGateSim.SimulatorTest do
     """)
 
     config = NervesGateSim.Simulator.config(path, dir)
-    assert config.firmware == Path.expand("firmware/gate.fw")
+    assert config.firmware == Path.join(dir, "firmware/gate.fw")
     assert config.factory_firmware == config.firmware
-    assert config.firmware_project == Path.expand("firmware")
+    assert config.firmware_project == Path.join(dir, "firmware")
     assert config.raw.firmware == "firmware/gate.fw"
 
     start_supervised!({NervesGateSim.Simulator, config})
@@ -28,10 +28,5 @@ defmodule NervesGateSim.SimulatorTest do
              %{id: :gateway_a, address: "127.0.0.2", internet: :lan2},
              %{id: :gateway_b, address: "127.0.0.3", internet: :lan1}
            ] = Enum.map(view.devices, &Map.take(&1, [:id, :address, :internet]))
-  end
-
-  test "the scenario catalog comes from firmware integration scenarios" do
-    ids = Enum.map(NervesGateSim.QemuTests.scenarios(), & &1.id)
-    assert "apps" in ids and "sdk" in ids and "public_status" in ids
   end
 end

@@ -1,7 +1,8 @@
 defmodule NervesGateSim.Scenarios.TestBench do
   @moduledoc false
   import ExUnit.Assertions
-  alias NervesGateSim.{DevSession, ManualFaults, QemuTests, Simulator, TailnetAuth}
+  alias NervesGateSim.{ManualFaults, QemuTests, Simulator, TailnetAuth}
+  alias Dev.Session, as: DevSession
   alias NervesGateSim.TestQemu, as: Qemu
 
   # Holding every device proves that a run excludes other runs and manual control.

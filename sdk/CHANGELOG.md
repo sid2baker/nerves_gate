@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Reject developer-platform applications from device archives, alongside firmware and simulator applications.
+
+### Fixed
+
 - Packaging rejects disagreement between the SDK dependency range and the application's declared SDK compatibility range.
 
 ## 0.1.0 - 2026-10-21

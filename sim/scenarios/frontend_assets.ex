@@ -3,7 +3,7 @@ defmodule NervesGateSim.Scenarios.FrontendAssets do
   import ExUnit.Assertions
   alias NervesGateSim.TestQemu, as: Qemu
   alias NervesGateWeb.Endpoint
-  alias NervesGateSimWeb.Endpoint, as: Site
+  alias DevWeb.Endpoint, as: Site
   alias Phoenix.Socket.Transport
 
   def spec,

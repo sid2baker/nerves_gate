@@ -61,6 +61,12 @@ defmodule NervesGateSDK.PackageTest do
              Package.validate(package, Map.put(installed, :other, package.main), "0.1.0")
   end
 
+  test "rejects a bundled developer platform even without it installed", context do
+    assert {:ok, package} = context |> archive() |> Package.read()
+    package = %{package | apps: [%{package.main | app: :nerves_gate_dev}]}
+    assert {:error, :application_conflict} = Package.validate(package, %{}, "0.1.0")
+  end
+
   test "rejects traversal, absolute paths, duplicate entries and arbitrary files", context do
     for path <- ["../escape", "package_fixture-1.0.0/../escape", "C:\\escape"] do
       file = archive(context, extra: [{String.to_charlist(path), "bad"}])

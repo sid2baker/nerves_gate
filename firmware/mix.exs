@@ -1,22 +1,15 @@
 defmodule NervesGate.MixProject do
   use Mix.Project
   @targets [:ec100, :x86_64]
-  @external_resource Path.join(__DIR__, "VERSION")
-  @version __DIR__ |> Path.join("VERSION") |> File.read!() |> String.trim()
+  @external_resource Path.expand("../VERSION", __DIR__)
+  @version @external_resource |> File.read!() |> String.trim()
 
   def project do
     [
       app: :nerves_gate,
       version: @version,
       description: "Nerves Gate device firmware and application runtime",
-      package: [
-        licenses: ["Apache-2.0"],
-        links: %{"GitHub" => "https://github.com/sid2baker/nerves_gate"},
-        files:
-          ~w(lib config priv rel rootfs_overlay mix.exs VERSION README.md CHANGELOG.md LICENSE),
-        exclude_patterns: [~r{^rootfs_overlay/[^/]+/usr/sbin/tailscaled$}]
-      ],
-      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
+      docs: [main: "readme", extras: ["README.md"]],
       elixir: "~> 1.20",
       archives: [nerves_bootstrap: "~> 1.17"],
       start_permanent: Mix.env() == :prod,
@@ -94,15 +87,6 @@ defmodule NervesGate.MixProject do
     end
   end
 
-  defp local_dependency(app, requirement, path, options) do
-    options =
-      if System.get_env("NERVES_GATE_LOCAL_DEPS") == "1",
-        do: Keyword.put(options, :path, path),
-        else: options
-
-    {app, requirement, options}
-  end
-
   defp system_dependency(app, version, target) do
     source = "systems/#{app}"
 
@@ -122,8 +106,8 @@ defmodule NervesGate.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.40", only: :docs, runtime: false},
-      # Optional host tools: the simulator declares them to serve this UI with
-      # code reloading; Mix then compiles them before this application.
+      # The root workbench declares these optional tools to reload the shared
+      # gateway UI; Mix compiles them before this application.
       {:volt, "~> 0.23.0", optional: true, targets: :host},
       {:phoenix_live_reload, "~> 1.5", optional: true, targets: :host},
       {:tidewave, "~> 0.9", optional: true, targets: :host},
@@ -154,7 +138,7 @@ defmodule NervesGate.MixProject do
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
-      local_dependency(:nerves_gate_sdk, "~> 0.1.0", "../sdk", [])
+      {:nerves_gate_sdk, path: "../sdk"}
     ] ++ system_dependencies()
   end
 

@@ -50,7 +50,10 @@ defmodule NervesGateSim.QemuTests do
 
   def console(device), do: GenServer.call(__MODULE__, {:console, device})
   def lifecycle(action), do: GenServer.call(__MODULE__, {:lifecycle, action})
-  def stop_session(id), do: GenServer.call(__MODULE__, {:stop_session, id})
+
+  def stop_session(id, request \\ self()),
+    do: GenServer.call(__MODULE__, {:stop_session, id, request})
+
   def configure(change), do: GenServer.call(__MODULE__, {:configure, change})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
   def unsubscribe, do: Phoenix.PubSub.unsubscribe(NervesGate.PubSub, @topic)
@@ -116,8 +119,8 @@ defmodule NervesGateSim.QemuTests do
     end
   end
 
-  def handle_call({:stop_session, id}, {request, _}, state) do
-    owner = Process.whereis(NervesGateSim.DevSession)
+  def handle_call({:stop_session, id, request}, _, state) when is_pid(request) do
+    owner = Process.whereis(:nerves_gate_workbench_session)
 
     cond do
       map_size(state.workers) > 0 ->

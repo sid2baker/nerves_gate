@@ -8,6 +8,7 @@ defmodule NervesGateSim.Scenarios.Apps do
 
   def run(%{device: vm}) do
     commission_storage(vm)
+    install_solution_app(vm)
 
     # Card removal uses a disposable Linux mount inside the supervised guest. No
     # host mounts, arbitrary VMs, hardware adapters or physical cards are involved.
@@ -76,6 +77,23 @@ defmodule NervesGateSim.Scenarios.Apps do
 
       for version <- ~w(1.0.0 1.1.0 1.2.0),
           do: call(vm, File, :rm, ["/tmp/gate_fixture-#{version}.ez"])
+    end
+  end
+
+  defp install_solution_app(vm) do
+    path = Path.join(System.tmp_dir!(), "gate_solution_#{System.unique_integer([:positive])}")
+
+    try do
+      solution = Dev.Solution.new!(path, true)
+      Dev.Solution.app_new!(solution, "solution_fixture")
+      package = Dev.Solution.package!(solution)
+      assert {:ok, _} = NervesGateSim.Apps.install(vm, package)
+      assert {:ok, entries} = apps(vm, :list, [])
+      assert Enum.any?(entries, &(&1.app == "solution_fixture" and &1.running?))
+      assert :ok = apps(vm, :uninstall, [:solution_fixture])
+    after
+      apps(vm, :uninstall, [:solution_fixture])
+      File.rm_rf!(path)
     end
   end
 

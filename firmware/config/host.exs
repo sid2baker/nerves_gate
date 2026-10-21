@@ -2,7 +2,7 @@ import Config
 
 # Host builds provide quality checks, asset builds and the shared gateway UI.
 # Start no device services here. Explicit simulator launchers set :services to
-# [NervesGateSim.HostInit, NervesGateWeb.Endpoint] and start the host application.
+# [Dev.GatewayInit, NervesGateWeb.Endpoint] and start the host application.
 # VintageNet behaviours/types are compiled but their applications never start.
 config :nerves_gate, services: []
 
@@ -22,8 +22,8 @@ config :volt,
     css: "assets/css/app.css",
     sources: [
       %{base: "lib/", pattern: "**/*.{ex,heex}"},
-      # The shared stylesheet serves both sites. Rebuild assets after simulator UI edits.
-      %{base: "../sim/lib/", pattern: "**/*.ex"},
+      # The shared stylesheet serves the device and developer workbench.
+      %{base: "../lib/", pattern: "**/*.ex"},
       %{base: "assets/", pattern: "**/*.js"}
     ]
   ]

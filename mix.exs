@@ -1,36 +1,55 @@
-defmodule NervesGate.Repository do
+defmodule Dev.MixProject do
   use Mix.Project
 
-  # Nerves systems are not formatted here: their mix.exs files are artifact inputs.
-  @projects ~w(sdk sim new firmware tools)
+  @external_resource Path.join(__DIR__, "VERSION")
+  @version __DIR__ |> Path.join("VERSION") |> File.read!() |> String.trim()
+  @projects ~w(sdk sim firmware)
 
   def project do
+    if Mix.target() != :host,
+      do: Mix.raise("The developer platform is host-only; run device builds from firmware/")
+
     [
+      app: :nerves_gate_dev,
+      version: @version,
       elixir: "~> 1.20",
+      elixirc_paths: ["lib", "sim/scenarios"],
+      listeners: if(Mix.env() == :dev, do: [Phoenix.CodeReloader], else: []),
+      deps: [
+        {:nerves_gate_sdk, path: "sdk"},
+        {:nerves_gate_sim, path: "sim"},
+        {:nerves_gate, path: "firmware", runtime: false},
+        {:phoenix, "~> 1.8"},
+        {:phoenix_live_view, "~> 1.2.13"},
+        {:bandit, "~> 1.12"},
+        {:req, "~> 0.7"},
+        {:floki, "~> 0.38"},
+        {:volt, "~> 0.23.0", only: [:dev, :test]},
+        {:phoenix_live_reload, "~> 1.5", only: :dev},
+        {:tidewave, "~> 0.9", only: :dev}
+      ],
       aliases: [
         setup: &setup/1,
         "deps.get": &deps_get/1,
         format: &format/1,
-        test: &test/1,
-        "dev.workspace": &dev_workspace/1,
         ci: &ci/1,
-        dev: &run("sim", ["qemu.dev" | &1]),
-        "dev.status": &run("sim", ["qemu.status" | &1]),
-        "dev.stop": &run("sim", ["qemu.stop" | &1]),
-        "dev.ui": &run("sim", ["dev.ui" | &1]),
         "test.sdk": &run("sdk", ["test" | &1]),
-        "test.sim": &run("sim", ["test" | &1]),
-        "test.firmware": &run("sim", ["qemu.test" | &1])
+        "test.sim": &run("sim", ["test" | &1])
       ]
     ]
   end
 
-  # Host-only dependency preparation for CI; no system downloads or device tools.
+  # No UI, devices, networking services or release actions start implicitly.
+  def application,
+    do: [extra_applications: [:logger, :crypto, :ssh, :eex], mod: {Dev.Application, []}]
+
+  def cli, do: [preferred_envs: [ci: :test, "test.qemu": :test]]
+
   defp deps_get(args) do
     for project <- @projects, do: run(project, ["deps.get" | args])
+    Mix.Tasks.Deps.Get.run(args)
   end
 
-  # Prepares every project and the QEMU firmware inputs. Never boots a device.
   defp setup([]) do
     Mix.Task.run("local.hex", ["--force", "--if-missing"])
     Mix.Task.run("local.rebar", ["--force", "--if-missing"])
@@ -40,112 +59,74 @@ defmodule NervesGate.Repository do
     unless bootstrap && Version.match?(to_string(bootstrap), "~> 1.17"),
       do: Mix.Task.run("archive.install", ["hex", "nerves_bootstrap", "~> 1.17", "--force"])
 
-    # Fetch every dependency graph before loading compiled project tasks: their
-    # consolidated protocols must not replace the protocols used by Hex.
-    for project <- ~w(sdk new sim), do: run(project, ["deps.get", "--check-locked"])
-    run("firmware", ["deps.get", "--check-locked"], target: "x86_64")
-    run("firmware", ["tailscaled.install"], target: "x86_64")
-    Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached afterwards).")
-    # The archive task loads only Nerves before selecting the cross-toolchain.
-    # Looking up a dependency task here can compile all target deps with host CC:
-    # bootstrap's application already ran in an earlier native project context.
-    run("firmware", ["nerves_bootstrap.init"], target: "x86_64")
-    run("sim", ["qemu.setup"])
-    Mix.shell().info("Ready. Run mix dev, then start devices at http://localhost:4000.")
+    deps_get(["--check-locked"])
+    run("firmware", ["deps.get", "--check-locked"], target: :x86_64)
+    run("firmware", ["tailscaled.install"], target: :x86_64)
+    # Enter the archive task before dependency task lookup can compile target
+    # ports with host CC. This prepares artifacts only, never device code.
+    run("firmware", ["nerves_bootstrap.init"], target: :x86_64)
+    # Resolve the simulator task in the root's host graph, which includes the
+    # workbench's optional reload tools and matching endpoint configuration.
+    # Artifact setup compiled Nerves tooling in the target graph; its completed
+    # dependency tasks must not skip the root's independent host compilation.
+    Mix.Task.clear()
+    Mix.Task.run("loadconfig")
+    Mix.Task.run("qemu.setup")
+
+    Mix.shell().info(
+      "Ready. Run mix dev [SOLUTION], then explicitly start devices in the workbench."
+    )
   end
 
   defp setup(_), do: Mix.raise("Usage: mix setup")
 
-  defp format(args) do
-    Mix.Tasks.Format.run(args)
-    for project <- @projects, do: run(project, ["format" | args])
-  end
-
-  defp test(args) do
-    for project <- @projects, do: run(project, ["test" | args])
-  end
+  defp format(args), do: Mix.Tasks.Format.run(args)
 
   defp ci([]) do
-    Mix.Tasks.Format.run(["--check-formatted"])
-
     for project <- @projects do
       Mix.shell().info("==> #{project}: mix ci")
       run(project, ["ci"])
     end
+
+    # Compile the root last: independent projects may load their own copies of
+    # shared host modules. Restore the root config before its compile and tests.
+    Mix.Task.clear()
+    Mix.Task.run("loadconfig")
+    Mix.Task.run("compile", ["--warnings-as-errors"])
+    Mix.Tasks.Format.run(["--check-formatted"])
+    Mix.Task.run("test")
   end
 
   defp ci(_), do: Mix.raise("Usage: mix ci")
 
-  defp dev_workspace([]) do
-    path = Path.join(System.tmp_dir!(), "gate_dev_#{System.system_time(:microsecond)}")
-    run("new", ["do", "compile", "+", "nerves_gate.new", path, "--local", __DIR__])
-
-    Mix.shell().info("""
-    Local workspace ready. Nothing has been started or published.
-      cd #{path}
-      mix setup
-      mix test
-      mix sim
-    Remove #{path} when finished.
-    """)
-  end
-
-  defp dev_workspace(_), do: Mix.raise("Usage: mix dev.workspace")
-
-  defp put_env(env) do
-    Enum.each(env, fn
-      {key, nil} -> System.delete_env(key)
-      {key, value} -> System.put_env(key, value)
-    end)
-  end
-
+  # Host-only native orchestration. Nerves device builds and solution apps run
+  # in supervised OS processes instead; their compiler state must be isolated.
   defp run(project, [task | args], options \\ []) do
-    apps = %{
-      "sdk" => :nerves_gate_sdk,
-      "sim" => :nerves_gate_sim,
-      "new" => :nerves_gate_new,
-      "firmware" => :nerves_gate,
-      "tools" => :nerves_gate_tools,
-      "systems/nerves_system_ec100" => :nerves_system_ec100,
-      "systems/nerves_system_ec100_qemu" => :nerves_system_ec100_qemu
-    }
+    target = options[:target] || :host
 
+    if target != :host and task not in ["deps.get", "tailscaled.install", "nerves_bootstrap.init"],
+      do: Mix.raise("Device compilation must run in a separate OS process")
+
+    apps = %{"sdk" => :nerves_gate_sdk, "sim" => :nerves_gate_sim, "firmware" => :nerves_gate}
+    app = Map.fetch!(apps, project)
+    running? = Enum.any?(Application.started_applications(), &(elem(&1, 0) == app))
     previous_env = Mix.env()
     previous_target = Mix.target()
-    # These are independent projects, not dependencies of the orchestration root.
     root = Mix.Project.pop()
-
-    env = %{
-      "NERVES_GATE_LOCAL_DEPS" => "1",
-      "NERVES_GATE_DEVICE_NODE" => nil
-    }
-
-    # Nerves exports toolchain variables while preparing a target. None may
-    # leak into the next independent project's host compilation.
     previous = System.get_env()
-
-    # Compilation prunes code paths to the project's own dependencies (dropping
-    # OTP apps such as ssl and archives such as nerves_bootstrap). Restore them.
     code_path = :code.get_path()
     compiler_options = Code.compiler_options()
+    gateway_env = Application.get_all_env(:nerves_gate)
 
     try do
-      # Independent builds can compile the same modules (firmware is also a
-      # simulator dependency). Replacing that loaded code is intentional here;
-      # all other compiler warnings still fail each project's CI.
+      # Root code-reload config must not leak into standalone subsystem builds
+      # which intentionally do not include the workstation's optional tools.
+      Application.delete_env(:nerves_gate, NervesGateWeb.Endpoint)
       Code.compiler_options(ignore_module_conflict: true)
-      put_env(env)
-
-      # Tests use :test; everything else follows the root (MIX_ENV, default dev).
-      Mix.env(if task in ["test", "qemu.test", "ci"], do: :test, else: previous_env)
-
-      Mix.target(
-        case options[:target] do
-          "ec100" -> :ec100
-          "x86_64" -> :x86_64
-          _ -> :host
-        end
-      )
+      System.put_env("NERVES_GATE_LOCAL_DEPS", "1")
+      System.delete_env("NERVES_GATE_DEVICE_NODE")
+      Mix.env(if task in ["test", "ci"], do: :test, else: previous_env)
+      Mix.target(target)
 
       Mix.Project.in_project(Map.fetch!(apps, project), Path.join(__DIR__, project), fn _ ->
         Mix.Task.clear()
@@ -153,6 +134,9 @@ defmodule NervesGate.Repository do
         Mix.Task.run(task, args)
       end)
     after
+      # Host tests may start the subsystem's application. Do not leave its
+      # PubSub or supervisors alive when returning to a different project.
+      if not running?, do: Application.stop(app)
       Code.compiler_options(compiler_options)
       :code.set_path(code_path)
       Mix.env(previous_env)
@@ -163,6 +147,11 @@ defmodule NervesGate.Repository do
           do: System.delete_env(key)
 
       System.put_env(previous)
+
+      for {key, _} <- Application.get_all_env(:nerves_gate),
+          do: Application.delete_env(:nerves_gate, key)
+
+      Application.put_all_env(nerves_gate: gateway_env)
       Mix.Project.push(root.name, root.file)
     end
   end

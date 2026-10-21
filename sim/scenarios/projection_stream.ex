@@ -186,8 +186,8 @@ defmodule NervesGateSim.Scenarios.ProjectionStream do
         error: nil,
         confirm_run: nil
       }
-      |> Map.merge(NervesGateSimWeb.DeviceLive.bench_assigns(bench, id))
-      |> NervesGateSimWeb.DeviceLive.render()
+      |> Map.merge(DevWeb.DeviceLive.bench_assigns(bench, id))
+      |> DevWeb.DeviceLive.render()
       |> Phoenix.HTML.Safe.to_iodata()
       |> IO.iodata_to_binary()
       |> Floki.parse_document!()

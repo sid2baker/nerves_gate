@@ -32,9 +32,21 @@ defmodule NervesGateSim.Simulator do
   def config(path, dir) do
     {config, _} = Code.eval_file(path)
     true = is_map(config.devices) and map_size(config.devices) in 1..253
-    firmware = Path.expand(config.firmware)
-    factory = Path.expand(Map.get(config, :factory_firmware, firmware))
-    project = config[:firmware_project] && Path.expand(config.firmware_project)
+    local_project = Path.expand("../firmware", NervesGateSim.source_dir())
+    local? = config.firmware == :local
+
+    firmware =
+      if local?,
+        do: Path.join(local_project, "_build/x86_64_dev/nerves/images/nerves_gate.fw"),
+        else: Path.expand(config.firmware, Path.dirname(path))
+
+    factory = Path.expand(Map.get(config, :factory_firmware, firmware), Path.dirname(path))
+
+    project =
+      if local?,
+        do: local_project,
+        else:
+          config[:firmware_project] && Path.expand(config.firmware_project, Path.dirname(path))
 
     Map.merge(config, %{
       path: path,
@@ -426,7 +438,12 @@ defmodule NervesGateSim.Simulator do
           ["firmware", "--overwrite"],
           [
             cd: project,
-            env: [{"MIX_TARGET", "x86_64"}, {"MIX_ENV", "dev"}, {"NERVES_GATE_DEVICE_NODE", nil}]
+            env: [
+              {"MIX_TARGET", "x86_64"},
+              {"MIX_ENV", "dev"},
+              {"NERVES_GATE_LOCAL_DEPS", "1"},
+              {"NERVES_GATE_DEVICE_NODE", nil}
+            ]
           ],
           report
         )

@@ -1,0 +1,17 @@
+# <%= module %>
+
+An independent Nerves Gate SDK application. From the platform checkout:
+
+```sh
+mix app.test <%= app %> --solution PATH
+mix app.package <%= app %> --solution PATH
+mix app.install <%= app %> --solution PATH --device gateway_a
+```
+
+Run host unit tests directly with `mix test`. Package directly with
+`MIX_ENV=prod mix nerves_gate.package`. Devices use the real firmware SDK backend;
+there is no fake hardware backend. SDK and platform libraries are never bundled.
+
+Packages run trusted code in the device BEAM. Native dependencies must be built
+for its architecture. Upgrades are cold restarts with a bounded health check.
+App data lives on the commissioned SD card; handle unavailable storage explicitly.
