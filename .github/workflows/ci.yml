@@ -25,18 +25,17 @@ jobs:
         uses: actions/cache@v6
         with:
           path: |
+            deps
+            _build/test
             sdk/deps
             sdk/_build/test
             sim/deps
             sim/_build/test
-            new/deps
-            new/_build/test
             firmware/deps
             firmware/_build/test
-            tools/_build/test
-          key: host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '*/mix.lock', '*/mix.exs') }}-${{ github.sha }}
+          key: platform-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'mix.lock', 'mix.exs', '*/mix.lock', '*/mix.exs') }}-${{ github.sha }}
           restore-keys: |
-            host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '*/mix.lock', '*/mix.exs') }}-
+            platform-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'mix.lock', 'mix.exs', '*/mix.lock', '*/mix.exs') }}-
       - name: Fetch locked host dependencies
         run: mise exec -- mix deps.get --check-locked
       - name: Quality gates and unit tests (no devices)
@@ -46,7 +45,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      MIX_TARGET: x86_64
       NERVES_GATE_LOCAL_DEPS: '1'
       NERVES_SYSTEM: ''
       NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
@@ -55,7 +53,7 @@ jobs:
       - uses: jdx/mise-action@v5
       - uses: ./.github/actions/host-tools
         with:
-          firmware: 'true'
+          qemu: 'true'
       - name: Cache verified firmware downloads
         uses: actions/cache@v6
         with:
@@ -63,39 +61,30 @@ jobs:
             ${{ env.NERVES_DL_DIR }}
             firmware/_build/setup
           key: firmware-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/scripts/tailscaled.ex') }}
+      - name: Prepare all projects without booting devices
+        run: mise exec -- mix setup
       - name: Build target firmware (never boot a device)
         working-directory: firmware
-        run: |
-          mise exec -- mix deps.get --check-locked
-          mise exec -- mix tailscaled.install
-          mise exec -- mix nerves.artifact.get
-          mise exec -- mix firmware --overwrite
+        env:
+          MIX_TARGET: x86_64
+        run: mise exec -- mix firmware --overwrite
+      - name: Reject workstation-linked native ports
+        run: mise exec -- elixir scripts/check_target.exs
 
-  workspace:
+  solution:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
       - uses: ./.github/actions/host-tools
-        with:
-          qemu: 'true'
       - name: Prepare host dependencies
         run: mise exec -- mix deps.get --check-locked
-      - name: Generate a workspace against this checkout
-        working-directory: new
-        run: mise exec -- env NERVES_GATE_LOCAL_DEPS=1 mix 'do' compile + nerves_gate.new "$RUNNER_TEMP/workspace" --local "$GITHUB_WORKSPACE"
-      - name: Exercise the ordinary app-developer commands (no device startup)
+      - name: Exercise the ordinary solution commands (no devices)
         run: |
-          # shellcheck disable=SC2016
-          mise exec -- sh -eu -c '
-            cd "$RUNNER_TEMP/workspace"
-            mix setup
-            mix test
-            mix app.new second_app
-            mix setup
-            mix test
-            mix app.package my_app
-            mix app.package second_app
-            mix format --check-formatted
-          '
+          mise exec -- mix solution.new "$RUNNER_TEMP/solution" --local-sdk
+          mise exec -- mix app.new demo --solution "$RUNNER_TEMP/solution"
+          mise exec -- mix app.new second_app --solution "$RUNNER_TEMP/solution"
+          mise exec -- mix app.test --solution "$RUNNER_TEMP/solution"
+          mise exec -- mix app.package demo --solution "$RUNNER_TEMP/solution"
+          mise exec -- mix app.package second_app --solution "$RUNNER_TEMP/solution"

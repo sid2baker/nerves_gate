@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags: ['sdk/v*', 'v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing sdk/vX.Y.Z or vX.Y.Z tag for an unpublished release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'sid2baker/nerves_gate'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: hex-release
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      MIX_TARGET: host
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@v5
+      - name: Set release paths
+        run: |
+          echo "NOTES_FILE=$RUNNER_TEMP/release-notes.md" >> "$GITHUB_ENV"
+          echo "RELEASE_DIR=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
+      - name: Validate version and canonical changelog
+        id: metadata
+        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check prepare "$RELEASE_TAG"
+      - name: Require a tagged commit from main
+        run: |
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor HEAD origin/main
+      - name: Reject unsupported Hex dependencies
+        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check dependencies "$RELEASE_TAG"
+      - name: Require unpublished outputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check unpublished "$RELEASE_TAG"
+      - name: Test and inspect the SDK payload
+        if: steps.metadata.outputs.project == 'sdk'
+        working-directory: sdk
+        env:
+          MIX_ENV: test
+        run: |
+          mise exec -- mix deps.get --check-locked
+          mise exec -- mix ci
+          mkdir -p "$RELEASE_DIR"
+          mise exec -- mix hex.build --output "$RELEASE_DIR/package.tar"
+          mise exec -- mix hex.build --unpack --output "$RELEASE_DIR/source"
+          cp mix.lock "$RELEASE_DIR/source/mix.lock"
+      - name: Compile and generate SDK docs from the unpacked payload
+        if: steps.metadata.outputs.project == 'sdk'
+        env:
+          MIX_ENV: docs
+        run: |
+          # shellcheck disable=SC2016
+          mise exec -- sh -eu -c '
+            cd "$RELEASE_DIR/source"
+            mix deps.get --check-locked
+            mix compile --warnings-as-errors
+            mix docs --warnings-as-errors
+          '
+      - name: Publish SDK and documentation
+        if: steps.metadata.outputs.project == 'sdk'
+        working-directory: sdk
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+          MIX_ENV: docs
+        run: |
+          mise exec -- mix deps.get --check-locked
+          mise exec -- mix hex.publish --yes
+      - name: Create the canonical GitHub Release (no attached assets)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ steps.metadata.outputs.prerelease }}
+        run: |
+          args=()
+          if test "$PRERELEASE" = true; then args+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file "$NOTES_FILE" "${args[@]}"
+      - name: Verify public release outputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check verify "$RELEASE_TAG"
