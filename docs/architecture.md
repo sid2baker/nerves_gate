@@ -10,20 +10,19 @@ applications run in the same BEAM and use only the SDK.
 
 | Path | Responsibility |
 | --- | --- |
-| `mix.exs` | Orchestration only: runs the independent projects natively |
+| `mix.exs`, `lib/dev/` | Host developer platform: solutions, builds, sessions, release checks and native host orchestration |
+| `lib/dev_web/`, `config/`, `priv/dev/` | Workbench endpoint, LiveViews, CLI API and owned session launchers |
 | `firmware/lib/nerves_gate.ex` | Public commands, status and subscriptions |
 | `firmware/lib/nerves_gate/` | Device domains, adapters, projection, SDK backend, storage and apps |
 | `firmware/lib/nerves_gate_web/` | Gateway endpoint, LiveViews and components |
 | `firmware/config/` | Firmware profiles; `host.exs` is for checks and assets only |
 | `firmware/test/unit/` | Host tests of pure firmware behaviour |
 | `sim/scenarios/` | Repository-only real-QEMU integration scenarios |
-| `tools/` | Private release tooling and unit tests |
 | `sdk/lib/nerves_gate_sdk/` | Application API, SDK structs, backend behaviour and package validation |
 | `sim/lib/nerves_gate_sim/simulator.ex`, `simulator/` | QEMU lifecycle and owned virtual hardware |
-| `sim/lib/nerves_gate_sim_web/` | Simulator endpoint, overview, device tests and CLI API |
 | `sim/lib/nerves_gate_sim/qemu_tests.ex` | Shared runner and device reservations |
-| `sim/lib/mix/tasks/`, `sim/priv/qemu/` | Session startup, UI launcher, setup, scenario CLI and app install |
-| `new/` | Application generator templates |
+| `sim/lib/mix/tasks/`, `sim/priv/qemu/` | Standalone prerequisite checks and simulator-node scripts |
+| `priv/templates/`, `Dev.Solution` | Separate solution repositories and SDK-only application scaffolding |
 | `systems/` | EC100 and QEMU Nerves systems |
 
 ## Data flow
@@ -62,7 +61,7 @@ snapshot. Commands return their result without a status read. See the
 `rest_for_one` order is PubSub, routing setup, workflow PropertyTable, SSH, Network,
 Remote, Equipment, Indicators, Buses, the app task supervisor, Storage, Apps,
 ProjectionServer, SDKBackend and Endpoint. Dependencies supervise VintageNet, tailscaled and
-Alarmist. Workstation UIs (`sim/config/`) start no device domains.
+Alarmist. Workstation configuration (`config/`) starts no device domains.
 
 Firmware starts `nerves_gate` as `transient`: ordinary child failures recover under
 supervision; abnormal application exit, including an exhausted restart limit,
@@ -136,8 +135,8 @@ under `/data/nerves_gate/apps.term`. See [applications](applications.md).
 ## Host-mode contract
 
 Firmware is also the shared gateway-UI library. Its host config starts no device
-services. Only simulator launchers configure `config :nerves_gate, services:` with
-`NervesGateSim.HostInit` and `NervesGateWeb.Endpoint`, and explicitly start that
+services. Only workstation launchers configure `config :nerves_gate, services:` with
+`Dev.GatewayInit` and `NervesGateWeb.Endpoint`, and explicitly start that
 application. Native networking dependencies compile on the host for their
 behaviours and configuration types but never start there. Host tools must not
 start VintageNet, tailscaled or any device domain.
@@ -145,14 +144,19 @@ start VintageNet, tailscaled or any device domain.
 Simulator production paths use the public facade, gateway backend and projection
 reducer, the shared endpoint/components, PubSub and distribution setup. Product
 scenarios additionally inspect private domains to verify failure recovery; those
-checks are not a public API for third-party apps. Independent package versions
-remain supported, with explicit SDK requirements and shared-lock checks rather
-than an artificial common version.
+checks are not a public API for third-party apps. The root, firmware and simulator share a platform version; the SDK and systems
+retain independent versions. Only the SDK is published on Hex. Solution apps use
+the released SDK by default, with local source opt-in for SDK development.
 
 ## QEMU simulator
 
 There is one simulator: `sim/`, which runs real firmware in QEMU and requires it.
-`mix dev` serves the simulator site and supervises a separate Simulator BEAM.
+Root `mix dev [SOLUTION]` serves the developer workbench and supervises a separate
+Simulator BEAM. Solutions live outside the checkout and record the platform
+version, firmware selection and virtual wiring. App tests/builds and device builds
+run in supervised OS processes; native host checks run before root checks. UI and
+CLI share `Dev.*` operations, not Mix task calls. Release validation also belongs
+to the root; only protected CI publishes.
 `Simulator` owns build, start, stop and reset; `Simulator.Device` owns each QEMU
 process, disk, QMP socket and Ethernet relay. `QemuTests` admits lifecycle,
 configuration, manual control and scenario runs: independent device runs can

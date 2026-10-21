@@ -1,76 +1,63 @@
-# Continuous integration
+# CI
 
-## Routine validation
+Routine CI never boots a device. Required checks are:
 
-Pushes and pull requests run `.github/workflows/ci.yml`:
+- **checks:** locked dependencies, SDK/simulator/firmware host quality gates and
+  root workbench, solution and release-contract tests.
+- **firmware-x86_64:** clean root setup, local target firmware build and a musl
+  interpreter check for `if_monitor` and `uevent`. No QEMU startup.
+- **solution:** create an external solution against the local SDK, create two
+  apps, test and package both with the ordinary commands. No devices.
 
-| Job | Checks | Starts devices? |
-| --- | --- | --- |
-| `checks` | Locked host dependencies and root `mix ci`: SDK, simulator, generator, firmware and private release tools | No |
-| `firmware-x86_64` | Build the actual x86_64 firmware, including target-only code and release assembly | No |
-| `workspace` | Generate a local-source workspace; setup, test, add a second app, setup again, test, package both apps and check formatting | No |
+Replace the former required check `workspace` with `solution` in branch
+protection. This repository does not modify protection automatically.
 
-Host builds and Dialyzer PLTs are cached by toolchain, lockfiles and project files.
-The image build caches verified downloads, never VM disks. A cache is an
-optimization: locked dependency fetching and all checks still run.
+## Native compilation regression
 
-Firmware's host tests cover pure validation, policies and codecs, not hardware.
-The workspace smoke job tests current source packages. Isolated archive generation
-also runs in the private release-tool tests; package-release preflight verifies
-unpacked Hex payloads without repository path overrides. App developers consume
-published dependencies, not repository siblings.
+A fresh hosted build once shipped glibc-linked workstation ports into a musl
+guest. Guests reached IEx but networking and all host status RPCs timed out.
+QEMU version changes did not fix it. Initialization must preserve these boundaries:
 
-Required branch-protection checks should be `checks`, `firmware-x86_64` and
-`workspace`. Repository rulesets must be updated by the operator; code changes do
-not alter those settings.
+1. Firmware code-reload listeners must run only in host/dev.
+2. Native root setup must enter the archive's `nerves_bootstrap.init` before
+   looking up dependency tasks. Bootstrap aliases are not automatically
+   reinstalled when the root enters another project in the same VM.
+3. Discard target task-completion state before resolving root host tasks; otherwise
+   Nerves tooling compiled in the target graph can be skipped in the host graph.
+   Simulator builds select the same local system sources as root setup.
 
-## QEMU integration
+The hosted ordinary suite passed all 41 scenarios after these fixes (run
+[39646478170](https://github.com/sid2baker/nerves_gate/actions/runs/39646478170)).
+Existing contaminated target build directories require a clean rebuild; changing
+initialization does not rebuild every cached native dependency. Root setup and
+all device builds are guarded without dropping `--check-locked` or increasing
+boot/RPC deadlines. Device compilation always uses a separate OS process.
 
-**QEMU integration** (`qemu.yml`) remains manually dispatched from Actions. It
-runs `mix setup` and `mix test.firmware --ci` on disposable GitHub-hosted runners,
-including firmware builds and both devices' shared scenarios. Only diagnostic
-`.log` files are retained (14 days). Select **tailscale** on `main` to also run
-credentialed authentication checks through the protected `tailnet-ci` environment.
-See [tailnet CI](tailnet-ci.md).
+## Manual integration
 
-Both QEMU jobs run on `ubuntu-26.04` (QEMU 10.2). Portable TCG is used,
-including on ARM Linux hosts; the runner reports virtualization capabilities.
-QEMU 8.2 remains the documented minimum.
+`qemu.yml` runs `mix setup` then `mix test.qemu --ci` with disposable owned devices
+on Ubuntu 26.04/QEMU 10.2. Portable TCG is used, including on ARM Linux hosts;
+KVM availability is reported but is not a requirement. Logs, not VM identity
+disks, are retained. The optional Tailscale job is main-only and protected by the
+`tailnet-ci` environment. See [tailnet CI](tailnet-ci.md).
 
-The hosted boot/status timeout was reproduced locally with a clean target build.
-Native dependencies compiled before Nerves configured its cross-compiler,
-producing workstation/glibc executables for the musl guest. Two early-compilation
-paths needed correction: firmware reload listeners must run only on host/dev, and
-root setup must enter the archive's `nerves_bootstrap.init` task before looking up
-Nerves dependency tasks. Bootstrap aliases are not automatically reinstalled when
-root commands enter another project in the same VM. Clean setup now compiles only
-Nerves tooling. Hosted run [39646478170](https://github.com/sid2baker/nerves_gate/actions/runs/39646478170)
-passed all 41 ordinary scenarios on commit `2e017b7`; routine CI also passed.
-Tailscale authentication was not selected. Existing target builds containing host
-binaries must be removed and rebuilt; fixing initialization does not automatically
-rebuild their dependencies.
-Boot/RPC deadlines were not increased. Manual integration remains the policy.
-
-For an operator-owned standalone run:
+Local equivalents:
 
 ```sh
-mix test.firmware --ci
+mix ci
+mix test.qemu --ci --only sdk   # explicit disposable bench, authorization required
 ```
 
-This boots a disposable bench. Agents must instead use focused checks on the
-operator's existing session, and must not start/stop sessions or boot devices
-without authorization.
+Ordinary device scenarios also attach to the user's existing session with
+`mix test.qemu --only ID [--device ID]`.
 
-## Publication is separate
+## Releases and caches
 
-**System releases** runs on system-directory changes on `main`, using the shared
-**System artifact** publisher. **Package release** runs on namespaced tags.
-See [Releases](releases.md). Neither workflow flashes physical devices.
+`release.yml` publishes only SDK Hex releases and asset-free platform GitHub
+Releases. System artifacts have their own workflow. Neither is dispatched by
+routine CI; see [releases](releases.md).
 
-Host-tool installation is shared in `.github/actions/host-tools/action.yml`; fwup
-is pinned and checksum-verified. Mix orchestration remains native; shell steps are
-limited to host package installation and independent CLI invocations in CI.
-
-Protected environments such as `hex-release` and `tailnet-ci` may be labelled
-"deployments" by GitHub. Here they gate publishing credentials or test
-authentication, not installation onto physical gateways.
+Host caches include root/subproject dependencies, host builds and firmware PLTs.
+Target jobs cache verified downloads and tailscaled input, never compiled target
+ports or VM disks. Host tools are installed by
+`.github/actions/host-tools/action.yml`; fwup is SHA-pinned.

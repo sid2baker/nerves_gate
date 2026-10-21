@@ -67,14 +67,17 @@ Workstation UIs send commands to the selected device. QEMU reports EC100
 peripherals as unavailable. The UI has no sign-in; see
 [HTTP exposure](networking.md#local-recovery-and-http-exposure).
 
-## Simulator site
+## Developer workbench
 
-`mix dev` serves `sim/lib/nerves_gate_sim_web/` at localhost:4000. The overview (`/`) manages
-devices, default wiring and lifecycle. Each `/devices/:id` page shows one device's
-observations, injected faults and scenario results, with a link to its gateway UI.
+Root `mix dev [SOLUTION]` serves `lib/dev_web/` at localhost:4000. The overview
+shows the solution and app test/package/install operations, explicit firmware
+builds, virtual wiring and simulator lifecycle. Each `/devices/:id` page shows
+one device's observations, injected faults and scenario results, with a link to
+its gateway UI. No device starts and no firmware is built merely by opening it.
+UI and CLI invoke the same operations; backend admission remains authoritative.
 See [development](development.md).
 
-The gateway and simulator sites intentionally share the committed firmware
-stylesheet. Firmware's Tailwind configuration scans `../sim/lib/`; rebuild and
-commit `firmware/priv/static/assets/` after simulator template/class changes too.
-This is a build-time source dependency, not a device runtime dependency.
+Both UIs share committed firmware assets. Firmware's Tailwind configuration scans
+root `../lib/`; rebuild and commit `firmware/priv/static/assets/` after workbench
+template/class changes. This is a build-time source dependency, not a device
+runtime dependency.

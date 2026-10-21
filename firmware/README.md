@@ -1,32 +1,27 @@
-# Nerves Gate firmware
+# Device firmware
 
-The `nerves_gate` device application: network, Tailscale, equipment, bus, LED and
-SSH domains, the gateway LiveView UI, the device SDK backend and the trusted OTP
-application runtime. EC100 (`MIX_TARGET=ec100`) and QEMU (`MIX_TARGET=x86_64`)
-build the same application. Host builds provide shared gateway UI modules for
-simulator tools, quality checks and assets; they start no device services.
+The Nerves Gate runtime and shared gateway UI, for EC100 and x86_64 QEMU. Device
+domains own commands, admission, persistence and deadlines. Apps use the SDK;
+workstation tooling never substitutes fake hardware services.
 
-The Hex package is consumed on the host by `nerves_gate_sim`. Device firmware
-builds run from the product checkout and resolve only their selected system's
-Git source and GitHub artifact. Target-specific `tailscaled` binaries are not
-included in the Hex payload. Firmware releases provide a separate x86_64 `.fw`
-image for app-development workspaces.
-
-Use repository-root `mix setup` and `mix dev` for product development.
-Firmware-specific commands run **inside this directory**, never through a root
-firmware alias. Set `NERVES_GATE_LOCAL_DEPS=1` to use the repository's SDK and
-systems:
+This is an independent Nerves project inside the developer-platform checkout.
+It reads the root `VERSION`; it is not published as a Hex package.
 
 ```sh
-NERVES_GATE_LOCAL_DEPS=1 mix ci                 # quality gates
-NERVES_GATE_LOCAL_DEPS=1 mix assets.build       # commit priv/static/assets/
-NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=ec100 MIX_ENV=prod mix firmware
-NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=x86_64 mix firmware
+cd firmware
+export NERVES_GATE_LOCAL_DEPS=1 # use this checkout's system sources, as setup does
+mix deps.get --check-locked
+mix ci                         # host checks and pure unit tests; no device
+MIX_TARGET=x86_64 mix firmware  # build only, never flash hardware
 ```
 
-Integration scenarios live in `test/scenarios/` and run on the
-[QEMU simulator](https://github.com/sid2baker/nerves_gate/blob/main/sim/README.md).
-See the [repository README](https://github.com/sid2baker/nerves_gate/blob/main/README.md)
-and [guides](https://github.com/sid2baker/nerves_gate/blob/main/docs/development.md).
+Use root `mix setup` first for host tools, tailscaled and system artifacts.
+Device builds always run in a separate process from the workbench and root host
+checks. A physical EC100 build selects `MIX_TARGET=ec100`; its system artifact is
+separate and must be available. Building does not authorize updating hardware.
 
-This package has its own VERSION and CHANGELOG; releases use `firmware/vX.Y.Z` tags.
+Host config starts no device domains. Root `mix dev.ui DEVICE` explicitly starts
+the shared gateway UI against a running simulated or development gateway.
+
+See the [public API](lib/nerves_gate.ex), [architecture](../docs/architecture.md),
+[applications](../docs/applications.md) and [platform changelog](../CHANGELOG.md).
