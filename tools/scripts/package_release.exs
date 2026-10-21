@@ -1,5 +1,5 @@
-Code.require_file("package_release.ex", __DIR__)
-alias NervesGate.PackageRelease
+Code.require_file("../lib/package_release.ex", __DIR__)
+alias NervesGateTools.PackageRelease
 [action, tag] = System.argv()
 root = Path.expand("../..", __DIR__)
 info = PackageRelease.metadata!(tag, root)

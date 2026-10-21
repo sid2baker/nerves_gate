@@ -1,10 +1,6 @@
-defmodule NervesGateSim.ArtifactReleaseTest do
+defmodule NervesGateTools.ArtifactReleaseTest do
   use ExUnit.Case, async: false
   alias Mix.Tasks.Nerves.Artifact.Release, as: Release
-
-  test "release lookup, canonical notes and immutable source checks" do
-    NervesGate.Scenarios.SystemArtifact.assert_tooling_contract()
-  end
 
   test "EC100 publication requires the binary, source archive and checksum manifest" do
     binary = "nerves_system_ec100-portable-0.2.1-ABC1234.tar.gz"

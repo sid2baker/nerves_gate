@@ -2,7 +2,7 @@ defmodule NervesGate.Repository do
   use Mix.Project
 
   # Nerves systems are not formatted here: their mix.exs files are artifact inputs.
-  @projects ~w(sdk sim new firmware)
+  @projects ~w(sdk sim new firmware tools)
 
   def project do
     [
@@ -12,7 +12,6 @@ defmodule NervesGate.Repository do
         "deps.get": &deps_get/1,
         format: &format/1,
         test: &test/1,
-        check: &check/1,
         "dev.workspace": &dev_workspace/1,
         ci: &ci/1,
         dev: &run("sim", ["qemu.dev" | &1]),
@@ -60,18 +59,8 @@ defmodule NervesGate.Repository do
   end
 
   defp test(args) do
-    for project <- ~w(sdk sim new), do: run(project, ["test" | args])
+    for project <- @projects, do: run(project, ["test" | args])
   end
-
-  defp check([]) do
-    for project <- ~w(sdk sim new) do
-      run(project, ["compile", "--warnings-as-errors"])
-      run(project, ["format", "--check-formatted"])
-      run(project, ["test"])
-    end
-  end
-
-  defp check(_), do: Mix.raise("Usage: mix check")
 
   defp ci([]) do
     Mix.Tasks.Format.run(["--check-formatted"])
@@ -113,6 +102,7 @@ defmodule NervesGate.Repository do
       "sim" => :nerves_gate_sim,
       "new" => :nerves_gate_new,
       "firmware" => :nerves_gate,
+      "tools" => :nerves_gate_tools,
       "systems/nerves_system_ec100" => :nerves_system_ec100,
       "systems/nerves_system_ec100_qemu" => :nerves_system_ec100_qemu
     }

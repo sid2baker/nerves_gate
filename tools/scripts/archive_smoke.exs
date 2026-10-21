@@ -1,4 +1,4 @@
-Code.require_file("archive_smoke.ex", __DIR__)
+Code.require_file("../lib/archive_smoke.ex", __DIR__)
 [archive] = System.argv()
-NervesGate.ArchiveSmoke.run!(archive)
+NervesGateTools.ArchiveSmoke.run!(archive)
 IO.puts("Installed archive generated a complete workspace outside the checkout.")

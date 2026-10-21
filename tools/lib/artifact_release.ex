@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   Preload this host-only task so Nerves can run it before resolving artifacts:
 
       cd firmware
-      MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r scripts/artifact_release.ex -S mix nerves.artifact.release plan
+      MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../tools/lib/artifact_release.ex -S mix nerves.artifact.release plan
 
   The tag comes from the system's `artifact_sites`, so downloads and publication
   cannot disagree. Changing it is a system build-input change.

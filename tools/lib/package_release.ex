@@ -1,4 +1,4 @@
-defmodule NervesGate.PackageRelease do
+defmodule NervesGateTools.PackageRelease do
   @moduledoc false
   # Pure metadata tests may run with SSL code paths pruned by Mix. HTTP
   # verification starts :inets and :ssl before using these modules.

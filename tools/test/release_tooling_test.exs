@@ -1,9 +1,6 @@
-Code.require_file("../../.github/scripts/package_release.ex", __DIR__)
-Code.require_file("../../.github/scripts/archive_smoke.ex", __DIR__)
-
-defmodule NervesGateNew.ReleaseToolingTest do
+defmodule NervesGateTools.ReleaseToolingTest do
   use ExUnit.Case, async: false
-  alias NervesGate.PackageRelease
+  alias NervesGateTools.PackageRelease
 
   test "release metadata requires a known tag, exact version and canonical dated notes" do
     root = Path.join(System.tmp_dir!(), "gate_notes_#{System.unique_integer([:positive])}")
@@ -39,8 +36,24 @@ defmodule NervesGateNew.ReleaseToolingTest do
     root = Path.join(System.tmp_dir!(), "gate_archive_test_#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
     on_exit(fn -> File.rm_rf!(root) end)
-    archive = Path.join(root, "nerves_gate_new-#{Mix.Project.config()[:version]}.ez")
-    Mix.Task.run("archive.build", ["--output", archive])
-    assert :ok = NervesGate.ArchiveSmoke.run!(archive)
+    paths = :code.get_path()
+
+    archive =
+      try do
+        Mix.Project.in_project(:nerves_gate_new, Path.expand("../../new", __DIR__), fn _ ->
+          output = Path.join(root, "nerves_gate_new-#{Mix.Project.config()[:version]}.ez")
+          Mix.Task.reenable("deps.loadpaths")
+          Mix.Task.run("deps.loadpaths")
+          Mix.Task.reenable("deps.compile")
+          Mix.Task.run("deps.compile")
+          Mix.Task.reenable("archive.build")
+          Mix.Task.run("archive.build", ["--output", output])
+          output
+        end)
+      after
+        :code.set_path(paths)
+      end
+
+    assert :ok = NervesGateTools.ArchiveSmoke.run!(archive)
   end
 end

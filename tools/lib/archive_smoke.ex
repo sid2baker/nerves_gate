@@ -1,4 +1,4 @@
-defmodule NervesGate.ArchiveSmoke do
+defmodule NervesGateTools.ArchiveSmoke do
   @moduledoc false
 
   # Installation must run in a new VM outside the checkout. Calling the task's

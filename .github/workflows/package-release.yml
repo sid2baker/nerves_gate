@@ -43,31 +43,20 @@ jobs:
           echo "RELEASE_DIR=$RUNNER_TEMP/package-release" >> "$GITHUB_ENV"
       - name: Validate version and canonical changelog
         id: package
-        run: mise exec -- elixir .github/scripts/package_release.exs prepare "$RELEASE_TAG"
+        run: mise exec -- elixir tools/scripts/package_release.exs prepare "$RELEASE_TAG"
       - name: Require a tagged commit from main
         run: |
           test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor HEAD origin/main
-      - name: Install Mix tooling outside the project
-        run: |
-          # shellcheck disable=SC2016
-          mise exec -- sh -eu -c '
-            cd "$RUNNER_TEMP"
-            mix local.hex --force --if-missing
-            mix local.rebar --force --if-missing
-            mix archive.install hex nerves_bootstrap "~> 1.17" --force
-          '
+      - uses: ./.github/actions/host-tools
+        with:
+          firmware: ${{ steps.package.outputs.project == 'firmware' && 'true' || 'false' }}
       - name: Reject unsupported package dependencies
-        run: mise exec -- elixir .github/scripts/package_release.exs dependencies "$RELEASE_TAG"
+        run: mise exec -- elixir tools/scripts/package_release.exs dependencies "$RELEASE_TAG"
       - name: Require unpublished outputs and available consumer dependencies
         env:
           GH_TOKEN: ${{ github.token }}
-        run: mise exec -- elixir .github/scripts/package_release.exs unpublished "$RELEASE_TAG"
-      - name: Install native host build prerequisites
-        if: steps.package.outputs.project == 'firmware' || steps.package.outputs.project == 'sim'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev
+        run: mise exec -- elixir tools/scripts/package_release.exs unpublished "$RELEASE_TAG"
       - name: Build and inspect Hex payload before publication
         working-directory: ${{ steps.package.outputs.project }}
         run: |
@@ -103,9 +92,6 @@ jobs:
           PACKAGE_VERSION: ${{ steps.package.outputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
-          printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
-          sudo apt-get install --yes "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" squashfs-tools
           mise exec -- mix deps.get --check-locked
           mise exec -- mix tailscaled.install
           mise exec -- mix firmware --overwrite
@@ -123,7 +109,7 @@ jobs:
             mix deps.get --check-locked
             mix archive.build --output "$RELEASE_DIR/$PACKAGE_APP-$PACKAGE_VERSION.ez"
           '
-          mise exec -- elixir .github/scripts/archive_smoke.exs "$RELEASE_DIR/$PACKAGE_APP-$PACKAGE_VERSION.ez"
+          mise exec -- elixir tools/scripts/archive_smoke.exs "$RELEASE_DIR/$PACKAGE_APP-$PACKAGE_VERSION.ez"
       - name: Retain preflight payloads
         uses: actions/upload-artifact@v7
         with:
@@ -162,4 +148,4 @@ jobs:
       - name: Verify public registry, documentation and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: mise exec -- elixir .github/scripts/package_release.exs verify "$RELEASE_TAG"
+        run: mise exec -- elixir tools/scripts/package_release.exs verify "$RELEASE_TAG"
