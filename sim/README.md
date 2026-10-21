@@ -51,6 +51,12 @@ From the repository root, `mix setup` prepares the x86_64 firmware inputs and
 `mix dev` builds the local firmware when devices start. `mix dev.status`,
 `mix dev.stop` and `mix dev.ui <device>` manage the session and serve the gateway
 UI with code reload. `mix test.firmware --only <scenario> [--device <id>]` runs
-firmware's integration scenarios (`firmware/test/scenarios`) on the running
+product integration scenarios (`sim/scenarios`) on the running
 session. Scenarios on different devices run concurrently; `devices: :all`
 reserves every device.
+
+For an application console, acquire idle Manual control on a device's page, then
+run `mix nerves_gate.sim.console --device gateway_a` (or workspace
+`mix app.console`). Run the printed SSH command in your terminal and use
+`RingLogger.attach()` in the guest's IEx console. Close it before releasing Manual
+control. This grants full VM access and never targets arbitrary machines.

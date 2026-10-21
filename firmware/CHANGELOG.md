@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- Hardware-free unit tests for input validation, LED policy, equipment labels and Modbus RTU framing run in host CI.
+
+### Changed
+
+- Align firmware and simulator locks on `nerves_time` 0.4.14, including its invalid-RTC-time fix, so clean locked dependency fetches remain reproducible.
+
 ## 0.1.0 - 2026-10-21
 
 ### Added

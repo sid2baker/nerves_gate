@@ -54,7 +54,7 @@ provide the file yourself.
 
 Applications depend only on [`nerves_gate_sdk`](sdk/README.md), run on real
 firmware (including the [QEMU simulator](sim/README.md)) and ship as standard OTP
-`.ez` archives on the gateway's SD card. See [applications](docs/applications.md).
+`.ez` archives on the gateway's SD card. See [app development](docs/app-development.md) and the [application runtime](docs/applications.md).
 
 ## Use a gateway
 
@@ -90,7 +90,7 @@ disabled by default.
 Each project is an independent Mix project with its own version, changelog and
 namespaced release tags. The root `mix.exs` only orchestrates them.
 
-Guides: [Development](docs/development.md) · [Architecture](docs/architecture.md) ·
+Guides: [Product development](docs/development.md) · [App development](docs/app-development.md) · [CI](docs/ci.md) · [Releases](docs/releases.md) · [Architecture](docs/architecture.md) ·
 [Public API](docs/action-api.md) · [Applications](docs/applications.md) ·
 [Networking](docs/networking.md) · [UI](docs/ui.md) ·
 [LEDs and button](docs/indicators.md) · [Buses](docs/buses.md).

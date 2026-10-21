@@ -69,7 +69,12 @@ peripherals as unavailable. The UI has no sign-in; see
 
 ## Simulator site
 
-`mix dev` serves `sim/lib/nerves_gate_web/simulator/` at localhost:4000. The overview (`/`) manages
+`mix dev` serves `sim/lib/nerves_gate_sim_web/` at localhost:4000. The overview (`/`) manages
 devices, default wiring and lifecycle. Each `/devices/:id` page shows one device's
 observations, injected faults and scenario results, with a link to its gateway UI.
 See [development](development.md).
+
+The gateway and simulator sites intentionally share the committed firmware
+stylesheet. Firmware's Tailwind configuration scans `../sim/lib/`; rebuild and
+commit `firmware/priv/static/assets/` after simulator template/class changes too.
+This is a build-time source dependency, not a device runtime dependency.

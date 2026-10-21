@@ -100,8 +100,7 @@ using local path dependencies (`NERVES_GATE_LOCAL_DEPS=1`):
 | --- | --- |
 | `mix setup` | Dependencies for all projects and the QEMU firmware inputs |
 | `mix format` | Each Elixir project's formatter (not the Nerves systems) |
-| `mix test` | SDK, simulator and generator unit tests; no devices |
-| `mix check` | Warnings-as-errors, formatting and unit tests for those packages |
+| `mix test` | SDK, simulator, generator, firmware and tooling tests; no devices |
 | `mix ci` | Each SDK, simulator, generator and firmware project's CI, in test mode |
 | `mix dev`, `mix dev.status`, `mix dev.stop`, `mix dev.ui` | The simulator session |
 | `mix test.sdk`, `mix test.sim` | One package's unit tests |
@@ -123,7 +122,16 @@ NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=x86_64 mix firmware
 
 There is no root `mix firmware` alias. App developers consume a compatible
 firmware image rather than building the product; see
-[Application development](applications.md#application-development).
+[Application development](app-development.md).
+
+## Fast checks before device testing
+
+Run `mix test` for host tests or `mix ci` for all host quality gates. Firmware's
+pure validation, policies and codecs have unit tests in `firmware/test/unit/`;
+these do not stand in for hardware tests. Use focused QEMU scenarios for I/O and
+persistence. Firmware changes still require a rebuild and device restart; live
+module loading is not supported because it would bypass supervision and release
+compatibility checks.
 
 ## Daily workflow
 
@@ -304,14 +312,15 @@ Optional settings:
 
 Both firmware profiles import `firmware/config/firmware.exs` for the shared device
 services. `sim` compiles `firmware` as a dependency (never starting its device
-services) plus the repository's `firmware/test/scenarios/` and
-`firmware/scripts/artifact_release.ex`. Hardware-specific settings live in the
-platform profiles and systems.
+services). Repository checkouts additionally compile `sim/scenarios/`; published
+simulator packages contain no product scenarios or release tools. Hardware-specific
+settings live in the platform profiles and systems. Private release tooling lives
+in `tools/` and is checked by root `mix ci`.
 
 ## Scenarios
 
-UI, CLI and CI run [`firmware/test/scenarios/`](../firmware/test/scenarios) with the
-same runner (`sim/lib/nerves_gate/qemu_tests.ex`). Scenarios are ordinary Elixir
+UI, CLI and CI run [`sim/scenarios/`](../sim/scenarios) with the
+same runner (`sim/lib/nerves_gate_sim/qemu_tests.ex`). Scenarios are ordinary Elixir
 modules using ExUnit assertions and owned device handles:
 
 ```elixir
@@ -407,14 +416,14 @@ isolation, not a sandbox against hostile local users. See the
 Scenarios and manual controls share the owned device drivers:
 
 ```elixir
-alias NervesGate.TestQemu, as: Qemu
+alias NervesGateSim.TestQemu, as: Qemu
 
 Qemu.network(vm, %{internet: :lan2})
 Qemu.network(vm, %{cables: %{lan1: false}})
 Qemu.network(vm, %{uplink: %{delay_ms: 200, loss: :alternate}})
 Qemu.network(vm)
 Qemu.network_stats(vm)
-Qemu.network(vm, NervesGate.Simulator.Network.defaults())
+Qemu.network(vm, NervesGateSim.Simulator.Network.defaults())
 ```
 
 Patches keep omitted fields and reject invalid values before changing forwarding.
@@ -455,96 +464,10 @@ Internet outages fail checks. See the
 - Distribution conflict: free port 9100 on the device's loopback address. The
   launcher never stops other processes.
 
+## Validation and releases
+
+See [CI](ci.md) for automated checks and [Releases](releases.md) for package and system publication.
+
 ## System artifacts
 
-Both systems live in this repository. Firmware consumes their source with Git
-subdirectory dependencies pinned to `system-ec100/v<VERSION>` or
-`system-ec100-qemu/v<VERSION>`. Their `artifact_sites` download fingerprinted
-binaries from GitHub Releases in `sid2baker/nerves_gate`; no system Hex packages
-are needed. `NERVES_GATE_LOCAL_DEPS=1` selects the checked-out system sources.
-
-1. For build-input changes, bump the system's `VERSION`, update firmware's pinned
-   dependency in `firmware/mix.exs`, and add a dated changelog section.
-2. Align system dependencies in its `mix.lock` and `firmware/mix.lock`.
-3. Push system changes to `main`. The separate `system-releases.yml` workflow
-   checks both target releases through `system-artifact.yml`. Current releases
-   are reused; missing releases are built, tagged, published and downloaded into
-   a fresh cache for verification. EC100 and QEMU publication run independently.
-
-EC100 publication includes the corresponding-source archive and `SHA256SUMS`.
-The publisher verifies all required assets and hashes before making a draft
-public. Manual dispatch selects `ec100` or `x86_64` and can resume a release.
-Release title is exactly the tag; notes are exactly the dated changelog body.
-
-The release tag is read from the system's `artifact_sites`, so downloads and
-publication agree. Published tags and assets are immutable; matching releases are
-reused. An interrupted draft resumes only with identical sources, locks, toolchain
-pins and artifact bytes. Otherwise clean up explicitly or bump the version; never
-move a tag or overwrite an artifact.
-
-Local system build (Docker required) and release-plan check (no build, no GitHub):
-
-```sh
-cd firmware
-export NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=x86_64 MIX_ENV=dev
-mix deps.get
-mix nerves.artifact.build nerves_system_ec100_qemu
-elixir -r scripts/artifact_release.ex -S mix nerves.artifact.release plan
-```
-
-For EC100, select `MIX_TARGET=ec100` and build `nerves_system_ec100` instead;
-collect its sources with
-`elixir -r ../systems/nerves_system_ec100/lib/mix/tasks/ec100.release.ex -S mix ec100.release`.
-Neither command flashes hardware. Local `plan` is read-only and never publishes.
-
-After changing the QEMU system, the operator resets and starts devices and runs
-`mix test.firmware --only system_artifact` against the new system. Release metadata
-and immutability checks also run as ordinary simulator unit tests.
-
-## Package releases
-
-Each project has its own `VERSION` and `CHANGELOG.md`, with namespaced tags:
-`firmware/vX.Y.Z`, `sdk/vX.Y.Z`, `sim/vX.Y.Z`, `new/vX.Y.Z`,
-`system-ec100/vX.Y.Z` and `system-ec100-qemu/vX.Y.Z`. Systems use Git source
-packages and GitHub binary releases, not Hex. Other packages consume Hex
-dependencies unless `NERVES_GATE_LOCAL_DEPS=1` selects repository-local paths.
-Publish SDK before firmware, then simulator and generator tooling. System
-artifacts must be published before firmware builds can download them.
-See [Package releases](releases.md) for the release workflow, credentials,
-validation, repair policy and current publication blockers.
-
-## CI
-
-Ordinary pushes and pull requests run **CI / checks** (`ci.yml`):
-`mix deps.get --check-locked` fetches host dependencies, then root `mix ci` runs
-all four projects' quality gates and unit tests. This needs neither QEMU nor
-firmware images, never starts devices and cannot publish releases.
-
-**QEMU integration** (`qemu.yml`) is manually dispatched from Actions. It runs
-`mix setup` and `mix test.firmware --ci` on disposable GitHub-hosted runners,
-including firmware builds and both devices' shared scenarios. Only diagnostic
-`.log` files are retained (14 days). Select the optional **tailscale** input on
-`main` to also run credentialed authentication checks through `tailnet-ci`.
-The known CI-only guest status-RPC timeout remains unresolved; moving this bench
-out of routine CI does not fix or waive its results.
-
-**System releases** (`system-releases.yml`) runs only for system-directory changes
-on `main`. It calls the shared publisher for both targets; PRs cannot publish.
-Manual target-specific publication remains available in **System artifact**.
-Integration tests consume already-published artifacts and fail if one is missing.
-**Package release** remains tag-triggered; see [releases](releases.md).
-
-GitHub calls protected environments such as `hex-release` and `tailnet-ci`
-"deployments". Here they gate publishing credentials or test authentication, not
-installation onto physical gateways. No workflow flashes physical devices.
-If branch protection required the old `qemu` or package-matrix checks, change the
-required check to **checks** in the repository's rulesets/settings.
-
-For an operator-owned standalone run, stop the development session first:
-
-```sh
-mix test.firmware --ci          # clean bench and shared scenarios
-```
-
-Agents run focused checks on the operator's session. Starting or stopping that
-session, booting devices and full CI runs belong to the operator.
+See [System artifact releases](releases.md#system-artifacts).

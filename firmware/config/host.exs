@@ -1,7 +1,9 @@
 import Config
 
-# Host builds are for quality checks and asset builds only. The workstation UI and
-# QEMU devices are owned by ../sim, which supplies its own configuration.
+# Host builds provide quality checks, asset builds and the shared gateway UI.
+# Start no device services here. Explicit simulator launchers set :services to
+# [NervesGateSim.HostInit, NervesGateWeb.Endpoint] and start the host application.
+# VintageNet behaviours/types are compiled but their applications never start.
 config :nerves_gate, services: []
 
 # Stable entry names let firmware use Phoenix static paths without loading Volt.
@@ -20,6 +22,7 @@ config :volt,
     css: "assets/css/app.css",
     sources: [
       %{base: "lib/", pattern: "**/*.{ex,heex}"},
+      # The shared stylesheet serves both sites. Rebuild assets after simulator UI edits.
       %{base: "../sim/lib/", pattern: "**/*.ex"},
       %{base: "assets/", pattern: "**/*.js"}
     ]

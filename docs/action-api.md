@@ -170,4 +170,4 @@ status = NervesGate.status(opts)
 
 Other options are `:equipment`, `:indicators` and `:buses`.
 [SSH](../firmware/lib/nerves_gate/ssh.ex) is a single device-owned store. See the
-[QEMU scenarios](../firmware/test/scenarios) for examples against real devices.
+[QEMU scenarios](../sim/scenarios) for examples against real devices.

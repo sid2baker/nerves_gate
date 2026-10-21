@@ -5,7 +5,13 @@
 ### Added
 
 - Local development workspaces keep newly created apps on the same checkout's SDK instead of switching to a published dependency.
-- Workspace `mix setup` downloads and SHA-256-verifies the pinned QEMU firmware when the default image is missing. Existing images and custom firmware paths are preserved; no GitHub CLI is required.
+- Workspace `mix setup` checks simulator prerequisites and downloads the pinned QEMU firmware to a versioned path. Managed images are SHA-256-verified on every setup; custom paths and old images are preserved.
+- `mix app.console` prints the SSH IEx command for an idle, manually reserved simulator device.
+- Generated apps demonstrate pure decisions over SDK observations and host-only unit tests.
+
+### Fixed
+
+- Generated Elixir files are formatted, including workspaces with long local dependency paths.
 
 ## 0.1.1 - 2026-10-21
 

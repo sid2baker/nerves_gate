@@ -1,7 +1,7 @@
 # Package releases
 
 The SDK, firmware, simulator and generator have independent versions and releases.
-Systems use the separate [GitHub system-artifact workflow](development.md#system-artifacts),
+Systems use the separate [GitHub system-artifact workflow](#system-artifacts),
 not Hex.
 
 ## Workflow
@@ -78,10 +78,59 @@ Git/path dependencies rather than silently omitting them.
 Target-specific `tailscaled` binaries are excluded from the Hex payload. The
 firmware release workflow builds a separate x86_64 `.fw` using the published
 system, without starting QEMU, and attaches it to the GitHub Release. Workspace
-`mix setup` downloads the default image to `firmware/nerves_gate.fw` and verifies
-the SHA-256 pinned in the generator. When changing that pin, verify the release
+`mix setup` downloads the default image to a versioned path under `firmware/`
+and verifies the SHA-256 pinned in the generator, including on subsequent setup
+runs. The workspace's default-path expression follows the generator pin on update;
+custom paths and older images are preserved. When changing that pin, verify the release
 asset's digest and firmware compatibility first. Existing files and custom paths
 are preserved. App developers need no GitHub CLI or product source checkout.
 This is not a physical-device flash or qualification run.
 
 No packages are published by repository setup, archive smoke tests or ordinary CI.
+
+## System artifacts
+
+
+Both systems live in this repository. Firmware consumes their source with Git
+subdirectory dependencies pinned to `system-ec100/v<VERSION>` or
+`system-ec100-qemu/v<VERSION>`. Their `artifact_sites` download fingerprinted
+binaries from GitHub Releases in `sid2baker/nerves_gate`; no system Hex packages
+are needed. `NERVES_GATE_LOCAL_DEPS=1` selects the checked-out system sources.
+
+1. For build-input changes, bump the system's `VERSION`, update firmware's pinned
+   dependency in `firmware/mix.exs`, and add a dated changelog section.
+2. Align system dependencies in its `mix.lock` and `firmware/mix.lock`.
+3. Push system changes to `main`. The separate `system-releases.yml` workflow
+   checks both target releases through `system-artifact.yml`. Current releases
+   are reused; missing releases are built, tagged, published and downloaded into
+   a fresh cache for verification. EC100 and QEMU publication run independently.
+
+EC100 publication includes the corresponding-source archive and `SHA256SUMS`.
+The publisher verifies all required assets and hashes before making a draft
+public. Manual dispatch selects `ec100` or `x86_64` and can resume a release.
+Release title is exactly the tag; notes are exactly the dated changelog body.
+
+The release tag is read from the system's `artifact_sites`, so downloads and
+publication agree. Published tags and assets are immutable; matching releases are
+reused. An interrupted draft resumes only with identical sources, locks, toolchain
+pins and artifact bytes. Otherwise clean up explicitly or bump the version; never
+move a tag or overwrite an artifact.
+
+Local system build (Docker required) and release-plan check (no build, no GitHub):
+
+```sh
+cd firmware
+export NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=x86_64 MIX_ENV=dev
+mix deps.get
+mix nerves.artifact.build nerves_system_ec100_qemu
+elixir -r ../tools/lib/artifact_release.ex -S mix nerves.artifact.release plan
+```
+
+For EC100, select `MIX_TARGET=ec100` and build `nerves_system_ec100` instead;
+collect its sources with
+`elixir -r ../systems/nerves_system_ec100/lib/mix/tasks/ec100.release.ex -S mix ec100.release`.
+Neither command flashes hardware. Local `plan` is read-only and never publishes.
+
+After changing the QEMU system, the operator resets and starts devices and runs
+`mix test.firmware --only system_artifact` against the new system. Release metadata
+and immutability checks also run as ordinary simulator unit tests.
