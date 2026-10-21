@@ -17,7 +17,10 @@ defmodule NervesGateNew.MixProject do
       ],
       aliases: [ci: ["compile --warnings-as-errors", "format --check-formatted", "test"]],
       docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
-      deps: [{:ex_doc, "~> 0.40", only: :docs, runtime: false}]
+      deps: [
+        {:ex_doc, "~> 0.40", only: :docs, runtime: false},
+        {:req, "~> 0.7", runtime: false}
+      ]
     ]
   end
 

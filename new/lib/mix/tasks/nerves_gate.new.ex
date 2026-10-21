@@ -8,8 +8,20 @@ defmodule Mix.Tasks.NervesGate.New do
   """
 
   @impl true
-  def run([path]) do
-    NervesGateNew.workspace(path)
+  def run([path, "--local", source]) do
+    source = Path.expand(source)
+
+    unless File.regular?(Path.join(source, "sdk/mix.exs")),
+      do: Mix.raise("Not a Nerves Gate checkout: #{source}")
+
+    generate(path, source)
+  end
+
+  def run([path]), do: generate(path, nil)
+  def run(_), do: Mix.raise("Usage: mix nerves_gate.new my_workspace")
+
+  defp generate(path, source) do
+    NervesGateNew.workspace(path, source)
 
     Mix.shell().info("""
 
@@ -17,8 +29,8 @@ defmodule Mix.Tasks.NervesGate.New do
       cd #{path}
       mix setup
 
-    Copy a compatible x86_64 QEMU image to firmware/nerves_gate.fw,
-    or edit config/simulator.exs to select your image. Then:
+    Setup downloads and verifies the default QEMU firmware if missing.
+    Existing images and custom paths in config/simulator.exs are preserved.
       mix sim
 
     Start devices on the site, open the gateway UI, and choose
@@ -30,6 +42,4 @@ defmodule Mix.Tasks.NervesGate.New do
       mix test
     """)
   end
-
-  def run(_), do: Mix.raise("Usage: mix nerves_gate.new my_workspace")
 end

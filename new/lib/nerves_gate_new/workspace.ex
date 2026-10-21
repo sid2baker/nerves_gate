@@ -6,12 +6,13 @@ defmodule NervesGateNew.Workspace do
     # loaded modules while fetching dependencies for each independent app.
     Mix.Local.append_archives()
     for {name, path} <- apps(), do: in_app(name, path, Mix.env(), "deps.get", [])
+    NervesGateNew.Firmware.setup!(Path.join(root(), "config/simulator.exs"))
   end
 
   def setup(_), do: Mix.raise("Usage: mix setup")
 
   def new([name]) do
-    NervesGateNew.app(Path.join(root(), "apps"), name)
+    NervesGateNew.app(Path.join(root(), "apps"), name, Mix.Project.config()[:nerves_gate_source])
     Mix.shell().info("Run mix setup to fetch the new app's dependencies.")
   end
 
@@ -24,7 +25,7 @@ defmodule NervesGateNew.Workspace do
     unless File.regular?(settings.firmware),
       do:
         Mix.raise(
-          "Place a compatible x86_64 QEMU image at #{settings.firmware}, or edit config/simulator.exs"
+          "Firmware not found at #{settings.firmware}. Run mix setup to download the default image, or supply your configured custom image."
         )
 
     Mix.Task.run("nerves_gate.sim", ["--config", config | args])

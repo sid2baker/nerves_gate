@@ -176,8 +176,8 @@ defmodule NervesGate.Scenarios.SystemArtifact do
     git!(root, ["tag", tag])
     assert :ok = Release.verify_pending_sources!(tag, system, repository)
 
-    File.mkdir_p!(Path.join(repository, "dev"))
-    File.write!(Path.join(repository, "dev/artifact_release.ex"), "publisher repair")
+    File.mkdir_p!(Path.join(repository, "scripts"))
+    File.write!(Path.join(repository, "scripts/artifact_release.ex"), "publisher repair")
     git!(root, ["add", "."])
     git!(root, ["commit", "--quiet", "-m", "Repair publisher only"])
     refute git!(root, ["rev-parse", "HEAD"]) == git!(root, ["rev-parse", tag])

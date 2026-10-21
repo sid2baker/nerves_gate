@@ -62,6 +62,28 @@ defmodule NervesGateNew.GeneratorTest do
     end
   end
 
+  test "local workspaces and additional apps use checkout sources", %{root: root} do
+    source = Path.expand("../..", __DIR__)
+    path = Path.join(root, "local_workspace")
+    Mix.Tasks.NervesGate.New.run([path, "--local", source])
+    workspace = File.read!(Path.join(path, "mix.exs"))
+    assert workspace =~ "nerves_gate_source: #{inspect(source)}"
+    assert workspace =~ "System.put_env(\"NERVES_GATE_LOCAL_DEPS\", \"1\")"
+
+    for project <- ["new", "sim"] do
+      assert workspace =~ "path: #{inspect(Path.join(source, project))}"
+    end
+
+    sdk = "path: #{inspect(Path.join(source, "sdk"))}"
+    assert File.read!(Path.join(path, "apps/my_app/mix.exs")) =~ sdk
+    NervesGateNew.app(Path.join(path, "apps"), "example_app", source)
+    assert File.read!(Path.join(path, "apps/example_app/mix.exs")) =~ sdk
+
+    for file <- Path.wildcard(Path.join(path, "**/*.{ex,exs}"), match_dot: true) do
+      assert {:ok, _} = file |> File.read!() |> Code.string_to_quoted()
+    end
+  end
+
   test "rejects invalid workspace names", %{root: root} do
     for name <- ["bad-name", "Uppercase"] do
       assert_raise Mix.Error, fn -> Mix.Tasks.NervesGate.New.run([Path.join(root, name)]) end

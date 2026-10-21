@@ -8,6 +8,8 @@ defmodule NervesGateNew.WorkspaceTest do
     path = Path.join(System.tmp_dir!(), "gate_workspace_#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm_rf!(path) end)
     NervesGateNew.workspace(path)
+    firmware = Path.join(path, "firmware/nerves_gate.fw")
+    File.write!(firmware, "existing image")
     local_sdk!(Path.join(path, "apps/my_app/mix.exs"))
     previous = Mix.Project.pop()
     compiler = Code.compiler_options()
@@ -33,7 +35,9 @@ defmodule NervesGateNew.WorkspaceTest do
         assert Mix.Project.get() == project
         assert_raise Mix.Error, ~r/Unknown app/, fn -> Workspace.package(["missing"]) end
         assert_raise Mix.Error, fn -> Workspace.new(["../escape"]) end
-        assert_raise Mix.Error, ~r/x86_64 QEMU image/, fn -> Workspace.sim([]) end
+        File.rm!(firmware)
+        assert_raise Mix.Error, ~r/Run mix setup/, fn -> Workspace.sim([]) end
+        File.write!(firmware, "existing image")
 
         Workspace.package([])
         assert Mix.Project.get() == project

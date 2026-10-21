@@ -43,7 +43,7 @@ defmodule NervesGateSim.MixProject do
   # Repository checkouts compile firmware's QEMU scenarios and the system release
   # tool they check. Packages contain neither.
   defp scenario_paths do
-    for path <- ["../firmware/test/scenarios", "../firmware/dev/artifact_release.ex"],
+    for path <- ["../firmware/test/scenarios", "../firmware/scripts/artifact_release.ex"],
         path = Path.expand(path, __DIR__),
         File.exists?(path),
         do: path

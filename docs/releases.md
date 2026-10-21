@@ -77,8 +77,11 @@ Git/path dependencies rather than silently omitting them.
 
 Target-specific `tailscaled` binaries are excluded from the Hex payload. The
 firmware release workflow builds a separate x86_64 `.fw` using the published
-system, without starting QEMU, and attaches it to the GitHub Release. App developers
-can download it into their workspace's `firmware/nerves_gate.fw`; they need no
-product source checkout. This is not a physical-device flash or qualification run.
+system, without starting QEMU, and attaches it to the GitHub Release. Workspace
+`mix setup` downloads the default image to `firmware/nerves_gate.fw` and verifies
+the SHA-256 pinned in the generator. When changing that pin, verify the release
+asset's digest and firmware compatibility first. Existing files and custom paths
+are preserved. App developers need no GitHub CLI or product source checkout.
+This is not a physical-device flash or qualification run.
 
 No packages are published by repository setup, archive smoke tests or ordinary CI.

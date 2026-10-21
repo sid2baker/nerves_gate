@@ -73,7 +73,7 @@ jobs:
         run: mise exec -- mix deps.get --check-locked
       - name: Check version, inputs and existing release
         id: release
-        run: mise exec -- elixir -r dev/artifact_release.ex -S mix nerves.artifact.release check
+        run: mise exec -- elixir -r scripts/artifact_release.ex -S mix nerves.artifact.release check
       - name: Cache system source downloads
         if: steps.release.outputs.publish == 'true'
         uses: actions/cache@v6
@@ -90,7 +90,7 @@ jobs:
         run: mise exec -- elixir -r ../systems/nerves_system_ec100/lib/mix/tasks/ec100.release.ex -S mix ec100.release
       - name: Publish immutable system release
         if: steps.release.outputs.publish == 'true'
-        run: mise exec -- elixir -r dev/artifact_release.ex -S mix nerves.artifact.release publish
+        run: mise exec -- elixir -r scripts/artifact_release.ex -S mix nerves.artifact.release publish
       - name: Verify download without the build cache
         run: mise exec -- mix nerves.artifact.get
         env:

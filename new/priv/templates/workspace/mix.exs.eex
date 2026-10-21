@@ -1,4 +1,4 @@
-defmodule <%= module %>.Workspace.MixProject do
+<%= if source, do: "# Local platform development: use this checkout, not released packages.\nSystem.put_env(\"NERVES_GATE_LOCAL_DEPS\", \"1\")\n\n" %>defmodule <%= module %>.Workspace.MixProject do
   use Mix.Project
 
   def project do
@@ -6,9 +6,9 @@ defmodule <%= module %>.Workspace.MixProject do
       app: :<%= name %>_workspace,
       version: "0.1.0",
       elixir: "~> 1.20",
-      deps: [
-        {:nerves_gate_new, "~> 0.1", only: [:dev, :test], runtime: false},
-        {:nerves_gate_sim, "~> 0.1.0", only: [:dev, :test], runtime: false}
+<%= if source, do: "      nerves_gate_source: #{inspect(source)},\n" %>      deps: [
+        {:nerves_gate_new, "~> 0.1", <%= if source, do: "path: #{inspect(Path.join(source, "new"))}, " %>only: [:dev, :test], runtime: false},
+        {:nerves_gate_sim, "~> 0.1.0", <%= if source, do: "path: #{inspect(Path.join(source, "sim"))}, " %>only: [:dev, :test], runtime: false}
       ],
       aliases: [
         setup: ["deps.get", &workspace(:setup, &1)],

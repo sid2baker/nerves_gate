@@ -73,7 +73,7 @@ defmodule NervesGate.MixProject do
 
   # Runs without compiling the project or its dependencies.
   defp tailscaled_install([]) do
-    Code.require_file("dev/tailscaled.ex", __DIR__)
+    Code.require_file("scripts/tailscaled.ex", __DIR__)
     NervesGate.Dev.Tailscaled.install()
   end
 

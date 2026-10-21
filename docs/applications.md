@@ -7,7 +7,7 @@ hot-code upgrade or dependency solver.
 ## Application development
 
 The app developer uses a generated workspace, not this product repository.
-After the packages are published to Hex, install the generator once:
+Install the generator from Hex once:
 
 ```sh
 mix archive.install hex nerves_gate_new
@@ -31,8 +31,11 @@ development/test only). Each app depends only on `nerves_gate_sdk` and has its
 own Mix project, dependency closure, unit tests and deployable package. This is
 not an umbrella. Installing the generator does not install QEMU or firmware.
 
-Place a compatible **x86_64 QEMU firmware image** at `firmware/nerves_gate.fw`,
-or select another path in `config/simulator.exs`. Then run:
+`mix setup` downloads the pinned **x86_64 QEMU firmware image** to
+`firmware/nerves_gate.fw` over HTTPS and verifies its SHA-256 checksum. Existing
+images are reused without a download; no GitHub CLI is needed. To use custom
+firmware, select its path in `config/simulator.exs` and provide that file yourself.
+A missing custom path is reported rather than filled with a default image. Then run:
 
 ```sh
 mix sim
@@ -57,8 +60,8 @@ existing files are never overwritten. Installation uses a temporary package.
 All commands use native Mix project entry, not subprocess Mix orchestration.
 
 The simulator requires the Linux/QEMU tools described in
-[its README](../sim/README.md). Workspace `mix setup` fetches dependencies only;
-it does not build platform firmware, boot devices or format cards. A real gateway
+[its README](../sim/README.md). Workspace `mix setup` fetches dependencies and
+missing default firmware; it does not build firmware, boot devices or format cards. A real gateway
 uses the same SDK and package; install its archive through the administrative
 application API after commissioning its SD card. Each app also works on its own:
 `cd apps/my_app && mix test` or `mix nerves_gate.package`.

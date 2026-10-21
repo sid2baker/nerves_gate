@@ -6,14 +6,20 @@ created for you. Applications depend only on the SDK; simulator and generator
 dependencies belong to this workspace and are never packaged with your apps.
 
 ```sh
-mix setup                       # fetch workspace and app dependencies
+mix setup                       # fetch dependencies and missing QEMU firmware
 mix test                        # all app unit tests; no hardware starts
 mix app.new telemetry           # create another independent app
 mix setup                       # fetch dependencies for new apps
 ```
 
-Place a compatible **x86_64 QEMU firmware image** at `firmware/nerves_gate.fw`,
-or edit `config/simulator.exs`. Then:
+`mix setup` downloads a pinned **x86_64 QEMU firmware image** to
+`firmware/nerves_gate.fw` over HTTPS and verifies its SHA-256 checksum. It skips
+existing files without a network request. No GitHub CLI or firmware build is
+needed.
+
+To use your own firmware, select its path in `config/simulator.exs` and provide
+the file yourself. Missing custom paths are reported, never silently replaced
+with the default image. Then:
 
 ```sh
 mix sim                         # simulator site at http://localhost:4000

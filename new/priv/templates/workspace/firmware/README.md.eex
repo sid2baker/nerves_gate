@@ -1,3 +1,5 @@
-Place a compatible x86_64 QEMU firmware image here as `nerves_gate.fw`,
-or change `config/simulator.exs` to point at your image. This directory contains
-firmware artifacts, not product source. Do not use an EC100 image for QEMU.
+`mix setup` downloads and checksum-verifies the default x86_64 QEMU image here
+as `nerves_gate.fw` if it is missing. Existing images are never overwritten.
+To use your own image, change `config/simulator.exs` and supply that file yourself.
+This directory contains artifacts, not product source. Do not use an EC100 image
+for QEMU.

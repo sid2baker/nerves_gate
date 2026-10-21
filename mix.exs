@@ -12,6 +12,7 @@ defmodule NervesGate.Repository do
         format: &format/1,
         test: &test/1,
         check: &check/1,
+        "dev.workspace": &dev_workspace/1,
         ci: &ci/1,
         dev: &run("sim", ["qemu.dev" | &1]),
         "dev.status": &run("sim", ["qemu.status" | &1]),
@@ -76,6 +77,22 @@ defmodule NervesGate.Repository do
   end
 
   defp ci(_), do: Mix.raise("Usage: mix ci")
+
+  defp dev_workspace([]) do
+    path = Path.join(System.tmp_dir!(), "gate_dev_#{System.system_time(:microsecond)}")
+    run("new", ["do", "compile", "+", "nerves_gate.new", path, "--local", __DIR__])
+
+    Mix.shell().info("""
+    Local workspace ready. Nothing has been started or published.
+      cd #{path}
+      mix setup
+      mix test
+      mix sim
+    Remove #{path} when finished.
+    """)
+  end
+
+  defp dev_workspace(_), do: Mix.raise("Usage: mix dev.workspace")
 
   defp put_env(env) do
     Enum.each(env, fn

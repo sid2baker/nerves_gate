@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- Local development workspaces keep newly created apps on the same checkout's SDK instead of switching to a published dependency.
+- Workspace `mix setup` downloads and SHA-256-verifies the pinned QEMU firmware when the default image is missing. Existing images and custom firmware paths are preserved; no GitHub CLI is required.
+
 ## 0.1.1 - 2026-10-21
 
 ### Fixed

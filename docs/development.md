@@ -24,6 +24,38 @@ installs the checksum-pinned x86 Tailscale daemon and downloads the prebuilt QEM
 system. It needs Internet access, never boots a device and does not overwrite a
 different installed daemon.
 
+## Test the app-development workflow locally
+
+Before releasing package changes, create a workspace using this checkout:
+
+```sh
+mix dev.workspace
+cd <printed-workspace-path>
+mix setup
+mix test
+mix app.new example_app
+mix setup
+mix test
+mix app.package example_app
+mix sim
+```
+
+`mix dev.workspace` only generates files in a new temporary directory. It does
+not run tests, start a server, boot devices or publish anything. Run the ordinary
+workspace commands yourself in separate terminals as needed. The workspace and
+all apps created within it use this checkout's generator, simulator, firmware
+host code and SDK, not their Hex releases. Local dependency selection is recorded
+in its `mix.exs`; no shell environment flags are needed.
+
+Setup downloads the pinned released QEMU image if missing. To test changed device
+code too, build it from `firmware/` and point the workspace's
+`config/simulator.exs` at that `.fw`; local host dependencies do not rebuild device
+firmware. `mix sim` serves the site, and devices start only when explicitly
+requested there. Remove the temporary workspace when finished.
+
+The isolated archive-install smoke test remains part of generator tests. Release
+tags are a separate, explicit step after local validation; see [releases](releases.md).
+
 ### Prerequisites
 
 - Linux x86_64 or aarch64; Elixir 1.20 / OTP 29 (`mise install`).
@@ -271,7 +303,7 @@ Optional settings:
 Both firmware profiles import `firmware/config/firmware.exs` for the shared device
 services. `sim` compiles `firmware` as a dependency (never starting its device
 services) plus the repository's `firmware/test/scenarios/` and
-`firmware/dev/artifact_release.ex`. Hardware-specific settings live in the
+`firmware/scripts/artifact_release.ex`. Hardware-specific settings live in the
 platform profiles and systems.
 
 ## Scenarios
@@ -455,7 +487,7 @@ cd firmware
 export NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=x86_64 MIX_ENV=dev
 mix deps.get
 mix nerves.artifact.build nerves_system_ec100_qemu
-elixir -r dev/artifact_release.ex -S mix nerves.artifact.release plan
+elixir -r scripts/artifact_release.ex -S mix nerves.artifact.release plan
 ```
 
 For EC100, select `MIX_TARGET=ec100` and build `nerves_system_ec100` instead;

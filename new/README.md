@@ -7,7 +7,6 @@ mix archive.install hex nerves_gate_new
 mix nerves_gate.new my_workspace
 cd my_workspace
 mix setup
-# Select an x86_64 QEMU firmware image in config/simulator.exs.
 mix sim
 # Start devices and commission application storage in their gateway UI.
 # In another terminal:
@@ -25,9 +24,11 @@ projects, not umbrella children. Each app depends only on `nerves_gate_sdk`.
 a device application's production package.
 
 Generation does not fetch dependencies, boot devices or format cards. `mix setup`
-fetches workspace and app dependencies; `mix sim` starts a site with stopped
-QEMU devices. It requires a compatible prebuilt firmware image and the host
-QEMU tools. There is no fake SDK backend and no copied firmware implementation.
+fetches workspace and app dependencies, then downloads and SHA-256-verifies the
+pinned QEMU firmware when the default image is missing. Existing images are reused
+without HTTP requests. Custom paths in `config/simulator.exs` must be supplied by
+the developer and are never populated with the default image. `mix sim` starts a
+site with stopped QEMU devices and requires the host QEMU tools. There is no fake SDK backend and no copied firmware implementation.
 
 `mix app.package` writes an app's standard OTP `.ez` archive under `packages/`.
 `mix app.install` installs a temporary package into the workspace's existing

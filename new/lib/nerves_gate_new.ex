@@ -2,20 +2,20 @@ defmodule NervesGateNew do
   @moduledoc false
   @reserved ~w(nerves_gate nerves_gate_sdk nerves_gate_sim nerves_gate_new nerves_gate_workspace)
 
-  def workspace(path) do
+  def workspace(path, source \\ nil) do
     name = Path.basename(Path.expand(path))
     validate_name!(name)
     absent!(path)
-    render("workspace", path, name: name, module: Macro.camelize(name))
-    app(Path.join(path, "apps"), "my_app")
+    render("workspace", path, name: name, module: Macro.camelize(name), source: source)
+    app(Path.join(path, "apps"), "my_app", source)
   end
 
-  def app(apps_dir, name) do
+  def app(apps_dir, name, source \\ nil) do
     validate_name!(name)
     if name in @reserved, do: Mix.raise("#{name} is a platform application name")
     path = Path.join(apps_dir, name)
     absent!(path)
-    render("app", path, app: name, module: Macro.camelize(name))
+    render("app", path, app: name, module: Macro.camelize(name), source: source)
   end
 
   def validate_name!(name) do
