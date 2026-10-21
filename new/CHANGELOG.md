@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-21
+
 ### Added
 
 - Generate app-development workspaces with independent OTP applications, simulator configuration and short Mix commands for adding, testing, installing and packaging apps.

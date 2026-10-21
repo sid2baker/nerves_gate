@@ -94,6 +94,22 @@ jobs:
             mix compile --warnings-as-errors
             mix docs --warnings-as-errors
           '
+      - name: Build the app-development QEMU firmware image (no device startup)
+        if: steps.package.outputs.project == 'firmware'
+        working-directory: firmware
+        env:
+          MIX_TARGET: x86_64
+          MIX_ENV: dev
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
+          sudo apt-get install --yes "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" squashfs-tools
+          mise exec -- mix deps.get --check-locked
+          mise exec -- mix tailscaled.install
+          mise exec -- mix firmware --overwrite
+          cp _build/x86_64_dev/nerves/images/nerves_gate.fw "$RELEASE_DIR/nerves_gate-x86_64-$PACKAGE_VERSION.fw"
       - name: Build and install generator archive outside the checkout
         if: steps.package.outputs.project == 'new'
         env:
@@ -115,6 +131,7 @@ jobs:
           path: |
             ${{ runner.temp }}/package-release/package.tar
             ${{ runner.temp }}/package-release/*.ez
+            ${{ runner.temp }}/package-release/*.fw
             ${{ runner.temp }}/release-notes.md
           if-no-files-found: error
           retention-days: 14
@@ -139,9 +156,8 @@ jobs:
           options=(--verify-tag --latest=false --title "$RELEASE_TAG" --notes-file "$NOTES_FILE")
           if [ "$PRERELEASE" = true ]; then options+=(--prerelease); fi
           assets=()
-          if [ -n "$(find "$RELEASE_DIR" -maxdepth 1 -name '*.ez' -print -quit)" ]; then
-            assets=("$RELEASE_DIR/"*.ez)
-          fi
+          shopt -s nullglob
+          assets=("$RELEASE_DIR/"*.ez "$RELEASE_DIR/"*.fw)
           gh release create "$RELEASE_TAG" "${assets[@]}" "${options[@]}"
       - name: Verify public registry, documentation and GitHub release
         env:

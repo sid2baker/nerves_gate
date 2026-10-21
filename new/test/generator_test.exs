@@ -16,7 +16,7 @@ defmodule NervesGateNew.GeneratorTest do
       assert workspace =~ command
     end
 
-    assert workspace =~ ":nerves_gate_sim"
+    assert workspace =~ "{:nerves_gate_sim, \"~> 0.1.0\""
     assert workspace =~ ":nerves_gate_new"
     refute workspace =~ "apps_path:"
 

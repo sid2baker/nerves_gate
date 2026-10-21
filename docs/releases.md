@@ -61,25 +61,24 @@ Repair missing docs with `mix hex.publish docs`; repair GitHub metadata/assets
 using the same canonical notes and verified archive. Registry propagation checks
 are bounded. The workflow keeps preflight package/archive/notes artifacts for 14 days.
 
-## Current first-release prerequisites
+## Distribution boundaries
 
-Adding the workflow does not mean all packages are ready to publish:
+Initial versions are SDK `0.1.0`, firmware `0.1.0`, simulator `0.1.0` and generator
+`0.1.0`. Publish in that order. Generator preflight checks the SDK and simulator's
+`~> 0.1.0` release lines before publication.
 
-- The SDK's first release is `0.1.0` (`sdk/v0.1.0`), with its dated changelog
-  section prepared. Firmware, simulator and generator still need their first
-  dated release sections.
-- Firmware still has Git dependencies: LiveView's required subscription changes,
-  `yaopcua`, `yamodbus`, `s7`, `ethercat`, and the two Nerves systems. Hex cannot
-  represent these dependencies; CI explicitly rejects them rather than dropping them.
-  Systems intentionally remain Git/GitHub based. Firmware's Hex distribution needs
-  a deliberate dependency/package-boundary decision before releasing it.
-- The simulator depends on firmware, so it cannot be released successfully before
-  firmware has a usable distribution. Generator publication is gated on the SDK and
-  simulator being available, even though the generator archive itself can be tested
-  locally now.
-- Review firmware's package file list before release: ignored target-specific
-  `tailscaled` executables can be included through `rootfs_overlay`. Do not publish
-  workstation-generated or architecture-inappropriate binaries accidentally.
+Firmware's Hex package provides the shared host-side gateway UI used by the
+simulator. Its host dependency graph contains only Hex dependencies, including
+released LiveView. Unused industrial-protocol dependencies are not platform
+services; device apps declare their own private protocol libraries when needed.
+Device builds still select their system's Git source and GitHub artifact; host
+consumers do not resolve device systems. The release preflight rejects unexpected
+Git/path dependencies rather than silently omitting them.
 
-Resolve these blockers before creating release tags. No packages are published by
-repository setup, archive smoke tests or ordinary CI.
+Target-specific `tailscaled` binaries are excluded from the Hex payload. The
+firmware release workflow builds a separate x86_64 `.fw` using the published
+system, without starting QEMU, and attaches it to the GitHub Release. App developers
+can download it into their workspace's `firmware/nerves_gate.fw`; they need no
+product source checkout. This is not a physical-device flash or qualification run.
+
+No packages are published by repository setup, archive smoke tests or ordinary CI.

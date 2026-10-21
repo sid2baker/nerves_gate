@@ -8,7 +8,7 @@ defmodule <%= module %>.Workspace.MixProject do
       elixir: "~> 1.20",
       deps: [
         {:nerves_gate_new, "~> 0.1", only: [:dev, :test], runtime: false},
-        {:nerves_gate_sim, "~> 1.0", only: [:dev, :test], runtime: false}
+        {:nerves_gate_sim, "~> 0.1.0", only: [:dev, :test], runtime: false}
       ],
       aliases: [
         setup: ["deps.get", &workspace(:setup, &1)],

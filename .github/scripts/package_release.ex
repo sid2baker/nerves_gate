@@ -107,7 +107,7 @@ defmodule NervesGate.PackageRelease do
         raise("A GitHub release already exists for #{info.tag}; inspect and repair it explicitly")
 
     if info.project == "new" do
-      for {app, requirement} <- [{"nerves_gate_sdk", "~> 0.1.0"}, {"nerves_gate_sim", "~> 1.0"}] do
+      for {app, requirement} <- [{"nerves_gate_sdk", "~> 0.1.0"}, {"nerves_gate_sim", "~> 0.1.0"}] do
         case get!("https://hex.pm/api/packages/#{app}") do
           {200, body} ->
             unless Enum.any?(JSON.decode!(body)["releases"], fn release ->
@@ -165,12 +165,16 @@ defmodule NervesGate.PackageRelease do
              release["isPrerelease"] == info.prerelease,
            do: raise("GitHub release metadata does not match the canonical notes/tag")
 
-    if info.project == "new" do
-      name = "#{info.app}-#{info.version}.ez"
+    asset_name =
+      case info.project do
+        "new" -> "#{info.app}-#{info.version}.ez"
+        "firmware" -> "nerves_gate-x86_64-#{info.version}.fw"
+        _ -> nil
+      end
 
-      unless Enum.any?(release["assets"], &(&1["name"] == name)),
-        do: raise("Missing generator archive #{name}")
-    end
+    if asset_name &&
+         not Enum.any?(release["assets"], &(&1["name"] == asset_name and &1["size"] > 0)),
+       do: raise("Missing release artifact #{asset_name}")
   end
 
   defp await!(label, ready?, attempts \\ 20) do

@@ -13,7 +13,8 @@ defmodule NervesGate.MixProject do
         licenses: ["Apache-2.0"],
         links: %{"GitHub" => "https://github.com/sid2baker/nerves_gate"},
         files:
-          ~w(lib config priv rel rootfs_overlay mix.exs VERSION README.md CHANGELOG.md LICENSE)
+          ~w(lib config priv rel rootfs_overlay mix.exs VERSION README.md CHANGELOG.md LICENSE),
+        exclude_patterns: [~r{^rootfs_overlay/[^/]+/usr/sbin/tailscaled$}]
       ],
       docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       elixir: "~> 1.20",
@@ -131,17 +132,12 @@ defmodule NervesGate.MixProject do
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
       {:phoenix, "~> 1.8"},
-      # PR #4441: lifecycle-managed LiveView/LiveComponent PubSub subscriptions.
-      {:phoenix_live_view, github: "phoenixframework/phoenix_live_view", branch: "main"},
+      {:phoenix_live_view, "~> 1.2.13"},
       {:phoenix_pubsub, "~> 2.4"},
       {:alarmist, "~> 0.4.2"},
       {:property_table, "~> 0.3.4"},
       {:circuits_uart, "~> 1.6"},
       {:input_event, "~> 1.4"},
-      {:yaopcua, github: "tallakt/yaopcua"},
-      {:yamodbus, github: "tallakt/yamodbus"},
-      {:s7, github: "sid2baker/s7"},
-      {:ethercat, github: "sid2baker/ethercat"},
       # Host tooling must never start the workstation VPN.
       {:tailscaled_ex, "~> 0.4.0", runtime: Mix.target() != :host},
       # Compiled on the host like VintageNet, but started only by firmware.
@@ -154,9 +150,17 @@ defmodule NervesGate.MixProject do
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
-      local_dependency(:nerves_gate_sdk, "~> 0.1.0", "../sdk", []),
-      system_dependency(:nerves_system_ec100, "0.2.1", :ec100),
-      system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)
-    ]
+      local_dependency(:nerves_gate_sdk, "~> 0.1.0", "../sdk", [])
+    ] ++ system_dependencies()
+  end
+
+  # Host consumers need the shared gateway UI, never a device system package.
+  # Device builds still resolve their pinned system source and GitHub artifact.
+  defp system_dependencies do
+    case Mix.target() do
+      :ec100 -> [system_dependency(:nerves_system_ec100, "0.2.1", :ec100)]
+      :x86_64 -> [system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)]
+      :host -> []
+    end
   end
 end
