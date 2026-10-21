@@ -1,0 +1,23 @@
+name: System releases
+
+# Separate from validation CI. Check both versioned releases when system sources
+# change; the publisher reuses current releases and only builds missing ones.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'systems/nerves_system_ec100/**'
+      - 'systems/nerves_system_ec100_qemu/**'
+
+permissions:
+  contents: write
+
+jobs:
+  system:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ec100, x86_64]
+    uses: ./.github/workflows/system-artifact.yml
+    with:
+      target: ${{ matrix.target }}

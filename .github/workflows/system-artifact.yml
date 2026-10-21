@@ -1,6 +1,6 @@
 name: System artifact
 
-# Trusted main-branch sources only. CI calls this after system-directory changes;
+# Trusted main-branch sources only. System releases calls this on source changes;
 # manual dispatch can resume an interrupted release. Never overwrite a tag/asset.
 on:
   workflow_call:

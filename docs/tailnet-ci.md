@@ -1,7 +1,9 @@
 # Real Tailscale authentication in QEMU
 
-**CI** has a main-branch **Tailscale authentication** job using the
-protected `tailnet-ci` GitHub environment. It never runs for pull requests.
+The manually dispatched **QEMU integration** workflow has an optional main-branch
+**Tailscale authentication** job using the protected `tailnet-ci` GitHub environment.
+Enable the **tailscale** input to run it. It never runs automatically on pushes or
+pull requests.
 Ordinary **Run all** and `mix test.firmware` selections exclude `tailscale_auth`;
 select it explicitly to enroll real test devices.
 
@@ -64,9 +66,10 @@ match them. Matching the owner claim supports both subject formats without
 hardcoding each repository's ID.
 
 Do not add `nerves_gate`-specific repository or workflow-path claims to this shared
-credential: they would exclude other repositories. Remove any old
-`event_name: workflow_dispatch` restriction: automatic CI uses the `push` event.
-Every consuming repository must protect its own credential-bearing jobs; this
+credential: they would exclude other repositories. This repository uses
+`workflow_dispatch`; other consumers may use different events, so avoid shared
+event restrictions that would exclude them. Every consuming repository must
+protect its own credential-bearing jobs; this
 workflow limits the job to `main` and the protected `tailnet-ci` environment.
 Do not grant `all`, policy editing, or route-management scopes. This scenario needs
 no `devices:core` permission; remove it from the shared credential only if no other
@@ -88,8 +91,9 @@ In `sid2baker/nerves_gate`, open **Settings → Environments**:
 
 The job sets `TS_TAGS: tag:ci`. Do not add an auth key, OAuth secret or reusable API
 token. OIDC token issuance is enabled only in this job with `id-token: write`.
-Inspect **Actions → Simulator CI → Tailscale authentication**, and approve the
-environment if required. The complete CI also supports manual dispatch on `main`.
+Open **Actions → QEMU integration → Run workflow**, select `main` and enable
+**tailscale**. Approve the `tailnet-ci` environment if required. Authentication
+runs after the ordinary QEMU scenarios pass.
 Missing credentials or failed enrollment fail the scenario rather than skipping it.
 
 ## Run locally

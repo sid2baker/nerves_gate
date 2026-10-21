@@ -466,10 +466,10 @@ are needed. `NERVES_GATE_LOCAL_DEPS=1` selects the checked-out system sources.
 1. For build-input changes, bump the system's `VERSION`, update firmware's pinned
    dependency in `firmware/mix.exs`, and add a dated changelog section.
 2. Align system dependencies in its `mix.lock` and `firmware/mix.lock`.
-3. Push to `main`. CI detects each system directory independently and calls
-   `.github/workflows/system-artifact.yml`. It builds the system, creates the
-   namespaced tag, publishes the artifact, and verifies a fresh download. QEMU
-   tests wait for the QEMU artifact; EC100 publication runs independently.
+3. Push system changes to `main`. The separate `system-releases.yml` workflow
+   checks both target releases through `system-artifact.yml`. Current releases
+   are reused; missing releases are built, tagged, published and downloaded into
+   a fresh cache for verification. EC100 and QEMU publication run independently.
 
 EC100 publication includes the corresponding-source archive and `SHA256SUMS`.
 The publisher verifies all required assets and hashes before making a draft
@@ -515,15 +515,30 @@ validation, repair policy and current publication blockers.
 
 ## CI
 
-`.github/workflows/qemu.yml` checks the pure packages (`sdk`, `new`) separately,
-then runs `mix setup`, the root `mix ci` quality gates and
-`mix test.firmware --ci` on disposable GitHub-hosted Ubuntu runners: it builds
-firmware, bootstraps both default devices, runs the shared scenarios and uploads
-only diagnostic `.log` files (14 days). Main-branch system changes invoke the
-shared `.github/workflows/system-artifact.yml` for each changed target; PRs
-cannot publish. QEMU setup waits for its system release and fails if a required
-artifact is unpublished. EC100 source and binary assets publish through the same
-immutable release process.
+Ordinary pushes and pull requests run **CI / checks** (`ci.yml`):
+`mix deps.get --check-locked` fetches host dependencies, then root `mix ci` runs
+all four projects' quality gates and unit tests. This needs neither QEMU nor
+firmware images, never starts devices and cannot publish releases.
+
+**QEMU integration** (`qemu.yml`) is manually dispatched from Actions. It runs
+`mix setup` and `mix test.firmware --ci` on disposable GitHub-hosted runners,
+including firmware builds and both devices' shared scenarios. Only diagnostic
+`.log` files are retained (14 days). Select the optional **tailscale** input on
+`main` to also run credentialed authentication checks through `tailnet-ci`.
+The known CI-only guest status-RPC timeout remains unresolved; moving this bench
+out of routine CI does not fix or waive its results.
+
+**System releases** (`system-releases.yml`) runs only for system-directory changes
+on `main`. It calls the shared publisher for both targets; PRs cannot publish.
+Manual target-specific publication remains available in **System artifact**.
+Integration tests consume already-published artifacts and fail if one is missing.
+**Package release** remains tag-triggered; see [releases](releases.md).
+
+GitHub calls protected environments such as `hex-release` and `tailnet-ci`
+"deployments". Here they gate publishing credentials or test authentication, not
+installation onto physical gateways. No workflow flashes physical devices.
+If branch protection required the old `qemu` or package-matrix checks, change the
+required check to **checks** in the repository's rulesets/settings.
 
 For an operator-owned standalone run, stop the development session first:
 

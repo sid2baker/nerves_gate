@@ -9,6 +9,7 @@ defmodule NervesGate.Repository do
       elixir: "~> 1.20",
       aliases: [
         setup: &setup/1,
+        "deps.get": &deps_get/1,
         format: &format/1,
         test: &test/1,
         check: &check/1,
@@ -23,6 +24,11 @@ defmodule NervesGate.Repository do
         "test.firmware": &run("sim", ["qemu.test" | &1])
       ]
     ]
+  end
+
+  # Host-only dependency preparation for CI; no system downloads or device tools.
+  defp deps_get(args) do
+    for project <- @projects, do: run(project, ["deps.get" | args])
   end
 
   # Prepares every project and the QEMU firmware inputs. Never boots a device.

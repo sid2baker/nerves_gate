@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - name: Install host build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev
+      - name: Install Mix tooling outside the project
+        run: |
+          # shellcheck disable=SC2016
+          mise exec -- sh -eu -c '
+            cd "$RUNNER_TEMP"
+            mix local.hex --force --if-missing
+            mix local.rebar --force --if-missing
+            mix archive.install hex nerves_bootstrap "~> 1.17" --force
+          '
+      - name: Fetch locked host dependencies
+        run: mise exec -- mix deps.get --check-locked
+      - name: Repository quality gates and unit tests (no devices)
+        run: mise exec -- mix ci
