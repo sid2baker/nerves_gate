@@ -4,18 +4,23 @@ defmodule NervesGateNew.Firmware do
   # Keep workspace setup reproducible; never follow a moving "latest" release.
   @url "https://github.com/sid2baker/nerves_gate/releases/download/firmware/v0.1.0/nerves_gate-x86_64-0.1.0.fw"
   @sha256 "398d9e450771ce2bbbb5bbc1c75480eeb29a436a17f2688b6ae0b3657cf98c40"
+  @version "0.1.0"
+
+  @doc "The pinned image path, relative to a workspace's config directory."
+  def default_path(config_dir),
+    do: Path.expand("../firmware/nerves_gate-x86_64-#{@version}.fw", config_dir)
 
   def setup!(config_file) do
     {config, _} = Code.eval_file(config_file)
     path = Path.expand(Map.fetch!(config, :firmware))
-    default = Path.expand("../firmware/nerves_gate.fw", Path.dirname(config_file))
+    default = default_path(Path.dirname(config_file))
 
     cond do
-      File.regular?(path) ->
-        :ok
-
       path == default ->
         fetch!(path, @url, @sha256)
+
+      File.regular?(path) ->
+        :ok
 
       true ->
         Mix.raise(
@@ -29,7 +34,7 @@ defmodule NervesGateNew.Firmware do
   def fetch!(path, url, sha256) do
     cond do
       File.regular?(path) ->
-        :ok
+        verify!(path, sha256)
 
       File.lstat(path) != {:error, :enoent} ->
         Mix.raise("Firmware destination already exists: #{path}")
@@ -63,11 +68,7 @@ defmodule NervesGateNew.Firmware do
           Mix.raise("Firmware download failed; check your connection and rerun mix setup.")
       end
 
-      unless checksum(temporary) == sha256,
-        do:
-          Mix.raise(
-            "Firmware checksum mismatch; no image was installed. Rerun mix setup to retry."
-          )
+      verify!(temporary, sha256)
 
       # Atomic publication without replacing a file created by another setup or
       # by the developer during the download. Both names are on the same volume.
@@ -77,7 +78,7 @@ defmodule NervesGateNew.Firmware do
 
         {:error, :eexist} ->
           if File.regular?(path),
-            do: :ok,
+            do: verify!(path, sha256),
             else: Mix.raise("Firmware destination already exists: #{path}")
 
         {:error, reason} ->
@@ -86,6 +87,16 @@ defmodule NervesGateNew.Firmware do
     after
       File.rm(temporary)
     end
+  end
+
+  defp verify!(path, sha256) do
+    unless checksum(path) == sha256,
+      do:
+        Mix.raise(
+          "Firmware checksum mismatch at #{path}; file preserved. Remove it explicitly and rerun mix setup."
+        )
+
+    :ok
   end
 
   defp checksum(path) do

@@ -10,6 +10,7 @@ defmodule NervesGateNew.WorkspaceTest do
     NervesGateNew.workspace(path)
     firmware = Path.join(path, "firmware/nerves_gate.fw")
     File.write!(firmware, "existing image")
+    File.write!(Path.join(path, "config/simulator.exs"), inspect(%{firmware: firmware}))
     local_sdk!(Path.join(path, "apps/my_app/mix.exs"))
     previous = Mix.Project.pop()
     compiler = Code.compiler_options()

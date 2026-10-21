@@ -7,6 +7,14 @@ defmodule <%= module %>Test do
     assert env[:nerves_gate_health_check] == {<%= module %>, :health_check, []}
   end
 
+  test "decides from typed observations without a hardware backend" do
+    alias NervesGateSDK.Network.Interface
+    online = %Interface{id: "eth0", kind: :ethernet, state: :up, internet?: true}
+    assert <%= module %>.internet_available?([online])
+    refute <%= module %>.internet_available?([%{online | state: :down}])
+    refute <%= module %>.internet_available?([])
+  end
+
   test "reports healthy while its supervisor runs" do
     assert :ok = <%= module %>.health_check()
   end

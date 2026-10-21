@@ -3,6 +3,15 @@ defmodule <%= module %> do
 
   def system_info, do: NervesGateSDK.System.info()
 
+  # Keep decisions pure: obtain observations with the SDK in a supervised worker,
+  # then pass the values to ordinary functions that can be tested on the host.
+  def internet_available?(interfaces) do
+    Enum.any?(interfaces, fn
+      %NervesGateSDK.Network.Interface{state: :up, internet?: true} -> true
+      _ -> false
+    end)
+  end
+
   # Called after a cold start, before the device commits an upgrade.
   # Add checks for the application's own readiness here. Return :ok to accept.
   def health_check do

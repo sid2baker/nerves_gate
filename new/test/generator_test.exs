@@ -84,6 +84,17 @@ defmodule NervesGateNew.GeneratorTest do
     end
   end
 
+  test "local workspaces are generated formatted even with long source paths", %{root: root} do
+    path = Path.join(root, "formatted_workspace")
+    source = Path.join(root, String.duplicate("long_source_path_", 8))
+    NervesGateNew.workspace(path, source)
+
+    for file <- Path.wildcard(Path.join(path, "**/*.{ex,exs}"), match_dot: true) do
+      contents = File.read!(file)
+      assert contents == IO.iodata_to_binary(Code.format_string!(contents)) <> "\n", file
+    end
+  end
+
   test "rejects invalid workspace names", %{root: root} do
     for name <- ["bad-name", "Uppercase"] do
       assert_raise Mix.Error, fn -> Mix.Tasks.NervesGate.New.run([Path.join(root, name)]) end

@@ -31,6 +31,8 @@ defmodule NervesGateNew.Workspace do
     Mix.Task.run("nerves_gate.sim", ["--config", config | args])
   end
 
+  def console(args), do: Mix.Task.run("nerves_gate.sim.console", args)
+
   def test(args) do
     for {name, path} <- apps(), do: in_app(name, path, :test, "test", args)
   end

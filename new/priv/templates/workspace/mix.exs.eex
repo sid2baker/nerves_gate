@@ -11,10 +11,11 @@
         {:nerves_gate_sim, "~> 0.1.0", <%= if source, do: "path: #{inspect(Path.join(source, "sim"))}, " %>only: [:dev, :test], runtime: false}
       ],
       aliases: [
-        setup: ["deps.get", &workspace(:setup, &1)],
+        setup: ["deps.get", "qemu.setup", &workspace(:setup, &1)],
         sim: &workspace(:sim, &1),
         "app.new": &workspace(:new, &1),
         "app.install": &workspace(:install, &1),
+        "app.console": &workspace(:console, &1),
         "app.package": &workspace(:package, &1),
         test: &workspace(:test, &1),
         format: ["format", &workspace(:format, &1)]

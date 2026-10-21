@@ -34,7 +34,7 @@ site with stopped QEMU devices and requires the host QEMU tools. There is no fak
 `mix app.install` installs a temporary package into the workspace's existing
 simulator session. An app name may be omitted when only one app exists.
 
-See [Application development](https://github.com/sid2baker/nerves_gate/blob/main/docs/applications.md#application-development).
+See [Application development](https://github.com/sid2baker/nerves_gate/blob/main/docs/app-development.md).
 Building the archive from source uses `mix archive.build` in this directory.
 Hex installation requires the packages to be published; no publication happens
 as part of generation or repository setup.

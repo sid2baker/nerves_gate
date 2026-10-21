@@ -1,5 +1,8 @@
-`mix setup` downloads and checksum-verifies the default x86_64 QEMU image here
-as `nerves_gate.fw` if it is missing. Existing images are never overwritten.
-To use your own image, change `config/simulator.exs` and supply that file yourself.
-This directory contains artifacts, not product source. Do not use an EC100 image
-for QEMU.
+`mix setup` downloads the checksum-pinned x86_64 QEMU image to a versioned file
+here. `config/simulator.exs` resolves the default from the workspace tooling;
+updating that dependency and running setup selects its new pin. Existing managed
+images are checksum-verified. Corrupt images are reported, never overwritten.
+
+To use custom firmware, set an explicit path in `config/simulator.exs` and provide
+that file yourself. Custom images and older versions are preserved. This folder
+contains firmware artifacts, not platform source code.

@@ -71,7 +71,11 @@ defmodule NervesGateNew.FirmwareTest do
     config = Path.join(root, "config/simulator.exs")
     File.write!(config, inspect(%{firmware: path}))
     assert :ok = Firmware.setup!(config)
-    assert :ok = Firmware.fetch!(path, "http://127.0.0.1:1", sha256("different image"))
+
+    assert_raise Mix.Error, ~r/checksum mismatch/, fn ->
+      Firmware.fetch!(path, "http://127.0.0.1:1", sha256("different image"))
+    end
+
     assert File.read!(path) == "my image"
 
     custom = Path.join(root, "custom.fw")
@@ -114,12 +118,27 @@ defmodule NervesGateNew.FirmwareTest do
       "image",
       200,
       fn url ->
-        assert :ok = Firmware.fetch!(path, url, sha256("image"))
+        assert_raise Mix.Error, ~r/checksum mismatch/, fn ->
+          Firmware.fetch!(path, url, sha256("image"))
+        end
       end,
       before_send: fn -> File.write!(path, "provided by user") end
     )
 
     assert File.read!(path) == "provided by user"
+  end
+
+  test "the managed image path is versioned and existing managed bytes are verified", %{
+    root: root
+  } do
+    config = Path.join(root, "config/simulator.exs")
+    path = Firmware.default_path(Path.dirname(config))
+    assert Path.basename(path) == "nerves_gate-x86_64-0.1.0.fw"
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "corrupt")
+    File.write!(config, inspect(%{firmware: path}))
+    assert_raise Mix.Error, ~r/checksum mismatch/, fn -> Firmware.setup!(config) end
+    assert File.read!(path) == "corrupt"
   end
 
   defp sha256(body), do: :crypto.hash(:sha256, body) |> Base.encode16(case: :lower)

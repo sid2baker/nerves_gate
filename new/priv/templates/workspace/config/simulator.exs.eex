@@ -1,6 +1,6 @@
 # mix setup downloads the default x86_64 QEMU image if missing.
 # To use a custom image, change this path and supply the file yourself.
 %{
-  firmware: Path.expand("../firmware/nerves_gate.fw", __DIR__),
+  firmware: NervesGateNew.Firmware.default_path(__DIR__),
   devices: %{gateway_a: %{network: %{internet: :lan1}}}
 }

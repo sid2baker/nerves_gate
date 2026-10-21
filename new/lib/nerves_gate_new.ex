@@ -44,7 +44,14 @@ defmodule NervesGateNew do
 
       destination = Path.join(path, relative)
       File.mkdir_p!(Path.dirname(destination))
-      File.write!(destination, EEx.eval_file(template, binding))
+      contents = EEx.eval_file(template, binding)
+
+      contents =
+        if Path.extname(destination) in [".ex", ".exs"],
+          do: [Code.format_string!(contents), "\n"],
+          else: contents
+
+      File.write!(destination, contents)
       Mix.shell().info([:green, "* creating ", :reset, destination])
     end
   end

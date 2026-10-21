@@ -13,9 +13,10 @@ mix setup                       # fetch dependencies for new apps
 ```
 
 `mix setup` downloads a pinned **x86_64 QEMU firmware image** to
-`firmware/nerves_gate.fw` over HTTPS and verifies its SHA-256 checksum. It skips
-existing files without a network request. No GitHub CLI or firmware build is
-needed.
+a versioned file under `firmware/` over HTTPS and verifies its SHA-256 checksum.
+Existing managed images are verified before reuse. Updating the workspace tooling
+and running setup selects its new pinned image; old and custom images are kept.
+No GitHub CLI or firmware build is needed.
 
 To use your own firmware, select its path in `config/simulator.exs` and provide
 the file yourself. Missing custom paths are reported, never silently replaced
@@ -26,7 +27,16 @@ mix sim                         # simulator site at http://localhost:4000
 ```
 
 Linux, QEMU 8.2+ with user/stream networking, fwup, flock and mkfs.ext4 are
-required. No product-repository checkout or firmware build is needed.
+required. Setup checks prerequisites without starting devices. On Ubuntu/Debian:
+
+```sh
+sudo apt install git build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools e2fsprogs
+```
+
+Install fwup from https://github.com/fwup-home/fwup/releases.
+On Apple Silicon, use an arm64 Ubuntu VM (for example `orb create --arch arm64
+ubuntu nerves-gate` with OrbStack). Clone and run inside its Linux filesystem;
+avoid amd64/Rosetta. No product-repository checkout or firmware build is needed.
 Generation and `mix setup` do not boot devices or format media.
 
 Start the device on the site, open its Gateway UI and choose
@@ -47,6 +57,12 @@ simulator with Ctrl+C in its original terminal. Reset erases disposable device
 disks, SD cards and enrollment. Manual controls operate only on owned QEMU guests.
 
 Each app can also be developed independently: `cd apps/my_app && mix test`.
+The generated example makes decisions from SDK structs using pure functions;
+its tests need neither a configured backend nor fake hardware. Use SDK calls in
+supervised workers and keep decisions separate from effects. Use QEMU to verify
+integration with real firmware. These are cold app installs, not hot-code reloads.
+For device diagnostics, use an authorized SSH IEx console and `RingLogger.attach()`;
+never put credentials into application logs.
 For deployment to a real device, commission its SD card and install the `.ez`
 archive through its administrative application API. Apps are trusted code in the
 firmware BEAM, not a sandbox; use only the public SDK, and handle missing storage.
