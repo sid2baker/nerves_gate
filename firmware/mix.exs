@@ -51,6 +51,7 @@ defmodule NervesGate.MixProject do
         ci: [
           "compile --warnings-as-errors",
           "format --check-formatted",
+          "test",
           "volt.js.check",
           "credo --strict",
           "dialyzer",
