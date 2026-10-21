@@ -18,7 +18,8 @@ NERVES_GATE_LOCAL_DEPS=1 MIX_TARGET=x86_64 mix firmware
 ```
 
 Integration scenarios live in `test/scenarios/` and run on the
-[QEMU simulator](../sim/README.md). See the [repository README](../README.md) and
-[guides](../docs/development.md).
+[QEMU simulator](https://github.com/sid2baker/nerves_gate/blob/main/sim/README.md).
+See the [repository README](https://github.com/sid2baker/nerves_gate/blob/main/README.md)
+and [guides](https://github.com/sid2baker/nerves_gate/blob/main/docs/development.md).
 
 This package has its own VERSION and CHANGELOG; releases use `firmware/vX.Y.Z` tags.

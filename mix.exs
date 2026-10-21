@@ -48,7 +48,7 @@ defmodule NervesGate.Repository do
   defp setup(_), do: Mix.raise("Usage: mix setup")
 
   defp format(args) do
-    Mix.Task.run("format", ["mix.exs", ".formatter.exs" | args])
+    Mix.Tasks.Format.run(args)
     for project <- @projects, do: run(project, ["format" | args])
   end
 
@@ -67,6 +67,8 @@ defmodule NervesGate.Repository do
   defp check(_), do: Mix.raise("Usage: mix check")
 
   defp ci([]) do
+    Mix.Tasks.Format.run(["--check-formatted"])
+
     for project <- @projects do
       Mix.shell().info("==> #{project}: mix ci")
       run(project, ["ci"])

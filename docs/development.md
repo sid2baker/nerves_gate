@@ -476,6 +476,8 @@ packages and GitHub binary releases, not Hex. Other packages consume Hex
 dependencies unless `NERVES_GATE_LOCAL_DEPS=1` selects repository-local paths.
 Publish SDK before firmware, then simulator and generator tooling. System
 artifacts must be published before firmware builds can download them.
+See [Package releases](releases.md) for the release workflow, credentials,
+validation, repair policy and current publication blockers.
 
 ## CI
 

@@ -1,6 +1,7 @@
 defmodule NervesGateSDK.MixProject do
   use Mix.Project
 
+  @external_resource Path.join(__DIR__, "VERSION")
   @version __DIR__ |> Path.join("VERSION") |> File.read!() |> String.trim()
 
   def project do
@@ -15,7 +16,8 @@ defmodule NervesGateSDK.MixProject do
         files: ~w(lib mix.exs VERSION README.md CHANGELOG.md LICENSE)
       ],
       aliases: [ci: ["compile --warnings-as-errors", "format --check-formatted", "test"]],
-      deps: []
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
+      deps: [{:ex_doc, "~> 0.40", only: :docs, runtime: false}]
     ]
   end
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-21
+
 ### Added
 
 - Portable system, network, event, storage, CAN, RS485 and equipment APIs through one backend behaviour.

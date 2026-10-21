@@ -182,7 +182,7 @@ defmodule NervesGate.Scenarios.Apps do
          applications: [:kernel, :stdlib, :elixir, :nerves_gate_sdk],
          mod: {module, []},
          env: [
-           nerves_gate_sdk_requirement: "~> 1.0",
+           nerves_gate_sdk_requirement: "~> 0.1.0",
            nerves_gate_health_check: {module, :health_check, []}
          ]
        ]}

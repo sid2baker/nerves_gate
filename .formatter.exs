@@ -1,1 +1,1 @@
-[inputs: ["mix.exs", ".formatter.exs", ".github/scripts/*.exs"]]
+[inputs: ["mix.exs", ".formatter.exs", ".github/scripts/*.{ex,exs}"]]

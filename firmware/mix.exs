@@ -1,6 +1,7 @@
 defmodule NervesGate.MixProject do
   use Mix.Project
   @targets [:ec100, :x86_64]
+  @external_resource Path.join(__DIR__, "VERSION")
   @version __DIR__ |> Path.join("VERSION") |> File.read!() |> String.trim()
 
   def project do
@@ -14,6 +15,7 @@ defmodule NervesGate.MixProject do
         files:
           ~w(lib config priv rel rootfs_overlay mix.exs VERSION README.md CHANGELOG.md LICENSE)
       ],
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       elixir: "~> 1.20",
       archives: [nerves_bootstrap: "~> 1.17"],
       start_permanent: Mix.env() == :prod,
@@ -114,6 +116,7 @@ defmodule NervesGate.MixProject do
 
   defp deps do
     [
+      {:ex_doc, "~> 0.40", only: :docs, runtime: false},
       # Optional host tools: the simulator declares them to serve this UI with
       # code reloading; Mix then compiles them before this application.
       {:volt, "~> 0.23.0", optional: true, targets: :host},
@@ -151,7 +154,7 @@ defmodule NervesGate.MixProject do
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
-      local_dependency(:nerves_gate_sdk, "~> 1.0", "../sdk", []),
+      local_dependency(:nerves_gate_sdk, "~> 0.1.0", "../sdk", []),
       system_dependency(:nerves_system_ec100, "0.2.1", :ec100),
       system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)
     ]

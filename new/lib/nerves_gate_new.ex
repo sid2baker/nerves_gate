@@ -34,6 +34,14 @@ defmodule NervesGateNew do
         File.regular?(template) do
       relative = template |> Path.relative_to(templates) |> String.trim_trailing(".eex")
       relative = String.replace(relative, "app_name", Keyword.get(binding, :app, ""))
+      # Mix archives omit hidden files; keep template sources visible.
+      relative =
+        case relative do
+          "formatter.exs" -> ".formatter.exs"
+          "gitignore" -> ".gitignore"
+          other -> other
+        end
+
       destination = Path.join(path, relative)
       File.mkdir_p!(Path.dirname(destination))
       File.write!(destination, EEx.eval_file(template, binding))

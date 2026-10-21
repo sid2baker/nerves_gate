@@ -34,7 +34,7 @@ defmodule NervesGateSDK.PackageTest do
     assert {:ok, ^package} = Package.read_binary(File.read!(archive))
     assert package.app == :package_fixture
     assert package.version == "1.0.0"
-    assert :ok = Package.validate(package, Package.installed(), "1.0.0")
+    assert :ok = Package.validate(package, Package.installed(), "0.1.0")
     destination = Path.join(context.root, "install")
     assert :ok = Package.extract(package, destination)
     assert File.read!(Path.join(destination, "package_fixture-1.0.0/priv/example.txt")) == "data"
@@ -47,14 +47,18 @@ defmodule NervesGateSDK.PackageTest do
   test "rejects incompatible SDK, missing dependencies and platform conflicts", context do
     assert {:ok, package} = context |> archive() |> Package.read()
     installed = Package.installed()
-    assert {:error, :incompatible_sdk} = Package.validate(package, installed, "2.0.0")
-    assert {:error, :missing_dependency} = Package.validate(package, %{}, "1.0.0")
+
+    for version <- ["0.2.0", "1.0.0", "2.0.0"] do
+      assert {:error, :incompatible_sdk} = Package.validate(package, installed, version)
+    end
+
+    assert {:error, :missing_dependency} = Package.validate(package, %{}, "0.1.0")
 
     assert {:error, :application_conflict} =
-             Package.validate(package, Map.put(installed, package.app, package.main), "1.0.0")
+             Package.validate(package, Map.put(installed, package.app, package.main), "0.1.0")
 
     assert {:error, :module_conflict} =
-             Package.validate(package, Map.put(installed, :other, package.main), "1.0.0")
+             Package.validate(package, Map.put(installed, :other, package.main), "0.1.0")
   end
 
   test "rejects traversal, absolute paths, duplicate entries and arbitrary files", context do
@@ -73,17 +77,17 @@ defmodule NervesGateSDK.PackageTest do
   test "checks exact versions of referenced platform libraries", context do
     file =
       archive(context,
-        env: [nerves_gate_sdk_requirement: "~> 1.0", nerves_gate_platform: [jason: "1.4.5"]]
+        env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_platform: [jason: "1.4.5"]]
       )
 
     assert {:ok, package} = Package.read(file)
     installed = Map.put(Package.installed(), :jason, %{version: "1.4.4", modules: []})
 
     assert {:error, :incompatible_platform_dependency} =
-             Package.validate(package, installed, "1.0.0")
+             Package.validate(package, installed, "0.1.0")
 
     installed = put_in(installed.jason.version, "1.4.5")
-    assert :ok = Package.validate(package, installed, "1.0.0")
+    assert :ok = Package.validate(package, installed, "0.1.0")
   end
 
   test "rejects non-archive byte snapshots and non-files", context do
@@ -107,7 +111,7 @@ defmodule NervesGateSDK.PackageTest do
          modules: [module],
          applications: [:kernel, :stdlib, :elixir, :nerves_gate_sdk],
          mod: {module, []},
-         env: Keyword.get(opts, :env, nerves_gate_sdk_requirement: "~> 1.0")
+         env: Keyword.get(opts, :env, nerves_gate_sdk_requirement: "~> 0.1.0")
        ]}
 
     files =

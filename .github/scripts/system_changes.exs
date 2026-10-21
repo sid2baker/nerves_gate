@@ -13,7 +13,8 @@ for {name, system} <- [system: "nerves_system_ec100_qemu", ec100: "nerves_system
       true
     else
       case System.cmd("git", ["diff", "--quiet", base, "HEAD", "--", "systems/#{system}"],
-             stderr_to_stdout: true) do
+             stderr_to_stdout: true
+           ) do
         {_, 0} -> false
         {_, 1} -> true
         {error, code} -> raise "git diff failed (#{code}): #{error}"

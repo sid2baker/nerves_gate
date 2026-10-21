@@ -11,7 +11,7 @@ defmodule NervesGate.Scenarios.Sdk do
     assert {:ok, %Info{} = info} = call(vm, NervesGateSDK.System, :info)
     assert info.model == "x86_64"
     assert info.uptime_ms >= 0
-    assert Version.match?(info.sdk_version, "~> 1.0")
+    assert Version.match?(info.sdk_version, "~> 0.1.0")
     refute Map.has_key?(info, :node)
     refute Map.has_key?(info, :cookie)
     assert {:ok, interfaces} = call(vm, Network, :interfaces)

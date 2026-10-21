@@ -22,9 +22,9 @@ defmodule NervesGateNew.GeneratorTest do
 
     app = Path.join(path, "apps/my_app")
     mix = File.read!(Path.join(app, "mix.exs"))
-    assert mix =~ "{:nerves_gate_sdk, \"~> 1.0\"}"
+    assert mix =~ "{:nerves_gate_sdk, \"~> 0.1.0\"}"
     refute mix =~ ":nerves_gate_sim"
-    assert mix =~ "nerves_gate_sdk_requirement: \"~> 1.0\""
+    assert mix =~ "nerves_gate_sdk_requirement: \"~> 0.1.0\""
     assert mix =~ "nerves_gate_health_check: {MyApp, :health_check, []}"
     assert File.exists?(Path.join(app, "lib/my_app/application.ex"))
     assert File.exists?(Path.join(app, "test/my_app_test.exs"))

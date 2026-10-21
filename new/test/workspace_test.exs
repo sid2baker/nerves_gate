@@ -59,7 +59,7 @@ defmodule NervesGateNew.WorkspaceTest do
     source =
       String.replace(
         source,
-        "{:nerves_gate_sdk, \"~> 1.0\"}",
+        "{:nerves_gate_sdk, \"~> 0.1.0\"}",
         "{:nerves_gate_sdk, path: #{inspect(@sdk)}}"
       )
 

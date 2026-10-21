@@ -1,6 +1,7 @@
 defmodule NervesGateSim.MixProject do
   use Mix.Project
 
+  @external_resource Path.join(__DIR__, "VERSION")
   @version __DIR__ |> Path.join("VERSION") |> File.read!() |> String.trim()
 
   def project do
@@ -17,8 +18,10 @@ defmodule NervesGateSim.MixProject do
         files: ~w(lib priv config mix.exs VERSION README.md CHANGELOG.md LICENSE)
       ],
       aliases: [ci: ["compile --warnings-as-errors", "format --check-formatted", "test"]],
+      docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       deps: [
-        local_dependency(:nerves_gate_sdk, "~> 1.0", "../sdk", []),
+        {:ex_doc, "~> 0.40", only: :docs, runtime: false},
+        local_dependency(:nerves_gate_sdk, "~> 0.1.0", "../sdk", []),
         # Compiled for the workstation UI and scenarios; started only by the session.
         local_dependency(:nerves_gate, "~> 0.1", "../firmware", runtime: false),
         {:req, "~> 0.7"},

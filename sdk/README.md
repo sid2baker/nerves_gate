@@ -32,7 +32,7 @@ Applications on a device are trusted same-BEAM OTP applications, not sandboxed.
 
 `mix nerves_gate.package` builds production code into a standard
 `<app>-<version>.ez` OTP archive. Declare
-`env: [nerves_gate_sdk_requirement: "~> 1.0"]` in `application/0` and
+`env: [nerves_gate_sdk_requirement: "~> 0.1.0"]` in `application/0` and
 `def cli, do: [preferred_envs: ["nerves_gate.package": :prod]]` to select production
 before dependency discovery on a clean checkout.
 

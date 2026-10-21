@@ -4,13 +4,14 @@ import Config
 unless {config_target(), config_env()} in [
          {:host, :dev},
          {:host, :test},
+         {:host, :docs},
          {:x86_64, :dev},
          {:ec100, :dev},
          {:ec100, :prod}
        ] do
   raise """
   Unsupported build: MIX_TARGET=#{config_target()} MIX_ENV=#{config_env()}.
-  Supported builds: host/dev, host/test, x86_64/dev, ec100/dev, ec100/prod.
+  Supported builds: host/dev, host/test, host/docs, x86_64/dev, ec100/dev, ec100/prod.
   Run QEMU scenarios with mix test; they use x86_64/dev firmware.
   """
 end
@@ -29,7 +30,7 @@ config :nerves_gate, NervesGateWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   url: [host: "nervesgate.local"],
   http: [ip: {127, 0, 0, 1}, port: 4000],
-  server: config_env() != :test,
+  server: config_env() not in [:test, :docs],
   render_errors: [formats: [html: NervesGateWeb.ErrorHTML], layout: false],
   pubsub_server: NervesGate.PubSub,
   live_view: [signing_salt: "nerves-gate-live"]

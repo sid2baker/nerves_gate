@@ -8,7 +8,7 @@ defmodule <%= module %>.MixProject do
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       deps: [
-        {:nerves_gate_sdk, "~> 1.0"}
+        {:nerves_gate_sdk, "~> 0.1.0"}
       ]
     ]
   end
@@ -20,7 +20,7 @@ defmodule <%= module %>.MixProject do
       extra_applications: [:logger],
       mod: {<%= module %>.Application, []},
       env: [
-        nerves_gate_sdk_requirement: "~> 1.0",
+        nerves_gate_sdk_requirement: "~> 0.1.0",
         nerves_gate_health_check: {<%= module %>, :health_check, []}
       ]
     ]
