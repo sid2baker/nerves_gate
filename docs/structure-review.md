@@ -79,10 +79,14 @@ The operator selected these during implementation:
   `39634374157` reproduced it on Ubuntu 26.04/QEMU 10.2. The same QEMU binary
   passes locally with cached target binaries but fails after a clean target build.
   Target `if_monitor` and `uevent` were linked to the host's glibc loader, absent
-  from the musl guest. Restricting firmware's Phoenix reload listener to host/dev
-  prevents compilation before Nerves initializes the cross-toolchain; the clean
-  local SDK bench then passes with musl executables. Hosted verification is still
-  pending. Existing contaminated target build directories require a clean rebuild.
+  from the musl guest. Firmware reload listeners now run only on host/dev. Hosted
+  run `39642134746` showed that root setup still compiled target dependencies too
+  early: the archive's bootstrap aliases are not reinstalled across native project
+  contexts. Root setup now enters `nerves_bootstrap.init` directly instead of
+  resolving a dependency task before Nerves is initialized. Clean setup no longer
+  compiles target port binaries; the following build produces musl executables and
+  the two-device SDK bench passes locally. Hosted verification of this second fix
+  is pending. Contaminated target build directories require a clean rebuild.
   Deadlines were not increased.
 - **MuonTrap output race:** host tests exposed an existing short-lived-command
   `:epipe` race. A trial exit-trapping change could hang and was removed. Do not

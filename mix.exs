@@ -46,7 +46,10 @@ defmodule NervesGate.Repository do
     run("firmware", ["deps.get", "--check-locked"], target: "x86_64")
     run("firmware", ["tailscaled.install"], target: "x86_64")
     Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached afterwards).")
-    run("firmware", ["nerves.artifact.get"], target: "x86_64")
+    # The archive task loads only Nerves before selecting the cross-toolchain.
+    # Looking up a dependency task here can compile all target deps with host CC:
+    # bootstrap's application already ran in an earlier native project context.
+    run("firmware", ["nerves_bootstrap.init"], target: "x86_64")
     run("sim", ["qemu.setup"])
     Mix.shell().info("Ready. Run mix dev, then start devices at http://localhost:4000.")
   end

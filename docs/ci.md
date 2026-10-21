@@ -38,12 +38,16 @@ including on ARM Linux hosts; the runner reports virtualization capabilities.
 QEMU 8.2 remains the documented minimum.
 
 The hosted boot/status timeout was reproduced locally with a clean target build.
-The cause was a firmware `Phoenix.CodeReloader` Mix listener running on device
-targets: native dependencies compiled before Nerves configured its cross-compiler,
-producing workstation/glibc executables for the musl guest. Restricting the listener
-to host/dev fixes the clean local build and SDK scenario. Hosted verification is
-pending. Existing target builds containing host binaries must be removed and
-rebuilt; changing the listener does not automatically rebuild their dependencies.
+Native dependencies compiled before Nerves configured its cross-compiler,
+producing workstation/glibc executables for the musl guest. Two early-compilation
+paths needed correction: firmware reload listeners must run only on host/dev, and
+root setup must enter the archive's `nerves_bootstrap.init` task before looking up
+Nerves dependency tasks. Bootstrap aliases are not automatically reinstalled when
+root commands enter another project in the same VM. Clean setup now compiles only
+Nerves tooling, and the following target build and SDK scenario pass locally.
+Hosted verification of the setup correction is pending. Existing target builds
+containing host binaries must be removed and rebuilt; fixing initialization does
+not automatically rebuild their dependencies.
 Boot/RPC deadlines were not increased. Manual integration remains the policy.
 
 For an operator-owned standalone run:
