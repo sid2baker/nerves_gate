@@ -19,10 +19,12 @@ x86_64 firmware and bootstraps the configured QEMU devices through USB SSH/fwup.
 | Each device's Gateway UI link | Gateway settings served by that device |
 | `mix dev.ui <target>` | Gateway UI with code reload at localhost:4001 |
 
-`mix setup` installs missing Mix tooling, fetches every project's dependencies,
+`mix setup` installs missing Mix tooling, fetches every project's locked dependencies,
 installs the checksum-pinned x86 Tailscale daemon and downloads the prebuilt QEMU
 system. It needs Internet access, never boots a device and does not overwrite a
-different installed daemon.
+different installed daemon. Firmware and simulator must lock shared dependencies
+to the same versions because root commands compile both projects in one VM.
+Setup refuses implicit lock updates; update and align their lockfiles deliberately.
 
 ## Test the app-development workflow locally
 

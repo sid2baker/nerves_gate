@@ -37,8 +37,8 @@ defmodule NervesGate.Repository do
 
     # Fetch every dependency graph before loading compiled project tasks: their
     # consolidated protocols must not replace the protocols used by Hex.
-    for project <- ~w(sdk new sim), do: run(project, ["deps.get"])
-    run("firmware", ["deps.get"], target: "x86_64")
+    for project <- ~w(sdk new sim), do: run(project, ["deps.get", "--check-locked"])
+    run("firmware", ["deps.get", "--check-locked"], target: "x86_64")
     run("firmware", ["tailscaled.install"], target: "x86_64")
     Mix.shell().info("Downloading the prebuilt EC100 QEMU system (cached afterwards).")
     run("firmware", ["nerves.artifact.get"], target: "x86_64")
