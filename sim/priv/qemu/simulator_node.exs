@@ -1,4 +1,4 @@
-alias NervesGate.Simulator
+alias NervesGateSim.Simulator
 
 # mix run --no-start keeps Mix's Logger, so apply the configured level (test: warning).
 if level = Application.get_env(:logger, :level), do: Logger.configure(level: level)

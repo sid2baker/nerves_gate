@@ -15,7 +15,7 @@ defmodule Mix.Tasks.Dev.Ui do
   devices. Real gateways need development firmware with the same cookie.
   """
   use Mix.Task
-  alias NervesGate.DevDiscovery
+  alias NervesGateSim.DevDiscovery
 
   @shortdoc "Run the gateway UI with code reload against a simulated or real gateway"
   @standard_epmd 4369

@@ -20,7 +20,7 @@ defmodule Mix.Tasks.NervesGate.Sim.Install do
       do: Mix.raise("Usage: mix nerves_gate.sim.install [device] [--package app.ez]")
 
     {client, state} =
-      NervesGate.DevSession.connect("_build/qemu-dev", 180_000) ||
+      NervesGateSim.DevSession.connect("_build/qemu-dev", 180_000) ||
         Mix.raise(
           "Start the simulator in this directory first (mix sim in a generated workspace)."
         )

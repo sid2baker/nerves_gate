@@ -4,14 +4,14 @@ import Config
 config :nerves_gate,
   target: :host,
   distribution_cookie: :mycookie,
-  services: [NervesGate.HostInit, NervesGateWeb.Endpoint]
+  services: [NervesGateSim.HostInit, NervesGateWeb.Endpoint]
 
 config :phoenix, :json_library, Jason
 config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret", "public_key"]
 
 for {endpoint, salt} <- [
       {NervesGateWeb.Endpoint, "nerves-gate-live"},
-      {NervesGateWeb.Simulator.Endpoint, "nerves-gate-simulator"}
+      {NervesGateSimWeb.Endpoint, "nerves-gate-simulator"}
     ] do
   config :nerves_gate, endpoint,
     adapter: Bandit.PhoenixAdapter,
@@ -30,7 +30,7 @@ if config_env() == :dev and File.dir?(Path.join(firmware, "assets")) do
   config :phoenix, :plug_init_mode, :runtime
 
   config :phoenix_live_reload,
-    dirs: [Path.join(firmware, "lib/nerves_gate_web"), "lib/nerves_gate_web"]
+    dirs: [Path.join(firmware, "lib/nerves_gate_web"), "lib/nerves_gate_sim_web"]
 
   config :volt,
     entry: Path.join(firmware, "assets/js/app.js"),
@@ -54,12 +54,12 @@ if config_env() == :dev and File.dir?(Path.join(firmware, "assets")) do
 
   config :volt, :server, prefix: "/assets", watch_dirs: [Path.join(firmware, "lib"), "lib/"]
 
-  for endpoint <- [NervesGateWeb.Endpoint, NervesGateWeb.Simulator.Endpoint] do
+  for endpoint <- [NervesGateWeb.Endpoint, NervesGateSimWeb.Endpoint] do
     config :nerves_gate, endpoint,
       code_reloader: true,
       debug_errors: true,
       reloadable_apps: [:nerves_gate, :nerves_gate_sim],
-      live_reload: [patterns: [~r"lib/nerves_gate_web/.*(ex|heex)$"]]
+      live_reload: [patterns: [~r"lib/(nerves_gate_web|nerves_gate_sim_web)/.*(ex|heex)$"]]
   end
 
   config :phoenix_live_view, debug_heex_annotations: true, debug_attributes: true

@@ -13,15 +13,15 @@ defmodule NervesGateSim.SimulatorTest do
       devices: %{gateway_b: %{}, gateway_a: %{network: %{internet: :lan2}}}}
     """)
 
-    config = NervesGate.Simulator.config(path, dir)
+    config = NervesGateSim.Simulator.config(path, dir)
     assert config.firmware == Path.expand("firmware/gate.fw")
     assert config.factory_firmware == config.firmware
     assert config.firmware_project == Path.expand("firmware")
     assert config.raw.firmware == "firmware/gate.fw"
 
-    start_supervised!({NervesGate.Simulator, config})
+    start_supervised!({NervesGateSim.Simulator, config})
 
-    view = NervesGate.Simulator.subscribe(node())
+    view = NervesGateSim.Simulator.subscribe(node())
     assert view.status == :stopped
 
     assert [
@@ -31,7 +31,7 @@ defmodule NervesGateSim.SimulatorTest do
   end
 
   test "the scenario catalog comes from firmware integration scenarios" do
-    ids = Enum.map(NervesGate.QemuTests.scenarios(), & &1.id)
+    ids = Enum.map(NervesGateSim.QemuTests.scenarios(), & &1.id)
     assert "apps" in ids and "sdk" in ids and "public_status" in ids
   end
 end

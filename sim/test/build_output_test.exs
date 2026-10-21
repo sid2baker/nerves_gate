@@ -1,8 +1,8 @@
 defmodule NervesGateSim.BuildOutputTest do
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
-  alias NervesGate.Simulator
-  alias NervesGate.Simulator.BuildOutput
+  alias NervesGateSim.Simulator
+  alias NervesGateSim.Simulator.BuildOutput
 
   test "reports complete lines across chunk, UTF-8 and ANSI boundaries" do
     owner = self()

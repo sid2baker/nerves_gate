@@ -16,11 +16,7 @@
   calls: [
     forbidden: [
       {"NervesGate.*", ["NervesGateWeb.*"],
-       except: [
-         "NervesGate.Application",
-         "NervesGate.Scenarios.ProjectionStream",
-         "NervesGate.Scenarios.FrontendAssets"
-       ]},
+       except: ["NervesGate.Application"]},
       {"NervesGateWeb.*",
        [
          "Alarmist.*",

@@ -1,6 +1,6 @@
 defmodule NervesGateSim.Prerequisites do
   @moduledoc false
-  @tools ~w(qemu-system-x86_64 fwup flock mkfs.ext4)
+  @tools ~w(qemu-system-x86_64 fwup flock mkfs.ext4 git make cc pkg-config inotifywait)
 
   def check!(additional \\ []) do
     unless :os.type() == {:unix, :linux} and
@@ -16,7 +16,14 @@ defmodule NervesGateSim.Prerequisites do
     missing = Enum.reject(Enum.uniq(@tools ++ additional), &System.find_executable/1)
 
     if missing != [],
-      do: Mix.raise("Missing simulator tools: #{Enum.join(missing, ", ")}. See sim/README.md.")
+      do:
+        Mix.raise("""
+        Missing simulator tools: #{Enum.join(missing, ", ")}.
+        Ubuntu/Debian: sudo apt install build-essential git pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools e2fsprogs
+        Fedora: sudo dnf install gcc make git pkgconf-pkg-config libmnl-devel libnl3-devel qemu-system-x86 util-linux inotify-tools e2fsprogs
+        Install fwup separately: https://github.com/fwup-home/fwup/releases
+        macOS: use an arm64 Ubuntu VM (for example OrbStack); run these commands inside Linux.
+        """)
 
     version = output!("qemu-system-x86_64", ["--version"])
 

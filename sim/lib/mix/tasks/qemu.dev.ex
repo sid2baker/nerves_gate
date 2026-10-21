@@ -1,7 +1,7 @@
 defmodule Mix.Tasks.Qemu.Dev do
   @moduledoc false
   use Mix.Task
-  alias NervesGate.DevSession
+  alias NervesGateSim.DevSession
   @shortdoc "Start the simulator site with an empty multi-device simulator"
 
   @impl true

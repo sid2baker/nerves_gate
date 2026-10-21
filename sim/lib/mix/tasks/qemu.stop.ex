@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Qemu.Stop do
   def run([]) do
     Mix.Task.run("compile")
 
-    case NervesGate.DevSession.stop() do
+    case NervesGateSim.DevSession.stop() do
       :ok -> IO.puts("No simulator session is running; the session lock is free.")
       {:error, message} -> Mix.raise(message)
     end

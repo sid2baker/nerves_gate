@@ -1,7 +1,7 @@
 defmodule NervesGateSim.AdmissionTest do
   use ExUnit.Case, async: false
-  alias NervesGate.QemuTests
-  alias NervesGate.Simulator.Network
+  alias NervesGateSim.QemuTests
+  alias NervesGateSim.Simulator.Network
 
   setup do
     {:ok, _} = Application.ensure_all_started(:phoenix_pubsub)
@@ -64,6 +64,27 @@ defmodule NervesGateSim.AdmissionTest do
 
       assert {:reply, {:error, _}, ^state} =
                QemuTests.handle_call({:install, :a, path}, from, state)
+    end
+  end
+
+  test "console details require idle manual ownership and expose no credentials" do
+    from = {self(), make_ref()}
+    state = state()
+    assert {:reply, {:error, _}, ^state} = QemuTests.handle_call({:console, :a}, from, state)
+    state = put_in(state.view.devices.a.owner, :manual)
+
+    state =
+      put_in(state.handles.a, %{address: "127.0.0.2", forwards: %{usb: 22}, secret: "private"})
+
+    assert {:reply, {:ok, %{address: "127.0.0.2", port: 22}}, ^state} =
+             QemuTests.handle_call({:console, :a}, from, state)
+
+    for state <- [
+          put_in(state.view.devices.a.blocked, true),
+          put_in(state.view.devices.a.manual_action, "release"),
+          put_in(state.view.blocked, true)
+        ] do
+      assert {:reply, {:error, _}, ^state} = QemuTests.handle_call({:console, :a}, from, state)
     end
   end
 

@@ -5,6 +5,6 @@ defmodule Mix.Tasks.Qemu.Status do
 
   def run([]) do
     Mix.Task.run("compile")
-    IO.puts(NervesGate.DevSession.describe(NervesGate.DevSession.status()))
+    IO.puts(NervesGateSim.DevSession.describe(NervesGateSim.DevSession.status()))
   end
 end

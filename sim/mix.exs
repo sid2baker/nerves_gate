@@ -10,7 +10,7 @@ defmodule NervesGateSim.MixProject do
       version: @version,
       elixir: "~> 1.20",
       description: "Disposable QEMU devices and development tools for Nerves Gate",
-      elixirc_paths: ["lib"] ++ scenario_paths(),
+      elixirc_paths: if(File.dir?("scenarios"), do: ["lib", "scenarios"], else: ["lib"]),
       listeners: [Phoenix.CodeReloader],
       package: [
         licenses: ["Apache-2.0"],
@@ -39,15 +39,6 @@ defmodule NervesGateSim.MixProject do
   def cli, do: [preferred_envs: [ci: :test]]
 
   def application, do: [extra_applications: [:logger]]
-
-  # Repository checkouts compile firmware's QEMU scenarios and the system release
-  # tool they check. Packages contain neither.
-  defp scenario_paths do
-    for path <- ["../firmware/test/scenarios", "../firmware/scripts/artifact_release.ex"],
-        path = Path.expand(path, __DIR__),
-        File.exists?(path),
-        do: path
-  end
 
   defp local_dependency(app, requirement, path, options) do
     options =

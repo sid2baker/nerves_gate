@@ -19,7 +19,7 @@ defmodule NervesGateSim.ConfigurationTest do
 
     assert :ok = NervesGateSim.configure()
 
-    for endpoint <- [NervesGateWeb.Endpoint, NervesGateWeb.Simulator.Endpoint] do
+    for endpoint <- [NervesGateWeb.Endpoint, NervesGateSimWeb.Endpoint] do
       settings = Application.fetch_env!(:nerves_gate, endpoint)
       assert settings[:adapter] == Bandit.PhoenixAdapter
       assert settings[:pubsub_server] == NervesGate.PubSub

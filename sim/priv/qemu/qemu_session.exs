@@ -1,7 +1,7 @@
 # The UI owns only the simulator BEAM's MuonTrap wrapper. QMP sockets, disks and
 # Ethernet relays stay inside that BEAM, never in scenario/UI worker processes.
 NervesGateSim.configure()
-alias NervesGate.{DevSession, QemuTests, Simulator}
+alias NervesGateSim.{DevSession, QemuTests, Simulator}
 Process.register(self(), DevSession)
 
 # mix run --no-start keeps Mix's Logger, so apply the configured level (test: warning).
@@ -89,15 +89,15 @@ Application.put_env(:nerves_gate, :simulator_node, :"simulator@127.0.0.1")
 # The session serves the simulator site, not the gateway UI. The gateway
 # Endpoint runs without a listener so scenarios can check its configuration.
 Application.put_env(:nerves_gate, :services, [
-  NervesGate.QemuTests,
+  NervesGateSim.QemuTests,
   NervesGateWeb.Endpoint,
-  NervesGateWeb.Simulator.Endpoint
+  NervesGateSimWeb.Endpoint
 ])
 
 gateway = Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)
 Application.put_env(:nerves_gate, NervesGateWeb.Endpoint, Keyword.put(gateway, :server, false))
 port = String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
-site = Application.fetch_env!(:nerves_gate, NervesGateWeb.Simulator.Endpoint)
+site = Application.fetch_env!(:nerves_gate, NervesGateSimWeb.Endpoint)
 
 site =
   Keyword.merge(site,
@@ -106,7 +106,7 @@ site =
     http: [ip: {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}, port: 0]
   )
 
-Application.put_env(:nerves_gate, NervesGateWeb.Simulator.Endpoint, site)
+Application.put_env(:nerves_gate, NervesGateSimWeb.Endpoint, site)
 
 views = fn timeout, message ->
   Stream.repeatedly(fn ->
@@ -126,7 +126,7 @@ result =
 
     if System.get_env("QEMU_CI") != "true" do
       [spec] =
-        Bandit.PhoenixAdapter.child_specs(NervesGateWeb.Simulator.Endpoint,
+        Bandit.PhoenixAdapter.child_specs(NervesGateSimWeb.Endpoint,
           otp_app: :nerves_gate,
           code_reloader: site[:code_reloader],
           http: [ip: {127, 0, 0, 1}, port: port]

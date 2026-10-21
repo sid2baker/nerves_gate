@@ -26,7 +26,7 @@ defmodule Mix.Tasks.Qemu.Test do
   end
 
   # The running session's site, over its private Unix socket; nil without one.
-  defdelegate session(), to: NervesGate.DevSession, as: :connect
+  defdelegate session(), to: NervesGateSim.DevSession, as: :connect
 
   # Never print HTTP error pages: development pages can include private state.
   defp api_body!(%{status: 200, body: body}) when is_map(body), do: body
