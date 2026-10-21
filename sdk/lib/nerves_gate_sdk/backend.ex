@@ -1,6 +1,7 @@
 defmodule NervesGateSDK.Backend do
   @moduledoc """
-  Implemented by device firmware and the host simulator.
+  Implemented by device firmware, including firmware running inside QEMU.
+  The host simulator does not provide an in-memory hardware backend.
 
   `call/2` runs in the caller's process. Implementations must preserve caller
   ownership when forwarding subscriptions or RS485 claims to another process.

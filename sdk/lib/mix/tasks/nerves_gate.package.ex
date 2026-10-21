@@ -60,6 +60,7 @@ defmodule Mix.Tasks.NervesGate.Package do
     version = Keyword.fetch!(config, :version)
     installed = Package.installed()
     main = Map.fetch!(installed, app)
+    validate_sdk_requirement!(config[:deps] || [], main.env[:nerves_gate_sdk_requirement])
     bundled = collect(app, installed, MapSet.new())
     platform = Map.drop(installed, MapSet.to_list(bundled))
     filename = Path.expand(output || "#{app}-#{version}.ez")
@@ -109,6 +110,21 @@ defmodule Mix.Tasks.NervesGate.Package do
         File.rm(filename)
         Mix.raise("Cannot package application: #{inspect(reason)}")
     end
+  end
+
+  @doc false
+  def validate_sdk_requirement!(deps, declared) do
+    requirement =
+      Enum.find_value(deps, fn
+        {:nerves_gate_sdk, requirement, _} when is_binary(requirement) -> requirement
+        {:nerves_gate_sdk, requirement} when is_binary(requirement) -> requirement
+        _ -> nil
+      end)
+
+    if requirement && requirement != declared,
+      do: Mix.raise("The SDK dependency requirement must match :nerves_gate_sdk_requirement.")
+
+    :ok
   end
 
   defp collect(app, installed, seen) do
