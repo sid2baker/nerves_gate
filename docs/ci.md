@@ -33,16 +33,18 @@ including firmware builds and both devices' shared scenarios. Only diagnostic
 credentialed authentication checks through the protected `tailnet-ci` environment.
 See [tailnet CI](tailnet-ci.md).
 
-Both QEMU jobs run on `ubuntu-26.04` (QEMU 10.2). Earlier hosted runs on
-`ubuntu-24.04` (QEMU 8.2) booted both guests and then timed out on every status
-call; local QEMU 11 runs pass. QEMU 8.2 remains the documented minimum until a
-reproduction confirms whether it is the cause.
+Both QEMU jobs run on `ubuntu-26.04` (QEMU 10.2). Portable TCG is used,
+including on ARM Linux hosts; the runner reports virtualization capabilities.
+QEMU 8.2 remains the documented minimum.
 
-The known CI guest status-RPC timeout is unresolved. Runner virtualization
-capabilities are reported for diagnosis; boot and RPC deadlines are not enlarged.
-Do not add nightly or required PR integration runs until this failure has been
-reproduced, diagnosed and verified fixed. Portable TCG is still used, including on
-ARM Linux hosts; KVM availability alone is not proof of the timeout's cause.
+The hosted boot/status timeout was reproduced locally with a clean target build.
+The cause was a firmware `Phoenix.CodeReloader` Mix listener running on device
+targets: native dependencies compiled before Nerves configured its cross-compiler,
+producing workstation/glibc executables for the musl guest. Restricting the listener
+to host/dev fixes the clean local build and SDK scenario. Hosted verification is
+pending. Existing target builds containing host binaries must be removed and
+rebuilt; changing the listener does not automatically rebuild their dependencies.
+Boot/RPC deadlines were not increased. Manual integration remains the policy.
 
 For an operator-owned standalone run:
 

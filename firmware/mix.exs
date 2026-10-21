@@ -20,7 +20,10 @@ defmodule NervesGate.MixProject do
       elixir: "~> 1.20",
       archives: [nerves_bootstrap: "~> 1.17"],
       start_permanent: Mix.env() == :prod,
-      listeners: [Phoenix.CodeReloader],
+      # Device listeners can compile native deps before Nerves sets the toolchain,
+      # silently putting workstation executables in an otherwise valid image.
+      listeners:
+        if(Mix.target() == :host and Mix.env() == :dev, do: [Phoenix.CodeReloader], else: []),
       elixirc_paths: ["lib"],
       deps: deps(),
       releases: [

@@ -75,12 +75,15 @@ The operator selected these during implementation:
 
 ## Unresolved external and runtime limits
 
-- **Hosted QEMU boot/status RPC timeout (C3):** read-only inspection of run
-  `39560927723` confirms guests reach IEx but host status calls time out. This is
-  not evidence of a KVM-only problem. Boot failures now record bounded domain
-  liveness/current-function diagnostics separately from the status call, and the
-  workflow reports virtualization capabilities. A new hosted run is still needed
-  to diagnose and verify a fix. Deadlines were not increased.
+- **Hosted QEMU boot/status RPC timeout (C3):** runs `39632003381` and
+  `39634374157` reproduced it on Ubuntu 26.04/QEMU 10.2. The same QEMU binary
+  passes locally with cached target binaries but fails after a clean target build.
+  Target `if_monitor` and `uevent` were linked to the host's glibc loader, absent
+  from the musl guest. Restricting firmware's Phoenix reload listener to host/dev
+  prevents compilation before Nerves initializes the cross-toolchain; the clean
+  local SDK bench then passes with musl executables. Hosted verification is still
+  pending. Existing contaminated target build directories require a clean rebuild.
+  Deadlines were not increased.
 - **MuonTrap output race:** host tests exposed an existing short-lived-command
   `:epipe` race. A trial exit-trapping change could hang and was removed. Do not
   describe a later passing run as fixing that dependency/runtime race.
@@ -100,7 +103,7 @@ The operator selected these during implementation:
 
 Completed for this change:
 
-- Root `mix ci`: SDK **11**, simulator **15**, generator **13**, firmware **7**
+- Root `mix ci`: SDK **11**, simulator **15**, generator **13**, firmware **8**
   and private tools **5** tests passed. Firmware static checks and Dialyzer passed.
 - The same locked dependency fetch and root CI passed from a fresh source snapshot,
   without existing dependencies or build products. This exposed a stale

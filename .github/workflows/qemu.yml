@@ -18,8 +18,7 @@ concurrency:
 
 jobs:
   qemu:
-    # Ubuntu 26.04 provides QEMU 10.2; 24.04's QEMU 8.2 runs timed out on guest
-    # status calls after boot. Keep both QEMU jobs on the same image.
+    # Ubuntu 26.04 provides QEMU 10.2. Keep both QEMU jobs on the same image.
     runs-on: ubuntu-26.04
     timeout-minutes: 180
     env:
