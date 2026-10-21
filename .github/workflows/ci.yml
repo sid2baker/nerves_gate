@@ -20,20 +20,82 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
-      - name: Install host build prerequisites
+      - uses: ./.github/actions/host-tools
+      - name: Cache host dependencies, builds and PLTs
+        uses: actions/cache@v6
+        with:
+          path: |
+            sdk/deps
+            sdk/_build/test
+            sim/deps
+            sim/_build/test
+            new/deps
+            new/_build/test
+            firmware/deps
+            firmware/_build/test
+            tools/_build/test
+          key: host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '*/mix.lock', '*/mix.exs') }}-${{ github.sha }}
+          restore-keys: |
+            host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', '*/mix.lock', '*/mix.exs') }}-
+      - name: Fetch locked host dependencies
+        run: mise exec -- mix deps.get --check-locked
+      - name: Quality gates and unit tests (no devices)
+        run: mise exec -- mix ci
+
+  firmware-x86_64:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      MIX_TARGET: x86_64
+      NERVES_GATE_LOCAL_DEPS: '1'
+      NERVES_SYSTEM: ''
+      NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - uses: ./.github/actions/host-tools
+        with:
+          firmware: 'true'
+      - name: Cache verified firmware downloads
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.NERVES_DL_DIR }}
+            firmware/_build/setup
+          key: firmware-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/scripts/tailscaled.ex') }}
+      - name: Build target firmware (never boot a device)
+        working-directory: firmware
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev
-      - name: Install Mix tooling outside the project
+          mise exec -- mix deps.get --check-locked
+          mise exec -- mix tailscaled.install
+          mise exec -- mix nerves.artifact.get
+          mise exec -- mix firmware --overwrite
+
+  workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - uses: ./.github/actions/host-tools
+        with:
+          qemu: 'true'
+      - name: Prepare host dependencies
+        run: mise exec -- mix deps.get --check-locked
+      - name: Generate a workspace against this checkout
+        working-directory: new
+        run: mise exec -- env NERVES_GATE_LOCAL_DEPS=1 mix 'do' compile + nerves_gate.new "$RUNNER_TEMP/workspace" --local "$GITHUB_WORKSPACE"
+      - name: Exercise the ordinary app-developer commands (no device startup)
         run: |
           # shellcheck disable=SC2016
           mise exec -- sh -eu -c '
-            cd "$RUNNER_TEMP"
-            mix local.hex --force --if-missing
-            mix local.rebar --force --if-missing
-            mix archive.install hex nerves_bootstrap "~> 1.17" --force
+            cd "$RUNNER_TEMP/workspace"
+            mix setup
+            mix test
+            mix app.new second_app
+            mix setup
+            mix test
+            mix app.package my_app
+            mix app.package second_app
+            mix format --check-formatted
           '
-      - name: Fetch locked host dependencies
-        run: mise exec -- mix deps.get --check-locked
-      - name: Repository quality gates and unit tests (no devices)
-        run: mise exec -- mix ci

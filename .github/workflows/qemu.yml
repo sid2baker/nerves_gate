@@ -1,6 +1,6 @@
 name: QEMU integration
 
-# Explicitly requested integration runs only; never part of ordinary push/PR CI.
+# Manual until the CI guest status-RPC timeout is diagnosed, not waived.
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +18,9 @@ concurrency:
 
 jobs:
   qemu:
-    runs-on: ubuntu-24.04
+    # Ubuntu 26.04 provides QEMU 10.2; 24.04's QEMU 8.2 runs timed out on guest
+    # status calls after boot. Keep both QEMU jobs on the same image.
+    runs-on: ubuntu-26.04
     timeout-minutes: 180
     env:
       NERVES_SYSTEM: ''
@@ -26,23 +28,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
-      - name: Install simulator host tools
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - uses: ./.github/actions/host-tools
+        with:
+          qemu: 'true'
+      - name: Record runner virtualization capabilities
         run: |
-          gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
-          printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
-          sudo apt-get update
-          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools squashfs-tools e2fsprogs "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
-      - name: Install Mix tooling outside the project
-        run: |
-          # shellcheck disable=SC2016
-          mise exec -- sh -eu -c '
-            cd "$RUNNER_TEMP"
-            mix local.hex --force --if-missing
-            mix local.rebar --force --if-missing
-            mix archive.install hex nerves_bootstrap "~> 1.17" --force
-          '
+          qemu-system-x86_64 --version
+          uname -m
+          if test -r /dev/kvm && test -w /dev/kvm; then
+            echo 'KVM available (QEMU bench currently uses portable TCG)'
+          else
+            echo 'KVM unavailable; using portable TCG'
+          fi
       - name: Cache verified downloads (never VM disks)
         uses: actions/cache@v6
         with:
@@ -75,7 +72,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     env:
       NERVES_SYSTEM: ''
@@ -83,31 +80,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
-      - name: Install simulator host tools
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP"
-          printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup_1.17.1_amd64.deb" | sha256sum --check
-          sudo apt-get update
-          sudo apt-get install --yes build-essential pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools squashfs-tools e2fsprogs "$RUNNER_TEMP/fwup_1.17.1_amd64.deb"
-      - name: Install Mix tooling outside the project
-        run: |
-          # shellcheck disable=SC2016
-          mise exec -- sh -eu -c '
-            cd "$RUNNER_TEMP"
-            mix local.hex --force --if-missing
-            mix local.rebar --force --if-missing
-            mix archive.install hex nerves_bootstrap "~> 1.17" --force
-          '
-      - name: Cache verified downloads (never credentials or VM disks)
-        uses: actions/cache@v6
+      - uses: ./.github/actions/host-tools
         with:
-          path: |
-            ${{ env.NERVES_DL_DIR }}
-            firmware/_build/setup
-          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'sim/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/scripts/tailscaled.ex') }}
-          restore-keys: simulator-downloads-${{ runner.os }}-
+          qemu: 'true'
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
       - name: Authenticate three QEMU guests and verify peer traffic
@@ -115,7 +90,6 @@ jobs:
           TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
           TS_TAGS: tag:ci
-        # Never tee stdout: GitHub masking commands contain generated credentials.
-        # No raw daemon logs, identity disks or credentials are uploaded as artifacts.
+        # Never tee stdout or upload daemon logs, identity disks or credentials.
         # --config is relative to sim/.
         run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.firmware --ci --only tailscale_auth --config priv/qemu/tailnet.exs

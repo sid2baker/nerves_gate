@@ -1,0 +1,42 @@
+name: Nerves Gate host tools
+description: Install pinned Mix tooling and optional firmware/QEMU prerequisites
+inputs:
+  firmware:
+    description: Install fwup and firmware packaging tools
+    default: 'false'
+  qemu:
+    description: Install QEMU and virtual disk tools
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Install host build prerequisites
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        FIRMWARE: ${{ inputs.firmware }}
+        QEMU: ${{ inputs.qemu }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        packages=(build-essential pkg-config libmnl-dev libnl-genl-3-dev)
+        if [[ "$FIRMWARE" == true || "$QEMU" == true ]]; then
+          gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP/fwup"
+          printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup/fwup_1.17.1_amd64.deb" | sha256sum --check
+          packages+=("$RUNNER_TEMP/fwup/fwup_1.17.1_amd64.deb" squashfs-tools)
+        fi
+        if [[ "$QEMU" == true ]]; then
+          packages+=(qemu-system-x86 util-linux inotify-tools e2fsprogs)
+        fi
+        sudo apt-get update
+        sudo apt-get install --yes "${packages[@]}"
+    - name: Install Mix tooling outside the project
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        # shellcheck disable=SC2016
+        mise exec -- sh -eu -c '
+          cd "$RUNNER_TEMP"
+          mix local.hex --force --if-missing
+          mix local.rebar --force --if-missing
+          mix archive.install hex nerves_bootstrap "~> 1.17" --force
+        '
