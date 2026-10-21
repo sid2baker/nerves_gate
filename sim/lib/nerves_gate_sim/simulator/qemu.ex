@@ -1,6 +1,6 @@
 defmodule NervesGateSim.Simulator.Qemu do
   @moduledoc false
-  alias NervesGateSim.Simulator.Network
+  alias NervesGateSim.Simulator.{Network, SSH}
 
   def image(vm) do
     {_, 0} =
@@ -102,6 +102,7 @@ defmodule NervesGateSim.Simulator.Qemu do
     node = vm.node
 
     Process.delete(:qemu_status_error)
+    Process.delete(:qemu_status_errors)
 
     poll(vm, "device boot", 180_000, fn ->
       match?(%{system: %{target: "x86_64", node: ^node}}, status(vm))
@@ -113,51 +114,82 @@ defmodule NervesGateSim.Simulator.Qemu do
       reraise "#{error.message}; last status error: #{reason}", __STACKTRACE__
   end
 
-  # Diagnose distribution separately from potentially blocked domain calls.
-  # Never record process dictionaries, mailboxes, state, cookies or SSH material.
+  # Locate a failed boot without trusting the path that failed. Distribution
+  # crosses libslirp forwards and the management relay; USB SSH does not.
+  # Never record packet contents, process state, mailboxes, cookies or keys.
   defp boot_diagnostics(vm) do
-    domains = [
-      NervesGate.Network,
-      NervesGate.Remote,
-      NervesGate.Equipment,
-      NervesGate.Indicators,
-      NervesGate.Buses,
-      NervesGate.Storage,
-      NervesGate.Apps
-    ]
-
-    observations =
-      for domain <- domains do
-        info =
-          case diagnostic_call(vm.node, :erlang, :whereis, [domain]) do
-            pid when is_pid(pid) ->
-              diagnostic_call(vm.node, :erlang, :process_info, [
-                pid,
-                [:status, :current_function, :message_queue_len]
-              ])
-
-            _ ->
-              :unavailable
-          end
-
-        {domain, info}
-      end
-
     report = %{
-      process_count: diagnostic_call(vm.node, :erlang, :system_info, [:process_count]),
-      domains: observations
+      status_errors: Process.get(:qemu_status_errors, %{}),
+      connected?: vm.node in Node.list(:connected),
+      relay: vm.network |> Network.snapshot() |> Map.take([:connected, :ready, :stats]),
+      epmd_forward: epmd_names(vm),
+      guest_over_usb_ssh: guest_facts(vm)
     }
 
     File.write(
       Path.join(vm.dir, "boot.log"),
       inspect(report, pretty: true, limit: :infinity) <> "\n"
     )
+  catch
+    kind, reason ->
+      File.write(Path.join(vm.dir, "boot.log"), Exception.format(kind, reason))
   end
 
-  defp diagnostic_call(node, module, function, arguments) do
-    :erpc.call(node, module, function, arguments, 500)
+  # EPMD NAMES_REQ through the host forward. The reply lists node names/ports only.
+  defp epmd_names(vm) do
+    {:ok, ip} = :inet.parse_address(String.to_charlist(vm.address))
+
+    case :gen_tcp.connect(ip, vm.forwards.epmd, [:binary, active: false], 2000) do
+      {:ok, socket} ->
+        try do
+          :ok = :gen_tcp.send(socket, <<1::16, ?n>>)
+          read_all(socket, "")
+        after
+          :gen_tcp.close(socket)
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp read_all(socket, data) do
+    case :gen_tcp.recv(socket, 0, 2000) do
+      {:ok, more} when byte_size(data) < 4096 -> read_all(socket, data <> more)
+      {:error, :closed} -> {:ok, data}
+      other -> {:incomplete, other, data}
+    end
+  end
+
+  @guest_facts """
+  %{
+    node: Node.self(),
+    epmd: :erl_epmd.names(),
+    eth2: Map.new(~w(lower_up connection addresses), &{&1, VintageNet.get(["interface", "eth2", &1])}),
+    status_ms: (fn ->
+      started = System.monotonic_time(:millisecond)
+      result = try do NervesGate.status() && :ok catch kind, _ -> kind end
+      {result, System.monotonic_time(:millisecond) - started}
+    end).(),
+    domains: for(name <- [NervesGate.Network, NervesGate.Remote, NervesGate.Equipment, NervesGate.Indicators, NervesGate.Buses, NervesGate.Storage, NervesGate.Apps], do: {name, (pid = Process.whereis(name)) && Process.info(pid, [:status, :current_function, :message_queue_len])})
+  }
+  """
+
+  defp guest_facts(vm) do
+    case SSH.connect(vm) do
+      {:ok, connection} ->
+        try do
+          # A string: the host must not create atoms from guest replies.
+          SSH.request(connection, "inspect(#{@guest_facts}, limit: :infinity)")
+        after
+          :ssh.close(connection)
+        end
+
+      error ->
+        error
+    end
   catch
-    _, _ -> :unavailable
+    kind, reason -> {kind, Exception.format_banner(kind, reason)}
   end
 
   def status(vm) do
@@ -165,6 +197,12 @@ defmodule NervesGateSim.Simulator.Qemu do
   catch
     :error, {:erpc, reason} ->
       Process.put(:qemu_status_error, reason)
+
+      Process.put(
+        :qemu_status_errors,
+        Map.update(Process.get(:qemu_status_errors, %{}), reason, 1, &(&1 + 1))
+      )
+
       nil
   end
 
