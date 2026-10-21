@@ -27,7 +27,10 @@ while read -r checksum url; do
     [[ -z "$checksum" || "$checksum" == \#* ]] && continue
     filename=${url##*/}
     if [[ ! -f "$cache/$filename" ]]; then
-        curl --fail --location --retry 3 --silent --show-error "$url" -o "$cache/$filename.part"
+        printf 'Downloading toolchain source: %s\n' "$url"
+        curl --fail --location --retry 3 --retry-all-errors --retry-max-time 600 \
+            --connect-timeout 20 --max-time 300 --silent --show-error \
+            "$url" -o "$cache/$filename.part"
         printf '%s  %s\n' "$checksum" "$cache/$filename.part" | sha512sum --check -
         mv "$cache/$filename.part" "$cache/$filename"
     fi
