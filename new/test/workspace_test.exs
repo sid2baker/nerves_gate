@@ -11,13 +11,25 @@ defmodule NervesGateNew.WorkspaceTest do
     local_sdk!(Path.join(path, "apps/my_app/mix.exs"))
     previous = Mix.Project.pop()
     compiler = Code.compiler_options()
+    paths = :code.get_path()
 
     try do
       Code.compiler_options(ignore_module_conflict: true)
 
       Mix.Project.in_project(:generated_workspace, path, fn _ ->
         project = Mix.Project.get()
+        Mix.Local.append_archives()
+
+        archives =
+          Enum.filter(
+            :code.get_path(),
+            &String.starts_with?(to_string(&1), Mix.path_for(:archives))
+          )
+
+        assert archives != []
+        Mix.Local.remove_archives()
         Workspace.setup([])
+        assert Enum.all?(archives, &(&1 in :code.get_path()))
         assert Mix.Project.get() == project
         assert_raise Mix.Error, ~r/Unknown app/, fn -> Workspace.package(["missing"]) end
         assert_raise Mix.Error, fn -> Workspace.new(["../escape"]) end
@@ -47,6 +59,7 @@ defmodule NervesGateNew.WorkspaceTest do
       end)
     after
       Code.compiler_options(compiler)
+      :code.set_path(paths)
       Mix.Project.push(previous.name, previous.file)
     end
   end

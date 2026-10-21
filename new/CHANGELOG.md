@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-10-21
+
+### Fixed
+
+- `mix setup` can fetch dependencies for additional apps after workspace tooling has been compiled.
+
 ## 0.1.0 - 2026-10-21
 
 ### Added

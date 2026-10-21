@@ -2,6 +2,9 @@ defmodule NervesGateNew.Workspace do
   @moduledoc "Commands used by generated app-development workspaces."
 
   def setup([]) do
+    # Compiling the workspace prunes archive paths. Hex still needs its lazily
+    # loaded modules while fetching dependencies for each independent app.
+    Mix.Local.append_archives()
     for {name, path} <- apps(), do: in_app(name, path, Mix.env(), "deps.get", [])
   end
 
