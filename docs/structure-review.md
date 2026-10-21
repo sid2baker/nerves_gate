@@ -73,9 +73,9 @@ The operator selected these during implementation:
   workspace default. Simulator packages also support custom firmware; no forced
   simulator/firmware common version or new artifact-manifest service is needed.
 
-## Unresolved external and runtime limits
+## Integration verification
 
-- **Hosted QEMU boot/status RPC timeout (C3):** runs `39632003381` and
+- **Hosted QEMU boot/status RPC timeout (C3), fixed:** runs `39632003381` and
   `39634374157` reproduced it on Ubuntu 26.04/QEMU 10.2. The same QEMU binary
   passes locally with cached target binaries but fails after a clean target build.
   Target `if_monitor` and `uevent` were linked to the host's glibc loader, absent
@@ -85,9 +85,14 @@ The operator selected these during implementation:
   contexts. Root setup now enters `nerves_bootstrap.init` directly instead of
   resolving a dependency task before Nerves is initialized. Clean setup no longer
   compiles target port binaries; the following build produces musl executables and
-  the two-device SDK bench passes locally. Hosted verification of this second fix
-  is pending. Contaminated target build directories require a clean rebuild.
-  Deadlines were not increased.
+  the two-device SDK bench passes locally. Hosted run
+  [39646478170](https://github.com/sid2baker/nerves_gate/actions/runs/39646478170)
+  passed all **41** ordinary scenarios on `2e017b7` in 32 minutes; routine CI passed
+  too. Tailscale authentication was not selected. Contaminated target build
+  directories require a clean rebuild. Deadlines were not increased.
+
+## Unresolved external and runtime limits
+
 - **MuonTrap output race:** host tests exposed an existing short-lived-command
   `:epipe` race. A trial exit-trapping change could hang and was removed. Do not
   describe a later passing run as fixing that dependency/runtime race.
@@ -123,5 +128,6 @@ Completed for this change:
   firmware build passed too.
 
 These checks do not qualify physical hardware, authenticate the current gateway
-UI, prove a hosted QEMU fix, or publish any package. The full scenario suite was
-not run. No existing development session was stopped or reset.
+UI or publish any package. The full ordinary scenario suite subsequently passed
+on GitHub, as recorded above; authenticated Tailscale was not tested. No existing
+development session was stopped or reset.

@@ -44,10 +44,11 @@ paths needed correction: firmware reload listeners must run only on host/dev, an
 root setup must enter the archive's `nerves_bootstrap.init` task before looking up
 Nerves dependency tasks. Bootstrap aliases are not automatically reinstalled when
 root commands enter another project in the same VM. Clean setup now compiles only
-Nerves tooling, and the following target build and SDK scenario pass locally.
-Hosted verification of the setup correction is pending. Existing target builds
-containing host binaries must be removed and rebuilt; fixing initialization does
-not automatically rebuild their dependencies.
+Nerves tooling. Hosted run [39646478170](https://github.com/sid2baker/nerves_gate/actions/runs/39646478170)
+passed all 41 ordinary scenarios on commit `2e017b7`; routine CI also passed.
+Tailscale authentication was not selected. Existing target builds containing host
+binaries must be removed and rebuilt; fixing initialization does not automatically
+rebuild their dependencies.
 Boot/RPC deadlines were not increased. Manual integration remains the policy.
 
 For an operator-owned standalone run:
