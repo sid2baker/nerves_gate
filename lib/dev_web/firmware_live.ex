@@ -32,6 +32,12 @@ defmodule DevWeb.FirmwareLive do
         </p>
       </.panel>
       <.panel title="Operation output" icon="clock"><.operation operation={@operation} /></.panel>
+      <.panel title="Initial EC100 installation" icon="usb">
+        <p>
+          Still running factory firmware? Provision over USB MASKROM with a mandatory backup and explicit erase confirmation.
+        </p>
+        <.link navigate="/factory" class="ui-text-link">Factory provisioning</.link>
+      </.panel>
       <.panel title="Use a firmware image" icon="network">
         <p>
           For a physical gateway, open its device page and review the image before explicitly authorizing an SSH A/B update.

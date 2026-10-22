@@ -80,6 +80,7 @@ sidebar separates the local developer workflows:
 | Simulated device | `/devices/:id` | Observations, gateway link, injected faults and Tests & controls tab |
 | Applications | `/apps`, `/apps/:id` | Create/open ordinary SDK projects; per-app test, package and simulator installation |
 | Firmware | `/firmware` | Explicit EC100/QEMU builds, output and image paths; building never installs |
+| Factory provisioning | `/factory` | Initial EC100 USB MASKROM installation; explicit RAM-loader review, mandatory full backup, physical-board acknowledgement and typed erase confirmation |
 | Simulator | `/simulator` | Bench-wide Start/Stop/Reset, virtual wiring, scenario runs and action log |
 
 The **Simulated · QEMU** badge is assigned only from owned simulator inventory,
@@ -95,8 +96,9 @@ review, never assumed from an option label.
 
 Apps are ordinary directories, not solutions. Physical devices never receive
 QEMU drivers, faults or disk-reset controls. Their firmware updates require a
-separate authenticated SSH review and explicit typed confirmation; see
-[firmware updates](firmware-updates.md). Page navigation does not cancel work or
+separate authenticated SSH review and explicit typed confirmation. Initial USB
+provisioning lives on its own page, never on a discovered device's update form;
+opening it never probes USB. See [firmware updates](firmware-updates.md). Page navigation does not cancel work or
 expire an otherwise valid review: operations belong to the backend, with status
 and expandable output visible across pages. Opening a page never starts devices,
 builds firmware or sends updates. UI and CLI invoke the same operations; backend

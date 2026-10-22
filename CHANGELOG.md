@@ -11,6 +11,9 @@
 
 ### Added
 
+- Developer workbench factory provisioning for EC100 over USB MASKROM, with a
+  reviewed image, mandatory full eMMC backup, explicit physical-board/erase
+  confirmation and verified readbacks before reset.
 - EC100 4G support for the Quectel EG800AK-GL using CDC-ECM, an operator APN and
   the existing Internet-source and Ethernet-backup settings. A working unlocked
   SIM is required; the USB recovery link stays separate.

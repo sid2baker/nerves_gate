@@ -13,6 +13,8 @@ defmodule Dev.Workbench do
   def application("open", path, _local_sdk), do: Dev.Applications.open(path)
   def application(_, _, _), do: {:error, "Expected new or open"}
 
+  defdelegate review_factory(params), to: Dev.Operations
+  defdelegate confirm_factory(id, text, identified), to: Dev.Operations
   defdelegate review_firmware(params), to: Dev.Operations
   defdelegate confirm_firmware(id, address), to: Dev.Operations
   defdelegate stop_session(id), to: Dev.Operations

@@ -59,7 +59,7 @@ defmodule DevWeb.PhysicalDeviceLive do
     review = Dev.Operations.snapshot().review
     device = socket.assigns.device
 
-    if device && review && review.address == device.address do
+    if device && review && Map.get(review, :address) == device.address do
       command(socket, Dev.Workbench.confirm_firmware(params["review_id"], params["address"]))
     else
       command(socket, {:error, "Review firmware for this device first"})
@@ -160,7 +160,7 @@ defmodule DevWeb.PhysicalDeviceLive do
           </form>
           <.button phx-click="refresh_images" variant="secondary">Refresh firmware list</.button>
           <.firmware_confirmation
-            :if={@operation.review && @operation.review.address == @device.address}
+            :if={@operation.review && Map.get(@operation.review, :address) == @device.address}
             review={@operation.review}
           />
         </.panel>

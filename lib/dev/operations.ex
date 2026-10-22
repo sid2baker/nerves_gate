@@ -15,6 +15,11 @@ defmodule Dev.Operations do
   def confirm_firmware(id, address),
     do: GenServer.call(__MODULE__, {:confirm_firmware, id, address})
 
+  def review_factory(params), do: GenServer.call(__MODULE__, {:review_factory, params})
+
+  def confirm_factory(id, text, identified),
+    do: GenServer.call(__MODULE__, {:confirm_factory, id, text, identified})
+
   def init(_), do: {:ok, %{task: nil, review: nil, stopping: false, view: view(:idle, nil)}}
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
 
@@ -40,6 +45,35 @@ defmodule Dev.Operations do
       {:review, plan}
     end)
   end
+
+  def handle_call({:review_factory, params}, _, state) do
+    start_task(state, "factory_review", fn report ->
+      {:review, Dev.FactoryProvisioning.review!(params, report)}
+    end)
+  end
+
+  def handle_call(
+        {:confirm_factory, id, text, identified},
+        _,
+        %{review: %{public: %{kind: :factory}}} = state
+      ) do
+    try do
+      :ok = Dev.FactoryProvisioning.confirmation!(state.review, id, text, identified)
+      plan = state.review
+
+      start_task(%{state | review: nil}, "factory_provision", fn report ->
+        {:ok, Dev.FactoryProvisioning.provision!(plan, report)}
+      end)
+    rescue
+      error in ArgumentError -> {:reply, {:error, Exception.message(error)}, state}
+    end
+  end
+
+  def handle_call({:confirm_factory, _, _, _}, _, state),
+    do: {:reply, {:error, "Review factory provisioning first"}, state}
+
+  def handle_call({:confirm_firmware, _, _}, _, %{review: %{public: %{kind: :factory}}} = state),
+    do: {:reply, {:error, "This is a factory review, not an SSH update"}, state}
 
   def handle_call({:confirm_firmware, _, _}, _, %{review: nil} = state),
     do: {:reply, {:error, "Review the firmware and device first"}, state}
@@ -139,7 +173,11 @@ defmodule Dev.Operations do
            state.view
            | status: :awaiting_confirmation,
              review: plan.public,
-             result: "Review complete. No firmware has been sent."
+             result:
+               if(Map.get(plan.public, :kind) == :factory,
+                 do: "Factory review complete. Transport loaded into RAM only; no eMMC writes.",
+                 else: "Review complete. No firmware has been sent."
+               )
          }
      }}
   end
@@ -172,15 +210,23 @@ defmodule Dev.Operations do
            }
        }}
 
-  def handle_info({:expire_review, id}, %{review: %{public: %{token: id}}} = state),
-    do:
-      {:noreply,
-       %{drop_review(state) | view: %{view(:idle, nil) | result: "Firmware review expired"}}}
+  def handle_info({:expire_review, id}, %{review: %{public: %{token: id}}} = state) do
+    message =
+      if Map.get(state.review.public, :kind) == :factory,
+        do: "Factory review expired; re-enter MASKROM before reviewing again",
+        else: "Firmware review expired"
+
+    {:noreply, %{drop_review(state) | view: %{view(:idle, nil) | result: message}}}
+  end
 
   def handle_info({:expire_review, _}, state), do: {:noreply, state}
 
   defp drop_review(state) do
-    Dev.FirmwareUpdate.cleanup(state.review)
+    case state.review do
+      %{public: %{kind: :factory}} = plan -> Dev.FactoryProvisioning.cleanup(plan)
+      plan -> Dev.FirmwareUpdate.cleanup(plan)
+    end
+
     %{state | review: nil, view: %{state.view | review: nil}}
   end
 

@@ -26,7 +26,7 @@ defmodule DevWeb.WorkbenchPageTest do
       )
       |> Floki.parse_document!()
 
-    assert Floki.find(document, "nav[aria-label='Workbench navigation'] a") |> length() == 5
+    assert Floki.find(document, "nav[aria-label='Workbench navigation'] a") |> length() == 6
     assert Floki.attribute(document, "nav a[aria-current=page]", "href") == ["/devices"]
     assert Floki.text(Floki.find(document, "#global-operation")) =~ "Firmware · running"
     assert Floki.attribute(document, "#global-operation", "href") == ["/firmware"]
@@ -217,6 +217,62 @@ defmodule DevWeb.WorkbenchPageTest do
     end
   end
 
+  test "factory provisioning is separate, explicit and never offers backup bypass" do
+    empty = render_component(&DevWeb.FactoryLive.render/1, assigns()) |> Floki.parse_document!()
+    assert Floki.find(empty, "#review-factory select[name=firmware][disabled]") != []
+    assert Floki.find(empty, "#confirm-factory") == []
+    assert Floki.find(empty, "input[type=password], input[name=backup]") == []
+    assert Floki.text(empty) =~ "RAM"
+    assert Floki.text(empty) =~ "not a verified EC100 serial number"
+
+    review = %{
+      kind: :factory,
+      token: "factory-token",
+      location: "101",
+      confirmation: "ERASE EC100 101",
+      version: "0.2.0-dev",
+      firmware: "/images/ec100.fw",
+      backup: "/backups/review",
+      capacity: 4_000_000_000,
+      required_space: 12_000_000_000,
+      available_space: 20_000_000_000,
+      sha256: String.duplicate("a", 64)
+    }
+
+    operation = %{
+      operation()
+      | status: :awaiting_confirmation,
+        kind: "factory_review",
+        review: review
+    }
+
+    document =
+      render_component(&DevWeb.FactoryLive.render/1, assigns(operation: operation))
+      |> Floki.parse_document!()
+
+    assert Floki.find(
+             document,
+             "#confirm-factory input[name=identified][type=checkbox][required]"
+           ) != []
+
+    assert Floki.find(document, "#confirm-factory input[name=confirmation][required]") != []
+    assert Floki.attribute(document, "input[name=review_id]", "value") == ["factory-token"]
+    assert Floki.text(document) =~ "ERASE EC100 101"
+    assert Floki.text(document) =~ "full eMMC user-area backup"
+    assert DevWeb.Components.operation_path(operation) == "/factory"
+
+    {:ok, device} = Dev.Discovery.manual("ec100.local")
+
+    other =
+      render_component(
+        &DevWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "firmware", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.find(other, "#confirm-firmware") == []
+  end
+
   test "firmware builds and destructive bench controls have separate pages" do
     firmware =
       render_component(&DevWeb.FirmwareLive.render/1, assigns()) |> Floki.parse_document!()
@@ -242,6 +298,7 @@ defmodule DevWeb.WorkbenchPageTest do
           {"/devices/gateway_a", DevWeb.DeviceLive, :devices},
           {"/apps", DevWeb.ApplicationsLive, :apps},
           {"/firmware", DevWeb.FirmwareLive, :firmware},
+          {"/factory", DevWeb.FactoryLive, :factory},
           {"/simulator", DevWeb.SimulatorLive, :simulator}
         ] do
       route = Phoenix.Router.route_info(DevWeb.Router, "GET", path, "localhost")

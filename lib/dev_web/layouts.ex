@@ -60,6 +60,7 @@ defmodule DevWeb.Layouts do
       {:devices, "/devices", "Devices", "network"},
       {:apps, "/apps", "Applications", "equipment"},
       {:firmware, "/firmware", "Firmware", "port"},
+      {:factory, "/factory", "Factory provisioning", "usb"},
       {:simulator, "/simulator", "Simulator", "settings"}
     ]
   end

@@ -1,8 +1,9 @@
 # Firmware builds and device updates
 
-Run `mix dev`. No shell target variables are required. This workbench performs
-normal SSH A/B firmware updates, not initial provisioning, SD-card flashing or
-factory resets. Finding or adding a device never writes to it.
+Run `mix dev`. No shell target variables are required. The workbench separates
+normal SSH A/B updates from destructive initial EC100 provisioning over USB
+MASKROM. Neither finding a device nor opening a page writes to it. SD-card
+flashing and factory reset are not offered.
 
 ## Build
 
@@ -45,6 +46,56 @@ A review expires after ten minutes and is invalidated by a new operation.
 Confirmation is single-use. The snapshot is deleted after update or expiry.
 Nothing formats the physical device's data partition or bypasses its own
 recovery/update admission and fwup compatibility checks.
+
+## Initial USB factory provisioning
+
+Use **Firmware → Factory provisioning** (`/factory`) only for initial installation
+or explicit factory re-provisioning. It replaces the EC100 bootloader, partition
+layout, firmware and application data. For an already provisioned device, prefer
+the normal SSH update above; that also works over USB networking.
+
+1. Build EC100 firmware. Install `rkdeveloptool` and arrange USB permissions on
+   the workstation hosting `mix dev`, not the browser's machine. Use direct udev
+   access or select noninteractive `sudo -n` after authorizing it in a terminal
+   (`sudo -v`). No password is requested or stored by the UI. Sudo policy may
+   require explicit permission for noninteractive commands from the workbench.
+2. Physically identify the intended EC100, connect its Type-C download port, and
+   enter MASKROM according to the board instructions. Follow the watchdog-jumper
+   instructions and keep stable power connected. Disconnect other Rockchip USB
+   devices. The FTDI UART adapter is a console, not the flashing connection.
+3. Choose the image and click **Load RAM transport and review**. This is an
+   explicit device operation: it checks exactly one matching RK3506 controller,
+   verifies/snapshots the image and boot files, loads the transport into RAM,
+   reads eMMC capacity and checks disk space. It does not write eMMC.
+4. Review the USB location, image hash/version, capacity and backup directory.
+   The disk budget conservatively reserves three times eMMC capacity plus the
+   firmware size and 256 MiB for backup, staging and readbacks. A typical 4 GB
+   board needs roughly 12 GB free. Space is checked again before installation.
+5. Check the physical-EC100 acknowledgement and type the exact displayed
+   `ERASE EC100 <USB location>` phrase. Click **Back up, erase and provision EC100**.
+   The existing `ec100.flash` engine stages/validates the factory layout, completes
+   and hashes the full eMMC user-area backup, then writes and reads back every
+   region. Backup cannot be disabled in the UI. Boot0/boot1 are not written.
+6. The EC100 resets only after all readback checks pass. The global operation
+   panel shows progress across pages. Keep `mix dev`, USB and power connected
+   until completion. Backups, their checksum and readbacks remain under
+   `ec100-backups/`, including after failure. Copy them somewhere safe.
+
+The USB VID/PID identifies the controller, **not a verified EC100 serial number**.
+The review is bound to the USB location and capacity, but cannot distinguish a
+replacement board at the same location. Never unplug/swap devices or run another
+flasher during the operation. The backend rechecks location and capacity before
+installation and location before every write/reset. The review expires after ten
+minutes, is invalidated by another operation, and is consumed once before flashing.
+After expiry, cancellation or failure, re-enter MASKROM before reviewing again.
+
+Factory provisioning is not power-loss atomic. An interrupted command has an
+uncertain outcome: inspect the device and preserve backups; there are no automatic
+write retries. Backup completion is checked before the first write, but a backup
+is not a guarantee that interrupted provisioning can be recovered automatically.
+The equivalent terminal workflow remains `MIX_TARGET=ec100 mix ec100.flash` from
+`firmware/`; the UI calls its shared staging/backup/readback functions, not the
+interactive Mix task. No system artifact rebuild is needed for this host feature.
 
 ## Read device information
 

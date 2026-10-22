@@ -55,6 +55,9 @@ defmodule DevWeb.Components do
     """
   end
 
+  def operation_path(%{kind: kind}) when kind in ["factory_review", "factory_provision"],
+    do: "/factory"
+
   def operation_path(%{review: %{address: address}}),
     do: Dev.Devices.physical_path(address) <> "?tab=firmware"
 
@@ -70,6 +73,8 @@ defmodule DevWeb.Components do
   def operation_label("device_info"), do: "Read device information"
   def operation_label("firmware_review"), do: "Firmware review"
   def operation_label("firmware_update"), do: "Firmware update"
+  def operation_label("factory_review"), do: "Factory review"
+  def operation_label("factory_provision"), do: "Factory provisioning"
   def operation_label(kind), do: String.capitalize(kind)
 
   def port_label(:lan1), do: "LAN1"

@@ -33,6 +33,7 @@ defmodule DevWeb.Router do
       live("/apps", ApplicationsLive, :apps)
       live("/apps/:id", ApplicationsLive, :apps)
       live("/firmware", FirmwareLive, :firmware)
+      live("/factory", FactoryLive, :factory)
       live("/simulator", SimulatorLive, :simulator)
     end
   end
