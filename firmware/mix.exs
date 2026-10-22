@@ -146,7 +146,7 @@ defmodule NervesGate.MixProject do
   # Device builds still resolve their pinned system source and GitHub artifact.
   defp system_dependencies do
     case Mix.target() do
-      :ec100 -> [system_dependency(:nerves_system_ec100, "0.2.1", :ec100)]
+      :ec100 -> [system_dependency(:nerves_system_ec100, "0.2.2", :ec100)]
       :x86_64 -> [system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)]
       :host -> []
     end

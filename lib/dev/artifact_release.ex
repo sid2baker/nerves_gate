@@ -11,13 +11,15 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   cannot disagree. Changing it is a system build-input change.
 
   `plan` is local and read-only. `check` checks GitHub and sets the Actions `publish`
-  output. `publish` is restricted to the main-branch GitHub workflow.
+  output. `source` prefetches with Buildroot; `collect` collects its legal info
+  and EC100 release assets after a standard Nerves artifact build. `publish` is
+  restricted to the main-branch GitHub workflow.
   """
   use Mix.Task
 
   @requirements ["loadpaths"]
   # This task is preloaded before Mix puts the Nerves dependency on the code path.
-  @compile {:no_warn_undefined, [Nerves, Nerves.Artifact.Archive]}
+  @compile {:no_warn_undefined, [Nerves, Nerves.Artifact.Archive, Nerves.Container]}
 
   @repo "sid2baker/nerves_gate"
   @systems [ec100: :nerves_system_ec100, x86_64: :nerves_system_ec100_qemu]
@@ -41,6 +43,16 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       do: File.write!(output, "publish=#{publish?}\n", [:append])
   end
 
+  def run(["source"]) do
+    info = metadata!()
+    buildroot!(info, :source)
+  end
+
+  def run(["collect"]) do
+    info = metadata!()
+    collect!(info)
+  end
+
   def run(["publish"]) do
     unless System.get_env("GITHUB_ACTIONS") == "true" and
              System.get_env("GITHUB_REPOSITORY") == @repo and
@@ -59,7 +71,99 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     end
   end
 
-  def run(_), do: Mix.raise("Usage: nerves.artifact.release plan | check | publish")
+  def run(_),
+    do: Mix.raise("Usage: nerves.artifact.release plan | check | source | collect | publish")
+
+  # Nerves 2.0.0-pre.4 ignores build_runner_opts. Use its workspace and mounts
+  # for ordinary Buildroot commands; do not implement another downloader.
+  defp buildroot!(info, phase) do
+    plan = Nerves.build_plan()
+    {tool, image, downloads, _} = Nerves.Container.prepare_artifact_workspace!(plan, info.package)
+
+    {script, targets} = buildroot_command(phase, info.package.app, info.download.filename)
+
+    args =
+      ["run", "--rm"] ++
+        Nerves.Container.container_user_args(tool) ++
+        Nerves.Container.work_mount_args(tool, info.package) ++
+        Nerves.Container.download_mount_args(tool, downloads) ++
+        [
+          "--env",
+          "NERVES_BR_DL_DIR=/workspace/dl",
+          "--workdir",
+          "/workspace/build",
+          "--entrypoint",
+          "/bin/sh",
+          image,
+          "-ec",
+          script,
+          "buildroot" | targets
+        ]
+
+    case System.cmd(tool, args, into: IO.stream(:stdio, :line), stderr_to_stdout: true) do
+      {_, 0} -> :ok
+      {_, status} -> Mix.raise("Buildroot #{phase} failed (#{status})")
+    end
+  end
+
+  defp collect!(info) do
+    unless match?({:unix, :linux}, :os.type()),
+      do: Mix.raise("Source archive collection requires Linux")
+
+    unless info.package.app == :nerves_system_ec100 and File.regular?(info.download.archive_path),
+      do: Mix.raise("Build the EC100 artifact before collecting its sources")
+
+    File.mkdir_p!("dist")
+
+    unless File.ls!("dist") == [],
+      do: Mix.raise("dist must be empty before collecting release assets")
+
+    buildroot!(info, :collect)
+    workspace = Nerves.Container.work_dir(info.package)
+    File.cp!(Path.join(workspace, "build/#{info.download.filename}"), info.download.archive_path)
+    [binary, sources, checksums] = Enum.map(info.assets, &Path.join("dist", &1))
+    File.cp!(info.download.archive_path, binary)
+
+    command!("tar", [
+      "-czf",
+      sources,
+      "--exclude=nerves_system_br/buildroot",
+      "-C",
+      workspace,
+      "build/legal-info",
+      to_string(info.package.app),
+      "nerves_system_br"
+    ])
+
+    for path <- [binary, sources],
+        File.stat!(path).size >= 2_147_483_648,
+        do: Mix.raise("#{path} exceeds GitHub's 2 GiB limit")
+
+    File.write!(checksums, Enum.map_join([binary, sources], "\n", &checksum_line/1) <> "\n")
+  end
+
+  @doc false
+  def buildroot_command(:source, app, _filename) do
+    {"""
+     /workspace/nerves_system_br/create-build.sh /workspace/#{app}/nerves_defconfig /workspace/build
+     exec make source
+     """, []}
+  end
+
+  def buildroot_command(:collect, _app, filename) do
+    # Buildroot cannot collect notices/config from a prebuilt external toolchain.
+    # Keep those installed files; do not maintain another compiler source list.
+    {"""
+     make legal-info
+     mkdir -p legal-info/licenses/toolchain-external-custom legal-info/toolchain-external-custom
+     cp -a host/opt/ext-toolchain/share/licenses/. legal-info/licenses/toolchain-external-custom/
+     cp host/opt/ext-toolchain/ct-ng.config host/opt/ext-toolchain/ct-ng.defconfig legal-info/toolchain-external-custom/
+     exec make system "$@"
+     """, ["NERVES_ARTIFACT_NAME=#{String.trim_trailing(filename, ".tar.gz")}"]}
+  end
+
+  defp checksum_line(path),
+    do: String.replace_prefix(sha256(path), "sha256:", "") <> "  " <> Path.basename(path)
 
   defp metadata! do
     app = @systems[Mix.target()] || Mix.raise("Use MIX_TARGET=ec100 or x86_64 from firmware/.")
@@ -326,9 +430,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       [system, sources, checksums] = paths
 
       expected =
-        Enum.map_join([system, sources], "\n", fn path ->
-          String.replace_prefix(sha256(path), "sha256:", "") <> "  " <> Path.basename(path)
-        end)
+        Enum.map_join([system, sources], "\\n", &checksum_line/1)
 
       unless String.trim(File.read!(checksums)) == expected and
                sha256(system) == sha256(info.download.archive_path),

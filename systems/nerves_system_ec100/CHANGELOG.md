@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+## 0.2.2 - 2026-10-22
+
+### Changed
+
+- System builds use Nerves 2 artifact tooling and Buildroot's source fetching and
+  license collection instead of a separate toolchain-source downloader.
+
 ## 0.2.1 - 2026-10-20
 
 ### Changed

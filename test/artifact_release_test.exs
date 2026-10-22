@@ -18,6 +18,73 @@ defmodule Dev.ArtifactReleaseTest do
     refute Release.assets_uploaded?(%{"assets" => [%{hd(assets) | "state" => "new"}]}, [binary])
   end
 
+  test "source prefetch uses Buildroot before compiling, not a separate downloader" do
+    {script, []} = Release.buildroot_command(:source, :nerves_system_ec100, "unused")
+
+    assert script =~
+             "create-build.sh /workspace/nerves_system_ec100/nerves_defconfig /workspace/build"
+
+    assert script =~ "exec make source"
+    refute script =~ "curl"
+    refute script =~ "make all"
+  end
+
+  @tag :tmp_dir
+  test "legal-info failure stops collection before packaging", %{tmp_dir: dir} do
+    File.write!(
+      Path.join(dir, "Makefile"),
+      "legal-info:\n\t@exit 17\nsystem:\n\t@touch should-not-exist\n"
+    )
+
+    {script, args} = Release.buildroot_command(:collect, :nerves_system_ec100, "system.tar.gz")
+    assert script =~ "make legal-info"
+    assert script =~ "share/licenses"
+    assert script =~ "ct-ng.config"
+    refute script =~ "curl"
+    assert args == ["NERVES_ARTIFACT_NAME=system"]
+
+    assert {_, 2} =
+             System.cmd("sh", ["-ec", script, "buildroot" | args],
+               cd: dir,
+               stderr_to_stdout: true
+             )
+
+    refute File.exists?(Path.join(dir, "should-not-exist"))
+  end
+
+  @tag :tmp_dir
+  test "standard collection retains installed notices/configuration before packaging", %{
+    tmp_dir: dir
+  } do
+    toolchain = Path.join(dir, "host/opt/ext-toolchain")
+    File.mkdir_p!(Path.join(toolchain, "share/licenses"))
+    File.write!(Path.join(toolchain, "share/licenses/NOTICE"), "installed notices")
+
+    for name <- ["ct-ng.config", "ct-ng.defconfig"],
+        do: File.write!(Path.join(toolchain, name), name)
+
+    File.write!(
+      Path.join(dir, "Makefile"),
+      "legal-info:\n\t@mkdir -p legal-info\nsystem:\n\t@printf '%s' '$(NERVES_ARTIFACT_NAME)' > artifact-name\n"
+    )
+
+    {script, args} = Release.buildroot_command(:collect, :nerves_system_ec100, "system.tar.gz")
+
+    assert {_, 0} =
+             System.cmd("sh", ["-ec", script, "buildroot" | args],
+               cd: dir,
+               stderr_to_stdout: true
+             )
+
+    assert File.read!(Path.join(dir, "artifact-name")) == "system"
+
+    assert File.read!(Path.join(dir, "legal-info/licenses/toolchain-external-custom/NOTICE")) ==
+             "installed notices"
+
+    assert File.read!(Path.join(dir, "legal-info/toolchain-external-custom/ct-ng.config")) ==
+             "ct-ng.config"
+  end
+
   test "QEMU publication requires its fingerprinted binary" do
     binary = "nerves_system_ec100_qemu-portable-0.2.2-ABC1234.tar.gz"
     assert Release.asset_names(:nerves_system_ec100_qemu, binary) == [binary]

@@ -19,7 +19,7 @@ Add this system to your Nerves application's dependencies and target configurati
 ```elixir
 {:nerves_system_ec100,
  github: "sid2baker/nerves_gate",
- tag: "system-ec100/v0.2.1",
+ tag: "system-ec100/v0.2.2",
  subdir: "systems/nerves_system_ec100",
  runtime: false,
  targets: [:ec100]}
@@ -55,7 +55,7 @@ Sources and binary artifacts live in `sid2baker/nerves_gate`. The
 publishes a release automatically after system changes reach `main`. The release
 tag is `system-ec100/v<VERSION>`, read directly from `artifact_sites`. Hex
 publication is not required. Releases contain a fingerprinted system tarball,
-corresponding-source tarball and `SHA256SUMS`, not application firmware (`.fw`).
+Buildroot source tarball and `SHA256SUMS`, not application firmware (`.fw`).
 
 Published tags and assets are immutable. Any build-input change requires a new
 `VERSION` and matching changelog section; CI refuses to overwrite a release.
@@ -65,12 +65,13 @@ for the shared publication process.
 
 ### Maintainer release checklist
 
-The workflow runs Buildroot's `make legal-info`, adds the external toolchain's
-sources and notices, and includes the matching Buildroot and EC100 build recipes.
-See [SOURCES.md](SOURCES.md#release-source-archive) for the archive layout and local
-command. When updating components, review the collected manifests, warnings, and
-notices, and update the pinned toolchain source list if needed. Always distribute
-the source tarball alongside the system tarball.
+The workflow fetches sources with Buildroot's `make source` before invoking
+Nerves 2's `mix nerves.artifact.build`. It then collects `make legal-info`, keeps
+the installed external-toolchain notices/configuration, and uses `make system`
+to package the notices. See [SOURCES.md](SOURCES.md#buildroot-source-and-license-collection)
+for the source archive layout, local commands and external-toolchain limitations.
+Review all warnings and any additional corresponding-source obligations before
+publication; a successful legal-info collection is not a compliance guarantee.
 
 1. Choose an unused stable version, update `VERSION`, firmware's pinned system
    dependency, and the dated [changelog](CHANGELOG.md) section. Release title and
@@ -83,8 +84,8 @@ the source tarball alongside the system tarball.
    never flashes a physical device. Test firmware on EC100 only with explicit
    hardware authorization, including boot, networking, recovery and A/B rollback.
 
-The workflow starts with clean dependencies and Buildroot workspaces; only source
-downloads are cached. The prerelease's default container uses a mutable base
+The workflow starts with clean dependencies and Buildroot workspaces; Nerves
+downloads are cached and saved even after a failed build. The prerelease's default container uses a mutable base
 image and the vendor loader tool embeds a timestamp. Builds are not claimed to
 be bit-for-bit reproducible.
 

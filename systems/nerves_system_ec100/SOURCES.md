@@ -10,56 +10,53 @@ Selected rkbin components: DDR 750 MHz v1.08, SPL v1.12, standard TEE v2.50,
 and USB plug v1.04. Archive and license hashes are in `patches/buildroot/`;
 binary hashes are in `bootstrap/rkbin.sha256`.
 
-Nerves Buildroot and ARMv7 toolchain dependencies are declared in `mix.exs` and
-locked in `mix.lock`. Component configuration is in `nerves_defconfig`.
+Nerves Buildroot and the application cross-toolchain dependencies are declared in
+`mix.exs` and locked in `mix.lock`. Buildroot's external ARMv7 toolchain is pinned
+to `15.3.0` in `nerves_defconfig`, independently of the `15.3.1` Mix package.
 
-## Release source archive
+## Buildroot source and license collection
 
-Each release includes a `nerves_system_ec100-sources-<version>-<fingerprint>.tar.gz`
-asset alongside the system tarball and `SHA256SUMS`. Its layout is:
+The shared [system workflow](../../.github/workflows/system-artifact.yml) uses:
 
-- `build/legal-info/`: Buildroot's manifests, configuration, original package
-  sources, applied patches, and license notices, including Rockchip's full `rkbin`
-  license. The DDR/SPL/TEE/USB loader blobs are proprietary, not source-built.
-- `build/legal-info/host-sources/toolchain-external-custom/`: the external
-  toolchain's source archives, exact `ct-ng.config` and `ct-ng.defconfig`, the
-  `15.3.0` Hex source package (extract its `contents.tar.gz` for build scripts and
-  patches), and the pinned crosstool-ng source archive with its bundled patches.
-  Downloads are verified against `release/toolchain-sources.sha512`.
-- `nerves_system_br/`: Nerves Buildroot `1.34.5`, including the expanded, patched
-  Buildroot `2026.05.3` sources and build scripts.
-- `nerves_system_ec100/`: this system's matching source, configuration, patches,
-  and build/release scripts. Follow its README to rebuild; Mix dependencies are
-  pinned in `mix.lock`.
+1. Buildroot `make source` before compilation, using its checksum validation,
+   configured download sites and the shared Nerves download cache.
+2. Nerves 2 `mix nerves.artifact.build nerves_system_ec100`.
+3. Buildroot `make legal-info` and `make system` to include notices in the system
+   artifact. Installed external-toolchain licenses and its exact `ct-ng.config`
+   and `ct-ng.defconfig` are retained alongside those reports.
 
-Buildroot uses the external ARMv7 toolchain `15.3.0` from `nerves_defconfig`,
-independently of the `15.3.1` Mix package. Its installed license texts are copied
-into `legal-info/licenses/toolchain-external-custom/`. These and the other
-collected notices are also included in the binary system archive. Large source
-archives are only in the separate source asset.
+The source asset `nerves_system_ec100-sources-<version>-<fingerprint>.tar.gz`
+contains `build/legal-info/`, this system's recipes and Nerves Buildroot's
+expanded sources. The binary artifact excludes the large source archives.
+`SHA256SUMS` covers both assets.
 
-To regenerate the assets from a clean checkout on Linux with Docker:
+Buildroot's legal-info report is **not a guarantee of complete corresponding
+source**. In particular, Buildroot does not collect source archives for its
+prebuilt external toolchain. Review the report's warnings, licenses and manifests
+before distribution, and arrange any required corresponding-source distribution
+or source offer. The external toolchain's upstream build recipes are in
+[nerves-project/toolchains at v15.3.0](https://github.com/nerves-project/toolchains/tree/v15.3.0).
+The Rockchip DDR/SPL/TEE/USB loader blobs remain proprietary, not source-built.
+
+To collect the assets locally after preparing a stable version and dated notes,
+run from `firmware/` on Linux with Docker or Podman:
 
 ```sh
-mix deps.get
-NERVES_CONTAINER_TOOL=docker mix nerves.artifact.build
-NERVES_CONTAINER_TOOL=docker mix ec100.release
+MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/dev/artifact_release.ex -S mix nerves.artifact.release source
+MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 mix nerves.artifact.build nerves_system_ec100
+MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/dev/artifact_release.ex -S mix nerves.artifact.release collect
 (cd dist && sha256sum --check SHA256SUMS)
 ```
 
-The collector requires an empty `dist/` directory. Nerves `2.0.0-pre.3` does not
-run the legacy `build_runner_opts` legal-info target, so the collector invokes it
-explicitly in the existing build container and repackages the system with notices.
-
-Buildroot's generated README still warns that it cannot save its own sources or
-the external toolchain's licenses; the additions above cover those omissions.
-The custom kernel also produces missing license-file hash warnings; its notices
-are collected from the pinned kernel source. Review these warnings and both
-manifests again when changing components; collection alone is not a compliance
-guarantee.
+Collection requires an empty `dist/`. Nerves `2.0.0-pre.4` still ignores the
+legacy `build_runner_opts`; the shared release task invokes the standard
+Buildroot targets in Nerves' own container workspace. It has no separate package
+downloader or compiler-source manifest. Download caches are saved after failed
+CI builds too. Source collection does not publish or flash anything.
 
 ## References
 
+- [Nerves 2 migration guide](https://github.com/nerves-project/nerves/blob/v2/guides/advanced/updating-projects.md#nerves-system-maintainers)
 - [nerves_system_trellis](https://github.com/nerves-project/nerves_system_trellis): A/B raw-FIT updates
 - [nerves_system_rpi2](https://github.com/nerves-project/nerves_system_rpi2): Cortex-A7 toolchain and package structure
 - [Rockchip kernel](https://github.com/rockchip-linux/kernel): RK3506 SoC device-tree definitions
