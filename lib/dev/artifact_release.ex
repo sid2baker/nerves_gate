@@ -248,7 +248,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
             ensure_pending_sources!(info)
             :draft
 
-          assets_uploaded?(release, info.assets) ->
+          published?(release, info.assets) ->
             :published
 
           true ->
@@ -356,8 +356,11 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     draft = await_release!(info.tag, "creation", fn _ -> true end)
     upload_assets!(info, draft, uploads, digests)
     gh!(["release", "edit", info.tag, "--draft=false", "--latest=false"])
-    await_release!(info.tag, "publication", &(&1["draft"] == false))
-    unless release_state!(info) == :published, do: Mix.raise("Release verification failed.")
+    # Verify the snapshot that satisfied the bounded publication wait. Another
+    # list lookup can return an older draft even after this one is public.
+    published = await_release!(info.tag, "publication", &published?(&1, info.assets))
+    ensure_tag_matches!(info)
+    verify_release!(published, info)
     Mix.shell().info("Published and verified #{info.tag}")
   end
 
@@ -408,6 +411,10 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   end
 
   def asset_names(:nerves_system_ec100_qemu, filename), do: [filename]
+
+  @doc false
+  def published?(release, names),
+    do: release["draft"] == false and assets_uploaded?(release, names)
 
   @doc false
   def assets_uploaded?(release, names) do

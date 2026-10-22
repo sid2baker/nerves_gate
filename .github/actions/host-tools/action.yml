@@ -27,8 +27,10 @@ runs:
         if [[ "$QEMU" == true ]]; then
           packages+=(qemu-system-x86 util-linux inotify-tools e2fsprogs)
         fi
-        sudo apt-get update
-        sudo apt-get install --yes "${packages[@]}"
+        # A stalled runner mirror must fail clearly instead of consuming the job.
+        apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        sudo apt-get "${apt_options[@]}" update --error-on=any
+        sudo apt-get "${apt_options[@]}" install --yes "${packages[@]}"
     - name: Install Mix tooling outside the project
       shell: bash
       working-directory: ${{ github.workspace }}

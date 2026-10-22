@@ -18,6 +18,26 @@ defmodule Dev.ArtifactReleaseTest do
     refute Release.assets_uploaded?(%{"assets" => [%{hd(assets) | "state" => "new"}]}, [binary])
   end
 
+  test "publication requires one public snapshot with all uploaded assets" do
+    names = ["system.tar.gz", "sources.tar.gz", "SHA256SUMS"]
+
+    assets =
+      for name <- names, do: %{"name" => name, "state" => "uploaded", "digest" => "sha256:abc"}
+
+    draft = %{"draft" => true, "assets" => assets}
+    published = %{draft | "draft" => false}
+
+    refute Release.published?(draft, names)
+    assert Release.published?(published, names)
+    refute Release.published?(%{published | "assets" => tl(assets)}, names)
+    refute Release.published?(%{published | "assets" => [%{hd(assets) | "digest" => nil}]}, names)
+
+    # The list endpoint can alternate old/new snapshots after a write. Once the
+    # complete public snapshot is seen, verify it without a second list lookup.
+    snapshots = [draft, %{published | "assets" => []}, published, draft]
+    assert Enum.find(snapshots, &Release.published?(&1, names)) == published
+  end
+
   test "source prefetch uses Buildroot before compiling, not a separate downloader" do
     {script, []} = Release.buildroot_command(:source, :nerves_system_ec100, "unused")
 
