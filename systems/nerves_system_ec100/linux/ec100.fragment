@@ -145,7 +145,7 @@ CONFIG_USB_ETH=y
 # CONFIG_USB_ETH_RNDIS is not set
 # CONFIG_USB_CONFIGFS is not set
 
-# Host-side preparation for a future modem; protocol still unqualified.
+# Quectel EG800AK: CDC-ECM data on wwan0, option AT control on ttyUSB2.
 CONFIG_USB_ACM=y
 CONFIG_USB_SERIAL=y
 CONFIG_USB_SERIAL_OPTION=y

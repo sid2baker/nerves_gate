@@ -19,7 +19,7 @@ Add this system to your Nerves application's dependencies and target configurati
 ```elixir
 {:nerves_system_ec100,
  github: "sid2baker/nerves_gate",
- tag: "system-ec100/v0.2.2",
+ tag: "system-ec100/v0.3.0",
  subdir: "systems/nerves_system_ec100",
  runtime: false,
  targets: [:ec100]}
@@ -307,11 +307,30 @@ tracing, or automatic reset. One temporary boot passed USB SSH/ping, but host
 traffic arrived late; the failing early-traffic sequence and reconnect behavior
 remain unvalidated for this candidate. Do not replace a known-good slot with it.
 
-USB1 (`ff780000.usb`) is enabled as an internal host with USB serial (`option`),
-CDC ACM, and CDC ECM drivers. No modem is fitted, so device operation is untested;
-modem power/reset and networking are not configured. Before adding a USB-network
-modem, verify interface identity so it cannot inherit the setup port's
-`VintageNetDirect`/DHCP-server configuration.
+### 4G module
+
+The 4G EC100 uses a Quectel **EG800AK-GL** (`2c7c:6002`) on the internal
+USB1 host (`ff780000.usb`). The system enables its GPIO1_C0 power switch at boot
+and keeps it on. The active-high reset on GPIO1_D1 is left unclaimed; the system
+does not pulse it or implement a modem reset watchdog.
+
+The module's factory USB mode is CDC-ECM (`AT+QCFG="usbnet"` reports `1`). Its
+ECM interface uses `wwan0` (the first WWAN interface), never the setup gadget's
+`usb0`. USB serial interfaces 1.2–1.4 use `option` and expose
+`/dev/ttyUSB0`–`/dev/ttyUSB2`; AT control is on `/dev/ttyUSB2` when this is the
+only USB serial device. CDC ACM is also enabled for the module's boot-ROM mode.
+The system does not change the modem's saved USB configuration.
+
+Applications must provide the ECM data-call control, APN, DHCP client and inbound
+firewall protection; `VintageNetECM` supports this data path. A present, unlocked
+SIM and an operator APN are required for cellular service. Do not configure the
+modem with `VintageNetDirect` or attach it to the recovery network.
+
+These identities and GPIOs were read from a factory-firmware board. Booting this
+system with the modem, its unclaimed reset line, cellular registration/data, and
+operation on boards without a 4G module still require hardware qualification.
+The factory manager was observed pulsing reset during repeated no-SIM failures;
+this system deliberately does not reproduce that retry policy.
 
 ## Kernel profile
 

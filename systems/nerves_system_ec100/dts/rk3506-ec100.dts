@@ -225,6 +225,18 @@
         pinctrl-0 = <&vcc5v0_otg0_en>;
     };
 
+    /* 4G module power enable (factory "pcie_power"); rail voltage unqualified. */
+    vcc_4g: vcc-4g-regulator {
+        compatible = "regulator-fixed";
+        regulator-name = "vcc_4g";
+        regulator-always-on;
+        regulator-boot-on;
+        enable-active-high;
+        gpio = <&gpio1 RK_PC0 GPIO_ACTIVE_HIGH>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&vcc_4g_en>;
+    };
+
     /* USB1 PHY supply, as described by the factory EC100 device tree. */
     vcc5v0_otg1: vcc5v0-otg1-regulator {
         compatible = "regulator-fixed";
@@ -386,7 +398,9 @@
     status = "okay";
 };
 
-/* Internal USB host; modem power/reset awaits an identified module. */
+/* Internal USB host for the Quectel EG800AK.
+ * Power: GPIO1_C0, active-high. Reset: GPIO1_D1, active-high; left unclaimed.
+ */
 &usb20_otg1 {
     dr_mode = "host";
     status = "okay";
@@ -420,6 +434,12 @@
     mmcio {
         mmcio_voltage_pin: mmcio-voltage-pin {
             rockchip,pins = <0 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+    };
+
+    modem {
+        vcc_4g_en: vcc-4g-en {
+            rockchip,pins = <1 RK_PC0 RK_FUNC_GPIO &pcfg_pull_none>;
         };
     };
 

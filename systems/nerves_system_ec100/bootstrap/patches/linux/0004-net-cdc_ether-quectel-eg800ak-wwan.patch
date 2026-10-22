@@ -1,0 +1,25 @@
+Subject: [PATCH] net: usb: cdc_ether: identify Quectel EG800AK as WWAN
+
+The EC100's Quectel EG800AK-GL exposes CDC-ECM interfaces with USB ID
+2c7c:6002. The generic CDC Ethernet match names its data interface usb%d,
+which competes with the EC100's Type-C recovery Ethernet gadget for usb0.
+
+Match the modem before the generic entry and use wwan_info so usbnet
+assigns wwan%d instead. This is a downstream device-ID addition; the
+first WWAN interface is wwan0. Binding and data-call control are unchanged.
+
+--- a/drivers/net/usb/cdc_ether.c
++++ b/drivers/net/usb/cdc_ether.c
+@@ -1035,6 +1035,12 @@ static const struct usb_device_id	products[] = {
+ 				      USB_CDC_PROTO_NONE),
+ 	.driver_info = (unsigned long)&wwan_info,
+ }, {
++	/* Quectel EG800AK (ECM mode) */
++	USB_DEVICE_AND_INTERFACE_INFO(0x2c7c, 0x6002, USB_CLASS_COMM,
++				      USB_CDC_SUBCLASS_ETHERNET,
++				      USB_CDC_PROTO_NONE),
++	.driver_info = (unsigned long)&wwan_info,
++}, {
+ 	USB_INTERFACE_INFO(USB_CLASS_COMM, USB_CDC_SUBCLASS_ETHERNET,
+ 			USB_CDC_PROTO_NONE),
+ 	.driver_info = (unsigned long) &cdc_info,

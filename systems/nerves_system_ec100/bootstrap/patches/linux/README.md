@@ -3,8 +3,8 @@
 These patches address faults seen on the EC100 with the pinned Rockchip vendor
 kernel. They are not all confirmed mainline Linux bugs. Patches 0001 and 0002
 track upstream fixes (0002 also has local additions); 0003 bundles downstream
-EC100 workarounds. Retain upstream fixes until our pinned kernel includes them,
-not merely until their PRs merge.
+EC100 workarounds; 0004 identifies the board's cellular modem. Retain upstream
+fixes until our pinned kernel includes them, not merely until their PRs merge.
 
 ## 0001 — Avoid an SD-card reboot crash
 
@@ -67,3 +67,16 @@ not establish that this guard is necessary.
 [Closed experimental PR #580](https://github.com/armbian/linux-rockchip/pull/580)
 records the untested early-traffic hypothesis. Combining the patches does not
 establish a shared root cause or prove that either change is sufficient alone.
+
+## 0004 — Keep the cellular modem separate from USB recovery
+
+[Patch](0004-net-cdc_ether-quectel-eg800ak-wwan.patch): matches the Quectel
+EG800AK's `2c7c:6002` CDC-ECM interface before the generic CDC Ethernet entry
+and selects `wwan_info`. The kernel then assigns `wwan%d` (`wwan0` for the
+board's single modem), leaving `usb0` for the Type-C setup/recovery gadget.
+Serial interfaces keep their existing `option` driver binding.
+
+This is a downstream-only device-ID addition, not an upstream fix. The pinned
+kernel has no matching Quectel ECM entry. Modem identity and ECM mode were
+confirmed on factory firmware; naming and operation under this system still
+need hardware validation.

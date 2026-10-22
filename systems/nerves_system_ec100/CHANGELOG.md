@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-22
+
+### Added
+
+- Enable power to the Quectel EG800AK 4G module using the factory GPIO1_C0
+  power-enable line.
+- Name the EG800AK's CDC-ECM data interface `wwan0`, keeping `usb0` reserved for
+  the Type-C recovery link.
+- Document the active-high modem reset on GPIO1_D1; the system leaves it
+  unclaimed and does not automatically reset the modem.
+
 ## 0.2.2 - 2026-10-22
 
 ### Changed
