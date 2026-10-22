@@ -85,6 +85,37 @@ defmodule Dev.ArtifactReleaseTest do
              "ct-ng.config"
   end
 
+  @tag :tmp_dir
+  test "publication verifies standard SHA256SUMS and rejects changed files", %{tmp_dir: dir} do
+    archive = Path.join(dir, "cached-system.tar.gz")
+    binary = Path.join(dir, "system.tar.gz")
+    sources = Path.join(dir, "sources.tar.gz")
+    checksums = Path.join(dir, "SHA256SUMS")
+    File.write!(archive, "built binary")
+    File.cp!(archive, binary)
+    File.write!(sources, "collected sources")
+
+    {manifest, 0} =
+      System.cmd("sha256sum", [Path.basename(binary), Path.basename(sources)], cd: dir)
+
+    File.write!(checksums, manifest)
+    paths = [binary, sources, checksums]
+    assert :ok = Release.verify_assets!(archive, paths)
+
+    File.write!(checksums, String.replace(manifest, "\n", "\\n"))
+    assert_raise Mix.Error, ~r/SHA256SUMS/, fn -> Release.verify_assets!(archive, paths) end
+    File.write!(checksums, manifest)
+
+    for path <- [archive, binary, sources] do
+      original = File.read!(path)
+      File.write!(path, "changed bytes")
+      assert_raise Mix.Error, ~r/SHA256SUMS/, fn -> Release.verify_assets!(archive, paths) end
+      File.write!(path, original)
+    end
+
+    assert :ok = Release.verify_assets!(archive, paths)
+  end
+
   test "QEMU publication requires its fingerprinted binary" do
     binary = "nerves_system_ec100_qemu-portable-0.2.2-ABC1234.tar.gz"
     assert Release.asset_names(:nerves_system_ec100_qemu, binary) == [binary]

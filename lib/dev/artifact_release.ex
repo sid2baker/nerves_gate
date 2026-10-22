@@ -426,18 +426,20 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       unless File.regular?(path), do: Mix.raise("Missing release asset #{path}")
     end
 
-    if info.package.app == :nerves_system_ec100 do
-      [system, sources, checksums] = paths
-
-      expected =
-        Enum.map_join([system, sources], "\\n", &checksum_line/1)
-
-      unless String.trim(File.read!(checksums)) == expected and
-               sha256(system) == sha256(info.download.archive_path),
-             do: Mix.raise("EC100 release assets or SHA256SUMS do not match the build.")
-    end
+    if info.package.app == :nerves_system_ec100,
+      do: verify_assets!(info.download.archive_path, paths)
 
     paths
+  end
+
+  @doc false
+  def verify_assets!(archive, [system, sources, checksums]) do
+    expected = Enum.map_join([system, sources], "\n", &checksum_line/1)
+
+    unless String.trim(File.read!(checksums)) == expected and sha256(system) == sha256(archive),
+      do: Mix.raise("EC100 release assets or SHA256SUMS do not match the build.")
+
+    :ok
   end
 
   defp asset(release, name),
