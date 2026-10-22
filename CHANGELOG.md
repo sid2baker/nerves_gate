@@ -7,7 +7,7 @@
 - Use the platform checkout as the developer environment. Create/open ordinary SDK applications directly in the workbench, or use `mix app.new PATH`; no generator archive or solution manifest is needed.
 - App test, package and install commands take an application directory. The optional `mix dev PATH` opens that application; plain `mix dev` starts the workbench. QEMU scenarios use `mix test.qemu`.
 - Firmware and simulator versions follow the platform version. The SDK retains its independent version and Hex package; firmware, simulator and generator are no longer published on Hex. Existing 0.1.x packages remain available.
-- Solution firmware defaults to a local build from the checkout. Supply a compatible `.fw` path in `nerves_gate.exs` for cross-version work.
+- Simulated devices use firmware built locally from the platform checkout by default.
 
 ### Added
 
@@ -26,4 +26,4 @@
 - Boot failures retain bounded, secret-free domain liveness diagnostics separately from the gateway status query.
 - Invalid RTC time handling uses the `nerves_time` 0.4.14 fix.
 
-Earlier component history is preserved in the immutable [firmware/v0.1.0](https://github.com/sid2baker/nerves_gate/tree/firmware/v0.1.0), [sim/v0.1.0](https://github.com/sid2baker/nerves_gate/tree/sim/v0.1.0) and [new/v0.1.1](https://github.com/sid2baker/nerves_gate/tree/new/v0.1.1) tags.
+Earlier component history is preserved in the [firmware](https://github.com/sid2baker/nerves_gate/tree/b7f474dd5639e55ef31fbd3e7dc35de786ade27a), [simulator](https://github.com/sid2baker/nerves_gate/tree/7fe074e82db853fd344fb12f75730ad91016b963) and [generator](https://github.com/sid2baker/nerves_gate/tree/9d1b3d9854c3e05fdbcc0e65b12db5cda37b7eb4) source commits.

@@ -1,7 +1,9 @@
 # Releases
 
-Publishing is explicit and occurs in protected CI. The workbench owns local
-release validation but holds no Hex publishing credential.
+Platform and SDK publishing is explicit and runs in tag-restricted GitHub
+Actions environments. System publishing runs on trusted main-branch source
+changes. The workbench owns local release validation but holds no Hex publishing
+credential.
 
 ## Platform and SDK
 
@@ -11,8 +13,7 @@ release validation but holds no Hex publishing credential.
 | SDK | `sdk/VERSION`, `sdk/CHANGELOG.md` | `sdk/vX.Y.Z` | Hex, HexDocs and GitHub Release |
 
 The platform is used from a supported checkout. Firmware is built locally from
-that checkout; compatible custom `.fw` files remain usable for cross-version
-work. Apps declare their required SDK version. No generator archive or
+that checkout. Apps declare their required SDK version. No generator archive or
 firmware/simulator Hex release is required.
 
 1. Update the relevant version and roll its `Unreleased` changelog into one dated
@@ -25,7 +26,15 @@ firmware/simulator Hex release is required.
    with release authorization.
 5. `.github/workflows/release.yml` validates the tag is on main, requires outputs
    to be unpublished, publishes the SDK when selected and creates/verifies the
-   GitHub Release. SDK publication uses the protected `hex-release` environment.
+   GitHub Release. SDK publication uses `hex-release`; platform publication uses
+   `platform-release` and has no Hex credential.
+
+Configure both environments with selected ref policies: `hex-release` allows
+`sdk/v*` tags, `platform-release` allows `v*` tags, and both allow `main` for
+manual dispatch of an existing tag. A manually dispatched tag must still point
+to a commit on main and pass all publication checks. `HEX_API_KEY` belongs only
+to `hex-release`. No required reviewer is configured; approval can be added
+separately if desired. `tailnet-ci` is independent and stays main-only.
 
 GitHub Release title is exactly its tag. Its body is exactly the dated changelog
 section body, without the heading, generated additions or installation snippets.
@@ -40,9 +49,12 @@ allows metadata validation before compiling workstation tooling:
 elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check sdk/v0.1.0
 ```
 
-Previously published firmware, simulator and generator 0.1.x packages remain
-immutable and usable by their existing consumers. Retirement is a separate,
-authorized action after a replacement platform release exists.
+Only the platform, SDK and two systems receive new releases. Obsolete component
+and legacy QEMU GitHub releases/tags have been removed; source history remains
+reachable through the commits linked in the root changelog. The standalone EC100
+repository is archived and points here. Previously published firmware, simulator
+and generator Hex packages still exist. Retiring them is a separate action after
+a replacement platform release exists; the SDK remains active.
 
 ## Systems
 

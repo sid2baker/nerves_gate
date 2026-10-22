@@ -111,7 +111,7 @@ Start the session with the three-device configuration:
 mix dev --config sim/priv/qemu/tailnet.exs
 ```
 
-Choose **Start devices** on the overview. In another terminal:
+Choose **Start devices** on the Simulator page. In another terminal:
 
 ```sh
 mix test.qemu --only tailscale_auth

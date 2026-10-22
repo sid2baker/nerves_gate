@@ -22,7 +22,8 @@ jobs:
     if: github.repository == 'sid2baker/nerves_gate'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    environment: hex-release
+    environment:
+      name: ${{ startsWith(inputs.tag || github.ref_name, 'sdk/') && 'hex-release' || 'platform-release' }}
     permissions:
       contents: write
     env:
