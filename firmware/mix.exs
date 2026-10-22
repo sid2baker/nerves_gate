@@ -133,6 +133,7 @@ defmodule NervesGate.MixProject do
       {:nerves_motd, "~> 0.1", targets: @targets},
       {:ring_logger, "~> 0.11", targets: @targets},
       {:nerves_ssh, "~> 1.3", targets: @targets},
+      {:mdns_lite, "~> 0.9.3", targets: @targets},
       {:nerves_time, "~> 0.4", targets: @targets},
       {:vintage_net, "~> 0.13", runtime: Mix.target() != :host},
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},

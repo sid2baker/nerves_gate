@@ -7,15 +7,18 @@ defmodule DevWeb.OverviewLive do
   def mount(_, _, socket) do
     if connected?(socket) do
       QemuTests.subscribe()
+      Dev.Discovery.refresh()
       Process.send_after(self(), :workbench, 500)
     end
 
     {:ok,
      assign(socket,
        bench: QemuTests.snapshot(),
-       solution: Dev.Workbench.solution(),
+       applications: Dev.Applications.list(),
+       discovery: Dev.Discovery.snapshot(),
        operation: Dev.Operations.snapshot(),
        error: nil,
+       update_address: "",
        confirm_reset: false
      )}
   end
@@ -38,6 +41,30 @@ defmodule DevWeb.OverviewLive do
   def handle_event("remove", %{"device" => id}, socket),
     do: command(socket, QemuTests.configure({:delete, id}))
 
+  def handle_event("discover", _, socket), do: command(socket, Dev.Discovery.refresh())
+
+  def handle_event("add_address", %{"address" => address}, socket),
+    do: command(socket, Dev.Discovery.add(address))
+
+  def handle_event(action, %{"application" => %{"path" => path}}, socket)
+      when action in ["create_application", "open_application"] do
+    kind = if action == "create_application", do: "new", else: "open"
+
+    case Dev.Workbench.application(kind, path) do
+      {:ok, _} -> command(socket, :ok)
+      error -> command(socket, error)
+    end
+  end
+
+  def handle_event("select_update", %{"address" => address}, socket),
+    do: {:noreply, assign(socket, update_address: address, error: nil)}
+
+  def handle_event("review_firmware", params, socket),
+    do: command(socket, Dev.Workbench.review_firmware(params))
+
+  def handle_event("confirm_firmware", params, socket),
+    do: command(socket, Dev.Workbench.confirm_firmware(params["review_id"], params["address"]))
+
   def handle_event("operation", params, socket),
     do: command(socket, Dev.Workbench.operate(params["kind"], params["app"], params["device"]))
 
@@ -45,7 +72,11 @@ defmodule DevWeb.OverviewLive do
     Process.send_after(self(), :workbench, 500)
 
     {:noreply,
-     assign(socket, solution: Dev.Workbench.solution(), operation: Dev.Operations.snapshot())}
+     assign(socket,
+       applications: Dev.Applications.list(),
+       discovery: Dev.Discovery.snapshot(),
+       operation: Dev.Operations.snapshot()
+     )}
   end
 
   def handle_info({:qemu_tests, bench}, socket), do: {:noreply, assign(socket, :bench, bench)}
@@ -53,13 +84,21 @@ defmodule DevWeb.OverviewLive do
   defp command(socket, {:error, message}), do: {:noreply, assign(socket, error: message)}
 
   defp command(socket, :ok),
-    do: {:noreply, assign(socket, bench: QemuTests.snapshot(), error: nil, confirm_reset: false)}
+    do:
+      {:noreply,
+       assign(socket,
+         bench: QemuTests.snapshot(),
+         applications: Dev.Applications.list(),
+         discovery: Dev.Discovery.snapshot(),
+         error: nil,
+         confirm_reset: false
+       )}
 
   def render(assigns) do
     ~H"""
     <main class="ui-main ui-stack bench" id="simulator">
       <.page_header
-        eyebrow="Development · owned QEMU only"
+        eyebrow="Devices and applications"
         title="Developer platform"
       >
         <:actions><.theme_toggle /></:actions>
@@ -79,57 +118,166 @@ defmodule DevWeb.OverviewLive do
                                                                                                                   "Reset the devices."}
       </.notice>
 
-      <.panel title="Solution" icon="settings" id="solution">
-        <p :if={!@solution} class="ui-help">
-          Open a solution with <code>mix dev PATH</code>. Create one with <code>mix solution.new PATH</code>.
+      <.panel title="Devices on this network" icon="network" id="network-devices">
+        <div class="ui-actions">
+          <.button phx-click="discover" disabled={@discovery.status == :searching}>Refresh discovery</.button>
+          <span role="status">{@discovery.status}</span>
+        </div>
+        <.notice :if={@discovery.error} tone="warning">{@discovery.error}</.notice>
+        <p :if={@discovery.devices == []} class="ui-help">No Nerves Gate advertisements found yet.</p>
+        <div :for={device <- @discovery.devices} class="ui-setting-row">
+          <div>
+            <h3>{device.name || device.address}</h3>
+            <p>{device.address} · {device.target} · {device.version} · {device.source}</p>
+          </div>
+          <div class="ui-actions">
+            <.button href={device.url} target="_blank" rel="noreferrer" variant="secondary">Open gateway</.button>
+            <.button phx-click="select_update" phx-value-address={device.address} variant="secondary">Update firmware…</.button>
+          </div>
+        </div>
+        <form id="add-address" phx-submit="add_address" class="ui-actions">
+          <input
+            type="text"
+            name="address"
+            aria-label="Device hostname or IPv4 address"
+            placeholder="ec100.example.ts.net or 192.168.1.42"
+            required
+          />
+          <.button type="submit" variant="secondary">Add address</.button>
+        </form>
+        <p class="ui-help">
+          Discovery uses local mDNS, not a subnet scan or VPN configuration. Advertisements are unverified. Add DNS names (including Tailscale names) or IPv4 addresses manually. Only open gateways on trusted networks.
         </p>
-        <div :if={@solution}>
-          <p>{@solution.path} · platform {@solution.platform}</p>
-          <.notice :if={@solution.warning} tone="warning">{@solution.warning}</.notice>
-          <p :if={@solution.apps == []} class="ui-help">
-            No apps. Use <code>mix app.new NAME --solution PATH</code>.
+      </.panel>
+      <.panel title="Physical-device firmware update" icon="settings" id="firmware-update">
+        <p class="ui-help">
+          Uses the device's standard SSH A/B updater, not disk flashing or factory reset. Review is read-only on the device. Updating writes firmware and reboots it. Use an authorized SSH key; the host key must already be verified in ~/.ssh/known_hosts. An active ssh-agent must hold your key; otherwise standard ~/.ssh key files are used. Password prompts are not available.
+        </p>
+        <form id="review-firmware" phx-submit="review_firmware" class="ui-stack">
+          <input
+            type="text"
+            name="address"
+            value={@update_address}
+            aria-label="Firmware device hostname or address"
+            placeholder="ec100.example.ts.net"
+            required
+          />
+          <input
+            type="number"
+            name="port"
+            value="22"
+            min="1"
+            max="65535"
+            aria-label="SSH port"
+            required
+          />
+          <input
+            type="text"
+            name="firmware"
+            aria-label="Firmware file path"
+            placeholder="firmware/_build/ec100_dev/nerves/images/nerves_gate.fw"
+            required
+          />
+          <.button type="submit" disabled={@operation.status == :running}>Review firmware and device</.button>
+        </form>
+        <.notice :if={@operation.review} tone="warning" id="firmware-confirmation">
+          <p>
+            Update {@operation.review.address}:{@operation.review.port} · {@operation.review.target}
           </p>
-          <div :for={app <- @solution.apps} class="ui-setting-row" id={"app-#{app}"}>
-            <h3>{app}</h3>
-            <div class="ui-actions">
+          <p>
+            {@operation.review.current_version} → {@operation.review.version} · serial {@operation.review.serial}
+          </p>
+          <p>{@operation.review.firmware}</p>
+          <code>SHA-256: {@operation.review.sha256}</code>
+          <p>
+            Review expires after ten minutes. Keep power connected. Type the exact reviewed hostname/address to authorize this update and reboot.
+          </p>
+          <form phx-submit="confirm_firmware">
+            <input type="hidden" name="review_id" value={@operation.review.token} />
+            <input
+              type="text"
+              name="address"
+              aria-label="Confirm update hostname or address"
+              autocomplete="off"
+              required
+            />
+            <.button type="submit" variant="danger">Update firmware and reboot</.button>
+          </form>
+        </.notice>
+      </.panel>
+      <.panel title="Applications" icon="settings" id="applications">
+        <p class="ui-help">
+          Create an ordinary SDK application or open an existing Mix project. No solution or workspace is required. App directories remain outside the platform source; opened apps are remembered for this session.
+        </p>
+        <form id="create-application" phx-submit="create_application" class="ui-actions">
+          <input
+            type="text"
+            name="application[path]"
+            aria-label="New application directory"
+            placeholder="../my_controller"
+            required
+          />
+          <.button type="submit">Create application</.button>
+        </form>
+        <form id="open-application" phx-submit="open_application" class="ui-actions">
+          <input
+            type="text"
+            name="application[path]"
+            aria-label="Existing application directory"
+            placeholder="/home/me/projects/my_controller"
+            required
+          />
+          <.button type="submit" variant="secondary">Open application</.button>
+        </form>
+        <div
+          :for={app <- @applications}
+          class="ui-setting-row"
+          id={"app-#{Base.url_encode64(app.path, padding: false)}"}
+        >
+          <div>
+            <h3>{app.name}</h3><p class="ui-help">{app.path}</p>
+          </div>
+          <div class="ui-actions">
+            <.button
+              :for={kind <- ["test", "package"]}
+              phx-click="operation"
+              phx-value-kind={kind}
+              phx-value-app={app.path}
+              disabled={@operation.status == :running}
+            >{String.capitalize(kind)}</.button>
+            <form phx-submit="operation">
+              <input type="hidden" name="kind" value="install" />
+              <input type="hidden" name="app" value={app.path} />
+              <select name="device" aria-label={"Install #{app.name} on simulated device"}>
+                <option :for={device <- @bench.lifecycle.devices} value={device.id}>
+                  {device.id}
+                </option>
+              </select>
               <.button
-                :for={kind <- ["test", "package"]}
-                phx-click="operation"
-                phx-value-kind={kind}
-                phx-value-app={app}
-                disabled={@operation.status == :running}
-              >{String.capitalize(kind)}</.button>
-              <form phx-submit="operation">
-                <input type="hidden" name="kind" value="install" />
-                <input type="hidden" name="app" value={app} />
-                <select name="device" aria-label={"Install #{app} on device"}>
-                  <option :for={device <- @bench.lifecycle.devices} value={device.id}>
-                    {device.id}
-                  </option>
-                </select>
-                <.button
-                  type="submit"
-                  disabled={@operation.status == :running || @bench.lifecycle.status != :ready}
-                >Install</.button>
-              </form>
-            </div>
+                type="submit"
+                disabled={@operation.status == :running || @bench.lifecycle.status != :ready}
+              >Install on simulator</.button>
+            </form>
           </div>
         </div>
       </.panel>
       <.panel title="Builds and applications" icon="settings" id="workbench-operation">
-        <.button
-          phx-click="operation"
-          phx-value-kind="firmware"
-          disabled={
-            @operation.status == :running || @bench.lifecycle.status != :stopped ||
-              @bench.lifecycle.prepared
-          }
-        >Build QEMU firmware</.button>
+        <form phx-submit="operation" class="ui-actions">
+          <input type="hidden" name="kind" value="firmware" />
+          <select name="app" aria-label="Firmware build target">
+            <option value="ec100">EC100 physical controller</option>
+            <option value="x86_64">x86_64 QEMU</option>
+          </select>
+          <.button type="submit" disabled={@operation.status == :running}>Build firmware</.button>
+        </form>
+        <p class="ui-help">
+          Building never flashes a device. QEMU builds require stopped/reset simulated devices; EC100 builds do not. Review the resulting .fw file above before authorizing an update.
+        </p>
         <p role="status">{@operation.kind} · {@operation.status}</p>
         <code :if={@operation.output} class="bench-output">{@operation.output}</code>
         <p :if={@operation.result}>{@operation.result}</p>
       </.panel>
-      <.panel title="Lifecycle" icon="settings" id="simulator-lifecycle">
+      <.panel title="Simulator lifecycle" icon="settings" id="simulator-lifecycle">
         <p role="status" aria-live="polite" id="simulator-phase">{@bench.lifecycle.phase}</p>
         <div :if={@bench.lifecycle.status in [:starting, :stopping]} class="ui-progress"></div>
         <code
@@ -187,7 +335,7 @@ defmodule DevWeb.OverviewLive do
         </.notice>
       </.panel>
 
-      <.panel title="Devices" icon="network" id="simulator-devices">
+      <.panel title="Simulated devices" icon="network" id="simulator-devices">
         <div class="ui-settings-list">
           <div
             :for={config <- @bench.lifecycle.devices}

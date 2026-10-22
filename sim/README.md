@@ -6,7 +6,7 @@ cards, faults, scenario admission and per-device reservations. There is no fake
 hardware backend and it never attaches to arbitrary VMs.
 
 The workbench UI, session launchers, app commands and release tools live at the
-repository root. Run `mix dev [SOLUTION]` there, and explicitly start devices in
+repository root. Run `mix dev [APP_DIRECTORY]` there, and explicitly start devices in
 the workbench. `mix test.qemu --only ID` attaches to that session;
 `mix test.qemu --ci --only ID` owns a separate disposable bench when authorized.
 

@@ -123,6 +123,7 @@ result =
   try do
     # The simulator's own dependencies (such as Req), then the workstation UI.
     {:ok, _} = Application.ensure_all_started(:nerves_gate_dev)
+    if path = System.get_env("NERVES_GATE_APP"), do: {:ok, _} = Dev.Applications.open(path)
     {:ok, _} = Application.ensure_all_started(:nerves_gate)
 
     if System.get_env("QEMU_CI") != "true" do

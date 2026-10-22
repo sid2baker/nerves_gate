@@ -12,17 +12,13 @@ defmodule Dev.Console do
 
   def run(args) do
     {options, rest, invalid} =
-      OptionParser.parse(args, strict: [device: :string, solution: :string])
+      OptionParser.parse(args, strict: [device: :string])
 
     if rest != [] or invalid != [], do: Mix.raise("Usage: mix app.console [--device id]")
 
     {client, state} =
       Dev.Session.connect("_build/qemu-dev", 180_000) ||
         Mix.raise("Start mix dev and the device first.")
-
-    if options[:solution] &&
-         Path.expand(options[:solution]) != get_in(state, ["solution", "path"]),
-       do: raise(ArgumentError, "The running session has a different solution")
 
     device =
       case {options[:device], state["lifecycle"]["devices"]} do

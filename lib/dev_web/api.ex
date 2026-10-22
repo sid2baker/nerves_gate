@@ -8,7 +8,8 @@ defmodule DevWeb.Api do
       conn,
       Map.merge(QemuTests.snapshot(), %{
         csrf_token: Plug.CSRFProtection.get_csrf_token(),
-        solution: Dev.Workbench.solution(),
+        applications: Dev.Applications.list(),
+        discovery: Dev.Discovery.snapshot(),
         operation: Dev.Operations.snapshot(),
         session_id: System.get_env("QEMU_SESSION_ID"),
         session_port: String.to_integer(System.fetch_env!("QEMU_HTTP_PORT")),
@@ -41,6 +42,14 @@ defmodule DevWeb.Api do
     reply(conn, result)
   end
 
+  def review_firmware(conn, params), do: reply(conn, Dev.Workbench.review_firmware(params))
+
+  def confirm_firmware(conn, params),
+    do: reply(conn, Dev.Workbench.confirm_firmware(params["review_id"], params["address"]))
+
+  def application(conn, %{"action" => action, "path" => path}),
+    do: reply(conn, Dev.Workbench.application(action, path))
+
   def operation(conn, params),
     do: reply(conn, Dev.Workbench.operate(params["kind"], params["app"], params["device"]))
 
@@ -56,6 +65,7 @@ defmodule DevWeb.Api do
 
   defp reply(conn, :ok), do: json(conn, %{ok: true})
   defp reply(conn, {:ok, id}) when is_integer(id), do: json(conn, %{id: id})
+  defp reply(conn, {:ok, %{path: _, name: _} = app}), do: json(conn, %{ok: true, app: app})
   defp reply(conn, {:error, message}) when is_binary(message), do: json(conn, %{error: message})
   defp reply(conn, {:error, reason}), do: json(conn, %{error: inspect(reason)})
 end

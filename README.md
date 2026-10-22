@@ -17,27 +17,36 @@ mix setup
 mix dev
 ```
 
-The workbench opens at http://localhost:4000 with every device stopped. Start,
+The workbench opens at http://localhost:4000, discovers advertised gateways on
+the current LAN and offers Create/Open Application controls. Every simulated
+device remains stopped. Start,
 stop, reset, wiring and scenario actions are explicit. Setup downloads the QEMU
 system/toolchain; firmware is built locally when explicitly requested or when
 starting fresh simulated devices. Nothing flashes physical hardware.
 
-## Develop a solution
+## Develop an application
 
-Keep your solution in its own repository, outside the platform checkout:
+Use **Create application** or **Open application** in the workbench. Apps are
+ordinary Mix projects, kept in their own directories/repositories. No solution
+manifest is needed. The command-line equivalents are:
 
 ```sh
-mix solution.new ../my_solution
-mix app.new controller --solution ../my_solution
-mix app.test --solution ../my_solution
-mix app.package controller --solution ../my_solution
-mix dev ../my_solution
+mix app.new ../my_controller
+mix app.test ../my_controller
+mix app.package ../my_controller
+mix dev ../my_controller
 ```
 
-A solution has `nerves_gate.exs` and independent Mix apps under `apps/`, not another
-platform Mix project. Apps depend on the released SDK. Use `--local-sdk` when
-creating a solution for SDK development. The workbench shows platform-version
-mismatches, app operations and firmware build progress.
+Apps depend on the released SDK. `mix app.new PATH --local-sdk` is available for
+SDK maintainers. The workbench supports tests, packaging and installation onto
+owned simulated devices, plus explicit QEMU firmware builds.
+
+LAN discovery uses mDNS, not a subnet scan. Older firmware without advertisements
+needs a known hostname or IP in **Add address**, including Tailscale DNS names.
+Discovered identities are unverified; only open gateway UIs on trusted networks.
+The workbench builds EC100/QEMU firmware and offers explicit SSH review and
+confirmed A/B updates. See [firmware updates](docs/firmware-updates.md), including
+the currently missing EC100 system artifact prerequisite.
 
 See [app development](docs/app-development.md) for storage commissioning,
 installation, console access and the SSH-only real-gateway workflow.
@@ -58,7 +67,7 @@ They never attach to arbitrary VMs or physical devices. See
 
 | Path | Owner |
 | --- | --- |
-| Root `lib/dev/`, `lib/dev_web/` | Workbench, solution tools, builds and release checks |
+| Root `lib/dev/`, `lib/dev_web/` | Workbench, app tools, LAN discovery, builds and release checks |
 | `sim/` | QEMU lifecycle, virtual hardware and shared scenario admission |
 | `firmware/` | EC100/QEMU device runtime and gateway UI |
 | `sdk/` | Independently versioned app contract and packaging, published on Hex |

@@ -6,6 +6,8 @@ defmodule Dev.Application do
     Supervisor.start_link(
       [
         {Task.Supervisor, name: Dev.Tasks},
+        Dev.Applications,
+        Dev.Discovery,
         Dev.Operations
       ],
       strategy: :one_for_one,

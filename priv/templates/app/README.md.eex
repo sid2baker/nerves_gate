@@ -1,16 +1,14 @@
 # <%= module %>
 
-An independent Nerves Gate SDK application. From the platform checkout:
+An ordinary Nerves Gate SDK application. Open this directory in the developer
+platform's Applications panel, or run `mix dev /path/to/<%= app %>` from the
+platform checkout. The workbench can test, package and install it on an owned
+simulated device. No solution manifest is required.
 
-```sh
-mix app.test <%= app %> --solution PATH
-mix app.package <%= app %> --solution PATH
-mix app.install <%= app %> --solution PATH --device gateway_a
-```
-
-Run host unit tests directly with `mix test`. Package directly with
-`MIX_ENV=prod mix nerves_gate.package`. Devices use the real firmware SDK backend;
-there is no fake hardware backend. SDK and platform libraries are never bundled.
+From this directory, run `mix test` for host unit tests and
+`MIX_ENV=prod mix nerves_gate.package` to package directly. Apps use the real
+firmware SDK backend; no fake hardware backend is included. SDK and platform
+libraries are never bundled.
 
 Packages run trusted code in the device BEAM. Native dependencies must be built
 for its architecture. Upgrades are cold restarts with a bounded health check.

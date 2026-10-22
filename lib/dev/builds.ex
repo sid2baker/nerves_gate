@@ -1,6 +1,7 @@
 defmodule Dev.Builds do
   @moduledoc "Explicit isolated firmware builds using the standard Nerves task."
-  def firmware!(report \\ fn _ -> :ok end) do
+  def firmware!(target \\ "x86_64", report \\ fn _ -> :ok end)
+      when target in ["ec100", "x86_64"] do
     status =
       NervesGateSim.Simulator.BuildOutput.run(
         "mix",
@@ -8,7 +9,7 @@ defmodule Dev.Builds do
         [
           cd: Path.join(Dev.root(), "firmware"),
           env: [
-            {"MIX_TARGET", "x86_64"},
+            {"MIX_TARGET", target},
             {"MIX_ENV", "dev"},
             {"NERVES_GATE_LOCAL_DEPS", "1"},
             {"NERVES_GATE_DEVICE_NODE", nil}
@@ -17,7 +18,12 @@ defmodule Dev.Builds do
         report
       )
 
-    if status != 0, do: raise("Firmware build failed (exit #{status})")
-    Path.join(Dev.root(), "firmware/_build/x86_64_dev/nerves/images/nerves_gate.fw")
+    if status != 0,
+      do:
+        raise(
+          "Firmware build failed (exit #{status}); inspect build output and system artifact availability"
+        )
+
+    Path.join(Dev.root(), "firmware/_build/#{target}_dev/nerves/images/nerves_gate.fw")
   end
 end

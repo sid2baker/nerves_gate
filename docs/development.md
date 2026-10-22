@@ -2,7 +2,7 @@
 
 The root is a host-only developer platform. `sdk/`, `sim/`, `firmware/` and
 `systems/` are independent projects, not umbrella children. App developers use
-[separate solutions](app-development.md) with the same workbench.
+[ordinary app projects](app-development.md) with the same workbench.
 
 ## Prerequisites
 
@@ -39,12 +39,12 @@ Run from the checkout:
 | Command | Action |
 | --- | --- |
 | `mix setup` | Prepare tools/artifacts without booting devices |
-| `mix dev [SOLUTION] [--port 4000]` | Start the workbench with empty QEMU hardware |
+| `mix dev [APP_DIRECTORY] [--port 4000]` | Start the workbench; discover LAN gateways; optionally open an app |
 | `mix dev.status` | Read this checkout's session identity/status |
 | `mix dev.stop` | Graceful session stop; never kills an arbitrary PID |
 | `mix dev.ui [DEVICE] [--port 4001]` | Reloadable gateway UI against a running device |
-| `mix solution.new PATH [--local-sdk]` | Create a separate solution repository |
-| `mix app.new/test/package/install/console` | [Solution operations](app-development.md#app-commands) |
+| `mix app.new PATH [--local-sdk]` | Create an independent SDK app |
+| `mix app.test/package/install PATH`, `mix app.console` | [App operations](app-development.md) |
 | `mix test.qemu --only ID [--device ID]` | Attach to the user's existing QEMU bench |
 | `mix test.qemu --lifecycle start/stop/reset` | Explicit lifecycle action on that bench |
 | `mix test.qemu --ci --only ID` | Boot and clean up an independent disposable bench |
@@ -67,8 +67,12 @@ Device-code changes need Reset followed by Start. Faults, scenarios, installatio
 and lifecycle changes are admitted by `NervesGateSim.QemuTests`, not by UI button
 availability.
 
-A solution is optional for platform work. Without it the default is
-`sim/priv/qemu/simulator.exs`, with two devices. A custom trusted data file can be
+Applications are opened or created in the UI; no solution manifest is required.
+LAN discovery is read-only mDNS and never attaches a hardware driver to a found
+gateway. Manual entries accept DNS names and IPv4 addresses. The workbench also
+supports explicit EC100/QEMU builds and authenticated SSH firmware review/update;
+see [firmware updates](firmware-updates.md) for confirmation and prerequisites. Existing non-advertising firmware needs an explicit known address.
+The simulator default is `sim/priv/qemu/simulator.exs`, with two devices. A custom trusted data file can be
 selected with `mix dev --config PATH` (paths are relative to the platform root).
 Tailscale opt-in uses `sim/priv/qemu/tailnet.exs`.
 
@@ -86,7 +90,7 @@ network; libslirp supplies real traffic without host networking changes.
 
 Device builds always run in an isolated OS process with an explicit target.
 Never call device-target compilation through native `Mix.Project.in_project/4`.
-Solution apps also use isolated Mix processes, keeping their Hex SDK and code out
+User apps also use isolated Mix processes, keeping their Hex SDK and code out
 of the workbench VM. Host-only repository checks use native project contexts;
 the root runs them before compiling/testing itself and restores environment,
 code paths and application ownership on return.
@@ -105,8 +109,8 @@ bench. `fresh_disk` scenarios own disposable state. Authenticated Tailscale is
 opt-in; see [tailnet testing](tailnet-ci.md).
 
 The suite covers network trials, recovery, faults, storage, SDK, apps, gateway
-assets and the system contract. Host tests cover pure policy/codecs, solution
-creation/packaging, endpoint configuration and release contracts. Firmware's
+assets and the system contract. Host tests cover pure policy/codecs, application
+creation/packaging and discovery projections, endpoint configuration and release contracts. Firmware's
 `.reach.exs`, Credo, Dialyzer and clone checks run in root `mix ci`.
 
 ## Assets

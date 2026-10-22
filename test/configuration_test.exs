@@ -1,6 +1,30 @@
 defmodule Dev.ConfigurationTest do
   use ExUnit.Case, async: false
 
+  test "device discovery advertises only public metadata and never starts on the host" do
+    for target <- [:ec100, :x86_64] do
+      config =
+        Config.Reader.read!(Path.join(Dev.root(), "firmware/config/firmware.exs"),
+          env: :dev,
+          target: target
+        )
+
+      assert config[:mdns_lite][:hosts] == [:hostname]
+      assert [service] = config[:mdns_lite][:services]
+      assert service.protocol == "nerves-device"
+      assert service.port == 4000
+
+      assert Enum.sort(service.txt_payload) ==
+               Enum.sort([
+                 "product=Nerves Gate",
+                 "platform=#{target}",
+                 "version=#{Dev.version()}"
+               ])
+    end
+
+    refute Enum.any?(Application.started_applications(), &(elem(&1, 0) == :mdns_lite))
+  end
+
   test "runtime secrets preserve Bandit and the endpoint host configuration" do
     config =
       Config.Reader.read!(Path.join(Dev.root(), "config/config.exs"),

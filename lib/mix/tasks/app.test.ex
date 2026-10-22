@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.App.Test do
   use Mix.Task
-  @shortdoc "test an application in a separate solution"
+  @shortdoc "Run host tests for an application directory"
   @requirements ["app.config"]
   def run(args), do: Dev.AppCLI.run(:test, args)
 end

@@ -30,6 +30,23 @@ config :nerves_gate,
 
 config :nerves_gate_sdk, :backend, NervesGate.SDKBackend
 
+# Public LAN advertisement only. Discovery does not grant access or advertise
+# distribution cookies, login URLs, credentials or application data.
+config :mdns_lite,
+  hosts: [:hostname],
+  services: [
+    %{
+      protocol: "nerves-device",
+      transport: "tcp",
+      port: 4000,
+      txt_payload: [
+        "product=Nerves Gate",
+        "platform=#{config_target()}",
+        "version=#{String.trim(File.read!(Path.expand("../../VERSION", __DIR__)))}"
+      ]
+    }
+  ]
+
 # Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
 # The UI is unauthenticated; use only on trusted networks.
 config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {0, 0, 0, 0}, port: 4000]

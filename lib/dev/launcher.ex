@@ -67,7 +67,7 @@ defmodule Dev.Launcher do
     end
   end
 
-  # Entered only by the packaged qemu_host script, under flock and MuonTrap.
+  # Entered only by the owned workbench host script, under flock and MuonTrap.
   def session(dir, args) do
     options = options!(args)
     ci? = options[:ci] || false
@@ -99,7 +99,7 @@ defmodule Dev.Launcher do
   end
 
   defp options!(args) do
-    {options, solutions} =
+    {options, applications} =
       OptionParser.parse!(args,
         strict: [port: :integer, ci: :boolean, only: :string, config: :string, firmware: :string]
       )
@@ -110,20 +110,17 @@ defmodule Dev.Launcher do
     if options[:port] && options[:port] not in 1..65_535,
       do: Mix.raise("Expected --port in 1..65535")
 
-    case solutions do
+    case applications do
       [] -> options
-      [path] -> Keyword.put(options, :solution, Path.expand(path))
-      _ -> raise ArgumentError, "Usage: mix dev [SOLUTION] [--port PORT]"
+      [path] -> Keyword.put(options, :app, Dev.Applications.project!(path).path)
+      _ -> raise ArgumentError, "Usage: mix dev [APP_DIRECTORY] [--port PORT]"
     end
   end
 
   defp config_path!(options, dir) do
-    cond do
-      options[:solution] ->
-        solution = Dev.Solution.load!(options[:solution])
-        System.put_env("NERVES_GATE_SOLUTION", solution.path)
-        Dev.Solution.simulator_config!(solution, dir)
+    if options[:app], do: System.put_env("NERVES_GATE_APP", options[:app])
 
+    cond do
       options[:config] ->
         Path.expand(options[:config])
 

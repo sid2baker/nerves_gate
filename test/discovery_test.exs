@@ -1,0 +1,77 @@
+defmodule Dev.DiscoveryTest do
+  use ExUnit.Case, async: true
+
+  test "only public Nerves Gate advertisements with usable IPv4 addresses are projected" do
+    result = %{
+      product: "Nerves Gate",
+      name: "controller",
+      platform: "ec100",
+      version: "0.2.0",
+      addresses: [{192, 168, 1, 42}, {127, 0, 0, 1}, {239, 1, 1, 1}],
+      cookie: "private"
+    }
+
+    assert [device] =
+             Dev.Discovery.devices([result, result, %{result | product: "Other Nerves device"}])
+
+    assert device.address == "192.168.1.42"
+    assert device.target == "ec100"
+    assert device.url == "http://192.168.1.42:4000/"
+    refute Map.has_key?(device, :cookie)
+    refute inspect(device) =~ "private"
+    assert Dev.Discovery.devices([%{result | addresses: []}]) == []
+  end
+
+  test "refresh is coalesced and enriches manual entries without losing them" do
+    from = {self(), make_ref()}
+    {:ok, state} = Dev.Discovery.init(nil)
+    {:reply, :ok, state} = Dev.Discovery.handle_call({:add, "192.168.1.42"}, from, state)
+    ref = make_ref()
+    state = %{state | task: %{ref: ref}}
+    assert {:reply, :ok, ^state} = Dev.Discovery.handle_call(:refresh, from, state)
+
+    devices =
+      Dev.Discovery.devices([
+        %{
+          product: "Nerves Gate",
+          name: "controller",
+          addresses: [{192, 168, 1, 42}],
+          platform: "ec100"
+        }
+      ])
+
+    assert {:noreply, ready} = Dev.Discovery.handle_info({ref, devices}, state)
+    assert ready.task == nil
+    assert [%{source: :mdns, target: "ec100"}] = ready.view.devices
+    assert {:noreply, missing} = Dev.Discovery.handle_info({ref, []}, state)
+    assert [%{source: :manual}] = missing.view.devices
+  end
+
+  test "manual addresses are unverified data, never URLs or control commands" do
+    assert {:ok, %{address: "192.168.1.42", source: :manual}} =
+             Dev.Discovery.manual(" 192.168.1.42 ")
+
+    for host <- ["ec100.example.ts.net", "device.local", "ec100"] do
+      assert {:ok, %{address: ^host, url: url}} = Dev.Discovery.manual(host)
+      assert url == "http://#{host}:4000/"
+    end
+
+    assert {:ok, "ec100.example.ts.net"} = Dev.Discovery.host(" EC100.example.ts.net. ")
+
+    for address <- [
+          nil,
+          "http://192.168.1.42/",
+          "127.0.0.1",
+          "224.0.0.251",
+          "0.0.0.0",
+          "999.0.0.1",
+          "--proxycommand=bad",
+          "bad..hostname",
+          "ssh://ec100.example.ts.net",
+          "device.example:22",
+          "192.168.1.1;reboot"
+        ] do
+      assert {:error, _} = Dev.Discovery.manual(address)
+    end
+  end
+end

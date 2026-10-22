@@ -10,7 +10,7 @@ applications run in the same BEAM and use only the SDK.
 
 | Path | Responsibility |
 | --- | --- |
-| `mix.exs`, `lib/dev/` | Host developer platform: solutions, builds, sessions, release checks and native host orchestration |
+| `mix.exs`, `lib/dev/` | Host developer platform: app projects, LAN discovery, builds, sessions, release checks and native host orchestration |
 | `lib/dev_web/`, `config/`, `priv/dev/` | Workbench endpoint, LiveViews, CLI API and owned session launchers |
 | `firmware/lib/nerves_gate.ex` | Public commands, status and subscriptions |
 | `firmware/lib/nerves_gate/` | Device domains, adapters, projection, SDK backend, storage and apps |
@@ -22,7 +22,8 @@ applications run in the same BEAM and use only the SDK.
 | `sim/lib/nerves_gate_sim/simulator.ex`, `simulator/` | QEMU lifecycle and owned virtual hardware |
 | `sim/lib/nerves_gate_sim/qemu_tests.ex` | Shared runner and device reservations |
 | `sim/lib/mix/tasks/`, `sim/priv/qemu/` | Standalone prerequisite checks and simulator-node scripts |
-| `priv/templates/`, `Dev.Solution` | Separate solution repositories and SDK-only application scaffolding |
+| `priv/templates/`, `Dev.Applications` | Independent SDK-only app scaffolding, opened directories and isolated builds |
+| `Dev.Discovery` | Bounded local mDNS browse and unverified known-address entries; no device control |
 | `systems/` | EC100 and QEMU Nerves systems |
 
 ## Data flow
@@ -145,15 +146,15 @@ Simulator production paths use the public facade, gateway backend and projection
 reducer, the shared endpoint/components, PubSub and distribution setup. Product
 scenarios additionally inspect private domains to verify failure recovery; those
 checks are not a public API for third-party apps. The root, firmware and simulator share a platform version; the SDK and systems
-retain independent versions. Only the SDK is published on Hex. Solution apps use
+retain independent versions. Only the SDK is published on Hex. Applications use
 the released SDK by default, with local source opt-in for SDK development.
 
 ## QEMU simulator
 
 There is one simulator: `sim/`, which runs real firmware in QEMU and requires it.
-Root `mix dev [SOLUTION]` serves the developer workbench and supervises a separate
-Simulator BEAM. Solutions live outside the checkout and record the platform
-version, firmware selection and virtual wiring. App tests/builds and device builds
+Root `mix dev [APP_DIRECTORY]` serves the developer workbench and supervises a separate
+Simulator BEAM. Ordinary application projects live outside the checkout; the
+simulator configuration owns virtual wiring. App tests/builds and device builds
 run in supervised OS processes; native host checks run before root checks. UI and
 CLI share `Dev.*` operations, not Mix task calls. Release validation also belongs
 to the root; only protected CI publishes.

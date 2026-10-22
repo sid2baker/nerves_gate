@@ -19,6 +19,9 @@ defmodule DevWeb.Router do
     post("/api/control", Api, :control)
     post("/api/install", Api, :install)
     post("/api/operation", Api, :operation)
+    post("/api/application", Api, :application)
+    post("/api/firmware/review", Api, :review_firmware)
+    post("/api/firmware/confirm", Api, :confirm_firmware)
     live("/", OverviewLive)
     live("/devices/:id", DeviceLive)
   end

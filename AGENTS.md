@@ -17,14 +17,14 @@
 The root is the host-only developer platform (`:nerves_gate_dev`), not an umbrella.
 Subsystems remain independent Mix projects. Root host checks use native
 `Mix.Project.in_project/4`; do not shell out to Mix for repository host orchestration.
-Device builds and solution apps are exceptions: they require isolated supervised
+Device builds and user apps are exceptions: they require isolated supervised
 OS processes, never device-target compilation in the workbench VM.
 
-- `lib/dev/`: sessions, solutions, builds, operation coordination and release tools.
+- `lib/dev/`: sessions, app projects, LAN discovery, builds, operation coordination and release tools.
 - `lib/dev_web/`: workbench UI and CLI API. UI and CLI call ordinary shared APIs,
   not Mix tasks. Backend validation is authoritative.
 - `config/`, `priv/dev/`: workstation configuration and owned launch scripts.
-- `priv/templates/`: solution app scaffolding; solutions live outside this checkout.
+- `priv/templates/`: ordinary SDK app scaffolding; app projects live outside this checkout.
 - `firmware/lib/nerves_gate/`: device domains own admission, deadlines and persistence.
 - `firmware/lib/nerves_gate.ex`: public API; status stays a direct domain query.
 - `firmware/lib/nerves_gate_web/`: gateway UI shared by EC100, QEMU and `mix dev.ui`.
@@ -55,7 +55,7 @@ OS processes, never device-target compilation in the workbench VM.
 
 - Run commands at the root. `mix setup` prepares projects and artifacts without
   building device firmware or booting devices.
-- The user owns `mix dev [SOLUTION]`. Do not start/stop that session or boot its
+- The user owns `mix dev [APP_DIRECTORY]`. Do not start/stop that session or boot its
   devices without authorization; ask the user to start it if unavailable.
 - Focused checks use `mix test.qemu --only ID [--device ID]` against that session.
   `--ci` creates a separate disposable bench and needs explicit authorization.

@@ -6,8 +6,10 @@ defmodule Dev.MixProject do
   @projects ~w(sdk sim firmware)
 
   def project do
-    if Mix.target() != :host,
-      do: Mix.raise("The developer platform is host-only; run device builds from firmware/")
+    # A device target left in the caller's shell must not select a device build
+    # for the workstation project. Firmware tasks select their own target in
+    # firmware/; keep the caller's environment unchanged for those commands.
+    Mix.target(:host)
 
     [
       app: :nerves_gate_dev,
@@ -23,6 +25,7 @@ defmodule Dev.MixProject do
         {:phoenix_live_view, "~> 1.2.13"},
         {:bandit, "~> 1.12"},
         {:req, "~> 0.7"},
+        {:nerves_discovery, "~> 0.1.6"},
         {:floki, "~> 0.38"},
         {:volt, "~> 0.23.0", only: [:dev, :test]},
         {:phoenix_live_reload, "~> 1.5", only: :dev},
@@ -74,7 +77,7 @@ defmodule Dev.MixProject do
     Mix.Task.run("qemu.setup")
 
     Mix.shell().info(
-      "Ready. Run mix dev [SOLUTION], then explicitly start devices in the workbench."
+      "Ready. Run mix dev, then create/open apps and explicitly start simulated devices."
     )
   end
 
@@ -99,7 +102,7 @@ defmodule Dev.MixProject do
 
   defp ci(_), do: Mix.raise("Usage: mix ci")
 
-  # Host-only native orchestration. Nerves device builds and solution apps run
+  # Host-only native orchestration. Nerves device builds and user apps run
   # in supervised OS processes instead; their compiler state must be isolated.
   defp run(project, [task | args], options \\ []) do
     target = options[:target] || :host

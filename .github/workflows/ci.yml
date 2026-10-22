@@ -71,7 +71,7 @@ jobs:
       - name: Reject workstation-linked native ports
         run: mise exec -- elixir scripts/check_target.exs
 
-  solution:
+  applications:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -80,11 +80,11 @@ jobs:
       - uses: ./.github/actions/host-tools
       - name: Prepare host dependencies
         run: mise exec -- mix deps.get --check-locked
-      - name: Exercise the ordinary solution commands (no devices)
+      - name: Exercise ordinary application commands (no devices)
         run: |
-          mise exec -- mix solution.new "$RUNNER_TEMP/solution" --local-sdk
-          mise exec -- mix app.new demo --solution "$RUNNER_TEMP/solution"
-          mise exec -- mix app.new second_app --solution "$RUNNER_TEMP/solution"
-          mise exec -- mix app.test --solution "$RUNNER_TEMP/solution"
-          mise exec -- mix app.package demo --solution "$RUNNER_TEMP/solution"
-          mise exec -- mix app.package second_app --solution "$RUNNER_TEMP/solution"
+          mise exec -- mix app.new "$RUNNER_TEMP/demo" --local-sdk
+          mise exec -- mix app.new "$RUNNER_TEMP/second_app" --local-sdk
+          mise exec -- mix app.test "$RUNNER_TEMP/demo"
+          mise exec -- mix app.test "$RUNNER_TEMP/second_app"
+          mise exec -- mix app.package "$RUNNER_TEMP/demo"
+          mise exec -- mix app.package "$RUNNER_TEMP/second_app"

@@ -1,37 +1,39 @@
 defmodule Dev.AppCLI do
   @moduledoc false
   def run(command, args) do
-    {options, names} = OptionParser.parse!(args, strict: [solution: :string, device: :string])
+    {options, paths} = OptionParser.parse!(args, strict: [device: :string, local_sdk: :boolean])
 
-    solution =
-      if options[:solution],
-        do: Dev.Solution.load!(options[:solution]),
-        else: Dev.Solution.current!()
-
-    if solution.warning, do: IO.puts(solution.warning)
-
-    name =
-      case names do
-        [] -> nil
-        [name] -> name
-        _ -> raise ArgumentError, "Select at most one app"
+    path =
+      case paths do
+        [path] -> Path.expand(path)
+        _ -> raise ArgumentError, "Usage: mix app.#{command} APP_DIRECTORY [--device ID]"
       end
 
     case command do
-      :new -> Dev.Solution.app_new!(solution, name || raise(ArgumentError, "Supply an app name"))
-      :test -> Dev.Solution.test!(solution, name)
-      :package -> IO.puts(Dev.Solution.package!(solution, name))
-      :install -> install(solution, name, options[:device])
+      :new ->
+        app = Dev.Applications.new!(path, options[:local_sdk] || false)
+        IO.puts("Created #{app.path}")
+
+        if session = Dev.Session.connect() do
+          {client, _} = session
+          Req.post!(client, url: "/api/application", form: [action: "open", path: app.path])
+        end
+
+      :test ->
+        Dev.Applications.test!(path)
+
+      :package ->
+        IO.puts(Dev.Applications.package!(path))
+
+      :install ->
+        install(path, options[:device])
     end
   end
 
-  defp install(solution, name, device) do
+  defp install(path, device) do
     {client, state} =
       Dev.Session.connect() ||
-        raise(ArgumentError, "Start mix dev SOLUTION and its devices first")
-
-    if get_in(state, ["solution", "path"]) != solution.path,
-      do: raise(ArgumentError, "The running session has a different solution")
+        raise(ArgumentError, "Start mix dev and its simulated devices first")
 
     device =
       device ||
@@ -40,7 +42,7 @@ defmodule Dev.AppCLI do
           _ -> raise ArgumentError, "Select --device"
         end
 
-    package = Dev.Solution.package!(solution, name, fn _ -> :ok end, :temporary)
+    package = Dev.Applications.package!(path, fn _ -> :ok end, :temporary)
 
     try do
       case Req.post!(client, url: "/api/install", form: [device: device, package: package]) do

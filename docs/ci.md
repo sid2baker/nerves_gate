@@ -3,13 +3,13 @@
 Routine CI never boots a device. Required checks are:
 
 - **checks:** locked dependencies, SDK/simulator/firmware host quality gates and
-  root workbench, solution and release-contract tests.
+  root workbench, application, discovery-projection and release-contract tests.
 - **firmware-x86_64:** clean root setup, local target firmware build and a musl
   interpreter check for `if_monitor` and `uevent`. No QEMU startup.
-- **solution:** create an external solution against the local SDK, create two
-  apps, test and package both with the ordinary commands. No devices.
+- **applications:** create two ordinary external apps against the local SDK,
+  test and package both with the ordinary commands. No devices.
 
-Replace the former required check `workspace` with `solution` in branch
+Use `applications` instead of the former `solution`/`workspace` check in branch
 protection. This repository does not modify protection automatically.
 
 ## Native compilation regression

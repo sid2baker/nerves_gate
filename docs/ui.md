@@ -69,9 +69,13 @@ peripherals as unavailable. The UI has no sign-in; see
 
 ## Developer workbench
 
-Root `mix dev [SOLUTION]` serves `lib/dev_web/` at localhost:4000. The overview
-shows the solution and app test/package/install operations, explicit firmware
-builds, virtual wiring and simulator lifecycle. Each `/devices/:id` page shows
+Root `mix dev [APP_DIRECTORY]` serves `lib/dev_web/` at localhost:4000. The overview
+discovers advertised LAN gateways and supports manual addresses, app creation and
+opening, test/package/install operations, explicit QEMU firmware builds, virtual
+wiring and simulator lifecycle. Apps are ordinary directories, not solutions.
+Discovered identities are unverified; physical devices are never treated as
+owned QEMU hardware. Physical firmware updates require a separate authenticated
+SSH review and explicit typed confirmation; see [firmware updates](firmware-updates.md). Each `/devices/:id` page shows
 one device's observations, injected faults and scenario results, with a link to
 its gateway UI. No device starts and no firmware is built merely by opening it.
 UI and CLI invoke the same operations; backend admission remains authoritative.
