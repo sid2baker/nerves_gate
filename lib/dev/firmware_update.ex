@@ -1,7 +1,23 @@
 defmodule Dev.FirmwareUpdate do
   @moduledoc "Explicit SSH firmware review/update; never provisions disks or bypasses host-key checks."
   @ttl 600_000
-  @identity ~S|Base.encode64(Jason.encode!(%{target: to_string(NervesGate.target()), version: to_string(Application.spec(:nerves_gate, :vsn)), platform: Nerves.Runtime.KV.get("nerves_fw_platform"), architecture: Nerves.Runtime.KV.get("nerves_fw_architecture"), product: Nerves.Runtime.KV.get("nerves_fw_product"), serial: Nerves.Runtime.KV.get("nerves_serial_number")}))|
+  @identity ~S|Base.encode64(Jason.encode!(%{target: to_string(NervesGate.target()), version: to_string(Application.spec(:nerves_gate, :vsn)), platform: Nerves.Runtime.KV.get_active("nerves_fw_platform"), architecture: Nerves.Runtime.KV.get_active("nerves_fw_architecture"), product: Nerves.Runtime.KV.get_active("nerves_fw_product"), serial: Nerves.Runtime.serial_number()}))|
+
+  @doc false
+  def identity_command, do: @identity
+
+  def read_device!(address) do
+    {:ok, host} = valid_host!(address)
+    device = with_connection(host, 22, &identity!/1)
+
+    unless device["product"] == "nerves_gate" and
+             Enum.all?(["target", "version", "platform", "architecture"], fn key ->
+               is_binary(device[key]) and device[key] != ""
+             end),
+           do: raise("SSH endpoint did not return a compatible Nerves Gate identity")
+
+    device
+  end
 
   def review!(params, report \\ fn _ -> :ok end) do
     {:ok, host} = valid_host!(params["address"])
@@ -158,18 +174,18 @@ defmodule Dev.FirmwareUpdate do
   def port!(port) when is_integer(port) and port in 1..65_535, do: port
   def port!(_), do: raise(ArgumentError, "SSH port must be between 1 and 65535")
 
-  def ssh_options do
-    key = if System.get_env("SSH_AUTH_SOCK"), do: [key_cb: {:ssh_agent, []}], else: []
-
-    key ++
-      [
-        user: ~c"root",
-        auth_methods: ~c"publickey",
-        user_interaction: false,
-        silently_accept_hosts: false,
-        save_accepted_host: false,
-        connect_timeout: 10_000
-      ]
+  def ssh_options(host) do
+    [
+      key_cb:
+        {Dev.SSHClient,
+         [host: to_charlist(host), agent: not is_nil(System.get_env("SSH_AUTH_SOCK"))]},
+      user: ~c"nerves_gate",
+      auth_methods: ~c"publickey",
+      user_interaction: false,
+      silently_accept_hosts: false,
+      save_accepted_host: false,
+      connect_timeout: 10_000
+    ]
   end
 
   defp valid_host!(address) do
@@ -182,7 +198,7 @@ defmodule Dev.FirmwareUpdate do
   defp with_connection(host, port, run) do
     {:ok, _} = Application.ensure_all_started(:ssh)
 
-    case :ssh.connect(to_charlist(host), port, ssh_options(), 15_000) do
+    case :ssh.connect(to_charlist(host), port, ssh_options(host), 15_000) do
       {:ok, connection} ->
         try do
           run.(connection)
@@ -190,9 +206,33 @@ defmodule Dev.FirmwareUpdate do
           :ssh.close(connection)
         end
 
-      {:error, _} ->
-        raise "SSH connection failed. Verify the host key in ~/.ssh/known_hosts and authorize your key (ssh-agent or standard ~/.ssh key files). Password prompts and unknown host keys are not accepted."
+      {:error, reason} ->
+        raise connection_error(reason)
     end
+  end
+
+  @doc false
+  def connection_error(reason) do
+    detail =
+      case reason do
+        :timeout ->
+          "SSH connection timed out. Check that the device is reachable on port 22."
+
+        :econnrefused ->
+          "SSH connection refused. Check that the device is listening on port 22."
+
+        :nxdomain ->
+          "Device hostname could not be resolved. Check DNS/Tailscale connectivity."
+
+        ~c"Service not available" ->
+          "SSH server rejected authentication or the requested service. Verify the requested hostname in known_hosts and check that the agent offers an authorized key."
+
+        _ ->
+          "SSH connection failed. Verify the host key and authorize your key."
+      end
+
+    detail <>
+      " Uses nerves_gate with public-key authentication, SSH_AUTH_SOCK (if set), and ~/.ssh/known_hosts. Password prompts and unknown host keys are not accepted."
   end
 
   defp identity!(connection) do

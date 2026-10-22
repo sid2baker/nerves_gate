@@ -1,5 +1,34 @@
 defmodule Dev.Builds do
-  @moduledoc "Explicit isolated firmware builds using the standard Nerves task."
+  @moduledoc "Explicit isolated firmware builds and local image selection."
+
+  def images(root \\ Dev.root()) do
+    Path.wildcard(Path.join(root, "firmware/_build/ec100_*/nerves/images/*.fw"))
+    |> Enum.flat_map(fn path ->
+      # Keep metadata inspection bounded without MuonTrap's captured-stdio ACK path.
+      case System.cmd("timeout", ["5s", "fwup", "-m", "-i", path], stderr_to_stdout: true) do
+        {text, 0} ->
+          metadata = Dev.FirmwareUpdate.metadata(text)
+
+          if metadata["meta-product"] == "nerves_gate" and
+               metadata["meta-platform"] == "ec100" and
+               metadata["meta-architecture"] == "arm" and is_binary(metadata["meta-version"]) do
+            [
+              %{
+                path: path,
+                version: metadata["meta-version"],
+                build: Path.relative_to(path, root)
+              }
+            ]
+          else
+            []
+          end
+
+        _ ->
+          []
+      end
+    end)
+  end
+
   def firmware!(target \\ "x86_64", report \\ fn _ -> :ok end)
       when target in ["ec100", "x86_64"] do
     status =

@@ -6,7 +6,7 @@ factory resets. Finding or adding a device never writes to it.
 
 ## Build
 
-In **Builds and applications**, choose **EC100 physical controller** or
+On the **Firmware** page, choose **EC100 physical controller** or
 **x86_64 QEMU**, then **Build firmware**. Builds run in an isolated process and
 never flash hardware. The result shows the `.fw` path.
 
@@ -18,10 +18,13 @@ silently upload an old file when a new build fails.
 
 ## Review and explicitly update
 
-1. Add the device's **hostname or IPv4 address**, including a Tailscale DNS name.
-   This saves an unverified entry; it does not connect or configure the VPN.
-2. Choose **Update firmware…** on its row, or enter its address in
-   **Physical-device firmware update**. Select its SSH port and local `.fw` path.
+1. On **Devices**, add the device's **hostname or IPv4 address**, including a
+   Tailscale DNS name. This saves an unverified entry; it does not connect or
+   configure the VPN.
+2. Open that device and its **Firmware** tab. Choose an image from the dropdown.
+   It lists compatible EC100 archives in `firmware/_build/ec100_*/nerves/images/`
+   with their actual firmware versions. Use **Refresh firmware list** after a
+   build. SSH uses fixed port **22**; the selected device fixes the destination.
 3. Select **Review firmware and device**. This checks archive integrity, copies
    the selected bytes into a private immutable review snapshot, verifies the
    SSH host key and reads the device's public identity/version. It sends no
@@ -42,10 +45,22 @@ Confirmation is single-use. The snapshot is deleted after update or expiry.
 Nothing formats the physical device's data partition or bypasses its own
 recovery/update admission and fwup compatibility checks.
 
+## Read device information
+
+A manual entry initially stores only its hostname/address. On the device's
+Overview tab, **Read device information** fetches target, running firmware version,
+architecture and serial over verified SSH on port 22. It sends no firmware and
+never opens the update subsystem or reboots the device. Successful observations
+are retained for the session with a timestamp; they are not a live connection.
+Firmware review also refreshes this information. Both actions use the same SSH
+credentials and host-key checks below. LAN mDNS generally does not cross Tailscale.
+
 ## SSH access
 
-Updates use root public-key authentication and require the device's host key to
-be verified in the workstation user's `~/.ssh/known_hosts`. Unknown/changed host
+Updates and information reads use `nerves_gate` public-key authentication and
+require the requested hostname/address to have a verified host key in the
+workstation user's `~/.ssh/known_hosts`. The hostname is preserved for this check,
+not replaced by its resolved IP. Unknown/changed host
 keys are rejected; they are never accepted automatically or saved by the
 workbench. Verify a new fingerprint using a trusted device connection before
 accepting it in your SSH client.
@@ -57,5 +72,8 @@ the device, workbench projections or logs. Password/passphrase prompts are not
 supported; USB password recovery remains a separate manual operation.
 
 This is a direct SSH connection, not an OpenSSH subprocess: custom OpenSSH proxy
-commands, jump-host rules and per-host identity-file settings are not imported.
-Use a directly reachable hostname/IP, the explicit port and an authorized key.
+commands, jump-host rules, `IdentityAgent` and per-host identity-file settings are
+not imported. Set `SSH_AUTH_SOCK` to the agent your terminal uses. Known-hosts
+parsing is provided by OTP; hashed OpenSSH host entries are not supported.
+Use a directly reachable hostname/IP and an authorized key. The device UI uses
+standard SSH port 22; the lower-level review API still accepts an explicit port.

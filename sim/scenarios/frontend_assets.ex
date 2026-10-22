@@ -180,15 +180,28 @@ defmodule NervesGateSim.Scenarios.FrontendAssets do
 
   defp assert_simulator_site(client, vm) do
     overview = Req.get!(client, url: "/").body |> Floki.parse_document!()
-    assert [_] = Floki.find(overview, "#simulator-lifecycle")
-    assert [_] = Floki.find(overview, "#add-device")
-    assert [_] = Floki.find(overview, "#simulator-devices a[href='/devices/#{vm.id}']")
+    assert [_] = Floki.find(overview, "#workbench-overview")
+    assert [] = Floki.find(overview, "form")
+    assert [_] = Floki.find(overview, "nav[aria-label='Workbench navigation']")
+    simulator = Req.get!(client, url: "/simulator").body |> Floki.parse_document!()
+    assert [_] = Floki.find(simulator, "#simulator-lifecycle")
+    assert [_] = Floki.find(simulator, "#add-device")
+    directory = Req.get!(client, url: "/devices").body |> Floki.parse_document!()
+
+    assert [_] =
+             Floki.find(
+               directory,
+               "#device-directory tr[data-device-kind=simulated] a[href='/devices/#{vm.id}']"
+             )
+
     assert [] = Floki.find(overview, "#internet-editor")
     assert Req.get!(client, url: "/network").status == 404
 
     device = Req.get!(client, url: "/devices/#{vm.id}").body |> Floki.parse_document!()
     assert [_] = Floki.find(device, "#device-summary")
-    assert [_] = Floki.find(device, "#test-results")
+    assert [] = Floki.find(device, "#test-results")
+    tests = Req.get!(client, url: "/devices/#{vm.id}?tab=tests").body |> Floki.parse_document!()
+    assert [_] = Floki.find(tests, "#test-results")
 
     assert Floki.attribute(device, "#device-ui-link", "href") ==
              [Qemu.ui_url(vm)]

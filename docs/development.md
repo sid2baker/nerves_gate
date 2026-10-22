@@ -7,7 +7,8 @@ The root is a host-only developer platform. `sdk/`, `sim/`, `firmware/` and
 ## Prerequisites
 
 Use Linux x86_64 or aarch64, QEMU 8.2+ with `user` and `stream` networking, fwup,
-flock, mkfs.ext4, a C compiler, make, pkg-config, inotify-tools and squashfs-tools.
+flock, mkfs.ext4, a C compiler, make, pkg-config, inotify-tools, squashfs-tools and
+GNU coreutils (`timeout`, used for bounded local firmware metadata reads).
 VintageNet host compilation also requires libmnl/libnl headers.
 
 Ubuntu/Debian:
@@ -39,7 +40,7 @@ Run from the checkout:
 | Command | Action |
 | --- | --- |
 | `mix setup` | Prepare tools/artifacts without booting devices |
-| `mix dev [APP_DIRECTORY] [--port 4000]` | Start the workbench; discover LAN gateways; optionally open an app |
+| `mix dev [APP_DIRECTORY] [--port 4000]` | Start the workbench; optionally open an app |
 | `mix dev.status` | Read this checkout's session identity/status |
 | `mix dev.stop` | Graceful session stop; never kills an arbitrary PID |
 | `mix dev.ui [DEVICE] [--port 4001]` | Reloadable gateway UI against a running device |
@@ -67,8 +68,10 @@ Device-code changes need Reset followed by Start. Faults, scenarios, installatio
 and lifecycle changes are admitted by `NervesGateSim.QemuTests`, not by UI button
 availability.
 
-Applications are opened or created in the UI; no solution manifest is required.
-LAN discovery is read-only mDNS and never attaches a hardware driver to a found
+Applications are opened or created on the Applications page; no solution manifest
+is required. The Devices page lists both physical gateways and tagged simulated
+devices; Simulator holds bench-wide wiring and lifecycle controls. LAN discovery
+starts on the Devices page or explicit refresh and is read-only mDNS and never attaches a hardware driver to a found
 gateway. Manual entries accept DNS names and IPv4 addresses. The workbench also
 supports explicit EC100/QEMU builds and authenticated SSH firmware review/update;
 see [firmware updates](firmware-updates.md) for confirmation and prerequisites. Existing non-advertising firmware needs an explicit known address.

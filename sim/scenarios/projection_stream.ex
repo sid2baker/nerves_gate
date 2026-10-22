@@ -183,6 +183,7 @@ defmodule NervesGateSim.Scenarios.ProjectionStream do
         __changed__: nil,
         projection: NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node}).status,
         id: id,
+        tab: "tests",
         error: nil,
         confirm_run: nil
       }

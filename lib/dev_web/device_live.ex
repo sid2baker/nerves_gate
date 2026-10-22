@@ -5,7 +5,7 @@ defmodule DevWeb.DeviceLive do
   alias NervesGate.Projection
   alias NervesGateSim.{ManualFaults, QemuTests}
   alias NervesGateWeb.{NetworkStatus, Observations}
-  alias DevWeb.OverviewLive
+  alias DevWeb.Components
 
   def mount(%{"id" => id}, _, socket) do
     if connected?(socket), do: QemuTests.subscribe()
@@ -24,6 +24,11 @@ defmodule DevWeb.DeviceLive do
         {:ok, Observations.subscribe(socket, &assign(&1, :projection, &2), config.node)}
     end
   end
+
+  def handle_params(params, _, socket),
+    do:
+      {:noreply,
+       assign(socket, :tab, if(params["tab"] == "tests", do: "tests", else: "overview"))}
 
   def handle_event("mode", %{"mode" => mode}, socket),
     do: command(socket, QemuTests.mode(socket.assigns.id, mode))
@@ -78,14 +83,14 @@ defmodule DevWeb.DeviceLive do
   def render(assigns) do
     ~H"""
     <main class="ui-main ui-stack bench" id="device-tests">
-      <.back_link navigate="/">Simulator</.back_link>
+      <.back_link navigate="/devices">Devices</.back_link>
       <.page_header
         eyebrow="Development · owned QEMU only"
         title={@id}
         description={if @config, do: "#{@config.node} · #{@config.address}", else: "Unknown device"}
       >
         <:actions>
-          <.theme_toggle />
+          <Components.device_kind :if={@config} kind={:simulated} />
           <.button
             :if={@device}
             id="device-ui-link"
@@ -97,17 +102,20 @@ defmodule DevWeb.DeviceLive do
           >Gateway UI</.button>
         </:actions>
       </.page_header>
-      <div class="ui-disconnected">
-        <.notice tone="warning" role="alert">
-          Connection to the simulator lost. Controls and observations may be stale; connections and faults remain active.
-        </.notice>
-      </div>
+
       <.notice :if={@config && !@device} id="device-not-running" title="Not running">
         <p>{@bench.lifecycle.phase}</p>
-        <.link navigate="/" class="ui-text-link">Open the simulator overview</.link>
+        <.link navigate="/simulator" class="ui-text-link">Open simulator configuration</.link>
       </.notice>
+      <nav :if={@config} class="dev-filters" aria-label="Device sections">
+        <.link
+          :for={{tab, label} <- [{"overview", "Overview"}, {"tests", "Tests & controls"}]}
+          patch={"/devices/#{@id}?tab=#{tab}"}
+          aria-current={if @tab == tab, do: "page"}
+        >{label}</.link>
+      </nav>
       <.panel
-        :if={@device}
+        :if={@device && @tab == "overview"}
         title="Observed device"
         icon="network"
         id="device-summary"
@@ -134,7 +142,7 @@ defmodule DevWeb.DeviceLive do
         icon="network"
         id="bench-connections"
       >
-        <.setting_row :for={port <- [:lan1, :lan2]} label={OverviewLive.port_label(port)}>
+        <.setting_row :for={port <- [:lan1, :lan2]} label={Components.port_label(port)}>
           <span id={"bench-#{port}-network"}>{network_label(@device.topology[port])}</span>
         </.setting_row>
         <.setting_row label="Management">Local control only · no Internet forwarding</.setting_row>
@@ -153,8 +161,7 @@ defmodule DevWeb.DeviceLive do
         </ul>
       </section>
 
-      <.notice :if={@error} tone="warning" role="alert" id="bench-error">{@error}</.notice>
-      <div :if={@device} class="bench-toolbar">
+      <div :if={@device && @tab == "tests"} class="bench-toolbar">
         <div class="ui-actions" role="group" aria-label="Device control mode">
           <.button
             id="mode-scenarios"
@@ -178,7 +185,7 @@ defmodule DevWeb.DeviceLive do
         <p class="ui-help" id="control-owner">{owner_label(@device)}</p>
       </div>
 
-      <div :if={@config} class="ui-stack">
+      <div :if={@config && @tab == "tests"} class="ui-stack">
         <.panel
           :if={manual?(@device)}
           title="Manual controls"
@@ -280,7 +287,7 @@ defmodule DevWeb.DeviceLive do
                 >Run</.button>
               </div>
               <div :if={@results[scenario.id]} class="ui-actions">
-                <.status tone={OverviewLive.result_tone(@results[scenario.id].status)}>
+                <.status tone={Components.result_tone(@results[scenario.id].status)}>
                   {@results[scenario.id].status}
                 </.status>
                 <span :if={@results[scenario.id].milliseconds} class="ui-help">
@@ -382,7 +389,7 @@ defmodule DevWeb.DeviceLive do
 
   defp port_observation(projection, name, bench_port) do
     port = Enum.find(projection.connections.ports, &(&1.name == name))
-    label = Enum.join([OverviewLive.port_label(bench_port) | role(port)], " · ")
+    label = Enum.join([Components.port_label(bench_port) | role(port)], " · ")
 
     value =
       cond do

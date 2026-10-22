@@ -135,6 +135,61 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 .ui-badge { display: inline-flex; align-items: center; padding: 1px 8px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface-muted); color: var(--ui-muted); font-size: 12px; font-weight: 550; line-height: 1.6; white-space: nowrap; }
 .ui-badge--warning { border-color: var(--ui-warning-line); background: var(--ui-warning-soft); color: var(--ui-warning); }
 
+/* Host workbench only. Gateway layouts do not use these classes. */
+.dev-shell { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: 100dvh; }
+.dev-sidebar { position: sticky; top: 0; height: 100dvh; padding: 28px 20px; border-right: 1px solid var(--ui-line); background: var(--ui-surface); }
+.dev-sidebar .ui-brand { color: var(--ui-ink); }
+.dev-brand-caption { margin: 8px 0 28px; }
+.dev-navigation { display: flex; flex-direction: column; gap: 6px; }
+.dev-navigation a { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 8px; color: var(--ui-muted); font-weight: 550; }
+.dev-navigation a:hover, .dev-filters a:hover { background: var(--ui-hover); }
+.dev-navigation a[aria-current="page"], .dev-filters a[aria-current="page"] { background: var(--ui-selected); color: var(--ui-accent-strong); }
+.dev-content { min-width: 0; }
+.dev-content .ui-page-header { align-items: flex-start; flex-wrap: wrap; }
+.dev-content .ui-page-header > div { min-width: 0; }
+.dev-content h1 { overflow-wrap: anywhere; }
+.dev-topbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 32px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface); }
+.dev-operation-link { min-width: 0; overflow-wrap: anywhere; }
+.dev-notices { max-width: 1240px; margin: 0 auto; padding: 0 32px; }
+.dev-notices > [role="alert"] { margin-top: 24px; }
+.dev-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.dev-summary-card { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 24px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius); background: var(--ui-surface); color: var(--ui-ink); }
+.dev-summary-card:hover { border-color: var(--ui-accent); }
+.dev-summary-card > .ui-icon { color: var(--ui-accent); }
+.dev-summary-card h2 { font-size: 18px; }
+.dev-summary-card p { color: var(--ui-muted); font-size: 14px; }
+.dev-badge--simulated { background: var(--ui-accent-soft); color: var(--ui-accent-strong); border-color: var(--ui-accent-line); }
+.dev-list-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.dev-filters { display: flex; gap: 4px; flex-wrap: wrap; }
+.dev-filters a { display: inline-flex; align-items: center; min-height: 44px; padding: 10px 14px; border-radius: 8px; color: var(--ui-muted); font-size: 14px; font-weight: 600; }
+.dev-table-wrap { overflow-x: auto; }
+.dev-device-table { width: 100%; border-collapse: collapse; text-align: left; }
+.dev-device-table caption { text-align: left; padding: 16px 20px; }
+.dev-device-table th { padding: 12px 20px; background: var(--ui-surface-muted); color: var(--ui-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.dev-device-table td { padding: 16px 20px; border-top: 1px solid var(--ui-line); font-size: 14px; }
+.dev-device-table tbody tr:hover { background: var(--ui-hover); }
+.dev-empty { padding: 24px; color: var(--ui-muted); }
+.dev-result { overflow-wrap: anywhere; }
+.dev-operation-details { padding: 12px 32px; border-bottom: 1px solid var(--ui-line); background: var(--ui-surface-muted); }
+.dev-operation-details summary { color: var(--ui-muted); font-size: 13px; }
+.dev-operation-details[open] summary { margin-bottom: 16px; }
+.dev-operation-details .bench-output { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .dev-shell { display: block; }
+  .dev-sidebar { position: static; height: auto; padding: 16px 20px; border-right: 0; border-bottom: 1px solid var(--ui-line); }
+  .dev-brand-caption { margin: 4px 0 12px; }
+  .dev-navigation { flex-direction: row; overflow-x: auto; }
+  .dev-navigation a { flex-shrink: 0; font-size: 14px; }
+  .dev-navigation .ui-icon { width: 16px; height: 16px; }
+  .dev-topbar { padding: 12px 20px; }
+}
+@media (max-width: 560px) {
+  .dev-summary-grid { grid-template-columns: minmax(0, 1fr); }
+  .dev-content .ui-page-header { flex-direction: column; align-items: stretch; }
+  .dev-topbar .ui-theme-toggle .ui-button { padding: 6px 8px; }
+  .dev-list-toolbar form, .dev-list-toolbar input { width: 100%; }
+}
+
 .ui-notifications { position: fixed; z-index: 60; right: 20px; bottom: 20px; display: grid; gap: 12px; width: min(440px, calc(100vw - 40px)); }
 .ui-toast { display: flex; align-items: center; gap: 16px; padding: 12px 16px; border: 1px solid var(--ui-accent-line); border-radius: var(--ui-radius); background: var(--ui-surface); box-shadow: 0 8px 30px var(--ui-shadow); }
 .ui-toast p { flex: 1; overflow-wrap: anywhere; }

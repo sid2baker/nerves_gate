@@ -17,16 +17,17 @@ mix setup
 mix dev
 ```
 
-The workbench opens at http://localhost:4000, discovers advertised gateways on
-the current LAN and offers Create/Open Application controls. Every simulated
-device remains stopped. Start,
+The workbench opens at http://localhost:4000 with Overview, Devices, Applications,
+Firmware and Simulator pages. Devices discovers LAN gateways and lists owned QEMU
+devices with a **Simulated** badge; Applications offers Create/Open controls.
+Every simulated device remains stopped. Start,
 stop, reset, wiring and scenario actions are explicit. Setup downloads the QEMU
 system/toolchain; firmware is built locally when explicitly requested or when
 starting fresh simulated devices. Nothing flashes physical hardware.
 
 ## Develop an application
 
-Use **Create application** or **Open application** in the workbench. Apps are
+Use **Create application** or **Open application** on the Applications page. Apps are
 ordinary Mix projects, kept in their own directories/repositories. No solution
 manifest is needed. The command-line equivalents are:
 

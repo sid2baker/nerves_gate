@@ -47,6 +47,39 @@ defmodule Dev.DiscoveryTest do
     assert [%{source: :manual}] = missing.view.devices
   end
 
+  test "explicit SSH observations enrich manual entries, survive discovery and exclude secrets" do
+    from = {self(), make_ref()}
+    {:ok, state} = Dev.Discovery.init(nil)
+    {:reply, :ok, state} = Dev.Discovery.handle_call({:add, "ec100.example.ts.net"}, from, state)
+
+    identity = %{
+      "target" => "ec100",
+      "version" => "0.2.0-dev",
+      "architecture" => "arm",
+      "serial" => "serial-42",
+      "cookie" => "secret",
+      "private_key" => "secret"
+    }
+
+    assert {:reply, :ok, state} =
+             Dev.Discovery.handle_call({:identity, "ec100.example.ts.net", identity}, from, state)
+
+    assert [device] = state.view.devices
+    assert device.target == "ec100"
+    assert device.version == "0.2.0-dev"
+    assert device.source == :manual
+    assert device.identity.values["serial"] == "serial-42"
+    assert {:ok, _, _} = DateTime.from_iso8601(device.identity.read_at)
+    refute inspect(state.view) =~ "secret"
+
+    ref = make_ref()
+    assert {:noreply, ready} = Dev.Discovery.handle_info({ref, []}, %{state | task: %{ref: ref}})
+    assert [^device] = ready.view.devices
+
+    assert {:reply, {:error, _}, ^ready} =
+             Dev.Discovery.handle_call({:identity, "other.local", identity}, from, ready)
+  end
+
   test "manual addresses are unverified data, never URLs or control commands" do
     assert {:ok, %{address: "192.168.1.42", source: :manual}} =
              Dev.Discovery.manual(" 192.168.1.42 ")

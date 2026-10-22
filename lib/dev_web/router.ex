@@ -22,7 +22,18 @@ defmodule DevWeb.Router do
     post("/api/application", Api, :application)
     post("/api/firmware/review", Api, :review_firmware)
     post("/api/firmware/confirm", Api, :confirm_firmware)
-    live("/", OverviewLive)
-    live("/devices/:id", DeviceLive)
+
+    live_session :workbench,
+      on_mount: [DevWeb.WorkbenchLive],
+      layout: {DevWeb.Layouts, :app} do
+      live("/", OverviewLive, :overview)
+      live("/devices", DevicesLive, :devices)
+      live("/devices/physical/:address", PhysicalDeviceLive, :devices)
+      live("/devices/:id", DeviceLive, :devices)
+      live("/apps", ApplicationsLive, :apps)
+      live("/apps/:id", ApplicationsLive, :apps)
+      live("/firmware", FirmwareLive, :firmware)
+      live("/simulator", SimulatorLive, :simulator)
+    end
   end
 end

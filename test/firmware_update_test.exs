@@ -54,18 +54,43 @@ defmodule Dev.FirmwareUpdateTest do
   end
 
   test "SSH never accepts unknown host keys or prompts for passwords" do
-    options = FirmwareUpdate.ssh_options()
+    options = FirmwareUpdate.ssh_options("ec100.example.ts.net")
     assert options[:silently_accept_hosts] == false
     assert options[:save_accepted_host] == false
     assert options[:user_interaction] == false
     assert options[:auth_methods] == ~c"publickey"
-    assert options[:user] == ~c"root"
+    assert options[:user] == ~c"nerves_gate"
+    assert {Dev.SSHClient, callback} = options[:key_cb]
+    assert callback[:host] == ~c"ec100.example.ts.net"
+    assert callback[:agent] == not is_nil(System.get_env("SSH_AUTH_SOCK"))
+    refute Keyword.has_key?(options, :preferred_algorithms)
 
     for invalid <- [0, -1, 65536, "22;command", "bad"] do
       assert_raise ArgumentError, fn -> FirmwareUpdate.port!(invalid) end
     end
 
     assert FirmwareUpdate.port!("22") == 22
+  end
+
+  test "device identity reads active-slot metadata and the runtime serial API" do
+    command = FirmwareUpdate.identity_command()
+    assert {:ok, _} = Code.string_to_quoted(command)
+
+    for key <- ["nerves_fw_product", "nerves_fw_platform", "nerves_fw_architecture"] do
+      assert command =~ "Nerves.Runtime.KV.get_active(\"#{key}\")"
+    end
+
+    assert command =~ "Nerves.Runtime.serial_number()"
+    refute command =~ "KV.get("
+    refute command =~ "KV.get_all"
+  end
+
+  test "connection failures explain common causes without exposing arbitrary server errors" do
+    assert FirmwareUpdate.connection_error(:timeout) =~ "timed out"
+    assert FirmwareUpdate.connection_error(:econnrefused) =~ "refused"
+    assert FirmwareUpdate.connection_error(:nxdomain) =~ "could not be resolved"
+    assert FirmwareUpdate.connection_error(~c"Service not available") =~ "authentication"
+    refute FirmwareUpdate.connection_error({:server, "private error"}) =~ "private error"
   end
 
   @tag :tmp_dir

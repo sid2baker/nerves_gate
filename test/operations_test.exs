@@ -9,6 +9,7 @@ defmodule Dev.OperationsTest do
       for request <- [
             {:start, "firmware", nil, nil},
             {:start, "install", "sample", "gateway_a"},
+            {:start, "device_info", "ec100.example.ts.net", nil},
             {:lifecycle, "start"},
             {:lifecycle, "reset"},
             {:stop_session, "session"}

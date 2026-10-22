@@ -7,7 +7,7 @@ platform fork or environment variables are required.
 
 In the workbench's **Applications** panel:
 
-1. Enter a new directory, such as `../my_controller`, and select **Create application**.
+1. On **Applications**, enter a new directory, such as `../my_controller`, and select **Create application**.
 2. Or enter an existing Mix project's directory and select **Open application**.
 3. Use **Test** and **Package** on its row. Opened directories are remembered for
    this session, not written into platform source.

@@ -1,5 +1,5 @@
 defmodule DevWeb.Endpoint do
-  @moduledoc "The simulator site: a private Unix socket for the CLI and a loopback port."
+  @moduledoc "Developer workbench: a private Unix socket for the CLI and a loopback port."
   use Phoenix.Endpoint, otp_app: :nerves_gate_dev
 
   @session_options [

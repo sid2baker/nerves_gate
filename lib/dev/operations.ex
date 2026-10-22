@@ -35,7 +35,9 @@ defmodule Dev.Operations do
 
   def handle_call({:review_firmware, params}, _, state) do
     start_task(state, "firmware_review", fn report ->
-      {:review, Dev.FirmwareUpdate.review!(params, report)}
+      plan = Dev.FirmwareUpdate.review!(params, report)
+      Dev.Discovery.record_identity(plan.public.address, plan.device)
+      {:review, plan}
     end)
   end
 
@@ -61,6 +63,7 @@ defmodule Dev.Operations do
         result =
           case kind do
             "firmware" -> Dev.Builds.firmware!(app || "x86_64", report)
+            "device_info" -> Dev.Devices.read_info!(app)
             "test" -> Dev.Applications.test!(app, report)
             "package" -> Dev.Applications.package!(app, report)
             "install" -> Dev.Applications.install!(app, device, report)
@@ -87,6 +90,12 @@ defmodule Dev.Operations do
       end)
 
     {:reply, :ok, %{state | task: task, view: view(:running, kind)}}
+  end
+
+  defp admitted("device_info", address) do
+    if Enum.any?(Dev.Discovery.snapshot().devices, &(&1.address == address)),
+      do: :ok,
+      else: {:error, "Add the device address first"}
   end
 
   defp admitted("firmware", "ec100"), do: :ok

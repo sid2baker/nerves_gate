@@ -7,8 +7,13 @@ defmodule Dev.Discovery do
   def refresh, do: GenServer.call(__MODULE__, :refresh)
   def add(address), do: GenServer.call(__MODULE__, {:add, address})
 
+  def record_identity(address, identity),
+    do: GenServer.call(__MODULE__, {:identity, address, identity})
+
   def init(_),
-    do: {:ok, %{task: nil, manual: %{}, view: %{status: :idle, devices: [], error: nil}}}
+    do:
+      {:ok,
+       %{task: nil, manual: %{}, identities: %{}, view: %{status: :idle, devices: [], error: nil}}}
 
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
 
@@ -28,7 +33,7 @@ defmodule Dev.Discovery do
     case manual(address) do
       {:ok, device} ->
         manual = Map.put(state.manual, device.address, device)
-        devices = merge(state.view.devices, manual)
+        devices = merge(state.view.devices, manual) |> enrich(Map.get(state, :identities, %{}))
         {:reply, :ok, %{state | manual: manual, view: %{state.view | devices: devices}}}
 
       error ->
@@ -36,9 +41,32 @@ defmodule Dev.Discovery do
     end
   end
 
+  def handle_call({:identity, address, identity}, _, state) do
+    if Enum.any?(state.view.devices, &(&1.address == address)) do
+      public =
+        for key <- ["target", "version", "platform", "architecture", "product", "serial"],
+            value = text(identity[key]),
+            into: %{},
+            do: {key, value}
+
+      observed = %{values: public, read_at: DateTime.utc_now() |> DateTime.to_iso8601()}
+      identities = Map.put(Map.get(state, :identities, %{}), address, observed)
+      view = %{state.view | devices: enrich(state.view.devices, identities)}
+      {:reply, :ok, Map.merge(state, %{identities: identities, view: view})}
+    else
+      {:reply, {:error, "Add the device address first"}, state}
+    end
+  end
+
   def handle_info({ref, devices}, %{task: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
-    view = %{status: :ready, devices: merge(devices, state.manual), error: nil}
+
+    view = %{
+      status: :ready,
+      devices: merge(devices, state.manual) |> enrich(Map.get(state, :identities, %{})),
+      error: nil
+    }
+
     {:noreply, %{state | task: nil, view: view}}
   end
 
@@ -120,6 +148,21 @@ defmodule Dev.Discovery do
 
   defp text(_), do: nil
   defp gateway_url(ip), do: "http://#{:inet.ntoa(ip)}:4000/"
+
+  defp enrich(devices, identities) do
+    Enum.map(devices, fn device ->
+      case identities[device.address] do
+        nil ->
+          device
+
+        identity ->
+          device
+          |> Map.put(:identity, identity)
+          |> Map.put(:target, identity.values["target"])
+          |> Map.put(:version, identity.values["version"])
+      end
+    end)
+  end
 
   defp merge(devices, manual),
     do:
