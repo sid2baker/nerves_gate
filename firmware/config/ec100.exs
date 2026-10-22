@@ -6,6 +6,10 @@ config :nerves_gate,
   data_partition: "/sys/class/block/mmcblk0p3/dev",
   # Removable SPI SD card; provision its first partition as ext4 separately.
   apps_device: "/dev/mmcblk1p1",
+  cellular: %{
+    interface: "wwan0",
+    config: %{type: VintageNetECM, vintage_net_ecm: %{at_tty: "ttyUSB2"}}
+  },
   buses_adapter: {NervesGate.Buses.EC100, nil},
   recovery_adapter: {NervesGate.Recovery.EC100, nil},
   indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"}

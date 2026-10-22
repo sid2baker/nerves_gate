@@ -11,6 +11,12 @@
 
 ### Added
 
+- EC100 4G support for the Quectel EG800AK-GL using CDC-ECM, an operator APN and
+  the existing Internet-source and Ethernet-backup settings. A working unlocked
+  SIM is required; the USB recovery link stays separate.
+- Cellular inbound protection is installed before saved network connections are
+  restored, keeping unsolicited mobile traffic away from the unauthenticated UI
+  and SSH. Firmware refuses startup if this protection cannot be installed.
 - The developer workbench creates/opens applications and offers explicit test, package, simulator install and EC100/QEMU firmware-build actions.
 - Physical firmware updates use verified-host SSH public-key authentication, image/device compatibility review, SHA-256 and a single-use typed confirmation before upload and reboot. No initial provisioning or disk formatting is performed.
 - Local mDNS discovery lists advertised Nerves Gate gateways without subnet scans or VPN changes. Known IPv4 addresses can be added manually. New firmware advertises public device metadata; discovery is not authentication.

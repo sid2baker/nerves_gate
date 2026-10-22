@@ -13,6 +13,7 @@ defmodule NervesGateSim.Scenarios.Topology do
 
   def run(%{device: vm}) do
     assert_frame_policy()
+    assert_cellular_input(vm)
     assert NervesGateSim.TestQemu.topology(vm) == NervesGateSim.Simulator.Network.baseline()
     original = identities(vm)
     factory = Qemu.status(vm).network.desired
@@ -58,6 +59,26 @@ defmodule NervesGateSim.Scenarios.Topology do
     save(vm, settings("eth0"))
     online(vm, "eth0")
     assert identities(vm) == original
+  end
+
+  defp assert_cellular_input(vm) do
+    alias NervesGate.Network.Vintage
+
+    before = input_rules(vm)
+    assert :ok = :erpc.call(vm.node, Vintage, :prepare_cellular_input, [])
+    assert input_rules(vm) == before
+
+    for tool <- ["iptables", "ip6tables"],
+        rule <- Vintage.cellular_input_rules(tool) do
+      assert {_, 0} = :erpc.call(vm.node, System, :cmd, [tool, ["-C", "INPUT" | rule]])
+    end
+  end
+
+  defp input_rules(vm) do
+    for tool <- ["iptables", "ip6tables"] do
+      {rules, 0} = :erpc.call(vm.node, System, :cmd, [tool, ["-S", "INPUT"]])
+      rules
+    end
   end
 
   # Small admission checks live with the same scenario, not a mock-network suite.

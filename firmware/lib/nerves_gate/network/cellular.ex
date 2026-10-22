@@ -2,10 +2,10 @@ defmodule NervesGate.Network.Cellular do
   @moduledoc """
   Firmware-supplied modem identity and VintageNet configuration, not a modem manager.
 
-  `:nerves_gate, :cellular` is nil until the modem is qualified. A profile contains
-  `:interface` and a standard VintageNet `:config` (QMI or Mobile). Install that
-  technology separately after identifying the hardware. Power/reset and stable
-  interface naming belong to the BSP. Never use the recovery gadget's usb0.
+  `:nerves_gate, :cellular` is nil on platforms without a modem profile. A profile
+  contains `:interface` and a standard VintageNet `:config` (ECM, QMI or Mobile).
+  EC100 uses the Quectel EG800AK's ECM data path. Power/reset and stable interface
+  naming belong to the BSP. Never use the recovery gadget's usb0.
   """
   alias NervesGate.Config
 
@@ -43,6 +43,7 @@ defmodule NervesGate.Network.Cellular do
     end
   end
 
+  defp technology_key(%{vintage_net_ecm: options}) when is_map(options), do: :vintage_net_ecm
   defp technology_key(%{vintage_net_qmi: options}) when is_map(options), do: :vintage_net_qmi
 
   defp technology_key(%{vintage_net_mobile: options}) when is_map(options),

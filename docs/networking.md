@@ -42,8 +42,9 @@ Equipment and USB are never modem bridges.
 VintageNet owns Internet checks, route metrics, DNS and reconnection. It prefers
 working Ethernet over working cellular, and working cellular over Ethernet that only
 reaches its LAN. A small metric callback classifies `br0` as Ethernet and a
-dedicated `cellN` modem as mobile. Failover and failback follow VintageNet's
-connectivity detection; sessions can briefly interrupt.
+dedicated `cellN` modem as mobile; VintageNet already recognizes `wwanN` as mobile.
+Failover and failback follow VintageNet's connectivity detection; sessions can
+briefly interrupt.
 
 Backup is connected standby: the modem registers and checks connectivity, and can
 use mobile data, while Ethernet is preferred. There is no cold standby, data budget,
@@ -56,28 +57,31 @@ unassigned Ethernet never make Internet status healthy.
 
 ### Cellular modems
 
-**EC100 firmware ships with cellular disabled (`cellular: nil`).** Its factory modem
-is unidentified and has no qualified drivers, power/reset or networking. The UI
-reports unsupported hardware, and Network rejects cellular proposals before
-changing Ethernet.
+**EC100 firmware includes the Quectel EG800AK-GL profile.** System `0.3.0` powers
+the module and names its CDC-ECM data interface `wwan0`, separately from USB
+recovery. `VintageNetECM` controls the modem through `ttyUSB2` (USB interface 1.4)
+and obtains an IPv4 address over DHCP after registration and data-call activation.
+This assumes the built-in modem is the only USB serial device. Its factory USB
+mode must remain ECM (`AT+QCFG="usbnet"` reports `1`); firmware does not change it.
 
-A firmware profile enables an identified modem by naming a dedicated `wwanN`,
-`pppN` or `cellN` interface and its VintageNet technology, for example QMI
-(PPP modems use `VintageNetMobile`):
+The EC100 profile is:
 
 ```elixir
 config :nerves_gate, :cellular, %{
   interface: "wwan0",
-  config: %{type: VintageNetQMI, vintage_net_qmi: %{}}
+  config: %{type: VintageNetECM, vintage_net_ecm: %{at_tty: "ttyUSB2"}}
 }
 ```
 
-The matching technology package (with `runtime: Mix.target() != :host`) and BSP
-drivers must be added too; there is no protocol guessing. Never infer the modem
-from enumeration order or send guessed GPIO/AT commands. **Never give the modem
-`usb0`**: that is the recovery link. The unauthenticated UI needs inbound
-protection before the gateway joins a cellular network; see
-[HTTP exposure](#local-recovery-and-http-exposure).
+QEMU keeps `cellular: nil` and rejects cellular proposals before changing Ethernet.
+EC100 boards without the module can still use Ethernet; a selected cellular link
+remains unavailable when its hardware or SIM is absent. There is no protocol
+probing, GPIO reset watchdog or automatic USB-mode switching. **Never give the
+modem `usb0`**: that is the recovery link. Inbound cellular traffic is filtered
+before networking starts; see [HTTP exposure](#local-recovery-and-http-exposure).
+Factory-firmware reads confirmed the modem identity, AT port and ECM commands;
+registration, DHCP and failover under Nerves still need a working SIM and hardware
+validation.
 
 The application supplies one operator APN. The SIM must already be unlocked; PINs,
 credentials and roaming controls are unsupported, and no SIM identifiers are
@@ -255,7 +259,13 @@ VPN or reset DNS.
 
 Firmware serves the UI on **all IPv4 interfaces, port 4000**, without sign-in:
 anyone who can reach it can change settings and add SSH keys. Keep it on trusted
-networks. No cellular INPUT rules are installed. The listener accepts interfaces
+networks. Before VintageNet restores saved connections, firmware installs IPv4
+and IPv6 INPUT rules on `wwan+`: accept established/related replies, allow IPv4
+DHCP server replies (UDP 67 → 68), and drop everything else. Rules are placed
+before existing INPUT rules and installation is idempotent. Installation failure
+stops firmware startup; it never continues with an unprotected cellular link.
+Cellular data calls use IPv4; new IPv6 traffic is also denied. These rules do not
+restrict USB, Ethernet or Tailscale interfaces. The listener accepts interfaces
 added later. Workstation UIs listen only on `127.0.0.1`.
 
 For USB recovery, open `http://<gateway-usb-address>:4000/network`. VintageNetDirect

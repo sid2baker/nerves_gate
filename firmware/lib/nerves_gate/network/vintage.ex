@@ -25,6 +25,50 @@ defmodule NervesGate.Network.Vintage do
       :ignore
   end
 
+  # DataInit calls this before VintageNet can restore a saved cellular link.
+  # A failure stops firmware startup rather than exposing services on that link.
+  @doc false
+  def prepare_cellular_input do
+    for tool <- ["iptables", "ip6tables"],
+        rule <- Enum.reverse(cellular_input_rules(tool)) do
+      case System.cmd(tool, ["-w", "5", "-C", "INPUT" | rule], stderr_to_stdout: true) do
+        {_, 0} ->
+          :ok
+
+        {_, 1} ->
+          {_, 0} =
+            System.cmd(tool, ["-w", "5", "-I", "INPUT", "1" | rule], stderr_to_stdout: true)
+      end
+    end
+
+    :ok
+  rescue
+    _exception in [MatchError, CaseClauseError, ErlangError] ->
+      Logger.error("Cellular INPUT protection failed; refusing to start device services.")
+      {:error, :cellular_firewall_unavailable}
+  end
+
+  @doc false
+  def cellular_input_rules(tool) when tool in ["iptables", "ip6tables"] do
+    replies = [
+      "-i",
+      "wwan+",
+      "-m",
+      "conntrack",
+      "--ctstate",
+      "ESTABLISHED,RELATED",
+      "-j",
+      "ACCEPT"
+    ]
+
+    drop = ["-i", "wwan+", "-j", "DROP"]
+
+    # Initial DHCP replies may be broadcast and not match conntrack. ECM uses
+    # IPv4 PDP contexts; unsolicited IPv6 (including new connections) is denied.
+    dhcp = ["-i", "wwan+", "-p", "udp", "--sport", "67", "--dport", "68", "-j", "ACCEPT"]
+    if tool == "iptables", do: [replies, dhcp, drop], else: [replies, drop]
+  end
+
   @impl true
   def observations(_), do: [{VintageNet, ["interface"]}]
 
@@ -316,7 +360,10 @@ defmodule NervesGate.Network.Vintage do
   defp cellular_interface do
     if profile = Cellular.profile() do
       config = get(profile.interface, "config") || %{}
-      options = config[:vintage_net_qmi] || config[:vintage_net_mobile] || %{}
+
+      options =
+        config[:vintage_net_ecm] || config[:vintage_net_qmi] || config[:vintage_net_mobile] || %{}
+
       provider = List.first(options[:service_providers] || []) || %{}
 
       interface(profile.interface)

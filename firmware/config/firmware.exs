@@ -22,7 +22,7 @@ config :nerves_gate,
     NervesGate.SDKBackend,
     NervesGateWeb.Endpoint
   ],
-  # Disabled until the real modem is identified; QEMU does not emulate one.
+  # Platforms opt into real modem hardware; QEMU has no cellular profile.
   cellular: nil,
   network_adapter: {NervesGate.Network.Vintage, nil},
   remote_adapter: {NervesGate.Remote.Tailscaled, nil},
@@ -48,7 +48,8 @@ config :mdns_lite,
   ]
 
 # Temporary access on every IPv4 interface, including USB, Ethernet and VPN.
-# The UI is unauthenticated; use only on trusted networks.
+# The UI is unauthenticated. Cellular INPUT is filtered before networking starts;
+# Ethernet and VPN access must still be restricted to trusted networks.
 config :nerves_gate, NervesGateWeb.Endpoint, http: [ip: {0, 0, 0, 0}, port: 4000]
 
 config :logger, backends: [RingLogger]
@@ -59,8 +60,8 @@ config :nerves, :erlinit, update_clock: true
 
 # Sends the Heart init handshake required by HEART_INIT_TIMEOUT in vm.args.
 # Validate firmware only after OTP applications start; internet is not required.
-# DataInit runs Nerves' normal mount/format, then requires the platform's data
-# partition to be mounted writable ext4 before data users start.
+# DataInit runs Nerves' normal mount/format, requires writable ext4 data, and
+# installs cellular INPUT protection before networking/data users start.
 config :nerves_runtime,
   startup_guard_enabled: true,
   init_module: NervesGate.Recovery.DataInit

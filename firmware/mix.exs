@@ -38,6 +38,7 @@ defmodule NervesGate.MixProject do
           :tailscaled_ex,
           :vintage_net,
           :vintage_net_bridge,
+          :vintage_net_ecm,
           :vintage_net_ethernet
         ]
       ],
@@ -138,6 +139,7 @@ defmodule NervesGate.MixProject do
       {:vintage_net, "~> 0.13", runtime: Mix.target() != :host},
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
+      {:vintage_net_ecm, "~> 0.2.1", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
       {:nerves_gate_sdk, path: "../sdk"}
     ] ++ system_dependencies()
@@ -147,7 +149,7 @@ defmodule NervesGate.MixProject do
   # Device builds still resolve their pinned system source and GitHub artifact.
   defp system_dependencies do
     case Mix.target() do
-      :ec100 -> [system_dependency(:nerves_system_ec100, "0.2.2", :ec100)]
+      :ec100 -> [system_dependency(:nerves_system_ec100, "0.3.0", :ec100)]
       :x86_64 -> [system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)]
       :host -> []
     end
