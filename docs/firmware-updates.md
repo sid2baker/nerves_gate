@@ -10,11 +10,11 @@ In **Builds and applications**, choose **EC100 physical controller** or
 **x86_64 QEMU**, then **Build firmware**. Builds run in an isolated process and
 never flash hardware. The result shows the `.fw` path.
 
-EC100 builds require the matching system artifact. The updated EC100 system
-`0.2.2` is not published yet. Build it locally with the standard Nerves 2 artifact
-task or publish it through the authorized [system-release workflow](releases.md#systems).
-Alternatively, supply a previously built compatible EC100 `.fw` file. Do not substitute a QEMU image or silently upload an old file
-when a new build fails.
+EC100 builds download the published, fingerprinted EC100 system `0.2.2` artifact.
+System maintainers can build changed systems locally with the standard Nerves 2
+artifact task; see [system releases](releases.md#systems). You can also review a
+previously built compatible EC100 `.fw` file. Do not substitute a QEMU image or
+silently upload an old file when a new build fails.
 
 ## Review and explicitly update
 

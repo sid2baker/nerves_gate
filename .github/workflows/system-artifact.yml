@@ -38,7 +38,9 @@ jobs:
       NERVES_GATE_LOCAL_DEPS: '1'
       NERVES_CONTAINER_TOOL: docker
       GH_TOKEN: ${{ github.token }}
-      NERVES_DL_DIR: ${{ github.workspace }}/_build/system-release-${{ github.run_id }}-${{ inputs.target }}-${{ github.run_attempt }}/downloads
+      # Cache paths must stay stable across runs; only extracted artifacts and
+      # the verification download are isolated per attempt.
+      NERVES_DL_DIR: ${{ github.workspace }}/_build/system-downloads/${{ inputs.target }}
       NERVES_ARTIFACTS_DIR: ${{ github.workspace }}/_build/system-release-${{ github.run_id }}-${{ inputs.target }}-${{ github.run_attempt }}/artifacts
       NERVES_SYSTEM: ''
     steps:

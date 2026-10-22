@@ -81,5 +81,6 @@ Review the reports and arrange any additional required source distribution befor
 publishing; the archive's existence alone is not proof of compliance.
 
 Existing uploaded bytes are not replaced. Validate a changed QEMU system with the
-owned `system_artifact` scenario before an authorized release. EC100 0.2.2 is
-prepared locally; its system artifact has not been published.
+owned `system_artifact` scenario before an authorized release. EC100 system
+`0.2.2` is published as `system-ec100/v0.2.2`; firmware locks reference that
+immutable monorepo tag.

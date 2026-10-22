@@ -45,8 +45,8 @@ LAN discovery uses mDNS, not a subnet scan. Older firmware without advertisement
 needs a known hostname or IP in **Add address**, including Tailscale DNS names.
 Discovered identities are unverified; only open gateway UIs on trusted networks.
 The workbench builds EC100/QEMU firmware and offers explicit SSH review and
-confirmed A/B updates. See [firmware updates](docs/firmware-updates.md), including
-the currently missing EC100 system artifact prerequisite.
+confirmed A/B updates. See [firmware updates](docs/firmware-updates.md) for build
+prerequisites and the explicit SSH review/confirmation flow.
 
 See [app development](docs/app-development.md) for storage commissioning,
 installation, console access and the SSH-only real-gateway workflow.
