@@ -146,7 +146,7 @@ Modbus. See [bus operations](buses.md).
   source, overall health and backup state.
 - `cellular`: modem/SIM observations, `pin_saved`, `auto_unlock`, operation and
   error. No PIN, SIM identifier or binding hash. `auto_unlock` is `ready`, `blocked`,
-  `different_sim`, `identity_unknown`, `off`, `storage_error` or `unknown`.
+  `different_sim`, `identity_unknown`, `off` or `unknown`.
 - `remote_access`: sanitized daemon observations, routes, operation and error.
 - `sharing`: equipment `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
   `other_routes` untouched by the control.

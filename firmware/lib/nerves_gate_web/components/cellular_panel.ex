@@ -290,7 +290,7 @@ defmodule NervesGateWeb.CellularPanel do
           Forget saved PIN (keep SIM protection)
         </.button>
         <p :if={@cellular.supported} class="ui-help">
-          The PIN is owner-only device storage, not encrypted, and is included in full data-partition backups. It is never included in status or network settings exports. APN saved, SIM unlocked and Internet available are separate states.
+          The PIN is stored on the device, not encrypted, and is included in full data-partition backups. It is never included in status or network settings exports. APN saved, SIM unlocked and Internet available are separate states.
         </p>
         <.notice :if={@message} role="status">{@message}</.notice>
       </.panel>
@@ -298,9 +298,9 @@ defmodule NervesGateWeb.CellularPanel do
     """
   end
 
-  defp saved_label(true), do: "Stored privately on this device"
+  defp saved_label(true), do: "Stored on this device"
   defp saved_label(false), do: "Not stored"
-  defp saved_label(_), do: "Unknown — storage unavailable"
+  defp saved_label(_), do: "Unknown"
 
   defp automatic_label(:ready),
     do:
@@ -316,9 +316,6 @@ defmodule NervesGateWeb.CellularPanel do
   defp automatic_label(:identity_unknown),
     do:
       "SIM identity could not be verified. Automatic unlock will not send a PIN until this modem can identify the same SIM, including while PIN-locked."
-
-  defp automatic_label(:storage_error),
-    do: "Private PIN storage is unavailable or invalid. Automatic unlock is disabled."
 
   defp automatic_label(:off), do: "Automatic unlock is off."
   defp automatic_label(_), do: "Automatic unlock status is unknown."

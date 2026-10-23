@@ -41,7 +41,7 @@ defmodule Dev.CellularPanelTest do
   test "disabled modem preserves stored PIN and permits forgetting without changing protection" do
     html = panel(%{enabled: false, pin_saved: true, auto_unlock: :blocked})
     assert html =~ "Cellular is disabled"
-    assert html =~ "Stored privately on this device"
+    assert html =~ "Stored on this device"
     assert html =~ "Forget saved PIN (keep SIM protection)"
     assert html =~ "not encrypted"
     assert html =~ "full data-partition backups"

@@ -62,7 +62,7 @@ defmodule NervesGate.Error do
     do:
       new(
         "cellular_pin_storage",
-        "Private PIN storage could not be read or saved safely. The SIM operation may already have succeeded; read status rather than resending it. Automatic unlock sends no PIN unless its safety latch is persisted first."
+        "The SIM PIN could not be saved. The SIM operation may already have succeeded; read status rather than resending it. Automatic unlock sends no PIN unless its safety latch is persisted first."
       )
 
   def from(:cellular_pin_not_saved),

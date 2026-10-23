@@ -99,8 +99,10 @@ and re-armed only by a known success, so a failed or uncertain attempt stays
 blocked across reboots and no PIN is ever retried blindly. If the modem cannot
 report the ICCID while locked, nothing is sent and manual unlock is required.
 
-The record is `/data/nerves_gate/cellular/pin.json` (owner-only). It is **not
-encrypted**: root access, full eMMC backups and VM crash dumps can expose it.
+The record is `["cellular", "pin"]` in the persistent `NervesGate.Settings`
+property table under `/data/nerves_gate/settings`. That table holds small
+device-local values with no better owner; network configuration stays in
+VintageNet. It is **not encrypted**: root access, full eMMC backups and VM crash dumps can expose it.
 Status, projections, notifications and logs never contain the PIN or SIM identity.
 Factory reset erases it.
 

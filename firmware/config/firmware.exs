@@ -9,6 +9,8 @@ config :nerves_gate,
   services: [
     NervesGate.Network.Vintage,
     {PropertyTable, name: NervesGate.Properties},
+    # Small device-local values with no better owner, such as the SIM PIN.
+    {PropertyTable, name: NervesGate.Settings, persist_data_path: "/data/nerves_gate/settings"},
     NervesGate.SSH,
     NervesGate.Network,
     NervesGate.Remote,
