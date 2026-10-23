@@ -1,8 +1,9 @@
 # Nerves Gate
 
 Nerves firmware for EC100 controllers and the developer platform around it. The
-same firmware runs on real gateways and in disposable QEMU devices. Applications
-use the typed [Nerves Gate SDK](sdk/README.md).
+same application runs on real gateways and in disposable QEMU devices, with
+board-specific firmware builds. Applications use the typed
+[Nerves Gate SDK](sdk/README.md).
 
 ## Quick start
 
@@ -48,6 +49,7 @@ mix test.qemu --only sdk --device gateway_a  # against your running mix dev
 | `systems/` | EC100 and QEMU Nerves systems |
 
 Read [development](docs/development.md), [architecture](docs/architecture.md),
+the [architecture review and recommendations](docs/architecture-review.md),
 [CI](docs/ci.md), [releases](docs/releases.md) and the [changelog](CHANGELOG.md).
 
 ## Device documentation

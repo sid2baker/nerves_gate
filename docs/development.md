@@ -69,10 +69,15 @@ networking changes. `_build/qemu-dev/session.lock` is held with flock until
 cleanup finishes: never delete it to bypass ownership.
 
 Device builds and user apps run in separate, supervised OS processes. Repository
-host checks for `sdk/` and `firmware/` run in-VM through `Mix.Project.in_project/4`,
-never with a device target. Shared dependencies are locked identically in the root
-and firmware; update them deliberately with `mix deps.update` and keep
-`--check-locked`.
+host checks for `sdk/` and `firmware/` run in-VM through `Mix.Project.in_project/4`;
+only dependency fetching and Nerves artifact initialization may enter a device
+target in that VM, never target application compilation. The helper restores
+selected Mix/compiler/configuration state, not the entire VM. Root configuration
+is merged on return; unrelated settings can remain without their services running.
+See the [project and session map](architecture.md).
+
+Shared dependencies are locked identically in the root and firmware; update them
+deliberately with `mix deps.update` and keep `--check-locked`.
 
 ## Scenarios
 
