@@ -63,36 +63,87 @@ the normal SSH update above; that also works over USB networking.
    enter MASKROM according to the board instructions. Follow the watchdog-jumper
    instructions and keep stable power connected. Disconnect other Rockchip USB
    devices. The FTDI UART adapter is a console, not the flashing connection.
-3. Choose the image and click **Load RAM transport and review**. This is an
-   explicit device operation: it checks exactly one matching RK3506 controller,
-   verifies/snapshots the image and boot files, loads the transport into RAM,
-   reads eMMC capacity and checks disk space. It does not write eMMC.
-4. Review the USB location, image hash/version, capacity and backup directory.
-   The disk budget conservatively reserves three times eMMC capacity plus the
-   firmware size and 256 MiB for backup, staging and readbacks. A typical 4 GB
-   board needs roughly 12 GB free. Space is checked again before installation.
-5. Check the physical-EC100 acknowledgement and type the exact displayed
-   `ERASE EC100 <USB location>` phrase. Click **Back up, erase and provision EC100**.
-   The existing `ec100.flash` engine stages/validates the factory layout, completes
-   and hashes the full eMMC user-area backup, then writes and reads back every
-   region. Backup cannot be disabled in the UI. Boot0/boot1 are not written.
-6. The EC100 resets only after all readback checks pass. The global operation
-   panel shows progress across pages. Keep `mix dev`, USB and power connected
-   until completion. Backups, their checksum and readbacks remain under
-   `ec100-backups/`, including after failure. Copy them somewhere safe.
+3. Choose the image and backup mode, then click **Load RAM transport and review**.
+   A full eMMC backup is enabled by default. **Skip full backup** explicitly opts
+   out: this run will not preserve the previous firmware/data. Keep any original
+   backup safe. Review checks exactly one matching RK3506 controller, snapshots
+   the image and boot files, loads the transport into RAM, reads eMMC capacity and
+   checks disk space. It does not write eMMC.
+4. Review the USB location, image hash/version, capacity, backup mode and artifact
+   directory. The conservative disk budget is three times eMMC capacity with backup,
+   or twice without, plus firmware size and 256 MiB for staging/readbacks. A typical
+   4 GB board needs roughly 12 GB or 8 GB free respectively. Space is checked again
+   before installation. This selection is fixed by the review, not confirmation fields.
+5. Check the physical-EC100 acknowledgement and type the exact displayed phrase:
+   `ERASE EC100 <USB location>`, or `ERASE EC100 <USB location> WITHOUT BACKUP` when
+   skipping. Confirm provisioning. The shared `ec100.flash` engine stages/validates
+   the factory layout, completes and hashes the full backup if enabled, then writes
+   and reads back every region. Skipping backup never disables readback verification.
+   Boot0/boot1 are not written.
+6. The EC100 resets only after all readback checks pass. The workbench then waits
+   up to three minutes for the reviewed USB port to return with USB Ethernet and
+   DHCP, and reads the gateway's existing Settings page. Matching firmware, target
+   and runtime information appear in the operation panel and Devices directory,
+   with links to open the gateway or its device information. Keep `mix dev`, USB and
+   power connected until completion. Backups (when enabled), checksums and readbacks
+   remain under `ec100-backups/`, including after failure. Copy them somewhere safe.
 
 The USB VID/PID identifies the controller, **not a verified EC100 serial number**.
 The review is bound to the USB location and capacity, but cannot distinguish a
 replacement board at the same location. Never unplug/swap devices or run another
 flasher during the operation. The backend rechecks location and capacity before
-installation and location before every write/reset. The review expires after ten
-minutes, is invalidated by another operation, and is consumed once before flashing.
+installation and location before every write/reset. A working RK3506 RAM transport
+may still be labelled `Maskrom` by `rkdeveloptool ld`; the label alone does not
+prove readiness or failure. The backend verifies one matching controller at the
+reviewed location before and after a successful read-only flash-info query, and
+requires unchanged capacity before every write/reset. An actual ROM-only device
+that cannot answer flash-info is rejected. No download or write is retried.
+The review expires after ten minutes, is invalidated by another operation, and is
+consumed once before flashing.
 After expiry, cancellation or failure, re-enter MASKROM before reviewing again.
+
+USB reconnection is a read-only Linux-host operation. Review captures the full
+sysfs USB topology; after reset, only an active, non-overlapping /30 Ethernet link
+on that exact port is eligible. The host checks a direct, gateway-free kernel
+route and binds HTTP to the USB source address; it does not choose a LAN mDNS
+advertisement, change DHCP/routes/VPN, send credentials or accept SSH host keys.
+The workstation must already accept DHCP on the USB interface. Firmware must
+report the reviewed version and `ec100` target. Only firmware, target and runtime
+text is retained; private HTML, session tokens and key listings are discarded.
+This is a timestamped USB HTTP observation, not authenticated SSH identity or a
+persistent live connection. If topology cannot be tracked, the review warns that
+manual connection will be needed. A reconnect timeout or worker failure after
+verified reset is shown separately from the successful flash; it never replays a
+write/reset. Operations already in flight are not retroactively changed.
+
+A failed review removes its private temporary artifacts. Never replay a command
+using an old `_build/factory-reviews/` path. The UI reports RAM transport loading
+as a progress step rather than a reusable shell command, verifies the staged
+loader immediately before download, and displays failures as alerts.
+`Creating Comm Object failed` means the loader opened but USB open/claim failed;
+`rkdeveloptool ld` can list a device without permission to download to it. Check
+udev read/write access or explicitly select the form's noninteractive sudo option
+with appropriate workbench-process authorization, and close competing flashers.
+The UI never changes USB permissions, escalates privileges or retries a download
+automatically. `Opening loader failed` instead means rkdeveloptool could not read
+or parse the loader; inspect the selected boot artifacts and tool installation.
+
+Firmware/USB subprocesses use MuonTrap's containment wrapper with bounded
+execution and a 64 MiB output window, read without stdin acknowledgements. This
+avoids MuonTrap 1.x's short-command EPIPE acknowledgement race. Timeout, output
+overflow or lost exit status never count as success and never replay a command.
+Cancellation closes the wrapper's port so its owned command is terminated.
+Worker failures report a fixed exit category without dumping private arguments;
+the confirmed factory operation keeps its backup directory visible even if the
+worker dies.
 
 Factory provisioning is not power-loss atomic. An interrupted command has an
 uncertain outcome: inspect the device and preserve backups; there are no automatic
-write retries. Backup completion is checked before the first write, but a backup
-is not a guarantee that interrupted provisioning can be recovered automatically.
+write retries. Keep the original pre-provisioning backup: a backup from a later
+attempt may already contain partially written firmware. When enabled, backup
+completion is checked before the first write, but a backup is not a guarantee
+that interrupted provisioning can be recovered automatically. Without a full
+backup, readbacks cannot restore the previous contents.
 The equivalent terminal workflow remains `MIX_TARGET=ec100 mix ec100.flash` from
 `firmware/`; the UI calls its shared staging/backup/readback functions, not the
 interactive Mix task. No system artifact rebuild is needed for this host feature.

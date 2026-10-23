@@ -91,9 +91,16 @@ defmodule DevWeb.PhysicalDeviceLive do
         </.page_header>
         <div class="ui-actions">
           <.device_kind kind={:physical} /><.status>
-            {if @device[:identity],
-              do: "Identity read over verified SSH · not a live connection",
-              else: "Unverified identity · device not queried"}
+            {cond do
+              @device[:identity] ->
+                "Identity read over verified SSH · not a live connection"
+
+              @device[:usb_info] ->
+                "Information read over direct USB HTTP · not authenticated SSH identity"
+
+              true ->
+                "Unverified identity · device not queried"
+            end}
           </.status>
         </div>
         <nav class="dev-filters" aria-label="Device sections">
@@ -108,7 +115,17 @@ defmodule DevWeb.PhysicalDeviceLive do
           <.setting_row label="Target">{@device.target || "Not read yet"}</.setting_row>
           <.setting_row label="Running firmware">{@device.version || "Not read yet"}</.setting_row>
           <.setting_row label="Address source">
-            {if @device.source == :manual, do: "Manually added", else: "LAN mDNS"}
+            {case @device.source do
+              :manual -> "Manually added"
+              :usb -> "Reviewed USB port after factory provisioning"
+              _ -> "LAN mDNS"
+            end}
+          </.setting_row>
+          <.setting_row :if={@device[:usb_info]} label="USB runtime">
+            {@device.usb_info.runtime}
+          </.setting_row>
+          <.setting_row :if={@device[:usb_info]} label="USB information read at">
+            {@device.usb_info.read_at}
           </.setting_row>
           <.setting_row :if={@device[:identity]} label="Serial">
             {@device.identity.values["serial"] || "Not reported"}

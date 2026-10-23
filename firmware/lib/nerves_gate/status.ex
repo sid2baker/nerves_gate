@@ -3,6 +3,7 @@ defmodule NervesGate.Status do
   alias NervesGate.{Buses, Config, Equipment, Indicators, Network, Remote}
   alias NervesGate.Equipment.Subnet
   alias NervesGate.Error
+  alias NervesGate.Network.Cellular
   alias NervesGate.Observations.Network, as: NetworkObservation
   alias NervesGate.Remote.Sharing
 
@@ -19,11 +20,12 @@ defmodule NervesGate.Status do
     cellular = cellular_supported?(status)
 
     %{
-      version: 6,
+      version: 7,
       system: system,
       backend: %{available: true, error: nil},
       network: network(status),
       connections: connections(status),
+      cellular: Cellular.view(status),
       capabilities: %{
         ethernet: true,
         mobile: cellular,
@@ -84,6 +86,16 @@ defmodule NervesGate.Status do
       "network.propose" => action("Try settings", ["network"], lan_available(status)),
       "network.confirm" => action("Keep settings", ["trial_id"], confirm),
       "network.cancel" => action("Restore saved settings", ["trial_id"], trial),
+      "cellular.refresh" => action("Refresh cellular status", [], cellular_available(status)),
+      "cellular.unlock" =>
+        action("Unlock SIM", ["pin"], cellular_available(status, :pin_required)),
+      "cellular.change_pin" =>
+        action("Change SIM PIN", ["current_pin", "new_pin"], cellular_available(status, :ready)),
+      "cellular.set_pin_lock" =>
+        action("Set SIM PIN protection", ["enabled", "pin"], cellular_available(status, :ready)),
+      "cellular.save_pin" =>
+        action("Verify and save SIM PIN", ["pin"], cellular_available(status, :ready)),
+      "cellular.forget_pin" => action("Forget saved PIN", [], cellular_forget_available(status)),
       "remote.connect" => action("Connect Tailscale", ["hostname"], remote_ready),
       "remote.configure" => action("Save device name", ["hostname"], remote_ready),
       "remote.disconnect" => action("Disconnect Tailscale", [], remote_ready),
@@ -110,6 +122,18 @@ defmodule NervesGate.Status do
       "ssh.remove_key" => action("Remove SSH key", ["fingerprint"], ssh_ready),
       "identify" => action("Identify gateway", [], identify_available(indicators))
     }
+  end
+
+  defp cellular_available(nil), do: {:error, :unavailable}
+  defp cellular_available(status), do: Cellular.available(status)
+
+  defp cellular_forget_available(nil), do: {:error, :unavailable}
+  defp cellular_forget_available(status), do: Cellular.available(status, :forget_pin)
+
+  defp cellular_available(status, sim) do
+    with :ok <- cellular_available(status) do
+      if Cellular.view(status).sim == sim, do: :ok, else: {:error, :cellular_sim_changed}
+    end
   end
 
   defp ssh_available(%{available: true}), do: :ok

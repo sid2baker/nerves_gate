@@ -28,7 +28,7 @@ defmodule NervesGate.Config do
     cond do
       not valid_apn?(apn) ->
         {:error,
-         "Enter the APN supplied by your mobile operator (up to 100 letters, digits, dots or hyphens)."}
+         "Leave APN blank for the network default, or enter the operator's APN (up to 100 letters, digits, dots or hyphens)."}
 
       network["mode"] == "unconfigured" ->
         {:error, "Choose your Ethernet port arrangement before enabling cellular."}
@@ -48,6 +48,8 @@ defmodule NervesGate.Config do
     do: {:error, "Choose Ethernet, 4G, or Ethernet with 4G backup."}
 
   defp validate_internet(_), do: :ok
+
+  defp valid_apn?(""), do: true
 
   defp valid_apn?(apn),
     do: is_binary(apn) and Regex.match?(~r/\A[a-zA-Z0-9][a-zA-Z0-9.-]{0,99}\z/, apn)

@@ -23,7 +23,8 @@ applications run in the same BEAM and use only the SDK.
 | `sim/lib/nerves_gate_sim/qemu_tests.ex` | Shared runner and device reservations |
 | `sim/lib/mix/tasks/`, `sim/priv/qemu/` | Standalone prerequisite checks and simulator-node scripts |
 | `priv/templates/`, `Dev.Applications` | Independent SDK-only app scaffolding, opened directories and isolated builds |
-| `Dev.Discovery` | Bounded local mDNS browse and unverified known-address entries; no device control |
+| `Dev.Discovery` | Bounded local mDNS browse, known-address entries and timestamped USB information; no device control |
+| `Dev.FactoryConnection` | Bounded post-provisioning USB topology/route checks and read-only gateway information |
 | `systems/` | EC100 and QEMU Nerves systems |
 
 ## Data flow
@@ -47,7 +48,7 @@ snapshot. Commands return their result without a status read. See the
 | --- | --- |
 | VintageNet | Interfaces, saved network settings, connectivity, DNS and routes |
 | Tailscale | Identity, preferences, enrollment and VPN routes |
-| Network | Admission, trials, USB auto-save, deadlines and rollback |
+| Network | Admission, trials, USB auto-save, SIM commissioning/private PIN storage, deadlines and rollback |
 | Remote | One bounded daemon worker and sanitized operation metadata |
 | Equipment | Neighbors, scoped labels and Network-owned scan observations |
 | Indicators | LED/button policy, identification and recovery |
@@ -70,8 +71,9 @@ terminates the BEAM and erlinit reboots the device. An orderly application stop
 remains possible. Dependency application start modes are unchanged.
 
 Workers are linked and bounded; owners stop and join them before restoration or
-new work. Network replies after hardware completion; Remote acknowledges acceptance
-and reports completion in status. A caller timeout means **unknown outcome**, not
+new work. Network trials, scans and sharing reply after hardware completion;
+cellular commissioning and Remote acknowledge acceptance and report completion
+in status. A caller timeout means **unknown outcome**, not
 cancellation or permission to replay. The facade sanitizes process-call failures;
 programming exceptions remain visible.
 

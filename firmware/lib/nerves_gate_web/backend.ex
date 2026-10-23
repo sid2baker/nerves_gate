@@ -31,6 +31,31 @@ defmodule NervesGateWeb.Backend do
   def distribution_cookie, do: call(:distribution_cookie, [])
   def network_confirm(id), do: call(:network_confirm, [id])
   def network_cancel(id), do: call(:network_cancel, [id])
+  def cellular_refresh, do: call(:cellular_refresh, [])
+
+  def cellular_unlock(pin, access), do: credential_call(:cellular_unlock, [pin], access)
+  def cellular_save_pin(pin, access), do: credential_call(:cellular_save_pin, [pin], access)
+  def cellular_forget_pin(access), do: credential_call(:cellular_forget_pin, [], access)
+
+  def cellular_change_pin(current, new, access),
+    do: credential_call(:cellular_change_pin, [current, new], access)
+
+  def cellular_set_pin_lock(enabled, pin, access),
+    do: credential_call(:cellular_set_pin_lock, [enabled, pin], access)
+
+  @doc false
+  def cellular_credentials_allowed?(observed, access, backend \\ configured()),
+    do: backend == :local and NervesGate.Network.Access.usb?(observed, access)
+
+  defp credential_call(function, args, access) do
+    network = if configured() == :local, do: NervesGate.status_input(:network)
+    observed = network && network.observed
+
+    if cellular_credentials_allowed?(observed, access),
+      do: call(function, args, :local),
+      else: {:error, NervesGate.Error.from(:cellular_usb_required)}
+  end
+
   def remote_connect(name, opts \\ []), do: call(:remote_connect, [name, opts])
   def remote_configure(name, opts \\ []), do: call(:remote_configure, [name, opts])
   def remote_disconnect, do: call(:remote_disconnect, [])

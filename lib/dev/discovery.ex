@@ -6,6 +6,7 @@ defmodule Dev.Discovery do
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
   def refresh, do: GenServer.call(__MODULE__, :refresh)
   def add(address), do: GenServer.call(__MODULE__, {:add, address})
+  def record_usb(info), do: GenServer.call(__MODULE__, {:usb, info})
 
   def record_identity(address, identity),
     do: GenServer.call(__MODULE__, {:identity, address, identity})
@@ -39,6 +40,28 @@ defmodule Dev.Discovery do
       error ->
         {:reply, error, state}
     end
+  end
+
+  def handle_call({:usb, info}, _, state) do
+    {:ok, device} = manual(info.address)
+    public = Map.take(info, [:version, :target, :runtime, :read_at, :interface])
+
+    device =
+      Map.merge(device, %{
+        name: "EC100 · USB",
+        source: :usb,
+        version: public.version,
+        target: public.target,
+        usb_info: public
+      })
+
+    manual = Map.put(state.manual, device.address, device)
+    # A fresh factory boot invalidates an older SSH observation at this address.
+    identities = Map.delete(state.identities, device.address)
+    devices = merge(state.view.devices, manual) |> enrich(identities)
+
+    {:reply, :ok,
+     %{state | manual: manual, identities: identities, view: %{state.view | devices: devices}}}
   end
 
   def handle_call({:identity, address, identity}, _, state) do
@@ -164,7 +187,15 @@ defmodule Dev.Discovery do
     end)
   end
 
-  defp merge(devices, manual),
-    do:
-      (devices ++ Map.values(manual)) |> Enum.uniq_by(& &1.address) |> Enum.sort_by(& &1.address)
+  defp merge(devices, manual) do
+    devices =
+      Enum.map(devices, fn device ->
+        case manual[device.address] do
+          %{source: :usb} = usb -> usb
+          _ -> device
+        end
+      end)
+
+    (devices ++ Map.values(manual)) |> Enum.uniq_by(& &1.address) |> Enum.sort_by(& &1.address)
+  end
 end

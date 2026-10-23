@@ -184,6 +184,9 @@ defmodule NervesGateWeb.NetworkEditor do
           ),
         stale: assigns.base != assigns.projection.network.desired,
         pending: assigns.projection.network.pending,
+        cellular_available:
+          assigns.projection.capabilities.mobile and
+            match?(%{cellular: %{present: true}}, assigns.projection.network.observed),
         equipment_reason:
           NetworkForm.equipment_reason(assigns.projection.network.desired, assigns.editor)
       )
@@ -299,26 +302,45 @@ defmodule NervesGateWeb.NetworkEditor do
                       value="cellular"
                       title="4G modem"
                       description="Use cellular only; keep equipment separate."
+                      disabled={!@cellular_available}
                     />
                     <:option
                       value="backup"
                       title="Ethernet with 4G backup"
                       description="Prefer Ethernet; use 4G when Ethernet has no Internet."
+                      disabled={!@cellular_available}
                     />
                   </.choice_group>
-                  <.notice :if={!@projection.capabilities.mobile}>
-                    This firmware has no qualified cellular setup. Identify the modem and configure its driver and dedicated interface before enabling 4G.
+                  <.notice :if={!@cellular_available}>
+                    <%= if @projection.capabilities.mobile do %>
+                      No 4G modem detected. 4G options are unavailable; Ethernet still works.
+                    <% else %>
+                      4G is not supported on this device. Use Ethernet for Internet.
+                    <% end %>
                   </.notice>
                   <div :if={@form.params["internet_mode"] in ["cellular", "backup"]}>
-                    <.field
-                      field={@form[:cellular_apn]}
-                      label="Cellular APN"
-                      help="Use the APN supplied by your mobile operator."
-                      required
-                      autocomplete="off"
-                    />
                     <p class="ui-help">
-                      SIM must already be unlocked. PIN and account-password setup are not supported yet.
+                      Try the mobile network's default APN first. If 4G does not connect, enter your operator's APN under Advanced.
+                    </p>
+                    <details
+                      id="cellular-advanced"
+                      open={@form.params["cellular_apn"] not in [nil, ""]}
+                    >
+                      <summary>Advanced cellular settings</summary>
+                      <.field
+                        field={@form[:cellular_apn]}
+                        label="APN override (optional)"
+                        help="Leave blank to request the network default. Only enter an APN if your operator requires one, for example for a business or IoT SIM."
+                        placeholder="Network default"
+                        disabled={!@cellular_available}
+                        autocomplete="off"
+                      />
+                      <p class="ui-help">
+                        Find a required APN in your operator's mobile-data setup instructions. APN account usernames and passwords are not supported.
+                      </p>
+                    </details>
+                    <p class="ui-help">
+                      After saving, check Cellular below. If the SIM needs a PIN, use the device's own UI over direct USB to unlock it.
                     </p>
                     <p :if={@form.params["internet_mode"] == "backup"} class="ui-help">
                       4G stays connected on standby. Connectivity checks can use mobile data. Existing connections may briefly interrupt during a switch.
@@ -422,7 +444,7 @@ defmodule NervesGateWeb.NetworkEditor do
                 disabled={
                   @stale or !@projection.actions["network.propose"].enabled or
                     (@editor == :internet and @form.params["internet_mode"] != "ethernet" and
-                       !@projection.capabilities.mobile)
+                       !@cellular_available)
                 }
                 phx-disable-with="Applying…"
               >{if @initial and @editor == :internet, do: "Finish setup", else: "Apply changes"}</.button>

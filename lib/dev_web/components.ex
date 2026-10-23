@@ -17,12 +17,59 @@ defmodule DevWeb.Components do
   attr(:id, :string, default: "workbench-operation")
 
   def operation(assigns) do
+    assigns =
+      assign(assigns,
+        connection: Map.get(assigns.operation, :connection),
+        recovery: Map.get(assigns.operation, :recovery)
+      )
+
     ~H"""
     <div id={@id} class="ui-stack">
       <p role="status">{operation_label(@operation.kind)} · {@operation.status}</p>
       <div :if={@operation.status == :running} class="ui-progress"></div>
+      <.notice :if={@operation.result && @operation.status == :failed} tone="warning" role="alert">
+        {@operation.result}
+      </.notice>
+      <p :if={@recovery} class="dev-result">
+        Preserve recovery files: <code>{@recovery.backup}</code>
+      </p>
+      <.notice :if={@recovery && Map.get(@recovery, :backup_enabled, true) == false} tone="warning">
+        Full eMMC backup was explicitly skipped. Readbacks are verification artifacts, not a backup of the previous firmware/data.
+      </.notice>
       <code :if={@operation.output} class="bench-output">{@operation.output}</code>
-      <p :if={@operation.result} class="dev-result">{@operation.result}</p>
+      <p :if={@operation.result && @operation.status != :failed} class="dev-result">
+        {@operation.result}
+      </p>
+      <p :if={@connection && @connection.status == :waiting}>
+        Flash verified · waiting for USB reboot and device information…
+      </p>
+      <.notice
+        :if={@connection && @connection.status == :unavailable}
+        tone="warning"
+        id="factory-reconnect-warning"
+      >
+        {@connection.message}
+      </.notice>
+      <div
+        :if={@connection && @connection.status == :connected}
+        id="factory-connected"
+        class="ui-stack"
+      >
+        <strong>Connected over USB · device information read</strong>
+        <.setting_row label="Address">
+          {@connection.device.address} · {@connection.device.interface}
+        </.setting_row>
+        <.setting_row label="Running firmware">{@connection.device.version}</.setting_row>
+        <.setting_row label="Target">{@connection.device.target}</.setting_row>
+        <.setting_row label="Runtime">{@connection.device.runtime}</.setting_row>
+        <p class="ui-help">
+          Read at {@connection.device.read_at}. Direct USB HTTP observation, not authenticated SSH identity or a persistent live connection.
+        </p>
+        <div class="ui-actions">
+          <.button href={@connection.device.url} target="_blank" rel="noreferrer">Open gateway</.button>
+          <.link navigate={Dev.Devices.physical_path(@connection.device.address)} class="ui-text-link">View device information</.link>
+        </div>
+      </div>
     </div>
     """
   end

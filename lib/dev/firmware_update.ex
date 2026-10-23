@@ -119,13 +119,16 @@ defmodule Dev.FirmwareUpdate do
   def cleanup(plan), do: File.rm_rf!(plan.dir)
 
   def image!(path) do
-    case MuonTrap.cmd("fwup", ["--verify", "-i", path], timeout: 15_000, stderr_to_stdout: true) do
+    case Dev.FirmwareCommand.run("fwup", ["--verify", "-i", path],
+           timeout: 15_000,
+           stderr_to_stdout: true
+         ) do
       {_, 0} -> :ok
       _ -> raise "Invalid firmware archive"
     end
 
     {metadata, 0} =
-      MuonTrap.cmd("fwup", ["-m", "-i", path], timeout: 15_000, stderr_to_stdout: true)
+      Dev.FirmwareCommand.run("fwup", ["-m", "-i", path], timeout: 15_000, stderr_to_stdout: true)
 
     metadata(metadata)
   end

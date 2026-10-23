@@ -18,11 +18,23 @@ defmodule NervesGate.Network.Policy do
   def matching(%{trial: %{id: id}}, id), do: :ok
   def matching(_, _), do: {:error, :no_matching_trial}
 
-  def supported(observed, network) do
-    if Config.cellular?(network) and
-         not (observed && Map.get(observed, :cellular_supported, false)),
-       do: {:error, :cellular_unsupported},
-       else: :ok
+  def supported(observed, network, current \\ nil) do
+    cond do
+      not Config.cellular?(network) ->
+        :ok
+
+      not match?(%{cellular_supported: true}, observed) ->
+        {:error, :cellular_unsupported}
+
+      Config.internet(network) == Config.internet(current) ->
+        :ok
+
+      not match?(%{cellular: %{present: true}}, observed) ->
+        {:error, :cellular_missing}
+
+      true ->
+        :ok
+    end
   end
 
   defp cellular_ready?(observed, network) do

@@ -13,6 +13,7 @@ defmodule Dev.FactoryProvisioning do
       do: raise(ArgumentError, "Choose direct USB access or noninteractive sudo")
 
     sudo = params["sudo"] == "true"
+    backup? = backup_enabled!(params["backup"])
     executable!("rkdeveloptool")
     if sudo, do: executable!("sudo")
     executable!("fwup")
@@ -40,16 +41,16 @@ defmodule Dev.FactoryProvisioning do
       # RAM loader reports capacity, enforce the full device-specific budget.
       space!(
         free_space!(Path.dirname(output)),
-        required_space(2_261_026, File.stat!(snapshot).size)
+        required_space(2_261_026, File.stat!(snapshot).size, backup?)
       )
 
       run = runner(sudo, report)
       location = device!(run.(["ld"]), "Maskrom")
+      usb_path = Dev.FactoryConnection.usb_path(location)
       report.("Loading temporary USB transport into RAM only; no eMMC writes")
-      run.(["db", Path.join(dir, "ec100-maskrom-loader.bin")])
-      sectors = probe!(run, 10)
-      device!(run.(["ld"]), "Loader", location)
-      required = required_space(sectors, File.stat!(snapshot).size)
+      run.(["db", loader!(dir, hashes["ec100-maskrom-loader.bin"])])
+      sectors = probe!(run, location, 10)
+      required = required_space(sectors, File.stat!(snapshot).size, backup?)
       available = free_space!(Path.dirname(output))
       space!(available, required)
 
@@ -58,7 +59,7 @@ defmodule Dev.FactoryProvisioning do
           kind: :factory,
           token: random(),
           location: location,
-          confirmation: "ERASE EC100 #{location}",
+          confirmation: erase_confirmation(location, backup?),
           firmware: original,
           version: image["meta-version"],
           sha256: hashes["image.fw"],
@@ -66,10 +67,13 @@ defmodule Dev.FactoryProvisioning do
           required_space: required,
           available_space: available,
           backup: output,
+          backup_enabled: backup?,
+          usb_tracking: not is_nil(usb_path),
           sudo: sudo
         },
         dir: dir,
         snapshot: snapshot,
+        usb_path: usb_path,
         hashes: hashes,
         sectors: sectors,
         expires: System.monotonic_time(:millisecond) + @ttl
@@ -111,28 +115,28 @@ defmodule Dev.FactoryProvisioning do
 
       space!(free_space!(Path.dirname(plan.public.backup)), plan.public.required_space)
       run = runner(plan.public.sudo, report)
-      device!(run.(["ld"]), "Loader", plan.public.location)
-
-      unless capacity!(run.(["rfi"])) == plan.sectors,
-        do: raise("Device capacity changed; review again")
+      transport!(run, plan.public.location, plan.sectors)
 
       flash = engine!()
       report.("Preparing the factory image; no device writes yet")
       files = apply(flash, :prepare!, [plan.snapshot, plan.dir, plan.sectors, plan.public.backup])
       File.chmod!(plan.public.backup, 0o700)
-      # The shared engine completes and hashes the full backup before its first
-      # write, then reads back every written region. Never offer --no-backup.
-      report.("Backing up the entire eMMC user area before any writes")
+      backup? = Map.get(plan.public, :backup_enabled, true)
+
+      report.(
+        if backup?,
+          do: "Backing up the entire eMMC user area before any writes",
+          else: "Full backup explicitly skipped; every write will still be read back and verified"
+      )
 
       guarded_run = fn args ->
-        if hd(args) in ["wl", "rd"], do: device!(run.(["ld"]), "Loader", plan.public.location)
+        if hd(args) in ["wl", "rd"],
+          do: transport!(run, plan.public.location, plan.sectors)
+
         run.(args)
       end
 
-      device!(run.(["ld"]), "Loader", plan.public.location)
-
-      unless capacity!(run.(["rfi"])) == plan.sectors,
-        do: raise("Device capacity changed; no writes performed")
+      transport!(run, plan.public.location, plan.sectors)
 
       space!(free_space!(Path.dirname(plan.public.backup)), plan.public.required_space)
 
@@ -141,12 +145,14 @@ defmodule Dev.FactoryProvisioning do
         files,
         plan.sectors,
         plan.public.backup,
-        [backup: true]
+        [backup: backup?]
       ])
 
       report.("Every written region verified. Resetting the EC100")
       guarded_run.(["rd"])
-      "Factory provisioning verified; device reset. Backup/readbacks: #{plan.public.backup}"
+      backup_notice = if backup?, do: "Full backup saved.", else: "Full backup skipped."
+
+      "Factory provisioning verified; device reset. #{backup_notice} Artifacts/readbacks: #{plan.public.backup}"
     rescue
       error ->
         raise "#{Exception.message(error)}. Inspect the device before retrying; keep #{plan.public.backup}"
@@ -157,6 +163,56 @@ defmodule Dev.FactoryProvisioning do
 
   def cleanup(nil), do: :ok
   def cleanup(plan), do: File.rm_rf!(plan.dir)
+
+  @doc false
+  def loader!(dir, expected_hash) do
+    path = Path.join(dir, "ec100-maskrom-loader.bin")
+
+    with {:ok, %{type: :regular, size: size}} when size > 0 <- File.stat(path),
+         {:ok, bytes} <- File.read(path),
+         true <- Base.encode16(:crypto.hash(:sha256, bytes), case: :lower) == expected_hash do
+      path
+    else
+      _ ->
+        raise "Reviewed RAM loader is missing, unreadable or changed. No USB download was attempted. Start a new factory review."
+    end
+  end
+
+  @doc false
+  def command_label(["db", _]),
+    do: "Loading the verified review's RAM transport (no eMMC writes)"
+
+  def command_label(args), do: "rkdeveloptool " <> Enum.join(args, " ")
+
+  @doc false
+  def command_error(args, output, code, sudo) do
+    output = output |> String.replace(~r/\e\[[0-9;]*[A-Za-z]/, "") |> String.trim()
+
+    detail =
+      cond do
+        hd(args) == "db" and String.contains?(output, "Creating Comm Object failed") ->
+          "The RAM loader opened, but rkdeveloptool could not open or claim the EC100 USB connection. " <>
+            usb_access_help(sudo) <> " Listing a device with ld does not prove download access."
+
+        hd(args) == "db" and String.contains?(output, "Opening loader failed") ->
+          "rkdeveloptool could not read or parse the reviewed RAM loader. Check the selected EC100 boot artifacts and rkdeveloptool installation."
+
+        true ->
+          "USB command failed (#{code}): #{String.slice(output, 0, 500)}. " <>
+            usb_access_help(sudo)
+      end
+
+    detail <>
+      " No automatic retry. Inspect the device before starting a new review; do not replay temporary review paths."
+  end
+
+  defp usb_access_help(false),
+    do:
+      "Direct USB access requires read/write USB permissions. Configure udev access, or explicitly select Noninteractive sudo (-n) in the factory form. Another flasher may also be holding the USB interface."
+
+  defp usb_access_help(true),
+    do:
+      "Check that sudo -n is authorized for rkdeveloptool from the workbench process and that no other flasher holds the USB interface. The UI cannot prompt for a password."
 
   @doc false
   def compatible!(image) do
@@ -178,7 +234,7 @@ defmodule Dev.FactoryProvisioning do
                  ~r/Vid=0x2207,Pid=0x350f.*LocationID=([0-9a-f]+)\s+(Maskrom|Loader)\b/i,
                  row
                ) do
-            [_, location, ^mode] -> location
+            [_, location, actual] when mode == :transport or actual == mode -> location
             _ -> nil
           end
 
@@ -190,7 +246,7 @@ defmodule Dev.FactoryProvisioning do
       do:
         raise(
           ArgumentError,
-          "Connect exactly one RK3506 EC100 in #{mode} mode at the reviewed USB location"
+          "Connect exactly one RK3506 EC100#{if mode == :transport, do: "", else: " in #{mode} mode"} at the reviewed USB location"
         )
 
     location
@@ -210,8 +266,17 @@ defmodule Dev.FactoryProvisioning do
   end
 
   @doc false
-  def required_space(sectors, firmware_bytes),
-    do: sectors * 512 * 3 + firmware_bytes + 256 * 1024 * 1024
+  def backup_enabled!(value) when value in [nil, "true"], do: true
+  def backup_enabled!("false"), do: false
+  def backup_enabled!(_), do: raise(ArgumentError, "Choose whether to create a full eMMC backup")
+
+  @doc false
+  def erase_confirmation(location, true), do: "ERASE EC100 #{location}"
+  def erase_confirmation(location, false), do: "ERASE EC100 #{location} WITHOUT BACKUP"
+
+  @doc false
+  def required_space(sectors, firmware_bytes, backup? \\ true),
+    do: sectors * 512 * if(backup?, do: 3, else: 2) + firmware_bytes + 256 * 1024 * 1024
 
   @doc false
   def space!(available, required) do
@@ -219,32 +284,52 @@ defmodule Dev.FactoryProvisioning do
       do:
         raise(
           ArgumentError,
-          "Insufficient backup disk space: require #{required} bytes, available #{available} bytes"
+          "Insufficient factory disk space: require #{required} bytes, available #{available} bytes"
         )
 
     :ok
   end
 
-  defp probe!(run, attempts) do
-    capacity!(run.(["rfi"]))
+  # Some RK3506 RAM transports retain the Maskrom descriptor in ld. The
+  # read-only flash-info command, not that label, proves transport readiness.
+  # Bracket it with identity checks and pin capacity before every write/reset.
+  @doc false
+  def transport!(run, location, expected_sectors \\ nil) do
+    device!(run.(["ld"]), :transport, location)
+    sectors = capacity!(run.(["rfi"]))
+    device!(run.(["ld"]), :transport, location)
+
+    if expected_sectors != nil and sectors != expected_sectors,
+      do:
+        raise(
+          ArgumentError,
+          "Device capacity changed; no write or reset authorized. Review again"
+        )
+
+    sectors
+  end
+
+  defp probe!(run, location, attempts) do
+    transport!(run, location)
   rescue
-    error ->
+    # Only read-only readiness failures are retried. Identity/USB-location or
+    # capacity mismatch (ArgumentError) abort immediately.
+    error in RuntimeError ->
       if attempts <= 1, do: reraise(error, __STACKTRACE__)
       Process.sleep(1_000)
-      probe!(run, attempts - 1)
+      probe!(run, location, attempts - 1)
   end
 
   defp copy_boot_files!(images, dir) do
     hashes = File.read!(Path.join(images, "bootloader.sha256"))
 
     for name <- @boot_files do
-      source = Path.join(images, name)
-      expected = Dev.FirmwareUpdate.hash!(source) <> "  " <> name
+      destination = Path.join(dir, name)
+      File.cp!(Path.join(images, name), destination)
+      expected = Dev.FirmwareUpdate.hash!(destination) <> "  " <> name
 
       unless expected in String.split(hashes, "\n"),
         do: raise("Boot artifact checksum mismatch: #{name}")
-
-      File.cp!(source, Path.join(dir, name))
     end
 
     File.cp!(Path.join(images, "bootloader.sha256"), Path.join(dir, "bootloader.sha256"))
@@ -259,7 +344,7 @@ defmodule Dev.FactoryProvisioning do
     script = Path.join(Dev.root(), "priv/dev/factory_images.exs")
 
     {out, status} =
-      MuonTrap.cmd("elixir", ["-r", script, "-S", "mix", "dev.factory_images"],
+      Dev.FirmwareCommand.run("elixir", ["-r", script, "-S", "mix", "dev.factory_images"],
         cd: Path.join(Dev.root(), "firmware"),
         timeout: 60_000,
         stderr_to_stdout: true,
@@ -304,16 +389,16 @@ defmodule Dev.FactoryProvisioning do
     rk = executable!("rkdeveloptool")
 
     fn args ->
-      report.("rkdeveloptool " <> Enum.join(args, " "))
+      report.(command_label(args))
       {command, argv} = if sudo, do: {executable!("sudo"), ["-n", rk | args]}, else: {rk, args}
       timeout = if hd(args) in ["rl", "wl"], do: 1_800_000, else: 30_000
 
-      case MuonTrap.cmd(command, argv, timeout: timeout, stderr_to_stdout: true) do
+      case Dev.FirmwareCommand.run(command, argv, timeout: timeout, stderr_to_stdout: true) do
         {out, 0} ->
           out
 
         {out, code} ->
-          raise "USB command failed (#{code}): #{String.slice(out, 0, 500)}. No automatic retry; check USB permissions (or sudo -v in a terminal) and inspect the device"
+          raise command_error(args, out, code, sudo)
       end
     end
   end

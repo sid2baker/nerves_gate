@@ -4,6 +4,96 @@ defmodule Dev.FactoryProvisioningTest do
 
   @maskrom "DevNo=1 Vid=0x2207,Pid=0x350f,LocationID=101 Maskrom\n"
   @loader "DevNo=1 Vid=0x2207,Pid=0x350f,LocationID=101 Loader\n"
+  @flash_info "Flash Info:\n\tFlash Size: 7471104 Sectors\n"
+
+  test "working RAM transport may retain the Maskrom label; identity brackets flash-info" do
+    for listing <- [@maskrom, @loader] do
+      run = fn command ->
+        send(self(), {:command, command})
+
+        case command do
+          ["ld"] -> listing
+          ["rfi"] -> @flash_info
+        end
+      end
+
+      assert Factory.transport!(run, "101") == 7_471_104
+      assert_receive {:command, ["ld"]}
+      assert_receive {:command, ["rfi"]}
+      assert_receive {:command, ["ld"]}
+      refute_receive {:command, _}, 0
+      assert Factory.transport!(run, "101", 7_471_104) == 7_471_104
+      assert_receive {:command, ["ld"]}
+      assert_receive {:command, ["rfi"]}
+      assert_receive {:command, ["ld"]}
+    end
+  end
+
+  test "Maskrom label alone never proves transport readiness" do
+    for result <- ["", "Flash Size: 100 Sectors", "Flash Size: 4 GB", "Read Flash Info failed"] do
+      run = fn
+        ["ld"] -> @maskrom
+        ["rfi"] -> result
+      end
+
+      assert_raise RuntimeError, fn -> Factory.transport!(run, "101") end
+    end
+
+    run = fn
+      ["ld"] -> @maskrom
+      ["rfi"] -> raise "USB command failed"
+    end
+
+    assert_raise RuntimeError, ~r/USB command failed/, fn -> Factory.transport!(run, "101") end
+  end
+
+  test "transport refuses ambiguous, unsupported or relocated devices before querying capacity" do
+    for listing <- [
+          "",
+          @maskrom <> @loader,
+          String.replace(@maskrom, "350f", "350a"),
+          String.replace(@maskrom, "2207", "1234"),
+          String.replace(@maskrom, "101", "102"),
+          String.replace(@maskrom, "Maskrom", "Unknown")
+        ] do
+      run = fn
+        ["ld"] -> listing
+        command -> flunk("must not query or write an unverified device: #{inspect(command)}")
+      end
+
+      assert_raise ArgumentError, fn -> Factory.transport!(run, "101") end
+    end
+  end
+
+  test "device disappearing or moving during flash-info invalidates transport" do
+    for after_info <- ["", String.replace(@maskrom, "101", "102"), @maskrom <> @loader] do
+      run = fn
+        ["ld"] ->
+          receive do
+            :flash_info_read -> after_info
+          after
+            0 -> @maskrom
+          end
+
+        ["rfi"] ->
+          send(self(), :flash_info_read)
+          @flash_info
+      end
+
+      assert_raise ArgumentError, fn -> Factory.transport!(run, "101") end
+    end
+  end
+
+  test "successful flash-info with changed capacity does not authorize a write or reset" do
+    run = fn
+      ["ld"] -> @maskrom
+      ["rfi"] -> @flash_info
+    end
+
+    assert_raise ArgumentError, ~r/Device capacity changed; no write or reset authorized/, fn ->
+      Factory.transport!(run, "101", 7_471_105)
+    end
+  end
 
   test "only one matching controller, mode and reviewed USB location is admitted" do
     assert Factory.device!(@maskrom, "Maskrom") == "101"
@@ -31,9 +121,45 @@ defmodule Dev.FactoryProvisioningTest do
     assert required > 7_471_104 * 512 * 3
     assert Factory.space!(required, required) == :ok
 
-    assert_raise ArgumentError, ~r/Insufficient backup disk space/, fn ->
+    assert_raise ArgumentError, ~r/Insufficient factory disk space/, fn ->
       Factory.space!(required - 1, required)
     end
+  end
+
+  test "backup is enabled by default and can only be explicitly skipped" do
+    assert Factory.backup_enabled!(nil)
+    assert Factory.backup_enabled!("true")
+    refute Factory.backup_enabled!("false")
+
+    for value <- [false, true, "", "skip", [], %{}] do
+      assert_raise ArgumentError, fn -> Factory.backup_enabled!(value) end
+    end
+
+    sectors = 7_471_104
+    full = Factory.required_space(sectors, 50_000_000)
+    skipped = Factory.required_space(sectors, 50_000_000, false)
+    assert full - skipped == sectors * 512
+    assert skipped > sectors * 512 * 2
+    assert Factory.erase_confirmation("101", true) == "ERASE EC100 101"
+    assert Factory.erase_confirmation("101", false) == "ERASE EC100 101 WITHOUT BACKUP"
+  end
+
+  test "skipping backup is bound into the reviewed erase phrase" do
+    plan = %{
+      public: %{
+        kind: :factory,
+        token: "token",
+        backup_enabled: false,
+        confirmation: Factory.erase_confirmation("101", false)
+      },
+      expires: System.monotonic_time(:millisecond) + 60_000
+    }
+
+    assert_raise ArgumentError, ~r/exact erase confirmation/, fn ->
+      Factory.confirmation!(plan, "token", "ERASE EC100 101", "true")
+    end
+
+    assert Factory.confirmation!(plan, "token", "ERASE EC100 101 WITHOUT BACKUP", "true") == :ok
   end
 
   test "firmware must match the physical EC100 product and architecture" do
@@ -85,6 +211,82 @@ defmodule Dev.FactoryProvisioningTest do
         "true"
       )
     end
+  end
+
+  @tag :tmp_dir
+  test "RAM download only receives an existing, readable, hash-verified staged loader", %{
+    tmp_dir: dir
+  } do
+    path = Path.join(dir, "ec100-maskrom-loader.bin")
+    bytes = "reviewed loader"
+    hash = Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
+
+    assert_raise RuntimeError, ~r/No USB download was attempted/, fn ->
+      Factory.loader!(dir, hash)
+    end
+
+    File.write!(path, bytes)
+    File.chmod!(path, 0o400)
+    assert Factory.loader!(dir, hash) == path
+
+    File.chmod!(path, 0o600)
+
+    for contents <- ["", "different loader"] do
+      File.write!(path, contents)
+
+      assert_raise RuntimeError, ~r/missing, unreadable or changed/, fn ->
+        Factory.loader!(dir, hash)
+      end
+    end
+
+    File.rm!(path)
+    File.mkdir!(path)
+
+    assert_raise RuntimeError, ~r/No USB download was attempted/, fn ->
+      Factory.loader!(dir, hash)
+    end
+  end
+
+  test "RAM transport progress does not expose an expiring command for manual replay" do
+    label = Factory.command_label(["db", "/temporary/factory-reviews/review/loader.bin"])
+    assert label =~ "RAM transport"
+    assert label =~ "no eMMC writes"
+    refute label =~ "/temporary"
+    refute label =~ "rkdeveloptool db"
+    assert Factory.command_label(["rfi"]) == "rkdeveloptool rfi"
+  end
+
+  test "USB-open failure is distinct from loader-open failure and explains explicit access choices" do
+    output = "\e[30;41mCreating Comm Object failed!\e[0m\r\n"
+    error = Factory.command_error(["db", "/temporary/loader.bin"], output, 1, false)
+    assert error =~ "RAM loader opened"
+    assert error =~ "could not open or claim"
+    assert error =~ "udev"
+    assert error =~ "explicitly select Noninteractive sudo"
+    assert error =~ "ld does not prove download access"
+    assert error =~ "No automatic retry"
+    refute error =~ "\e["
+    refute error =~ "/temporary"
+
+    sudo_error = Factory.command_error(["db", "/temporary/loader.bin"], output, 1, true)
+    assert sudo_error =~ "sudo -n is authorized"
+    assert sudo_error =~ "workbench process"
+    refute sudo_error =~ "explicitly select"
+
+    file_error =
+      Factory.command_error(["db", "/temporary/loader.bin"], "Opening loader failed", 1, false)
+
+    assert file_error =~ "could not read or parse"
+    refute file_error =~ "RAM loader opened"
+    refute file_error =~ "udev"
+  end
+
+  test "other USB errors remain bounded and never authorize automatic retry" do
+    error = Factory.command_error(["wl", "0", "image"], String.duplicate("x", 1000), 5, false)
+    assert error =~ "USB command failed (5)"
+    refute error =~ String.duplicate("x", 501)
+    assert error =~ "No automatic retry"
+    assert error =~ "Inspect the device"
   end
 
   @tag :tmp_dir

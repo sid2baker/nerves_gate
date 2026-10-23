@@ -233,6 +233,7 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 .ui-choices { display: flex; flex-wrap: wrap; gap: 10px; }
 .ui-choice { display: flex; align-items: center; gap: 10px; cursor: pointer; border: 1px solid var(--ui-control-line); border-radius: 7px; padding: 12px 14px; flex: 1 1 145px; min-width: 0; background: var(--ui-surface); }
 .ui-choice:has(input:checked) { border-color: var(--ui-accent); background: var(--ui-accent-soft); }
+.ui-choice:has(input:disabled) { opacity: .5; cursor: not-allowed; }
 .ui-choice > input { flex: none; width: 16px; height: 16px; accent-color: var(--ui-accent); margin: 0; }
 .ui-choice-content { display: flex; flex-direction: column; }
 .ui-choice-title { font-size: 14px; font-weight: 550; }

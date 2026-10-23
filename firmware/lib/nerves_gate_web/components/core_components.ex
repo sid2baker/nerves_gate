@@ -259,6 +259,7 @@ defmodule NervesGateWeb.CoreComponents do
     attr(:title, :string, required: true)
     attr(:description, :string)
     attr(:icon, :string)
+    attr(:disabled, :boolean)
   end
 
   def choice_group(assigns) do
@@ -274,6 +275,7 @@ defmodule NervesGateWeb.CoreComponents do
             name={@field.name}
             value={option.value}
             checked={to_string(@field.value) == option.value}
+            disabled={option[:disabled]}
           />
           <span class="ui-choice-content">
             <span class="ui-choice-title">{option.title}</span>

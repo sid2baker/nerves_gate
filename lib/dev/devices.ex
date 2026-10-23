@@ -10,7 +10,12 @@ defmodule Dev.Devices do
           kind: :physical,
           target: device.target,
           version: device.version,
-          status: if(device[:identity], do: "SSH identity read", else: "Unverified"),
+          status:
+            cond do
+              device[:identity] -> "SSH identity read"
+              device[:usb_info] -> "USB information read"
+              true -> "Unverified"
+            end,
           source: device.source,
           url: device.url,
           path: physical_path(device.address)

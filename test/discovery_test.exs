@@ -80,6 +80,49 @@ defmodule Dev.DiscoveryTest do
              Dev.Discovery.handle_call({:identity, "other.local", identity}, from, ready)
   end
 
+  test "fresh USB observations survive discovery, exclude secrets and invalidate stale SSH identity" do
+    from = {self(), make_ref()}
+    {:ok, state} = Dev.Discovery.init(nil)
+    {:reply, :ok, state} = Dev.Discovery.handle_call({:add, "172.31.211.1"}, from, state)
+
+    {:reply, :ok, state} =
+      Dev.Discovery.handle_call(
+        {:identity, "172.31.211.1", %{"version" => "old", "serial" => "old-serial"}},
+        from,
+        state
+      )
+
+    info = %{
+      address: "172.31.211.1",
+      version: "new",
+      target: "ec100",
+      runtime: "Elixir 1.20 · OTP 29",
+      read_at: "2026-10-22T12:00:00Z",
+      interface: "enxusb",
+      cookie: "private",
+      html: "private"
+    }
+
+    assert {:reply, :ok, state} = Dev.Discovery.handle_call({:usb, info}, from, state)
+    assert [device] = state.view.devices
+    assert device.source == :usb
+    assert device.version == "new"
+    assert device.usb_info.runtime == info.runtime
+    refute device[:identity]
+    refute inspect(state.view) =~ "private"
+    refute inspect(state.view) =~ "old-serial"
+    assert [directory] = Dev.Devices.list(%{lifecycle: %{devices: []}}, state.view)
+    assert directory.status == "USB information read"
+
+    ref = make_ref()
+    mdns = [%{device | source: :mdns, version: "old"} |> Map.delete(:usb_info)]
+
+    assert {:noreply, refreshed} =
+             Dev.Discovery.handle_info({ref, mdns}, %{state | task: %{ref: ref}})
+
+    assert [^device] = refreshed.view.devices
+  end
+
   test "manual addresses are unverified data, never URLs or control commands" do
     assert {:ok, %{address: "192.168.1.42", source: :manual}} =
              Dev.Discovery.manual(" 192.168.1.42 ")

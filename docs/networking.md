@@ -83,12 +83,78 @@ Factory-firmware reads confirmed the modem identity, AT port and ECM commands;
 registration, DHCP and failover under Nerves still need a working SIM and hardware
 validation.
 
-The application supplies one operator APN. The SIM must already be unlocked; PINs,
-credentials and roaming controls are unsupported, and no SIM identifiers are
-exposed. Modem settings use the normal trial and VintageNet persistence, with
-source/APN metadata stored alongside `br0`'s topology metadata. Ethernet-only
-disables the modem with VintageNet's Null technology. Readiness requires no modem,
-SIM, registration or Internet; registration can outlast the undo window.
+4G choices are greyed out until a supported modem interface is actually detected;
+a firmware modem profile alone is not hardware detection. Enabling cellular or
+changing its APN also requires detected hardware on the device. Other network
+edits may preserve existing cellular settings while a modem is absent. Ethernet
+remains available.
+
+Cellular uses the mobile network's default APN unless an override is supplied.
+The modem requests this with an empty APN; this is not a carrier-profile database
+or a guarantee that every operator provides a default. If it does not connect,
+open **Advanced cellular settings → APN override** and enter the value from your
+operator's mobile-data setup instructions. Business and IoT SIMs often require a
+specific APN. An existing override stays visible; clear it to try the network
+default again. APN account usernames/passwords remain unsupported.
+
+Modem settings use the normal trial and VintageNet persistence, with source/APN
+metadata stored alongside `br0`'s topology metadata. Ethernet-only disables the modem with VintageNet's Null
+technology. Readiness requires no modem, SIM, registration or Internet;
+registration can outlast the undo window. Roaming policy is not configurable.
+
+### SIM commissioning and saved PIN
+
+After enabling and saving a cellular source, the Internet page shows SIM
+state, PIN protection, optional remaining attempts, registration, operator and
+signal. Unknown readings are not proof of a missing SIM. Refresh is read-only.
+Saving an APN, unlocking the SIM and obtaining Internet are separate states.
+
+Enter credentials only in the device's own UI over server-verified direct USB.
+Ethernet, VPN and workstation UIs cannot submit them. The trusted administrative
+[Elixir API](action-api.md) also exposes these operations. All commands share
+Network's one bounded worker and reject active trials/recovery. VintageNetECM
+remains the AT-port owner; there is no raw-AT web endpoint or second UART manager.
+
+**Unlock and save PIN** sends one existing 4–8 digit PIN. After an acknowledged
+unlock and fresh READY/identity checks, the device saves the PIN bound to a hash
+of this SIM's ICCID. For an already-ready SIM, **Verify and save PIN** verifies it
+by reapplying the current PIN-protection setting once, without changing protection.
+This verification is a PIN attempt: a wrong PIN consumes an attempt.
+
+On restart or modem power loss, automatic unlock requires a live PIN-required
+state and a fresh matching SIM identity. It durably blocks its saved credential
+*before* sending one PIN. A failed, interrupted or uncertain attempt remains
+blocked across restarts; only an acknowledged, freshly verified successful PIN
+operation re-arms it. No blind PIN retry is sent. Automatic unlock therefore works
+across successful restarts but fails closed after an uncertain one. A different
+SIM never receives the saved PIN.
+
+**Hardware qualification remains required:** the EG800AK must answer `AT+QCCID`
+while PIN-locked for safe automatic unlock. If it cannot, status reports unknown
+identity and no automatic PIN is sent; manual unlock is required. No assumption
+about locked-SIM identity availability is made. PIN/PUK attempts, registration,
+DHCP and failover have not yet been validated with a working SIM under Nerves.
+
+Advanced settings change the PIN or enable/disable PIN protection once. A
+successful PIN change or enabling protection saves the verified credential;
+disabling protection forgets it. Old saved credentials are blocked before any
+security write. An unknown PIN-change outcome cannot be resolved by reading the
+PIN back: never blindly try both old and new codes. PUK, PIN2, carrier recovery,
+SMS and USSD are unsupported; recover a blocked SIM with the carrier or a phone.
+
+**Forget saved PIN** removes the private record without changing the SIM, even
+when cellular is disabled or the modem is missing. These SIM operations are not
+network trials and are not undone by network rollback.
+
+The owner-only directory `/data/nerves_gate/cellular/` holds `pin.json` (0600).
+The store uses canonical `/root/nerves_gate/cellular/` because the BSP makes
+`/data` a symlink to `/root`; other credential-path symlinks are refused.
+This is **not encryption**: root access and full data-partition/eMMC backups can
+read it. Full VM crash dumps can also contain in-memory credentials. Protect
+backups and diagnostic dumps accordingly. Ordinary network settings, status,
+projections and notifications contain neither PIN nor SIM identifier/hash. PIN
+commands are filtered from logs and never retained as UI drafts. EC100 factory
+reset erases the record with the rest of `/data`.
 
 ## Saving and rollback
 

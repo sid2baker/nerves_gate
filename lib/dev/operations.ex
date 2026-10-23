@@ -60,10 +60,19 @@ defmodule Dev.Operations do
     try do
       :ok = Dev.FactoryProvisioning.confirmation!(state.review, id, text, identified)
       plan = state.review
+      owner = self()
 
-      start_task(%{state | review: nil}, "factory_provision", fn report ->
-        {:ok, Dev.FactoryProvisioning.provision!(plan, report)}
-      end)
+      start_task(
+        %{state | review: nil},
+        "factory_provision",
+        fn report ->
+          message = Dev.FactoryProvisioning.provision!(plan, report)
+          send(owner, {:factory_verified, self(), message})
+          connection = Dev.FactoryConnection.wait(plan, report)
+          {:factory_complete, message, connection}
+        end,
+        %{backup: plan.public.backup, backup_enabled: Map.get(plan.public, :backup_enabled, true)}
+      )
     rescue
       error in ArgumentError -> {:reply, {:error, Exception.message(error)}, state}
     end
@@ -110,7 +119,7 @@ defmodule Dev.Operations do
     end
   end
 
-  defp start_task(state, kind, run) do
+  defp start_task(state, kind, run, recovery \\ nil) do
     state = drop_review(state)
     owner = self()
 
@@ -123,7 +132,8 @@ defmodule Dev.Operations do
         end
       end)
 
-    {:reply, :ok, %{state | task: task, view: view(:running, kind)}}
+    view = Map.put(view(:running, kind), :recovery, recovery)
+    {:reply, :ok, %{state | task: task, view: view}}
   end
 
   defp admitted("device_info", address) do
@@ -182,33 +192,74 @@ defmodule Dev.Operations do
      }}
   end
 
+  def handle_info({:factory_verified, pid, message}, %{task: %{pid: pid}} = state) do
+    view =
+      Map.merge(state.view, %{
+        result: message,
+        flash_verified: true,
+        connection: %{status: :waiting}
+      })
+
+    {:noreply, %{state | view: view}}
+  end
+
+  def handle_info({:factory_verified, _, _}, state), do: {:noreply, state}
+
+  def handle_info({ref, {:factory_complete, message, connection}}, %{task: %{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+
+    view =
+      Map.merge(state.view, %{
+        status: :succeeded,
+        result: message,
+        flash_verified: true,
+        connection: connection
+      })
+
+    {:noreply, %{state | task: nil, view: view}}
+  end
+
   def handle_info({ref, {status, message}}, %{task: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
 
-    {:noreply,
-     %{
-       state
-       | task: nil,
-         view: %{
-           state.view
-           | status: if(status == :ok, do: :succeeded, else: :failed),
-             result: message
-         }
-     }}
+    view =
+      if Map.get(state.view, :flash_verified, false) and status != :ok do
+        Map.merge(state.view, %{
+          status: :succeeded,
+          connection: %{
+            status: :unavailable,
+            message: "Flash verified; USB reconnect could not complete. No flash retry was made."
+          }
+        })
+      else
+        %{state.view | status: if(status == :ok, do: :succeeded, else: :failed), result: message}
+      end
+
+    {:noreply, %{state | task: nil, view: view}}
   end
 
-  def handle_info({:DOWN, ref, :process, _, _}, %{task: %{ref: ref}} = state),
-    do:
-      {:noreply,
-       %{
-         state
-         | task: nil,
-           view: %{
-             state.view
-             | status: :failed,
-               result: "Worker exited; inspect the operation/device before retrying"
-           }
-       }}
+  def handle_info({:DOWN, ref, :process, _, reason}, %{task: %{ref: ref}} = state) do
+    view =
+      if Map.get(state.view, :flash_verified, false) do
+        Map.merge(state.view, %{
+          status: :succeeded,
+          connection: %{
+            status: :unavailable,
+            message:
+              "Flash verified; USB reconnect worker exited (#{worker_exit(reason)}). No flash retry was made."
+          }
+        })
+      else
+        %{
+          state.view
+          | status: :failed,
+            result:
+              "Worker exited (#{worker_exit(reason)}). Operation outcome is unknown; inspect the device and preserve recovery files. Do not retry automatically."
+        }
+      end
+
+    {:noreply, %{state | task: nil, view: view}}
+  end
 
   def handle_info({:expire_review, id}, %{review: %{public: %{token: id}}} = state) do
     message =
@@ -230,6 +281,25 @@ defmodule Dev.Operations do
     %{state | review: nil, view: %{state.view | review: nil}}
   end
 
+  # Report a fixed diagnostic category, never arbitrary exit terms or arguments.
+  defp worker_exit(:epipe), do: "broken subprocess pipe: epipe"
+  defp worker_exit(:killed), do: "killed"
+  defp worker_exit(:shutdown), do: "shutdown"
+  defp worker_exit({:shutdown, _}), do: "shutdown"
+  defp worker_exit(:normal), do: "normal exit without a result"
+  defp worker_exit(:timeout), do: "timeout"
+  defp worker_exit({:timeout, _}), do: "timeout"
+  defp worker_exit(_), do: "unexpected termination"
+
   defp view(status, kind),
-    do: %{status: status, kind: kind, output: nil, result: nil, review: nil}
+    do: %{
+      status: status,
+      kind: kind,
+      output: nil,
+      result: nil,
+      review: nil,
+      recovery: nil,
+      connection: nil,
+      flash_verified: false
+    }
 end

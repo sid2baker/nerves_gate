@@ -6,6 +6,96 @@ defmodule NervesGate.Error do
   def from(%{code: code, message: message}) when is_binary(code) and is_binary(message),
     do: new(code, message)
 
+  def from(:cellular_parameters),
+    do: new("invalid_parameters", "Use 4–8 digit SIM PINs and a boolean PIN-protection setting.")
+
+  def from(:cellular_disabled),
+    do:
+      new(
+        "cellular_disabled",
+        "Enable and save a cellular Internet source before SIM operations."
+      )
+
+  def from(:cellular_missing),
+    do:
+      new(
+        "cellular_missing",
+        "The configured cellular interface is not detected. Check modem power and USB enumeration."
+      )
+
+  def from(:cellular_sim_changed),
+    do:
+      new(
+        "cellular_sim_changed",
+        "The SIM is no longer asking for its PIN, or its state is unknown. Refresh before acting."
+      )
+
+  def from(:cellular_sim_not_ready),
+    do:
+      new(
+        "cellular_sim_not_ready",
+        "The SIM must be unlocked and ready before changing PIN security."
+      )
+
+  def from(:cellular_incorrect_pin),
+    do:
+      new(
+        "cellular_incorrect_pin",
+        "The modem rejected the PIN. No retry was sent. Refresh the SIM state and attempts before trying again."
+      )
+
+  def from(:cellular_resume_failed),
+    do:
+      new(
+        "cellular_resume_failed",
+        "The PIN was accepted, but cellular configuration could not restart. Read status and reapply network settings; do not resend the PIN."
+      )
+
+  def from(:cellular_outcome_unknown),
+    do:
+      new(
+        "cellular_outcome_unknown",
+        "The cellular result is uncertain. Refresh SIM state before acting. PIN changes cannot be verified by reading; never blindly replay a PIN command."
+      )
+
+  def from(:cellular_pin_storage),
+    do:
+      new(
+        "cellular_pin_storage",
+        "Private PIN storage could not be read or saved safely. The SIM operation may already have succeeded; read status rather than resending it. Automatic unlock sends no PIN unless its safety latch is persisted first."
+      )
+
+  def from(:cellular_pin_not_saved),
+    do: new("cellular_pin_not_saved", "No SIM PIN is saved on this device.")
+
+  def from(:cellular_auto_unlock_blocked),
+    do:
+      new(
+        "cellular_auto_unlock_blocked",
+        "Automatic unlock is blocked or the SIM identity could not be matched. Verify the SIM and explicitly unlock or save its PIN; no automatic retry was sent."
+      )
+
+  def from(:cellular_identity_unknown),
+    do:
+      new(
+        "cellular_identity_unknown",
+        "The modem could not identify this SIM. Its PIN cannot be safely saved or used automatically. Refresh before acting; do not repeat an accepted PIN command."
+      )
+
+  def from(:cellular_read_failed),
+    do:
+      new(
+        "cellular_read_failed",
+        "The modem did not report a known SIM state. Refresh later; unknown does not mean the SIM is absent."
+      )
+
+  def from(:cellular_usb_required),
+    do:
+      new(
+        "cellular_usb_required",
+        "SIM credentials require the device's own UI over verified direct USB. Remote/workstation and Ethernet sessions cannot submit PINs."
+      )
+
   def from(:cellular_unsupported),
     do:
       new(

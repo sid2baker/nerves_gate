@@ -52,7 +52,7 @@ defmodule DevWeb.FactoryLive do
       <.panel title="Prepare and review" icon="port">
         <p>
           Build EC100 firmware first. Review verifies the image and boot artifacts, loads a temporary
-          USB transport into RAM, reads eMMC capacity and checks backup disk space. Review writes nothing to eMMC.
+          USB transport into RAM, reads eMMC capacity and checks artifact/backup disk space. Review writes nothing to eMMC.
         </p>
         <form id="review-factory" phx-submit="review_factory" class="ui-stack">
           <label for="factory-image">EC100 firmware</label>
@@ -66,6 +66,17 @@ defmodule DevWeb.FactoryLive do
               {image.version} · {image.build}
             </option>
           </select>
+          <label for="factory-backup">Full eMMC backup</label>
+          <select id="factory-backup" name="backup" disabled={@operation.status == :running}>
+            <option value="true">Create full backup (recommended)</option>
+            <option value="false">
+              Skip full backup — I accept losing the existing firmware and data
+            </option>
+          </select>
+          <p class="ui-help">
+            Skipping saves the full-device read, not write verification. Keep any original backup safe;
+            this run cannot restore the previous firmware/data without one. Readbacks are always retained.
+          </p>
           <label for="factory-access">USB permissions</label>
           <select id="factory-access" name="sudo" disabled={@operation.status == :running}>
             <option value="false">Direct USB access (udev permissions)</option>
@@ -73,7 +84,9 @@ defmodule DevWeb.FactoryLive do
           </select>
           <p class="ui-help">
             Install rkdeveloptool on the workbench host. For sudo access, authorize it in a terminal
-            first (sudo -v); the workbench never prompts for or stores your password.
+            first (sudo -v); sudo policy must also allow the workbench process to run rkdeveloptool
+            noninteractively. The workbench never prompts for or stores your password.
+            A device appearing in rkdeveloptool ld does not prove read/write USB access.
           </p>
           <div class="ui-actions">
             <.button type="submit" disabled={@images == [] or @operation.status == :running}>
@@ -89,17 +102,34 @@ defmodule DevWeb.FactoryLive do
         </.setting_row>
         <.setting_row label="Firmware">{@review.version} · {@review.firmware}</.setting_row>
         <.setting_row label="eMMC capacity">{bytes(@review.capacity)}</.setting_row>
-        <.setting_row label="Backup directory">{@review.backup}</.setting_row>
+        <.setting_row label="Full eMMC backup">
+          {if Map.get(@review, :backup_enabled, true), do: "Enabled", else: "SKIPPED"}
+        </.setting_row>
+        <.setting_row label="Artifact/readback directory">{@review.backup}</.setting_row>
         <.setting_row label="Disk space">
           {bytes(@review.required_space)} required · {bytes(@review.available_space)} available at review
         </.setting_row>
         <code>SHA-256: {@review.sha256}</code>
         <p>
-          A full eMMC user-area backup and checksum are mandatory before the first write.
+          <%= if Map.get(@review, :backup_enabled, true) do %>
+            A full eMMC user-area backup and checksum will be saved before the first write.
+          <% else %>
+            <strong>No full backup will be made. Existing firmware and data cannot be recovered from this run.</strong>
+          <% end %>
           Every written region is read back and checked. The device resets only after verification.
           Installation is not power-loss atomic. Backup/readbacks are kept even on failure;
           never retry automatically after an uncertain result.
         </p>
+        <p>
+          After verified writes and reset, the workbench waits up to three minutes for this USB port
+          to return, then reads firmware, target and runtime from the gateway. Your workstation must
+          accept DHCP on the USB interface. A reconnect timeout does not mean flashing failed;
+          no commands are replayed and workstation networking is never changed.
+        </p>
+        <.notice :if={Map.get(@review, :usb_tracking, true) == false} tone="warning">
+          The USB port could not be tracked on this host. Flashing can proceed, but automatic
+          reconnection will be unavailable; use the Devices page after boot.
+        </.notice>
         <p>
           Review expires after ten minutes and is single-use. Another operation cancels it.
           After expiry or failure, re-enter MASKROM before reviewing again.
@@ -113,11 +143,18 @@ defmodule DevWeb.FactoryLive do
           <label for="factory-confirmation">Type {@review.confirmation}</label>
           <input id="factory-confirmation" name="confirmation" autocomplete="off" required />
           <.button type="submit" variant="danger" disabled={@operation.status == :running}>
-            Back up, erase and provision EC100
+            {if Map.get(@review, :backup_enabled, true),
+              do: "Back up, erase and provision EC100",
+              else: "Erase and provision EC100 WITHOUT BACKUP"}
           </.button>
         </form>
       </.panel>
-      <.panel title="Operation output" icon="clock"><.operation operation={@operation} /></.panel>
+      <.panel title="Operation output" icon="clock">
+        <.operation operation={@operation} />
+        <p :if={@operation.kind == "factory_review" and @operation.status == :failed} class="ui-help">
+          This failed review's temporary files have been removed. Fix the reported cause, inspect the device and start a new review; do not copy a temporary loader command from an old run.
+        </p>
+      </.panel>
       <.panel title="Already running Nerves Gate?" icon="network">
         <p>
           Use a device's Firmware tab for a non-provisioning SSH A/B update, including over USB networking.

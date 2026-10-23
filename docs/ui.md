@@ -12,7 +12,7 @@ form drafts stay separate from live observations.
 | Page | Route | Purpose |
 | --- | --- | --- |
 | Overview | `/` | Internet, Remote access and Erlang distribution cards |
-| Internet | `/network` | Internet port/address, cellular source, backup and APN |
+| Internet | `/network` | Internet port/address, detected 4G sources, network-default APN with advanced override, SIM commissioning |
 | Remote access | `/remote` | Tailscale enrollment, private sign-in, hostname and disconnect |
 | Erlang distribution | `/distribution` | Node, cookie and connection instructions |
 | Equipment | `/equipment` | Physical ports ordered LAN, RS485, CAN |

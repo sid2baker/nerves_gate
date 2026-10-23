@@ -25,6 +25,12 @@ defmodule NervesGateWeb.NetworkLive do
       projection={@projection}
       access={@access}
     />
+    <.live_component
+      module={NervesGateWeb.CellularPanel}
+      id="cellular-panel"
+      projection={@projection}
+      access={@access}
+    />
     """
   end
 end

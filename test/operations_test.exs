@@ -73,6 +73,104 @@ defmodule Dev.OperationsTest do
     assert File.dir?(backup)
   end
 
+  test "worker failure keeps recovery location and reports only a safe exit category" do
+    for {reason, category} <- [
+          {:epipe, "epipe"},
+          {:killed, "killed"},
+          {:shutdown, "shutdown"},
+          {{:shutdown, "private reason"}, "shutdown"},
+          {:normal, "normal exit without a result"},
+          {{:timeout, "private command"}, "timeout"},
+          {{:unexpected, "private reason"}, "unexpected termination"}
+        ] do
+      {:ok, idle} = Dev.Operations.init(nil)
+      ref = make_ref()
+      recovery = %{backup: "/backups/owned-recovery"}
+      view = %{idle.view | kind: "factory_provision", status: :running, recovery: recovery}
+      state = %{idle | task: %{ref: ref}, view: view}
+
+      assert {:noreply, failed} =
+               Dev.Operations.handle_info({:DOWN, ref, :process, self(), reason}, state)
+
+      assert failed.task == nil
+      assert failed.view.status == :failed
+      assert failed.view.recovery == recovery
+      assert failed.view.result =~ category
+      assert failed.view.result =~ "outcome is unknown"
+      assert failed.view.result =~ "Do not retry automatically"
+      refute failed.view.result =~ "private"
+    end
+  end
+
+  test "verified-flash phase survives reconnect timeout, exception and worker death" do
+    {:ok, idle} = Dev.Operations.init(nil)
+    ref = make_ref()
+
+    state = %{
+      idle
+      | task: %{ref: ref, pid: self()},
+        view: %{idle.view | status: :running, kind: "factory_provision"}
+    }
+
+    message = "Factory provisioning verified; device reset."
+
+    assert {:noreply, verified} =
+             Dev.Operations.handle_info({:factory_verified, self(), message}, state)
+
+    assert verified.view.flash_verified
+    assert verified.view.connection.status == :waiting
+    assert verified.view.status == :running
+
+    connection = %{status: :unavailable, message: "USB not ready; no retry"}
+
+    for event <- [
+          {ref, {:factory_complete, message, connection}},
+          {ref, {:error, "private error"}},
+          {:DOWN, ref, :process, self(), :killed}
+        ] do
+      assert {:noreply, done} = Dev.Operations.handle_info(event, verified)
+      assert done.task == nil
+      assert done.view.status == :succeeded
+      assert done.view.result == message
+      assert done.view.connection.status == :unavailable
+      refute done.view.connection.message =~ "private"
+    end
+
+    assert {:noreply, ^idle} =
+             Dev.Operations.handle_info({:factory_verified, self(), message}, idle)
+  end
+
+  test "successful factory reconnect exposes observed USB information separately from the flash result" do
+    {:ok, idle} = Dev.Operations.init(nil)
+    ref = make_ref()
+
+    state = %{
+      idle
+      | task: %{ref: ref},
+        view: %{idle.view | status: :running, kind: "factory_provision"}
+    }
+
+    info = %{
+      address: "198.18.234.2",
+      interface: "enxusb",
+      version: "new",
+      target: "ec100",
+      runtime: "Elixir 1.20 · OTP 29",
+      read_at: "2026-10-22T12:00:00Z"
+    }
+
+    connection = %{status: :connected, device: info}
+
+    assert {:noreply, done} =
+             Dev.Operations.handle_info(
+               {ref, {:factory_complete, "Flash verified", connection}},
+               state
+             )
+
+    assert done.view.status == :succeeded
+    assert done.view.connection == connection
+  end
+
   test "unknown workbench operations never start a worker" do
     {:ok, idle} = Dev.Operations.init(nil)
 

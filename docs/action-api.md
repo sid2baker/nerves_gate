@@ -30,6 +30,12 @@ status = NervesGate.status()
 | `network_propose(settings, opts)` | `{:ok, trial_id}` after temporary application |
 | `network_confirm(trial_id, opts)` | `:ok` after saving interface settings |
 | `network_cancel(trial_id, opts)` | `:ok` after restoration |
+| `cellular_refresh(opts)` | `:ok`; read-only SIM/modem refresh accepted |
+| `cellular_unlock(pin, opts)` | `:ok`; one unlock and private SIM-bound PIN save accepted |
+| `cellular_save_pin(pin, opts)` | `:ok`; one PIN verification and private save accepted |
+| `cellular_forget_pin(opts)` | `:ok`; private PIN deletion accepted, SIM protection unchanged |
+| `cellular_change_pin(current, new, opts)` | `:ok`; one SIM PIN change accepted |
+| `cellular_set_pin_lock(enabled, pin, opts)` | `:ok`; one SIM protection change accepted |
 | `remote_connect(hostname, opts)` | `:ok` after accepting connection/enrollment |
 | `remote_configure(hostname, opts)` | `:ok` after accepting a hostname change |
 | `remote_disconnect(opts)` | `:ok` after accepting `down`; enrollment is kept |
@@ -55,10 +61,31 @@ keys; hostname and trial ID are plain strings. Failures return
 browser sign-in link. Only the bounded remote worker uses the key; it is never
 persisted or included in status or events. Do not log it or put it in configuration.
 
-Cellular configuration adds `"internet" => %{"mode" => "cellular", "apn" => "..."}`
-without an Ethernet Internet role, or `"mode" => "backup"` with one. Without it,
-the gateway is Ethernet-only. Validation checks shape, not hardware; proposals
-require a [configured modem](networking.md#cellular-modems).
+Cellular configuration adds `"internet" => %{"mode" => "cellular", "apn" => ""}`
+without an Ethernet Internet role, or `"mode" => "backup"` with one. An empty APN
+requests the mobile network's default; provide an operator APN string to override
+it. No carrier database is consulted. Without cellular settings, the gateway is
+Ethernet-only. Validation checks shape, not hardware. Enabling cellular or
+changing its APN requires a [qualified, detected modem](networking.md#cellular-modems);
+unrelated network edits can preserve existing cellular settings while it is absent.
+
+Cellular acceptance is not completion: observe `status.cellular.operation` and
+`.error`. Refresh never submits a PIN. All PINs are 4–8 ASCII digits; protection
+is a boolean. Unlock and successful security writes privately save the verified
+PIN for the same SIM; disabling protection forgets it. `cellular_save_pin` verifies
+an already-ready SIM's PIN by reapplying its existing protection setting once
+(**a wrong PIN consumes an attempt**). Forget works without an enabled/present
+modem and does not change the SIM.
+
+The saved PIN is used automatically only after fresh identity matching and a
+durable one-attempt latch. Failure or uncertainty blocks automatic attempts across
+reboots; a known-successful PIN operation must re-arm it. Neither simply reading
+READY nor restarting re-arms a blocked record. If the modem cannot identify a
+locked SIM, automatic unlock refuses to send a PIN. See
+[SIM commissioning](networking.md#sim-commissioning-and-saved-pin), including
+hardware qualification and unencrypted backup storage limits. PINs, ICCIDs and
+binding hashes never enter status or configuration exports. Do not log API PIN
+arguments or results of internal private-store functions.
 
 ## Completion and safety
 
@@ -90,7 +117,8 @@ never log them or put them in status, notifications or shared UI assigns.
 
 Network calls time out after 15 seconds; sharing allows 70. On `outcome_unknown`,
 **read status before considering a retry**. A caller timeout does not cancel
-admitted work, and commands are never replayed automatically.
+admitted work. Commands are not replayed; the separate SIM auto-unlock policy
+above can use a saved, verified PIN after a fresh PIN-required observation.
 
 Use the facade's `equipment_scan`, `equipment_share` and `equipment_unshare`, not
 internal worker entry points: they hold Network's cross-domain admission guard.
@@ -124,12 +152,15 @@ Modbus. See [bus operations](buses.md).
 ## Status
 
 `status/1` reads domains independently; it is **not an atomic snapshot**.
-[`Status`](../firmware/lib/nerves_gate/status.ex) builds the JSON-encodable v6 map:
+[`Status`](../firmware/lib/nerves_gate/status.ex) builds the JSON-encodable v7 map:
 
 - `version`, `system`: shape version and firmware/runtime information.
 - `network`: saved settings, trial, observations, readiness, recovery and errors.
 - `connections`: port roles, conflicts, per-uplink connectivity, selected Internet
   source, overall health and backup state.
+- `cellular`: modem/SIM observations, `pin_saved`, `auto_unlock`, operation and
+  error. No PIN, SIM identifier or binding hash. `auto_unlock` is `ready`, `blocked`,
+  `different_sim`, `identity_unknown`, `off`, `storage_error` or `unknown`.
 - `remote_access`: sanitized daemon observations, routes, operation and error.
 - `sharing`: equipment `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
   `other_routes` untouched by the control.

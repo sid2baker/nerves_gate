@@ -4,6 +4,11 @@ defmodule NervesGate.Application do
 
   @impl true
   def start(_type, _args) do
+    :logger.add_primary_filter(
+      :cellular_credentials,
+      {&NervesGate.Network.Cellular.filter_log/2, nil}
+    )
+
     children =
       [{Phoenix.PubSub, [name: NervesGate.PubSub]}] ++
         Application.fetch_env!(:nerves_gate, :services)

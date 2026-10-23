@@ -21,7 +21,7 @@ defmodule NervesGate.Network do
   """
   use GenServer
   alias NervesGate.{Alarms, Config, Observations, Remote}
-  alias NervesGate.Network.{Access, Adapter, Policy}
+  alias NervesGate.Network.{Access, Adapter, Cellular, Policy}
   alias NervesGate.Remote.Sharing
 
   @doc false
@@ -69,6 +69,10 @@ defmodule NervesGate.Network do
   @spec conflicts(map() | nil, map()) :: list()
   defdelegate conflicts(observed, network), to: Policy
 
+  @doc "Accept one bounded cellular operation; observe status for completion. PINs stay in private device storage."
+  def cellular(operation, params, server \\ __MODULE__),
+    do: GenServer.call(server, {:cellular, operation, params})
+
   # Cross-domain operations share the LAN worker; clients use NervesGate.equipment_*.
   @doc false
   def scan(equipment, server \\ __MODULE__),
@@ -107,6 +111,7 @@ defmodule NervesGate.Network do
       proposal_reply: nil,
       recovering: match?({:restore, _}, error),
       observed: nil,
+      cellular: Cellular.cached(),
       trial_ms: Keyword.get(opts, :trial_ms, 60_000),
       poll_ms: Keyword.get(opts, :poll_ms, 1000),
       effect_ms: effect_ms,
@@ -152,6 +157,17 @@ defmodule NervesGate.Network do
     end
   end
 
+  def handle_call({:cellular, operation, params}, _, state) do
+    state = refresh(state)
+
+    with :ok <- Cellular.parameters(operation, params),
+         :ok <- Cellular.available(public(state), operation) do
+      {:reply, :ok, start_cellular(state, operation, params) |> publish()}
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
   def handle_call({:propose, network, access, expected}, from, state) do
     state |> refresh() |> propose(network, access, expected, from) |> respond()
   end
@@ -167,7 +183,7 @@ defmodule NervesGate.Network do
     with :ok <- Policy.available(public(state)),
          :ok <- check_expected(state, expected),
          {:ok, network} <- Config.validate_network(input),
-         :ok <- Policy.supported(state.observed, network),
+         :ok <- Policy.supported(state.observed, network, state.config["network"]),
          :ok <- lan_change(state) do
       auto = not state.config["setup_completed"] and Access.usb?(state.observed, access)
       timeout = if auto, do: 15_000, else: state.trial_ms
@@ -294,14 +310,83 @@ defmodule NervesGate.Network do
         true -> state |> auto_save() |> reconcile_sharing()
       end
 
-    publish(state)
+    state |> refresh_cellular_if_due() |> publish()
+  end
+
+  defp start_cellular(state, operation, params) do
+    state = %{state | cellular: %{state.cellular | operation: operation, error: nil}}
+    work(state, :cellular, nil, fn -> Cellular.perform(operation, params) end)
+  end
+
+  defp refresh_cellular_if_due(state) do
+    due =
+      state.cellular.refreshed_at == nil or
+        System.system_time(:millisecond) - state.cellular.refreshed_at >= 30_000
+
+    cond do
+      Cellular.available(public(state)) != :ok ->
+        state
+
+      state.cellular.sim == :pin_required and state.cellular.auto_unlock == :ready ->
+        state = %{state | cellular: %{state.cellular | operation: :auto_unlock, error: nil}}
+        work(state, :cellular, nil, &Cellular.auto_unlock/0)
+
+      due ->
+        start_cellular(state, :refresh, [])
+
+      true ->
+        state
+    end
   end
 
   defp work(state, operation, from, fun) do
     task = Task.async(fun)
-    timeout = if operation == :sharing, do: 65_000, else: state.effect_ms
+
+    timeout =
+      case operation do
+        :sharing -> 65_000
+        :cellular -> 45_000
+        _ -> state.effect_ms
+      end
+
     timer = Process.send_after(self(), {:work_timeout, task.ref}, timeout)
     %{state | worker: %{task: task, timer: timer, operation: operation, from: from}}
+  end
+
+  defp complete(state, %{operation: :cellular}, result) do
+    cellular =
+      case result do
+        {:ok, data} ->
+          data
+
+        {:error, _} ->
+          %{Cellular.cached() | error: NervesGate.Error.from(:cellular_outcome_unknown)}
+      end
+
+    cellular = %{cellular | operation: nil, refreshed_at: System.system_time(:millisecond)}
+    # Keep the exact safe domain error, never raw UART responses or task reasons.
+    cellular =
+      case result do
+        {:error, reason}
+        when reason in [
+               :cellular_incorrect_pin,
+               :cellular_sim_changed,
+               :cellular_sim_not_ready,
+               :cellular_resume_failed,
+               :cellular_unsupported,
+               :cellular_pin_storage,
+               :cellular_pin_not_saved,
+               :cellular_auto_unlock_blocked,
+               :cellular_identity_unknown,
+               :cellular_read_failed
+             ] ->
+          %{cellular | error: NervesGate.Error.from(reason)}
+
+        _ ->
+          cellular
+      end
+
+    %{state | cellular: cellular}
   end
 
   defp complete(state, %{operation: :sharing, from: from}, result) do
@@ -322,7 +407,7 @@ defmodule NervesGate.Network do
   end
 
   defp complete(state, %{operation: :apply}, :ok) do
-    state = refresh(state)
+    state = refresh(%{state | cellular: Cellular.cached()})
 
     cond do
       expired?(state) -> expire(state, nil)
@@ -347,7 +432,7 @@ defmodule NervesGate.Network do
     reply(from, if(error, do: {:error, error}, else: result))
     previous = if match?({:restore, _}, state.error), do: nil, else: state.error
 
-    %{state | recovering: error != nil, error: error || previous}
+    %{state | recovering: error != nil, error: error || previous, cellular: Cellular.cached()}
     |> finish_proposal()
     |> refresh()
   end
@@ -376,7 +461,7 @@ defmodule NervesGate.Network do
   end
 
   defp interrupt(%{worker: %{operation: operation} = worker} = state, reason)
-       when operation in [:sharing, :scan] do
+       when operation in [:sharing, :scan, :cellular] do
     {state, _} = stop_work(state)
     complete(state, worker, {:error, reason})
   end
@@ -429,7 +514,14 @@ defmodule NervesGate.Network do
 
       observed ->
         error = if match?({:discovery, _}, state.error), do: nil, else: state.error
-        %{state | observed: observed, error: error}
+
+        changed =
+          get_in(state.observed || %{}, [:cellular, :present]) !=
+            get_in(observed, [:cellular, :present])
+
+        cellular = if changed, do: Cellular.reset(state.cellular), else: state.cellular
+
+        %{state | observed: observed, error: error, cellular: cellular}
     end
   end
 
@@ -438,6 +530,7 @@ defmodule NervesGate.Network do
       config: state.config,
       trial: state.trial,
       observed: state.observed,
+      cellular: state.cellular,
       error: state.error,
       recovering: state.recovering,
       ready: ready?(state),

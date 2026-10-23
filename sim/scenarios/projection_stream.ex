@@ -590,6 +590,10 @@ defmodule NervesGateSim.Scenarios.ProjectionStream do
     assert {:ok, with_backup} = NetworkForm.to_network(backup, ports, shared, :internet)
     assert with_backup["equipment"] == shared["equipment"]
     assert with_backup["internet"] == %{"mode" => "backup", "apn" => "test.apn"}
+    default_apn = Map.put(backup, "cellular_apn", "")
+    assert {:ok, automatic} = NetworkForm.to_network(default_apn, ports, shared, :internet)
+    assert automatic["internet"] == %{"mode" => "backup", "apn" => ""}
+    assert NetworkForm.from_settings(automatic, :internet)["cellular_apn"] == ""
     assert {:ok, ^with_backup} = NetworkForm.to_network(params, ports, with_backup, :ports)
     assert {:ok, ^shared} = NetworkForm.to_network(internet, ports, with_backup, :internet)
 

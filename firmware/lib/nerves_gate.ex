@@ -88,6 +88,37 @@ defmodule NervesGate do
     end
   end
 
+  @doc "Accept a read-only SIM/modem refresh. Read status.cellular for completion."
+  @spec cellular_refresh(keyword()) :: command_result()
+  def cellular_refresh(opts \\ []),
+    do: invoke(fn -> Network.cellular(:refresh, [], network(opts)) end) |> result()
+
+  @doc "Unlock once and privately save the verified PIN for this SIM after restart. Failed or uncertain attempts are never automatically retried."
+  @spec cellular_unlock(String.t(), keyword()) :: command_result()
+  def cellular_unlock(pin, opts \\ []),
+    do: invoke(fn -> Network.cellular(:unlock, [pin], network(opts)) end) |> result()
+
+  @doc "Change an unlocked SIM's PIN once. On an unknown outcome, do not blindly replay either PIN."
+  @spec cellular_change_pin(String.t(), String.t(), keyword()) :: command_result()
+  def cellular_change_pin(current, new, opts \\ []),
+    do: invoke(fn -> Network.cellular(:change_pin, [current, new], network(opts)) end) |> result()
+
+  @doc "Enable/disable SIM PIN protection once, using the current PIN. Returns acceptance."
+  @spec cellular_set_pin_lock(boolean(), String.t(), keyword()) :: command_result()
+  def cellular_set_pin_lock(enabled, pin, opts \\ []),
+    do:
+      invoke(fn -> Network.cellular(:set_pin_lock, [enabled, pin], network(opts)) end) |> result()
+
+  @doc "Verify and privately save an already-unlocked SIM's PIN, preserving its current PIN protection. Verification is one PIN attempt."
+  @spec cellular_save_pin(String.t(), keyword()) :: command_result()
+  def cellular_save_pin(pin, opts \\ []),
+    do: invoke(fn -> Network.cellular(:save_pin, [pin], network(opts)) end) |> result()
+
+  @doc "Forget the saved PIN without changing SIM protection. Works even with cellular disabled or absent."
+  @spec cellular_forget_pin(keyword()) :: command_result()
+  def cellular_forget_pin(opts \\ []),
+    do: invoke(fn -> Network.cellular(:forget_pin, [], network(opts)) end) |> result()
+
   @doc "Request Tailscale connection/enrollment; optional `auth_key:` is used once, never saved. Returns acceptance."
   @spec remote_connect(String.t(), keyword()) :: command_result()
   def remote_connect(hostname, opts \\ []),

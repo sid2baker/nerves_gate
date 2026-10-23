@@ -73,7 +73,9 @@ is required. The Devices page lists both physical gateways and tagged simulated
 devices; Simulator holds bench-wide wiring and lifecycle controls. LAN discovery
 starts on the Devices page or explicit refresh and is read-only mDNS and never attaches a hardware driver to a found
 gateway. Manual entries accept DNS names and IPv4 addresses. The workbench also
-supports explicit EC100/QEMU builds and authenticated SSH firmware review/update;
+supports explicit EC100/QEMU builds and authenticated SSH firmware review/update.
+Factory provisioning defaults to a full backup, allows an explicitly confirmed
+skip, and waits for a direct USB information read after verified reset;
 see [firmware updates](firmware-updates.md) for confirmation and prerequisites. Existing non-advertising firmware needs an explicit known address.
 The simulator default is `sim/priv/qemu/simulator.exs`, with two devices. A custom trusted data file can be
 selected with `mix dev --config PATH` (paths are relative to the platform root).
