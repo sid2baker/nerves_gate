@@ -44,7 +44,6 @@ defmodule NervesGate.MixProject do
       ],
       aliases: [
         "assets.build": ["volt.build --tailwind"],
-        "tailscaled.install": &tailscaled_install/1,
         ci: [
           "compile --warnings-as-errors",
           "format --check-formatted",
@@ -67,12 +66,6 @@ defmodule NervesGate.MixProject do
       preferred_targets: [ci: :host, "assets.build": :host],
       preferred_envs: [ci: :test, "assets.build": :dev]
     ]
-  end
-
-  # Runs without compiling the project or its dependencies.
-  defp tailscaled_install([]) do
-    Code.require_file("scripts/tailscaled.ex", __DIR__)
-    NervesGate.Dev.Tailscaled.install()
   end
 
   # Setting the app mode in applications: also changes its dependencies' modes.
@@ -125,7 +118,7 @@ defmodule NervesGate.MixProject do
       {:circuits_uart, "~> 1.6"},
       {:input_event, "~> 1.4"},
       # Host tooling must never start the workstation VPN.
-      {:tailscaled_ex, "~> 0.4.0", runtime: Mix.target() != :host},
+      {:tailscaled_ex, "~> 0.5.0", runtime: Mix.target() != :host},
       # Compiled on the host like VintageNet, but started only by firmware.
       {:nerves_runtime, "~> 0.13", runtime: Mix.target() != :host},
       {:nerves_motd, "~> 0.1", targets: @targets},

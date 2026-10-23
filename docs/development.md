@@ -23,7 +23,10 @@ bridges or workstation network changes are needed.
 
 `mix setup` fetches locked dependencies, tailscaled and the prebuilt QEMU
 system/toolchain, and checks these prerequisites. It neither builds firmware nor
-boots devices. EC100 builds additionally need the published EC100 system artifact.
+boots devices. QEMU's amd64 daemon is installed by `Tailscaled.Installer` before
+target compilation, with an explicit Tailscale 1.104.1 archive checksum and cache
+under `firmware/_build/setup/`. The EC100's qualified ARM daemon is unchanged;
+EC100 builds additionally need the published EC100 system artifact.
 
 ## Commands
 

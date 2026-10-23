@@ -45,7 +45,7 @@ jobs:
           path: |
             ${{ env.NERVES_DL_DIR }}
             firmware/_build/setup
-          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/scripts/tailscaled.ex') }}
+          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'mix.exs') }}
           restore-keys: simulator-downloads-${{ runner.os }}-
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup

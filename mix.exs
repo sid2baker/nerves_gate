@@ -1,6 +1,9 @@
 defmodule Dev.MixProject do
   use Mix.Project
 
+  # Setup can load this OTP-only installer before dependencies are compiled.
+  @compile {:no_warn_undefined, Tailscaled.Installer}
+
   @external_resource Path.join(__DIR__, "VERSION")
   @version __DIR__ |> Path.join("VERSION") |> File.read!() |> String.trim()
   @projects ~w(sdk firmware)
@@ -62,7 +65,18 @@ defmodule Dev.MixProject do
 
     deps_get(["--check-locked"])
     run("firmware", ["deps.get", "--check-locked"], target: :x86_64)
-    run("firmware", ["tailscaled.install"], target: :x86_64)
+
+    unless Code.ensure_loaded?(Tailscaled.Installer),
+      do: Code.require_file("firmware/deps/tailscaled_ex/lib/tailscaled/installer.ex", __DIR__)
+
+    Tailscaled.Installer.install!(
+      Path.join(__DIR__, "firmware/rootfs_overlay/x86_64/usr/sbin/tailscaled"),
+      arch: "amd64",
+      version: "1.104.1",
+      sha256: "108d1d96ecf410d305571e173516f27038f870919a9b89c914a167c6d33a4528",
+      cache_dir: Path.join(__DIR__, "firmware/_build/setup")
+    )
+
     # Enter the archive task before dependency task lookup can compile target
     # ports with host CC. This prepares artifacts only, never device code.
     run("firmware", ["nerves_bootstrap.init"], target: :x86_64)
@@ -120,7 +134,7 @@ defmodule Dev.MixProject do
   defp run(project, [task | args], options \\ []) do
     target = options[:target] || :host
 
-    if target != :host and task not in ["deps.get", "tailscaled.install", "nerves_bootstrap.init"],
+    if target != :host and task not in ["deps.get", "nerves_bootstrap.init"],
       do: Mix.raise("Device compilation must run in a separate OS process")
 
     apps = %{"sdk" => :nerves_gate_sdk, "firmware" => :nerves_gate}
