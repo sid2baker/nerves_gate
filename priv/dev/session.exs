@@ -1,6 +1,8 @@
 # The UI owns only the simulator BEAM's MuonTrap wrapper. QMP sockets, disks and
 # Ethernet relays stay inside that BEAM, never in scenario/UI worker processes.
 Dev.configure()
+# Scenario failures inside libraries must still show the scenario's own frames.
+:erlang.system_flag(:backtrace_depth, 32)
 alias Simulator.QemuTests
 alias Dev.Session
 Process.register(self(), :nerves_gate_workbench_session)

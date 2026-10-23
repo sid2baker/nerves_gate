@@ -149,16 +149,20 @@ defmodule Simulator.RecoveryChecks do
   defp fail(vm, pid, :supervisor),
     do: assert(:ok = :erpc.call(vm.node, :sys, :terminate, [pid, :shutdown, 15_000], 20_000))
 
+  # Network's init restores saved settings within two bounded 10-second steps.
   defp restarted!(vm, target, pid) do
-    replacement(fn -> child_pid(vm, target) end, pid, now() + 10_000) ||
+    replacement(fn -> child_pid(vm, target) end, pid, now() + 30_000) ||
       flunk("#{inspect(target)} did not restart; evidence: #{vm.dir}/recovery.log")
   end
 
   # The next PID, or nil after the deadline, a stopped supervisor or node loss.
   defp replacement(read, previous, deadline) do
-    case read.() do
+    case current(read) do
       pid when is_pid(pid) and pid != previous ->
         pid
+
+      :stopped ->
+        nil
 
       _ ->
         if now() < deadline do
@@ -166,9 +170,16 @@ defmodule Simulator.RecoveryChecks do
           replacement(read, previous, deadline)
         end
     end
+  end
+
+  # A supervisor does not answer while a restarting child's init is still running:
+  # that timeout means busy, not stopped.
+  defp current(read) do
+    read.()
   catch
-    :error, {:erpc, _} -> nil
-    :exit, {:exception, {reason, _}} when reason in [:noproc, :shutdown] -> nil
+    :error, {:erpc, :timeout} -> :busy
+    :error, {:erpc, _} -> :stopped
+    :exit, {:exception, {reason, _}} when reason in [:noproc, :shutdown] -> :stopped
   end
 
   defp child_pid(vm, target) do
