@@ -1,7 +1,7 @@
 # The UI owns only the simulator BEAM's MuonTrap wrapper. QMP sockets, disks and
 # Ethernet relays stay inside that BEAM, never in scenario/UI worker processes.
 Dev.configure()
-alias NervesGateSim.{QemuTests, Simulator}
+alias Simulator.QemuTests
 alias Dev.Session
 Process.register(self(), :nerves_gate_workbench_session)
 
@@ -59,7 +59,7 @@ IO.puts("Simulator diagnostics: #{dir}")
       {MuonTrap.Daemon,
        [
          "mix",
-         ["do", "compile", "+", "run", "--no-start", NervesGateSim.script("simulator_node")],
+         ["do", "compile", "+", "run", "--no-start", Simulator.script("simulator_node")],
          [env: [{"QEMU_SIM_DIR", dir}], stderr_to_stdout: true, logger_fun: &IO.puts/1]
        ]},
       id: :simulator,
@@ -90,7 +90,7 @@ Application.put_env(:nerves_gate, :simulator_node, :"simulator@127.0.0.1")
 # The session serves the simulator site, not the gateway UI. The gateway
 # Endpoint runs without a listener so scenarios can check its configuration.
 Application.put_env(:nerves_gate, :services, [
-  NervesGateSim.QemuTests,
+  Simulator.QemuTests,
   NervesGateWeb.Endpoint,
   DevWeb.Endpoint
 ])

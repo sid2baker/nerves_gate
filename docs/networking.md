@@ -34,37 +34,23 @@ never part of these changes.
 
 ## Internet source and cellular
 
-**Overview → Internet** offers Ethernet, 4G modem, and Ethernet with 4G backup.
-Settings without a source are Ethernet-only. Cellular-only uses separate ports with
-no Ethernet Internet port; a shared bridge can use Ethernet or Ethernet with backup.
-Equipment and USB are never modem bridges.
+**Overview → Internet** offers Ethernet, 4G, or Ethernet with 4G backup; settings
+without a source are Ethernet-only. 4G-only needs separate ports; a joined bridge
+can use Ethernet or Ethernet with backup. Equipment and USB never bridge to the modem.
 
-VintageNet owns Internet checks, route metrics, DNS and reconnection. It prefers
-working Ethernet over working cellular, and working cellular over Ethernet that only
-reaches its LAN. A small metric callback classifies `br0` as Ethernet and a
-dedicated `cellN` modem as mobile; VintageNet already recognizes `wwanN` as mobile.
-Failover and failback follow VintageNet's connectivity detection; sessions can
-briefly interrupt.
+VintageNet owns connectivity checks, route metrics, DNS and failover: working
+Ethernet beats working cellular, which beats Ethernet that only reaches its LAN.
+Backup is connected standby, so the modem stays registered and can use mobile
+data. There is no cold standby, data budget, load balancing or failback timer.
+Internet loss alarms only when every permitted uplink is known unavailable; using
+backup and an unavailable modem raise separate warnings.
 
-Backup is connected standby: the modem registers and checks connectivity, and can
-use mobile data, while Ethernet is preferred. There is no cold standby, data budget,
-load balancing or failback hold timer.
+### Cellular modem
 
-The UI shows each permitted uplink and the preferred usable connection. Internet
-loss alarms only when all permitted uplinks are known unavailable. Using backup and
-an unavailable configured modem are separate two-second warnings. USB, VPN and
-unassigned Ethernet never make Internet status healthy.
-
-### Cellular modems
-
-**EC100 firmware includes the Quectel EG800AK-GL profile.** System `0.3.0` powers
-the module and names its CDC-ECM data interface `wwan0`, separately from USB
-recovery. `VintageNetECM` controls the modem through `ttyUSB2` (USB interface 1.4)
-and obtains an IPv4 address over DHCP after registration and data-call activation.
-This assumes the built-in modem is the only USB serial device. Its factory USB
-mode must remain ECM (`AT+QCFG="usbnet"` reports `1`); firmware does not change it.
-
-The EC100 profile is:
+EC100 firmware supports the built-in Quectel EG800AK-GL. The system powers it and
+names its CDC-ECM data interface `wwan0`; `VintageNetECM` drives it over
+`ttyUSB2` and gets IPv4 by DHCP. The modem's factory USB mode must stay ECM;
+firmware never changes it, and **never give the modem `usb0`**, the recovery link.
 
 ```elixir
 config :nerves_gate, :cellular, %{
@@ -73,88 +59,50 @@ config :nerves_gate, :cellular, %{
 }
 ```
 
-QEMU keeps `cellular: nil` and rejects cellular proposals before changing Ethernet.
-EC100 boards without the module can still use Ethernet; a selected cellular link
-remains unavailable when its hardware or SIM is absent. There is no protocol
-probing, GPIO reset watchdog or automatic USB-mode switching. **Never give the
-modem `usb0`**: that is the recovery link. Inbound cellular traffic is filtered
-before networking starts; see [HTTP exposure](#local-recovery-and-http-exposure).
-Factory-firmware reads confirmed the modem identity, AT port and ECM commands;
-registration, DHCP and failover under Nerves still need a working SIM and hardware
-validation.
+QEMU has no modem (`cellular: nil`). 4G choices stay disabled until a modem is
+actually detected, and the backend rejects enabling cellular or changing its APN
+without one; other edits keep existing cellular settings. Inbound cellular traffic
+is [filtered](#local-recovery-and-http-exposure) before networking starts.
 
-4G choices are greyed out until a supported modem interface is actually detected;
-a firmware modem profile alone is not hardware detection. Enabling cellular or
-changing its APN also requires detected hardware on the device. Other network
-edits may preserve existing cellular settings while a modem is absent. Ethernet
-remains available.
+Cellular uses the network's default APN (an empty APN) unless you set
+**Advanced cellular settings → APN override**. Not every operator provides a
+default; business and IoT SIMs often need a specific APN. APN usernames and
+passwords are unsupported. Modem settings use the normal trial and rollback.
 
-Cellular uses the mobile network's default APN unless an override is supplied.
-The modem requests this with an empty APN; this is not a carrier-profile database
-or a guarantee that every operator provides a default. If it does not connect,
-open **Advanced cellular settings → APN override** and enter the value from your
-operator's mobile-data setup instructions. Business and IoT SIMs often require a
-specific APN. An existing override stays visible; clear it to try the network
-default again. APN account usernames/passwords remain unsupported.
-
-Modem settings use the normal trial and VintageNet persistence, with source/APN
-metadata stored alongside `br0`'s topology metadata. Ethernet-only disables the modem with VintageNet's Null
-technology. Readiness requires no modem, SIM, registration or Internet;
-registration can outlast the undo window. Roaming policy is not configurable.
+Modem identity and AT/ECM commands are verified on hardware. Registration, DHCP,
+failover and PIN handling with a working SIM are not yet validated.
 
 ### SIM commissioning and saved PIN
 
-After enabling and saving a cellular source, the Internet page shows SIM
-state, PIN protection, optional remaining attempts, registration, operator and
-signal. Unknown readings are not proof of a missing SIM. Refresh is read-only.
-Saving an APN, unlocking the SIM and obtaining Internet are separate states.
+Once cellular is enabled, the Internet page shows SIM state, PIN protection,
+remaining attempts, registration, operator and signal. Unknown is not proof of a
+missing SIM, and Refresh is read-only. PIN entry is accepted only in the device's
+own UI over verified direct USB, or through the administrative
+[Elixir API](action-api.md). All SIM commands share Network's single worker, and
+VintageNetECM remains the only AT-port user.
 
-Enter credentials only in the device's own UI over server-verified direct USB.
-Ethernet, VPN and workstation UIs cannot submit them. The trusted administrative
-[Elixir API](action-api.md) also exposes these operations. All commands share
-Network's one bounded worker and reject active trials/recovery. VintageNetECM
-remains the AT-port owner; there is no raw-AT web endpoint or second UART manager.
+- **Unlock and save PIN** sends one 4–8 digit PIN. After success and a fresh
+  READY/identity check, the PIN is saved bound to a hash of the SIM's ICCID.
+- **Verify and save PIN** checks the PIN of an already-ready SIM by reapplying its
+  current protection setting once. **A wrong PIN consumes an attempt.**
+- **Advanced** changes the PIN or turns protection on or off, once. Success saves
+  the verified PIN; disabling protection forgets it. After an unknown PIN-change
+  outcome, never try both codes blindly.
+- **Forget saved PIN** deletes the record without touching the SIM.
 
-**Unlock and save PIN** sends one existing 4–8 digit PIN. After an acknowledged
-unlock and fresh READY/identity checks, the device saves the PIN bound to a hash
-of this SIM's ICCID. For an already-ready SIM, **Verify and save PIN** verifies it
-by reapplying the current PIN-protection setting once, without changing protection.
-This verification is a PIN attempt: a wrong PIN consumes an attempt.
+PUK, PIN2, SMS and USSD are unsupported; recover a blocked SIM with the carrier or
+a phone. SIM operations are not network trials and rollback does not undo them.
 
-On restart or modem power loss, automatic unlock requires a live PIN-required
-state and a fresh matching SIM identity. It durably blocks its saved credential
-*before* sending one PIN. A failed, interrupted or uncertain attempt remains
-blocked across restarts; only an acknowledged, freshly verified successful PIN
-operation re-arms it. No blind PIN retry is sent. Automatic unlock therefore works
-across successful restarts but fails closed after an uncertain one. A different
-SIM never receives the saved PIN.
+After a restart, the saved PIN is sent automatically only when the SIM asks for it
+and its fresh identity matches. The record is blocked *before* that single attempt
+and re-armed only by a known success, so a failed or uncertain attempt stays
+blocked across reboots and no PIN is ever retried blindly. If the modem cannot
+report the ICCID while locked, nothing is sent and manual unlock is required.
 
-**Hardware qualification remains required:** the EG800AK must answer `AT+QCCID`
-while PIN-locked for safe automatic unlock. If it cannot, status reports unknown
-identity and no automatic PIN is sent; manual unlock is required. No assumption
-about locked-SIM identity availability is made. PIN/PUK attempts, registration,
-DHCP and failover have not yet been validated with a working SIM under Nerves.
-
-Advanced settings change the PIN or enable/disable PIN protection once. A
-successful PIN change or enabling protection saves the verified credential;
-disabling protection forgets it. Old saved credentials are blocked before any
-security write. An unknown PIN-change outcome cannot be resolved by reading the
-PIN back: never blindly try both old and new codes. PUK, PIN2, carrier recovery,
-SMS and USSD are unsupported; recover a blocked SIM with the carrier or a phone.
-
-**Forget saved PIN** removes the private record without changing the SIM, even
-when cellular is disabled or the modem is missing. These SIM operations are not
-network trials and are not undone by network rollback.
-
-The owner-only directory `/data/nerves_gate/cellular/` holds `pin.json` (0600).
-The store uses canonical `/root/nerves_gate/cellular/` because the BSP makes
-`/data` a symlink to `/root`; other credential-path symlinks are refused.
-This is **not encryption**: root access and full data-partition/eMMC backups can
-read it. Full VM crash dumps can also contain in-memory credentials. Protect
-backups and diagnostic dumps accordingly. Ordinary network settings, status,
-projections and notifications contain neither PIN nor SIM identifier/hash. PIN
-commands are filtered from logs and never retained as UI drafts. EC100 factory
-reset erases the record with the rest of `/data`.
+The record is `/data/nerves_gate/cellular/pin.json` (owner-only). It is **not
+encrypted**: root access, full eMMC backups and VM crash dumps can expose it.
+Status, projections, notifications and logs never contain the PIN or SIM identity.
+Factory reset erases it.
 
 ## Saving and rollback
 
@@ -288,8 +236,9 @@ Once Tailscale reports an online IPv4 address, firmware starts OTP distribution 
 `nerves_gate@<Tailscale-IPv4>`, for example `nerves_gate@100.88.166.70`. Until then
 it waits without blocking startup, HTTP or recovery. VPN outages leave the node
 running. A new address restarts distribution under the new name and disconnects
-clients; renaming the host does not. Development launchers start distribution themselves; QEMU uses its management
-network (see [the bench](development.md#isolation)).
+clients; renaming the host does not. Development launchers start distribution
+themselves; QEMU uses its management network (see
+[the simulator](development.md#workbench-and-simulator)).
 
 Firmware listens on TCP **4369** (EPMD) and **9100** (distribution) on all IPv4
 interfaces. Native distribution is unencrypted; Tailscale encrypts the VPN path.

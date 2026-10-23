@@ -3,7 +3,7 @@ defmodule DevWeb.DeviceLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
   alias NervesGate.Projection
-  alias NervesGateSim.{ManualFaults, QemuTests}
+  alias Simulator.{ManualFaults, QemuTests}
   alias NervesGateWeb.{NetworkStatus, Observations}
   alias DevWeb.Components
 

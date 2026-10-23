@@ -61,31 +61,17 @@ keys; hostname and trial ID are plain strings. Failures return
 browser sign-in link. Only the bounded remote worker uses the key; it is never
 persisted or included in status or events. Do not log it or put it in configuration.
 
-Cellular configuration adds `"internet" => %{"mode" => "cellular", "apn" => ""}`
-without an Ethernet Internet role, or `"mode" => "backup"` with one. An empty APN
-requests the mobile network's default; provide an operator APN string to override
-it. No carrier database is consulted. Without cellular settings, the gateway is
-Ethernet-only. Validation checks shape, not hardware. Enabling cellular or
-changing its APN requires a [qualified, detected modem](networking.md#cellular-modems);
-unrelated network edits can preserve existing cellular settings while it is absent.
+Cellular settings add `"internet" => %{"mode" => "cellular", "apn" => ""}` without
+an Ethernet Internet role, or `"mode" => "backup"` with one. An empty APN requests
+the network default. Validation checks shape only; enabling cellular or changing
+its APN also needs a [detected modem](networking.md#cellular-modem).
 
-Cellular acceptance is not completion: observe `status.cellular.operation` and
-`.error`. Refresh never submits a PIN. All PINs are 4–8 ASCII digits; protection
-is a boolean. Unlock and successful security writes privately save the verified
-PIN for the same SIM; disabling protection forgets it. `cellular_save_pin` verifies
-an already-ready SIM's PIN by reapplying its existing protection setting once
-(**a wrong PIN consumes an attempt**). Forget works without an enabled/present
-modem and does not change the SIM.
-
-The saved PIN is used automatically only after fresh identity matching and a
-durable one-attempt latch. Failure or uncertainty blocks automatic attempts across
-reboots; a known-successful PIN operation must re-arm it. Neither simply reading
-READY nor restarting re-arms a blocked record. If the modem cannot identify a
-locked SIM, automatic unlock refuses to send a PIN. See
-[SIM commissioning](networking.md#sim-commissioning-and-saved-pin), including
-hardware qualification and unencrypted backup storage limits. PINs, ICCIDs and
-binding hashes never enter status or configuration exports. Do not log API PIN
-arguments or results of internal private-store functions.
+SIM commands only acknowledge acceptance: observe `status.cellular.operation` and
+`.error`. PINs are 4–8 ASCII digits. `cellular_save_pin` reapplies the existing
+protection setting once, so **a wrong PIN consumes an attempt**. Saving, automatic
+unlock and storage limits are described in
+[SIM commissioning](networking.md#sim-commissioning-and-saved-pin). Never log PIN
+arguments.
 
 ## Completion and safety
 
@@ -201,4 +187,4 @@ status = NervesGate.status(opts)
 
 Other options are `:equipment`, `:indicators` and `:buses`.
 [SSH](../firmware/lib/nerves_gate/ssh.ex) is a single device-owned store. See the
-[QEMU scenarios](../sim/scenarios) for examples against real devices.
+[QEMU scenarios](../lib/simulator/scenarios) for examples against real devices.

@@ -15,7 +15,7 @@
 ## Structure and ownership
 
 The root is the host-only developer platform (`:nerves_gate_dev`), not an umbrella.
-Subsystems remain independent Mix projects. Root host checks use native
+`sdk/` and `firmware/` remain independent Mix projects. Root host checks use native
 `Mix.Project.in_project/4`; do not shell out to Mix for repository host orchestration.
 Device builds and user apps are exceptions: they require isolated supervised
 OS processes, never device-target compilation in the workbench VM.
@@ -32,10 +32,11 @@ OS processes, never device-target compilation in the workbench VM.
   app lifecycle and SD storage. `NervesGate.Buses` owns CAN/RS485 access.
 - `sdk/`: typed app contract and packaging. Never expose firmware status maps or
   administrative commands through the SDK.
-- `sim/lib/nerves_gate_sim/simulator.ex`, `simulator/`: owned real QEMU hardware.
-- `sim/lib/nerves_gate_sim/qemu_tests.ex`: shared UI/CLI/CI admission and reservations;
+- `lib/simulator.ex`, `lib/simulator/`: owned real QEMU hardware; `priv/simulator/`
+  holds the simulator-node script and bench configurations.
+- `lib/simulator/qemu_tests.ex`: shared UI/CLI/CI admission and reservations;
   independent devices can run concurrently; `devices: :all` reserves every device.
-- `sim/scenarios/`: real-QEMU scenarios compiled by the root. Extend them for I/O
+- `lib/simulator/scenarios/`: real-QEMU scenarios. Extend them for I/O
   checks, not hardware mocks or fake SDK backends.
 - `firmware/test/unit/`: pure policy, validation and codec tests; no devices.
 - `systems/`: Nerves systems. Artifact input changes require a system version bump.
@@ -66,7 +67,7 @@ OS processes, never device-target compilation in the workbench VM.
 - Build changed assets in `firmware/` with `mix assets.build`; commit
   `firmware/priv/static/assets/` with their sources.
 - Test changed behaviour. Documentation-only changes need no QEMU checks.
-- Root, firmware and sim share `VERSION`/`CHANGELOG.md`; SDK and systems keep
+- Root and firmware share `VERSION`/`CHANGELOG.md`; SDK and systems keep
   independent versions. Only SDK is published on Hex. Tags/releases, retirement,
   pushes and physical-device operations require a request.
 - Release checks live under `lib/dev/`. Protected CI is the publisher; do not put

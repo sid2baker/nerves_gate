@@ -32,7 +32,7 @@ defmodule Dev.Builds do
   def firmware!(target \\ "x86_64", report \\ fn _ -> :ok end)
       when target in ["ec100", "x86_64"] do
     status =
-      NervesGateSim.Simulator.BuildOutput.run(
+      Simulator.BuildOutput.run(
         "mix",
         ["firmware", "--overwrite"],
         [

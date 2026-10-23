@@ -14,7 +14,7 @@ defmodule Dev.GatewayUI do
   local Tailscale daemon without changing it and never starts or stops simulated
   devices. Real gateways need development firmware with the same cookie.
   """
-  alias NervesGateSim.DevDiscovery
+  alias Dev.TailnetDiscovery
 
   @standard_epmd 4369
 
@@ -73,7 +73,7 @@ defmodule Dev.GatewayUI do
       gateway ->
         gateway
 
-      DevDiscovery.node_address(target) != :error ->
+      TailnetDiscovery.node_address(target) != :error ->
         real(String.to_atom(target))
 
       true ->
@@ -106,10 +106,10 @@ defmodule Dev.GatewayUI do
   defp tailnet do
     Mix.shell().info("Looking for gateways on the tailnet...")
 
-    case DevDiscovery.tailnet() do
+    case TailnetDiscovery.tailnet() do
       {:ok, _local, peers} ->
         start_distribution!()
-        for gateway <- DevDiscovery.discover(peers), do: real(gateway.node)
+        for gateway <- TailnetDiscovery.discover(peers), do: real(gateway.node)
 
       {:error, message} ->
         Mix.shell().info(message)
@@ -119,9 +119,9 @@ defmodule Dev.GatewayUI do
 
   defp serve(node, port) do
     unless Node.alive?(), do: start_distribution!()
-    {:ok, address} = DevDiscovery.node_address(Atom.to_string(node))
+    {:ok, address} = TailnetDiscovery.node_address(Atom.to_string(node))
 
-    unless Enum.any?(DevDiscovery.discover([address]), &(&1.node == node)),
+    unless Enum.any?(TailnetDiscovery.discover([address]), &(&1.node == node)),
       do: Mix.raise("Gateway #{node} did not reply. Start it and check its development cookie.")
 
     Application.put_env(:nerves_gate, :backend_node, node)

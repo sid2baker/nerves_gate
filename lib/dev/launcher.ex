@@ -4,7 +4,7 @@ defmodule Dev.Launcher do
 
   def run(args) do
     options = options!(args)
-    Dev.Prerequisites.check!()
+    Simulator.Prerequisites.check!()
     Dev.configure()
 
     dir =
@@ -140,7 +140,7 @@ defmodule Dev.Launcher do
         path
 
       File.regular?(Path.join(Dev.root(), "firmware/mix.exs")) ->
-        Path.join(Dev.root(), "sim/priv/qemu/simulator.exs")
+        Simulator.script("simulator")
 
       true ->
         Mix.raise("Supply --firmware path/to/nerves_gate.fw (a compatible QEMU firmware image)")

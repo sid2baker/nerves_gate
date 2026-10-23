@@ -3,7 +3,7 @@
 A pure Elixir application API. It has no Nerves or Linux dependencies. Gateway
 firmware implements `NervesGateSDK.Backend`; on a workstation, calls return
 `{:error, :backend_not_configured}`. Run applications on real firmware, including
-the QEMU gateways of `nerves_gate_sim`.
+the QEMU gateways of the Nerves Gate developer workbench.
 
 ```elixir
 alias NervesGateSDK.{CAN, Events, Network, Storage, System}

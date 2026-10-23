@@ -1,7 +1,7 @@
 defmodule Dev.AdmissionTest do
   use ExUnit.Case, async: false
-  alias NervesGateSim.QemuTests
-  alias NervesGateSim.Simulator.Network
+  alias Simulator.QemuTests
+  alias Simulator.Network
 
   setup do
     {:ok, _} = Application.ensure_all_started(:phoenix_pubsub)

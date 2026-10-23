@@ -45,7 +45,7 @@ jobs:
           path: |
             ${{ env.NERVES_DL_DIR }}
             firmware/_build/setup
-          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'sim/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/scripts/tailscaled.ex') }}
+          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/scripts/tailscaled.ex') }}
           restore-keys: simulator-downloads-${{ runner.os }}-
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
@@ -90,4 +90,4 @@ jobs:
           TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
           TS_TAGS: tag:ci
         # Never tee stdout or upload daemon logs, identity disks or credentials.
-        run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci --only tailscale_auth --config sim/priv/qemu/tailnet.exs
+        run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci --only tailscale_auth --config priv/simulator/tailnet.exs

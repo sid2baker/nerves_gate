@@ -1,7 +1,7 @@
 defmodule Dev.Applications do
   @moduledoc "Ordinary SDK application projects opened by the workbench."
   use GenServer
-  @reserved ~w(dev dev_web nerves_gate nerves_gate_dev nerves_gate_sdk nerves_gate_sim)
+  @reserved ~w(dev dev_web nerves_gate nerves_gate_dev nerves_gate_sdk simulator)
 
   def start_link(_), do: GenServer.start_link(__MODULE__, [], name: __MODULE__)
   def list, do: GenServer.call(__MODULE__, :list)
@@ -103,7 +103,7 @@ defmodule Dev.Applications do
     output = package!(path, report, :temporary)
 
     try do
-      case NervesGateSim.QemuTests.install(device, output) do
+      case Simulator.QemuTests.install(device, output) do
         {:ok, id} -> await_install!(id, report)
         {:error, message} -> raise ArgumentError, message
       end
@@ -114,7 +114,7 @@ defmodule Dev.Applications do
 
   defp await_install!(id, report) do
     run =
-      Enum.find(NervesGateSim.QemuTests.snapshot().runs, &(&1.id == id)) ||
+      Enum.find(Simulator.QemuTests.snapshot().runs, &(&1.id == id)) ||
         raise("Install outcome unknown; inspect the device page")
 
     report.(run.phase)
@@ -136,7 +136,7 @@ defmodule Dev.Applications do
     {:ok, _} = Application.ensure_all_started(:muontrap)
 
     status =
-      NervesGateSim.Simulator.BuildOutput.run(
+      Simulator.BuildOutput.run(
         "mix",
         args,
         [

@@ -30,10 +30,10 @@ defmodule Dev.Operations do
     do: {:reply, {:error, "Finish the workbench operation first"}, state}
 
   def handle_call({:lifecycle, action}, _, state),
-    do: {:reply, NervesGateSim.QemuTests.lifecycle(action), state}
+    do: {:reply, Simulator.QemuTests.lifecycle(action), state}
 
   def handle_call({:stop_session, id}, {request, _}, state) do
-    result = NervesGateSim.QemuTests.stop_session(id, request)
+    result = Simulator.QemuTests.stop_session(id, request)
     state = if result == :ok, do: drop_review(state), else: state
     {:reply, result, %{state | stopping: result == :ok}}
   end
@@ -145,7 +145,7 @@ defmodule Dev.Operations do
   defp admitted("firmware", "ec100"), do: :ok
 
   defp admitted("firmware", target) when target in [nil, "x86_64"] do
-    lifecycle = NervesGateSim.QemuTests.snapshot().lifecycle
+    lifecycle = Simulator.QemuTests.snapshot().lifecycle
 
     if lifecycle.status == :stopped and not lifecycle.prepared,
       do: :ok,

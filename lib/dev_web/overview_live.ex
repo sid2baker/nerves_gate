@@ -3,7 +3,7 @@ defmodule DevWeb.OverviewLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
   import DevWeb.Components
-  alias NervesGateSim.QemuTests
+  alias Simulator.QemuTests
 
   def mount(_, _, socket) do
     if connected?(socket) do

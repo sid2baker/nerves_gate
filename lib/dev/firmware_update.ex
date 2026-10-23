@@ -276,7 +276,7 @@ defmodule Dev.FirmwareUpdate do
         :ssh_connection.adjust_window(connection, channel, byte_size(data))
         output = if output == :discard, do: :discard, else: output <> data
         if is_binary(output) and byte_size(output) > 65_536, do: raise("SSH response too large")
-        if output == :discard, do: report.(NervesGateSim.Simulator.BuildOutput.line(data))
+        if output == :discard, do: report.(Simulator.BuildOutput.line(data))
         receive_result!(connection, channel, deadline, output, report)
 
       {:ssh_cm, ^connection, {:eof, ^channel}} ->

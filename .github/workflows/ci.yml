@@ -31,8 +31,6 @@ jobs:
             _build/test
             sdk/deps
             sdk/_build/test
-            sim/deps
-            sim/_build/test
             firmware/deps
             firmware/_build/test
           key: platform-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mise.toml', 'mix.lock', 'mix.exs', '*/mix.lock', '*/mix.exs') }}-${{ github.sha }}

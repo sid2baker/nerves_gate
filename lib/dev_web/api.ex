@@ -1,7 +1,7 @@
 defmodule DevWeb.Api do
   @moduledoc "JSON for the simulator CLI tasks. Never includes device credentials."
   use Phoenix.Controller, formats: [:json]
-  alias NervesGateSim.QemuTests
+  alias Simulator.QemuTests
 
   def state(conn, _) do
     json(

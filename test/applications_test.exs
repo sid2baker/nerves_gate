@@ -48,7 +48,7 @@ defmodule Dev.ApplicationsTest do
   end
 
   test "scenario catalog stays owned by the simulator and loaded by the platform" do
-    ids = Enum.map(NervesGateSim.QemuTests.scenarios(), & &1.id)
+    ids = Enum.map(Simulator.QemuTests.scenarios(), & &1.id)
     assert "apps" in ids and "sdk" in ids and "public_status" in ids
   end
 end

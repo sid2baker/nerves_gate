@@ -1,92 +1,63 @@
 # Nerves Gate
 
-A developer platform and Nerves firmware for EC100 controllers. The same firmware
-runs in disposable QEMU devices and on real gateways. Applications use the typed
-[Nerves Gate SDK](sdk/README.md), not workstation hardware stand-ins.
+Nerves firmware for EC100 controllers and the developer platform around it. The
+same firmware runs on real gateways and in disposable QEMU devices. Applications
+use the typed [Nerves Gate SDK](sdk/README.md).
 
-## Start the developer platform
+## Quick start
 
-Use Linux x86_64 or aarch64 (including a Linux VM on macOS), with the
-[host prerequisites](docs/development.md#prerequisites). `mise.toml` pins Elixir
-1.20 and OTP 29. App developers use a supported platform release checkout;
-maintainers work on source.
+Linux x86_64 or aarch64 (a Linux VM on macOS works), with the
+[host prerequisites](docs/development.md#prerequisites):
 
 ```sh
-mise install
-mix setup
-mix dev
+mise install   # Elixir 1.20, OTP 29
+mix setup      # dependencies, tools and prebuilt QEMU system; boots nothing
+mix dev        # workbench at http://localhost:4000
 ```
 
-The workbench opens at http://localhost:4000 with Overview, Devices, Applications,
-Firmware and Simulator pages. Devices discovers LAN gateways and lists owned QEMU
-devices with a **Simulated** badge; Applications offers Create/Open controls.
-Every simulated device remains stopped. Start,
-stop, reset, wiring and scenario actions are explicit. Setup downloads the QEMU
-system/toolchain; firmware is built locally when explicitly requested or when
-starting fresh simulated devices. Nothing flashes physical hardware.
+Simulated devices stay stopped until you start them on the Simulator page.
+Nothing flashes physical hardware unless you explicitly confirm it.
 
-## Develop an application
+## Applications
 
-Use **Create application** or **Open application** on the Applications page. Apps are
-ordinary Mix projects, kept in their own directories/repositories. No solution
-manifest is needed. The command-line equivalents are:
+Apps are ordinary Mix projects in their own directories. Create or open them on
+the Applications page, or:
 
 ```sh
 mix app.new ../my_controller
 mix app.test ../my_controller
 mix app.package ../my_controller
-mix dev ../my_controller
 ```
 
-Apps depend on the released SDK. `mix app.new PATH --local-sdk` is available for
-SDK maintainers. The workbench supports tests, packaging and installation onto
-owned simulated devices, plus explicit QEMU firmware builds.
+See [app development](docs/app-development.md).
 
-LAN discovery uses mDNS, not a subnet scan. Older firmware without advertisements
-needs a known hostname or IP in **Add address**, including Tailscale DNS names.
-Discovered identities are unverified; only open gateway UIs on trusted networks.
-The workbench builds EC100/QEMU firmware and offers explicit SSH review and
-confirmed A/B updates. See [firmware updates](docs/firmware-updates.md) for build
-prerequisites and the explicit SSH review/confirmation flow.
-
-See [app development](docs/app-development.md) for storage commissioning,
-installation, console access and the SSH-only real-gateway workflow.
-
-## Work on the platform
+## Working on the platform
 
 ```sh
 mix format --force
-mix ci                                     # host checks; no devices
-mix test.qemu --only sdk --device gateway_a # user's running bench
+mix ci                                       # host checks; no devices
+mix test.qemu --only sdk --device gateway_a  # against your running mix dev
 ```
 
-Disposable integration benches are explicit: `mix test.qemu --ci --only sdk`.
-They never attach to arbitrary VMs or physical devices. See
-[development](docs/development.md) and [CI](docs/ci.md).
-
-## Projects
-
-| Path | Owner |
+| Path | Contents |
 | --- | --- |
-| Root `lib/dev/`, `lib/dev_web/` | Workbench, app tools, LAN discovery, builds and release checks |
-| `sim/` | QEMU lifecycle, virtual hardware and shared scenario admission |
-| `firmware/` | EC100/QEMU device runtime and gateway UI |
-| `sdk/` | Independently versioned app contract and packaging, published on Hex |
-| `systems/` | Nerves system sources and GitHub artifacts |
+| `lib/dev/`, `lib/dev_web/` | Workbench, app tools, discovery, builds, updates and release checks |
+| `lib/simulator/` | QEMU devices, virtual networking, scenarios and runner |
+| `firmware/` | Device runtime and gateway UI (separate Nerves project) |
+| `sdk/` | App contract and packaging (separately versioned, published on Hex) |
+| `systems/` | EC100 and QEMU Nerves systems |
 
-No umbrella or fake hardware backend. The platform, firmware and simulator share
-`VERSION`; the SDK and systems keep independent versions. Platform releases are
-GitHub tags/releases, not Hex packages. Previously published component packages
-remain immutable. See [architecture](docs/architecture.md),
-[releases](docs/releases.md) and the [changelog](CHANGELOG.md).
+Read [development](docs/development.md), [architecture](docs/architecture.md),
+[CI](docs/ci.md), [releases](docs/releases.md) and the [changelog](CHANGELOG.md).
 
 ## Device documentation
 
-- [Public commands](docs/action-api.md)
+- [Public API](docs/action-api.md)
 - [Networking and recovery](docs/networking.md)
+- [Firmware builds and updates](docs/firmware-updates.md)
 - [Applications and storage](docs/applications.md)
 - [CAN and RS485](docs/buses.md)
-- [Indicators](docs/indicators.md)
+- [LEDs and button](docs/indicators.md)
 - [Gateway and workbench UI](docs/ui.md)
 
 Apache-2.0. See [LICENSE](LICENSE).

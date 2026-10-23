@@ -49,12 +49,9 @@ allows metadata validation before compiling workstation tooling:
 elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check sdk/v0.1.0
 ```
 
-Only the platform, SDK and two systems receive new releases. Obsolete component
-and legacy QEMU GitHub releases/tags have been removed; source history remains
-reachable through the commits linked in the root changelog. The standalone EC100
-repository is archived and points here. Previously published firmware, simulator
-and generator Hex packages still exist. Retiring them is a separate action after
-a replacement platform release exists; the SDK remains active.
+Only the platform, the SDK and the two systems are released. Older firmware,
+simulator and generator Hex packages remain published; retiring them is a
+separate, explicit action.
 
 ## Systems
 

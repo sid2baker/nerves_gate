@@ -1,92 +1,71 @@
 # App development
 
-Start the platform with `mix dev`. No solution manifest, generator archive,
-platform fork or environment variables are required.
+Start the platform with `mix dev`. No manifest, generator archive or environment
+variables are needed.
 
 ## Create or open an application
 
-In the workbench's **Applications** panel:
+On the workbench's **Applications** page, enter a new directory such as
+`../my_controller` and choose **Create application**, or enter an existing Mix
+project and choose **Open application**. Each row has **Test** and **Package**.
+Opened directories are remembered for the session only.
 
-1. On **Applications**, enter a new directory, such as `../my_controller`, and select **Create application**.
-2. Or enter an existing Mix project's directory and select **Open application**.
-3. Use **Test** and **Package** on its row. Opened directories are remembered for
-   this session, not written into platform source.
-
-An app is an ordinary independent Mix project with its own Git repository and
-`mix.lock`. It depends on `{:nerves_gate_sdk, "~> 0.1.0"}` plus its private
-libraries, and declares an SDK requirement and health check. Tests exercise pure
-app decisions over typed observations; real I/O uses QEMU, not a fake host backend.
-
-The equivalent commands from the platform checkout are:
+The command-line equivalents:
 
 ```sh
-mix app.new ../my_controller
+mix app.new ../my_controller      # --local-sdk uses this checkout's SDK
 mix app.test ../my_controller
 mix app.package ../my_controller
-mix dev ../my_controller
+mix dev ../my_controller          # open the app when the workbench starts
 ```
 
-`mix dev APP_DIRECTORY` simply opens that app on startup; plain `mix dev` is the
-normal entry point. `mix app.new PATH --local-sdk` is for SDK maintainers: it uses
-this checkout's SDK instead of Hex. Do not distribute workstation-specific paths.
+An app is an independent Mix project with its own repository and `mix.lock`. It
+depends on `{:nerves_gate_sdk, "~> 0.1.0"}` and declares an SDK requirement and a
+health check (the template provides both). Unit-test pure decisions over typed
+observations; test real I/O on QEMU, not with a fake backend.
 
-Packages are written to `APP_DIRECTORY/packages/NAME.ez`. Existing output is not
-silently replaced; move/remove it deliberately before rebuilding. App tests and
-builds run in supervised separate Mix processes, never loading app code into the
-workbench VM. Inside an app, ordinary `mix test` and
-`MIX_ENV=prod mix nerves_gate.package` also work.
-
-## Find gateways on the current network
-
-The workbench automatically makes a bounded local mDNS query when opened. Use
-**Refresh discovery** to search again. It only lists advertisements identifying
-`Nerves Gate`; it does not scan subnets or configure the workstation network/VPN.
-The **Add address** form accepts a DNS hostname (including Tailscale DNS) or an
-explicit IPv4 address without probing it.
-
-New firmware advertises its public hostname, firmware version and target via
-`_nerves-device._tcp`. Already-installed firmware without this advertisement will
-not appear automatically: add its known address manually, or explicitly update
-it through your authorized firmware procedure. Multicast filtering and VM network
-boundaries can prevent discovery.
-
-Advertisement data is unverified, not authentication. **Open gateway** opens the
-device's existing HTTP UI on port 4000. That UI has no sign-in: only use it on
-trusted networks. Finding a device never attaches simulator drivers, installs an
-app or updates firmware. Use the explicit [firmware build/review/update flow](firmware-updates.md) for
-physical-device firmware; finding a device never authorizes an update.
+Packages are written to `APP_DIRECTORY/packages/NAME.ez`; existing output is never
+replaced silently. App builds run in separate Mix processes, never in the
+workbench VM. Inside the app, `mix test` and `MIX_ENV=prod mix nerves_gate.package`
+work as usual.
 
 ## Run an app on QEMU
 
-Start simulated devices explicitly in the workbench. On each guest, open
-**Settings → Application storage → Use this card** for its prepared virtual SD
-card. Device-owned storage commissioning is not bypassed.
-
-Select a simulated device in the app row and choose **Install on simulator**, or:
+Start simulated devices on the Simulator page. On each device, open
+**Settings → Application storage → Use this card** for its virtual SD card. Then
+choose **Install on simulator** in the app row, or:
 
 ```sh
 mix app.install ../my_controller --device gateway_a
-mix app.console --device gateway_a
+mix app.console --device gateway_a   # prints an SSH IEx command during Manual control
 ```
 
-Installations, scenarios and Manual control share backend reservations. The
-console command prints the SSH IEx command only with idle Manual control; close
-SSH before releasing it. `RingLogger.attach()` follows device/app logs.
+Installs, scenarios and Manual control share device reservations. In the console,
+`RingLogger.attach()` follows logs. A same-version reinstall keeps app data; a new
+version uses the device's health-checked upgrade. Packages never bundle the SDK.
 
-Same-version development reinstall preserves app data; versioned upgrades use
-the device's health-checked rollback. Packages never bundle the SDK or platform.
+## Find physical gateways
+
+The Devices page browses local mDNS for `_nerves-device._tcp` advertisements from
+Nerves Gate; **Refresh discovery** searches again. It never scans subnets or
+changes workstation networking. **Add address** accepts a hostname (including
+Tailscale DNS) or IPv4 address for firmware that does not advertise, or across
+networks mDNS cannot reach.
+
+Advertisements are unverified. **Open gateway** opens the device's HTTP UI on port
+4000, which has no sign-in: use it only on trusted networks. Finding a device never
+installs anything; firmware updates follow [their own flow](firmware-updates.md).
 
 ## Install on a physical gateway
 
-This remains an explicit SSH/SFTP procedure with authorized access:
+This is an explicit SSH procedure with your own authorized key:
 
-1. Commission a supported card in the gateway's Application storage settings.
-2. Package the app and transfer its `.ez` to a temporary file on the gateway.
-3. In SSH IEx, call `NervesGate.Apps.install(path)`, then
-   `NervesGate.Apps.start(:your_app)`. Use `NervesGate.Apps.upgrade(path)` for a
-   versioned update.
-4. Remove the temporary file and inspect app status/logs.
+1. Commission an SD card in the gateway's Application storage settings.
+2. Package the app and copy the `.ez` to a temporary file on the gateway.
+3. In SSH IEx, run `NervesGate.Apps.install(path)` and
+   `NervesGate.Apps.start(:your_app)`, or `NervesGate.Apps.upgrade(path)` for a
+   new version.
+4. Delete the temporary file and check app status and logs.
 
-Use your own authorized connection and keys. Never copy the simulator's public
-development cookie into production. Native dependencies must be built for the
-device architecture. See [application lifecycle](applications.md).
+Never reuse the simulator's development cookie in production. Native dependencies
+must be built for the device architecture. See [application runtime](applications.md).

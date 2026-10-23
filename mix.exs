@@ -3,7 +3,7 @@ defmodule Dev.MixProject do
 
   @external_resource Path.join(__DIR__, "VERSION")
   @version __DIR__ |> Path.join("VERSION") |> File.read!() |> String.trim()
-  @projects ~w(sdk sim firmware)
+  @projects ~w(sdk firmware)
 
   def project do
     # A device target left in the caller's shell must not select a device build
@@ -15,11 +15,9 @@ defmodule Dev.MixProject do
       app: :nerves_gate_dev,
       version: @version,
       elixir: "~> 1.20",
-      elixirc_paths: ["lib", "sim/scenarios"],
       listeners: if(Mix.env() == :dev, do: [Phoenix.CodeReloader], else: []),
       deps: [
         {:nerves_gate_sdk, path: "sdk"},
-        {:nerves_gate_sim, path: "sim"},
         {:nerves_gate, path: "firmware", runtime: false},
         {:phoenix, "~> 1.8"},
         {:phoenix_live_view, "~> 1.2.13"},
@@ -36,8 +34,7 @@ defmodule Dev.MixProject do
         "deps.get": &deps_get/1,
         format: &format/1,
         ci: &ci/1,
-        "test.sdk": &run("sdk", ["test" | &1]),
-        "test.sim": &run("sim", ["test" | &1])
+        "test.sdk": &run("sdk", ["test" | &1])
       ]
     ]
   end
@@ -110,7 +107,7 @@ defmodule Dev.MixProject do
     if target != :host and task not in ["deps.get", "tailscaled.install", "nerves_bootstrap.init"],
       do: Mix.raise("Device compilation must run in a separate OS process")
 
-    apps = %{"sdk" => :nerves_gate_sdk, "sim" => :nerves_gate_sim, "firmware" => :nerves_gate}
+    apps = %{"sdk" => :nerves_gate_sdk, "firmware" => :nerves_gate}
     app = Map.fetch!(apps, project)
     running? = Enum.any?(Application.started_applications(), &(elem(&1, 0) == app))
     previous_env = Mix.env()

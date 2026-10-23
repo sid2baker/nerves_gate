@@ -3,7 +3,7 @@ defmodule Dev.DependencyLocksTest do
 
   test "all shared workstation and firmware dependencies have identical locks" do
     locks =
-      for path <- ["mix.lock", "sim/mix.lock", "firmware/mix.lock"],
+      for path <- ["mix.lock", "firmware/mix.lock"],
           do: {path, Mix.Dep.Lock.read(Path.join(Dev.root(), path))}
 
     for {left, a} <- locks,
