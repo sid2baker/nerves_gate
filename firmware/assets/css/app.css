@@ -1,8 +1,7 @@
 @import "tailwindcss";
 @source "../../lib/nerves_gate_web";
 
-/* Colors live only in these tokens. The system preference picks light or dark unless
-   Phoenix's theme toggle sets data-theme on <html>. */
+/* The system preference applies unless the browser-local theme menu overrides it. */
 :root {
   color-scheme: light dark;
   --ui-bg: light-dark(#f7f8fa, #0f1719);
@@ -119,10 +118,6 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 /* A row of aria-pressed buttons that choose one value. */
 .ui-segmented { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid var(--ui-control-line); border-radius: 9px; background: var(--ui-surface-muted); }
 .ui-segmented > .ui-button { min-height: 36px; padding: 6px 12px; border-color: transparent; border-radius: 6px; background: transparent; color: var(--ui-muted); }
-/* The theme toggle's selection follows data-theme, which only the layout script sets. */
-:root:not([data-theme]) .ui-theme-toggle > [data-phx-theme="system"],
-:root[data-theme="light"] .ui-theme-toggle > [data-phx-theme="light"],
-:root[data-theme="dark"] .ui-theme-toggle > [data-phx-theme="dark"],
 .ui-segmented > .ui-button[aria-pressed="true"] { background: var(--ui-surface); border-color: var(--ui-accent); color: var(--ui-accent-strong); opacity: 1; }
 /* Native <details> menu: keyboard accessible without a popup library. */
 .ui-menu { position: relative; }
@@ -132,6 +127,8 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 .ui-menu-list { position: absolute; z-index: 20; right: 0; top: calc(100% + 4px); min-width: 180px; padding: 4px; display: flex; flex-direction: column; border: 1px solid var(--ui-line); border-radius: 9px; background: var(--ui-surface); box-shadow: 0 8px 30px var(--ui-shadow); }
 .ui-menu-list > .ui-button { justify-content: flex-start; min-height: 38px; padding: 8px 12px; border: 0; border-radius: 6px; background: transparent; color: var(--ui-ink); font-weight: 500; }
 .ui-menu-list > .ui-button--danger { color: var(--ui-warning); }
+.ui-theme-menu .ui-menu-list { min-width: 132px; }
+.ui-theme-menu .ui-button[aria-pressed="true"] { background: var(--ui-selected); color: var(--ui-accent-strong); }
 .ui-badge { display: inline-flex; align-items: center; padding: 1px 8px; border: 1px solid var(--ui-line); border-radius: 999px; background: var(--ui-surface-muted); color: var(--ui-muted); font-size: 12px; font-weight: 550; line-height: 1.6; white-space: nowrap; }
 .ui-badge--warning { border-color: var(--ui-warning-line); background: var(--ui-warning-soft); color: var(--ui-warning); }
 
@@ -186,7 +183,6 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 @media (max-width: 560px) {
   .dev-summary-grid { grid-template-columns: minmax(0, 1fr); }
   .dev-content .ui-page-header { flex-direction: column; align-items: stretch; }
-  .dev-topbar .ui-theme-toggle .ui-button { padding: 6px 8px; }
   .dev-list-toolbar form, .dev-list-toolbar input { width: 100%; }
 }
 

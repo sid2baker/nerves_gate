@@ -305,9 +305,6 @@ defmodule DevWeb.DeviceLive do
           </ul>
         </.panel>
       </div>
-      <footer :if={@config} class="ui-help">
-        <p>Gateway UI with code reload: <code>mix dev.ui {@id}</code></p>
-      </footer>
     </main>
     """
   end

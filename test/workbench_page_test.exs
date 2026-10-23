@@ -214,6 +214,7 @@ defmodule DevWeb.WorkbenchPageTest do
       assert Floki.find(document, "[data-device-kind=simulated]") != [] == (id == "gateway_a")
       assert Floki.find(document, "#test-results") == []
       assert Floki.find(document, "#review-firmware") == []
+      refute Floki.text(document) =~ "mix dev.ui"
     end
   end
 
@@ -249,6 +250,7 @@ defmodule DevWeb.WorkbenchPageTest do
       |> Keyword.merge(Map.to_list(DevWeb.DeviceLive.bench_assigns(view, "gateway_a")))
 
     document = render_component(&DevWeb.DeviceLive.render/1, values) |> Floki.parse_document!()
+    assert Floki.attribute(document, "#device-ui-link", "href") == ["http://localhost:4001"]
     result = Floki.find(document, "#scenario-cable_loss") |> Floki.text()
     assert result =~ "skipped"
     assert result =~ reason

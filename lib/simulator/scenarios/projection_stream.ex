@@ -15,7 +15,7 @@ defmodule Simulator.Scenarios.ProjectionStream do
 
   alias Phoenix.LiveView.{Lifecycle, Socket}
 
-  # The workstation UI's backend is VM-wide, so this scenario holds every device.
+  # These in-process UI checks select a VM-wide backend and hold every device.
   def spec,
     do: %{
       :name =>
@@ -24,7 +24,7 @@ defmodule Simulator.Scenarios.ProjectionStream do
     }
 
   def run(%{device: vm}) do
-    # Select the device exactly as mix dev.ui does for the in-process UI checks.
+    # Exercise the gateway reducers against this device's projection stream.
     Application.put_env(:nerves_gate, :backend_node, vm.node)
 
     try do

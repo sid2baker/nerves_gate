@@ -33,6 +33,7 @@ defmodule Dev.MixProject do
         setup: &setup/1,
         "deps.get": &deps_get/1,
         format: &format/1,
+        firmware: &firmware/1,
         ci: &ci/1,
         "test.sdk": &run("sdk", ["test" | &1])
       ]
@@ -80,6 +81,20 @@ defmodule Dev.MixProject do
 
   defp setup(_), do: Mix.raise("Usage: mix setup")
 
+  defp firmware(args) do
+    {options, targets} = OptionParser.parse!(args, strict: [env: :string])
+    target = List.first(targets) || "x86_64"
+    env = options[:env] || "dev"
+
+    unless length(targets) <= 1 and
+             {target, env} in [{"x86_64", "dev"}, {"ec100", "dev"}, {"ec100", "prod"}],
+           do: Mix.raise("Usage: mix firmware [x86_64 | ec100] [--env dev | prod]")
+
+    Mix.Task.run("app.config")
+    env = if env == "prod", do: :prod, else: :dev
+    Dev.Builds.firmware!(target, &Mix.shell().info(&1), env)
+  end
+
   defp format(args), do: Mix.Tasks.Format.run(args)
 
   defp ci([]) do
@@ -93,6 +108,7 @@ defmodule Dev.MixProject do
     Mix.Task.clear()
     Mix.Task.run("loadconfig")
     Mix.Task.run("compile", ["--warnings-as-errors"])
+    Dev.Builds.assets!(&Mix.shell().info(&1))
     Mix.Tasks.Format.run(["--check-formatted"])
     Mix.Task.run("test")
   end

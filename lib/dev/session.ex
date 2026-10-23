@@ -146,7 +146,7 @@ defmodule Dev.Session do
       )
 
     case Req.get(client, url: "/api/state") do
-      {:ok, %{status: 200, body: %{"epmd_port" => _}} = response} ->
+      {:ok, %{status: 200, body: %{"session_port" => _}} = response} ->
         cookie =
           Enum.map_join(
             Req.Response.get_header(response, "set-cookie"),

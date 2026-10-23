@@ -43,17 +43,14 @@ defmodule Dev.ConfigurationTest do
 
     assert :ok = Dev.configure()
 
-    for {app, endpoint} <- [
-          {:nerves_gate, NervesGateWeb.Endpoint},
-          {:nerves_gate_dev, DevWeb.Endpoint}
-        ] do
-      settings = Application.fetch_env!(app, endpoint)
-      assert settings[:adapter] == Bandit.PhoenixAdapter
-      assert settings[:pubsub_server] == NervesGate.PubSub
-      assert settings[:http][:ip] == {127, 0, 0, 1}
-      assert settings[:server] == false
-      assert byte_size(settings[:secret_key_base]) >= 64
-      assert is_binary(settings[:live_view][:signing_salt])
-    end
+    settings = Application.fetch_env!(:nerves_gate_dev, DevWeb.Endpoint)
+    assert settings[:adapter] == Bandit.PhoenixAdapter
+    assert settings[:pubsub_server] == NervesGate.PubSub
+    assert settings[:http][:ip] == {127, 0, 0, 1}
+    assert settings[:server] == false
+    assert byte_size(settings[:secret_key_base]) >= 64
+    assert is_binary(settings[:live_view][:signing_salt])
+    assert Application.fetch_env!(:nerves_gate, :services) == []
+    assert Application.get_env(:nerves_gate, NervesGateWeb.Endpoint) == nil
   end
 end

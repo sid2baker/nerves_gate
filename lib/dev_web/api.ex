@@ -12,9 +12,7 @@ defmodule DevWeb.Api do
         discovery: Dev.Discovery.snapshot(),
         operation: Dev.Operations.snapshot(),
         session_id: System.get_env("QEMU_SESSION_ID"),
-        session_port: String.to_integer(System.fetch_env!("QEMU_HTTP_PORT")),
-        # mix dev.ui must start its VM with the session's private EPMD port.
-        epmd_port: String.to_integer(System.fetch_env!("ERL_EPMD_PORT"))
+        session_port: String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
       })
     )
   end

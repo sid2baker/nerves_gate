@@ -17,25 +17,6 @@ defmodule NervesGateWeb.Layouts do
         <link phx-track-static rel="stylesheet" href="/assets/css/app.css" />
         <script phx-track-static type="module" src="/assets/js/app.js">
         </script>
-        <%!-- Phoenix's generated theme switcher: system unless chosen, shared across tabs. --%>
-        <script>
-          (() => {
-            const setTheme = (theme) => {
-              if (theme === "system") {
-                localStorage.removeItem("phx:theme");
-                document.documentElement.removeAttribute("data-theme");
-              } else {
-                localStorage.setItem("phx:theme", theme);
-                document.documentElement.setAttribute("data-theme", theme);
-              }
-            };
-            if (!document.documentElement.hasAttribute("data-theme")) {
-              setTheme(localStorage.getItem("phx:theme") || "system");
-            }
-            window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
-            window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
-          })();
-        </script>
       </head>
       <body>{@inner_content}</body>
     </html>

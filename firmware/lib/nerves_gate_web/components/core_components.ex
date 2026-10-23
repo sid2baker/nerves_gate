@@ -23,7 +23,8 @@ defmodule NervesGateWeb.CoreComponents do
     "info" => "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 11v6 M12 7v.01",
     "clock" => "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M12 7v5l3 2",
     "network" => "M9 3h6v6H9z M3 15h6v6H3z M15 15h6v6h-6z M12 9v3 M6 15v-3h12v3",
-    "lock" => "M5 10h14v11H5z M8 10V7a4 4 0 0 1 8 0v3 M12 14v3"
+    "lock" => "M5 10h14v11H5z M8 10V7a4 4 0 0 1 8 0v3 M12 14v3",
+    "theme" => "M12 3a9 9 0 1 0 0 18V3 M12 3a9 9 0 0 1 0 18 M12 7v10"
   }
 
   attr(:name, :string, required: true)
@@ -58,20 +59,28 @@ defmodule NervesGateWeb.CoreComponents do
     """
   end
 
-  @doc "Phoenix's generated theme toggle; the root layout's script applies the choice."
+  @doc "Compact browser-local theme preference, independent of the LiveView connection."
   def theme_toggle(assigns) do
     ~H"""
-    <div class="ui-segmented ui-theme-toggle" role="group" aria-label="Theme">
-      <button
-        :for={{theme, label} <- [{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}]}
-        type="button"
-        class="ui-button"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme={theme}
+    <details class="ui-menu ui-theme-menu">
+      <summary
+        class="ui-button ui-button--quiet ui-icon-button"
+        aria-label="Color theme"
+        title="Color theme"
       >
-        {label}
-      </button>
-    </div>
+        <.icon name="theme" />
+      </summary>
+      <div class="ui-menu-list" role="group" aria-label="Color theme">
+        <button
+          :for={{theme, label} <- [{"system", "System"}, {"light", "Light"}, {"dark", "Dark"}]}
+          type="button"
+          class="ui-button"
+          data-theme-choice={theme}
+        >
+          {label}
+        </button>
+      </div>
+    </details>
     """
   end
 

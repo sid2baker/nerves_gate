@@ -45,7 +45,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      NERVES_GATE_LOCAL_DEPS: '1'
       NERVES_SYSTEM: ''
       NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
     steps:
@@ -63,11 +62,8 @@ jobs:
           key: firmware-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'firmware/scripts/tailscaled.ex') }}
       - name: Prepare all projects without booting devices
         run: mise exec -- mix setup
-      - name: Build target firmware (never boot a device)
-        working-directory: firmware
-        env:
-          MIX_TARGET: x86_64
-        run: mise exec -- mix firmware --overwrite
+      - name: Build assets and target firmware (never boot a device)
+        run: mise exec -- mix firmware x86_64
       - name: Reject workstation-linked native ports
         run: mise exec -- elixir scripts/check_target.exs
 

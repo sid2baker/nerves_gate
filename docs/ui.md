@@ -1,7 +1,9 @@
 # Gateway UI
 
-EC100 and QEMU devices serve the same UI from `lib/nerves_gate_web/`;
-`mix dev.ui <target>` serves it on the workstation with code reload.
+EC100 and QEMU devices serve the same UI from `firmware/lib/nerves_gate_web/`.
+Open the device's gateway URL, linked from the developer workbench. Gateway
+Elixir/HEEx changes require rebuilding firmware; use disposable QEMU devices for
+this development loop.
 
 Navigation is **Overview · Equipment · Settings**. Open a connection or physical
 port for its settings and diagnostics. Pages share the device-owned projection;
@@ -56,6 +58,10 @@ TCP/UDP port probes. Scans cannot overlap LAN trials and never change settings.
 
 ## Controls
 
+- **Color theme:** the header icon opens System / Light / Dark choices. The
+  preference stays in the browser and follows other tabs. Switching works even
+  while LiveView is disconnected or browser storage is unavailable. Theme code
+  is bundled in the external JavaScript asset; firmware keeps its strict CSP.
 - **Sharing:** the equipment LAN page controls its confirmed IPv4 subnet. Unknown
   is not Off. See [equipment sharing](networking.md#equipment-sharing).
 - **Buses:** pages distinguish unsupported targets, missing devices, disabled ports
@@ -63,7 +69,7 @@ TCP/UDP port probes. Scans cannot overlap LAN trials and never change settings.
 - **Identify** (Settings) blinks the status LEDs, then resumes current patterns.
   There is no web reboot or reset. See [LEDs and button](indicators.md).
 
-Workstation UIs send commands to the selected device. QEMU reports EC100
+Gateway commands run on the device serving the page. QEMU reports EC100
 peripherals as unavailable. The UI has no sign-in; see
 [HTTP exposure](networking.md#local-recovery-and-http-exposure).
 

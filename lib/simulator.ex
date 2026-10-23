@@ -1,7 +1,7 @@
 defmodule Simulator do
   @moduledoc "Host-only lifecycle owner of disposable QEMU devices. No devices start with this server."
   use GenServer
-  alias Simulator.{BuildOutput, Device, Qemu}
+  alias Simulator.{Device, Qemu}
 
   @config_header """
   # Ordinary data, not a scenario DSL. The simulator site edits the devices and
@@ -433,24 +433,28 @@ defmodule Simulator do
     Simulator.Prerequisites.check!()
 
     if project = config[:firmware_project] do
-      status =
-        BuildOutput.run(
-          "mix",
-          ["firmware", "--overwrite"],
-          [
-            cd: project,
-            env: [
-              {"MIX_TARGET", "x86_64"},
-              {"MIX_ENV", "dev"},
-              {"NERVES_GATE_LOCAL_DEPS", "1"},
-              {"NERVES_GATE_DEVICE_NODE", nil}
-            ]
-          ],
-          report
-        )
+      if project == Path.join(Dev.root(), "firmware") do
+        Dev.Builds.firmware!("x86_64", report)
+      else
+        status =
+          Simulator.BuildOutput.run(
+            "mix",
+            ["firmware", "--overwrite"],
+            [
+              cd: project,
+              env: [
+                {"MIX_TARGET", "x86_64"},
+                {"MIX_ENV", "dev"},
+                {"NERVES_GATE_LOCAL_DEPS", "1"},
+                {"NERVES_GATE_DEVICE_NODE", nil}
+              ]
+            ],
+            report
+          )
 
-      if status != 0 do
-        raise "Firmware build failed"
+        if status != 0 do
+          raise "Firmware build failed"
+        end
       end
     end
 

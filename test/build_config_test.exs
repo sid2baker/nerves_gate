@@ -17,6 +17,19 @@ defmodule Dev.BuildConfigTest do
     end
   end
 
+  test "firmware command rejects unsupported targets and environments before building" do
+    firmware = Dev.MixProject.project()[:aliases][:firmware]
+
+    for args <- [
+          ["unknown"],
+          ["x86_64", "--env", "prod"],
+          ["ec100", "--env", "test"],
+          ["ec100", "extra"]
+        ] do
+      assert_raise Mix.Error, ~r/Usage: mix firmware/, fn -> firmware.(args) end
+    end
+  end
+
   test "only host development enables the workbench code reload listener" do
     previous = Mix.env()
 

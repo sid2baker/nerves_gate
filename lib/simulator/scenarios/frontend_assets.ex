@@ -2,9 +2,7 @@ defmodule Simulator.Scenarios.FrontendAssets do
   @moduledoc false
   import ExUnit.Assertions
   alias Simulator.TestQemu, as: Qemu
-  alias NervesGateWeb.Endpoint
   alias DevWeb.Endpoint, as: Site
-  alias Phoenix.Socket.Transport
 
   def spec,
     do: %{
@@ -12,7 +10,6 @@ defmodule Simulator.Scenarios.FrontendAssets do
     }
 
   def run(%{device: vm}) do
-    assert_websocket_csrf()
     assert Qemu.status(vm).system.node == vm.node
 
     # Independent probes: development error pages may close a keep-alive
@@ -28,8 +25,8 @@ defmodule Simulator.Scenarios.FrontendAssets do
     port = String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
     assert %URI{scheme: "http", host: "localhost", port: ^port} = URI.parse(Site.url())
     assert Site.config(:http)[:ip] == {:local, System.fetch_env!("QEMU_HTTP_SOCKET")}
-    # The session checks the gateway Endpoint's configuration but never serves it.
-    refute Phoenix.Endpoint.server?(:nerves_gate, Endpoint)
+    # Gateway HTTP services belong to devices, not the workbench.
+    assert Process.whereis(NervesGateWeb.Endpoint) == nil
 
     firmware =
       Req.new(
@@ -122,62 +119,6 @@ defmodule Simulator.Scenarios.FrontendAssets do
     end
   end
 
-  @doc false
-  def assert_websocket_csrf do
-    {"/live", Phoenix.LiveView.Socket, socket_opts} =
-      List.keyfind(Endpoint.__sockets__(), "/live", 0)
-
-    websocket_opts = Keyword.fetch!(socket_opts, :websocket)
-    assert websocket_opts[:check_origin] == false
-    assert websocket_opts[:check_csrf] == true
-    assert :peer_data in websocket_opts[:connect_info]
-    session_opts = Keyword.fetch!(websocket_opts[:connect_info], :session)
-    assert session_opts[:same_site] == "Strict"
-    assert session_opts[:http_only] == true
-    opts = Transport.load_config(websocket_opts)
-
-    {page, token} = csrf_session(session_opts)
-    {other_page, _other_token} = csrf_session(session_opts)
-
-    request =
-      Plug.Test.conn(:get, "http://gateway.example.ts.net:4000/live/websocket")
-      |> Plug.Conn.put_req_header("origin", "https://gateway.example.ts.net")
-
-    refute Transport.check_origin(request, Phoenix.LiveView.Socket, Endpoint, opts).halted
-
-    connect_info = fn page, params ->
-      conn = Plug.Conn.fetch_query_params(%{request | query_string: URI.encode_query(params)})
-      conn = if page, do: Plug.Test.recycle_cookies(conn, page), else: conn
-      Transport.connect_info(conn, Endpoint, opts[:connect_info], opts)
-    end
-
-    valid = connect_info.(page, %{"_csrf_token" => token})
-    assert valid.session == Plug.Conn.get_session(page)
-    assert valid.peer_data == Plug.Conn.get_peer_data(request)
-
-    for {cookie_source, params} <- [
-          {page, %{}},
-          {page, %{"_csrf_token" => "invalid"}},
-          {nil, %{"_csrf_token" => token}},
-          {other_page, %{"_csrf_token" => token}}
-        ] do
-      assert connect_info.(cookie_source, params).session == nil
-    end
-  end
-
-  defp csrf_session(session_opts) do
-    conn = Plug.Test.conn(:get, "/")
-
-    conn =
-      %{conn | secret_key_base: Endpoint.config(:secret_key_base)}
-      |> Plug.Session.call(Plug.Session.init(session_opts))
-      |> Plug.Conn.fetch_session()
-      |> Plug.CSRFProtection.call(Plug.CSRFProtection.init([]))
-
-    token = Plug.CSRFProtection.get_csrf_token()
-    {Plug.Conn.send_resp(conn, 200, ""), token}
-  end
-
   defp assert_simulator_site(client, vm) do
     overview = Req.get!(client, url: "/").body |> Floki.parse_document!()
     assert [_] = Floki.find(overview, "#workbench-overview")
@@ -205,8 +146,6 @@ defmodule Simulator.Scenarios.FrontendAssets do
 
     assert Floki.attribute(device, "#device-ui-link", "href") ==
              [Qemu.ui_url(vm)]
-
-    assert Floki.text(device) =~ "mix dev.ui #{vm.id}"
   end
 
   defp assert_assets(client) do

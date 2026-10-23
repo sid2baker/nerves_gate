@@ -2,15 +2,6 @@ defmodule NervesGateWeb.Router do
   use Phoenix.Router
   import Phoenix.LiveView.Router
 
-  # Volt's development error overlay injects styles. Firmware keeps a strict CSP.
-  @style_src if Application.compile_env(
-                  :nerves_gate,
-                  [NervesGateWeb.Endpoint, :code_reloader],
-                  false
-                ),
-                do: "'self' 'unsafe-inline'",
-                else: "'self'"
-
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -20,7 +11,7 @@ defmodule NervesGateWeb.Router do
 
     plug(:put_secure_browser_headers, %{
       "content-security-policy" =>
-        "default-src 'self'; script-src 'self'; style-src #{@style_src}; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+        "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     })
   end
 

@@ -20,15 +20,6 @@ defmodule NervesGateWeb.Endpoint do
     longpoll: false
   )
 
-  # The simulator's mix dev.ui only; firmware is never compiled with code reloading.
-  if code_reloading? do
-    plug(Tidewave)
-    socket("/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket)
-    plug(Phoenix.LiveReloader)
-    plug(Phoenix.CodeReloader)
-    plug(Volt.DevServer, root: Application.compile_env(:volt, :root, "assets"))
-  end
-
   # Firmware uses stable filenames; revalidate them across firmware upgrades.
   plug(Plug.Static,
     at: "/",

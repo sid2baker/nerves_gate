@@ -30,9 +30,9 @@ boots devices. EC100 builds additionally need the published EC100 system artifac
 | Command | Action |
 | --- | --- |
 | `mix setup` | Prepare tools and artifacts |
+| `mix firmware [x86_64 \| ec100] [--env dev \| prod]` | Build assets on the host, then firmware in an isolated process; never boots a device |
 | `mix dev [APP_DIRECTORY] [--config PATH] [--port 4000]` | Start the workbench; optionally open an app |
 | `mix dev.status`, `mix dev.stop` | Read or gracefully stop this checkout's session |
-| `mix dev.ui [DEVICE] [--port 4001]` | Gateway UI with code reload against a running device |
 | `mix app.new/test/package/install PATH`, `mix app.console` | [App operations](app-development.md) |
 | `mix test.qemu --only ID [--device ID]` | Run scenarios on the running bench |
 | `mix test.qemu --lifecycle start/stop/reset` | Explicit lifecycle action on that bench |
@@ -54,7 +54,9 @@ default bench is `priv/simulator/simulator.exs` with two devices;
 
 Devices stay stopped until an explicit Start, which builds local firmware when
 selected and creates disposable disks. Stop keeps disks; Reset erases them. After
-device-code changes, Reset and Start. `Simulator.QemuTests` admits every
+device-code changes, including gateway Elixir/HEEx, rebuild firmware, Reset and
+Start. Open the device's gateway link to use its UI; the workstation serves only
+the workbench. `Simulator.QemuTests` admits every
 lifecycle change, fault, installation and scenario run; UI button state is only
 presentation.
 
@@ -109,15 +111,21 @@ checks run in root `mix ci`.
 
 ## Assets
 
-Both UIs share firmware assets; Tailwind scans `firmware/lib/` and root `lib/`.
-After template or style changes:
+Both UIs share assets defined in `firmware/config/assets.exs`; Tailwind scans
+`firmware/lib/` and root `lib/`. Volt handles workbench asset changes automatically
+while `mix dev` is running.
 
-```sh
-cd firmware
-NERVES_GATE_LOCAL_DEPS=1 mix assets.build
-```
+Run firmware builds from the repository root, for example `mix firmware ec100`
+or `mix firmware ec100 --env prod`. The workbench's Build action and local QEMU
+builds use the same pipeline: compile assets on the host, then run the target
+firmware build in an isolated process. Asset failures stop packaging. Volt never
+runs on the device. No separate asset command or environment flag is required.
+`mix ci` also builds assets without building firmware or starting devices.
 
-Commit `firmware/priv/static/assets/` with the sources.
+For an asset-only diagnostic build, run `mix assets.build` in `firmware/`.
+Commit the resulting `firmware/priv/static/assets/` files with their sources.
+`NERVES_GATE_LOCAL_DEPS` selects local system/BSP sources for internal device
+builds; the build pipeline sets it automatically. It is not an asset setting.
 
 ## Diagnostics and limits
 

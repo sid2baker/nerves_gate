@@ -27,7 +27,7 @@ OS processes, never device-target compilation in the workbench VM.
 - `priv/templates/`: ordinary SDK app scaffolding; app projects live outside this checkout.
 - `firmware/lib/nerves_gate/`: device domains own admission, deadlines and persistence.
 - `firmware/lib/nerves_gate.ex`: public API; status stays a direct domain query.
-- `firmware/lib/nerves_gate_web/`: gateway UI shared by EC100, QEMU and `mix dev.ui`.
+- `firmware/lib/nerves_gate_web/`: gateway UI served by EC100 and QEMU; shared components also serve the workbench.
 - `firmware/lib/nerves_gate/{sdk_backend,apps,storage}.ex`: SDK translation, trusted
   app lifecycle and SD storage. `NervesGate.Buses` owns CAN/RS485 access.
 - `sdk/`: typed app contract and packaging. Never expose firmware status maps or
@@ -63,12 +63,14 @@ OS processes, never device-target compilation in the workbench VM.
   devices without authorization; ask the user to start it if unavailable.
 - Focused checks use `mix test.qemu --only ID [--device ID]` against that session.
   `--ci` creates a separate disposable bench and needs explicit authorization.
-- `mix dev.ui DEVICE [--port 4001]` connects to a running device, never boots one.
+- Open a device's gateway link for its UI. After gateway Elixir/HEEx changes, rebuild firmware and Reset/Start the disposable QEMU device.
 - Root `mix ci` runs all host checks/tests and may be run by agents. Never weaken
   `--check-locked`, compiler checks or deadlines.
 - `mix format --force` formats the root and subsystems, excluding system inputs.
-- Build changed assets in `firmware/` with `mix assets.build`; commit
-  `firmware/priv/static/assets/` with their sources.
+- Root `mix firmware [x86_64 | ec100] [--env dev | prod]`, workbench Build and local
+  QEMU builds prepare assets on the host before isolated target compilation.
+  `mix ci` builds assets too; `mix assets.build` in `firmware/` is only an
+  asset-only diagnostic. Commit `firmware/priv/static/assets/` with their sources.
 - Test changed behaviour. Documentation-only changes need no QEMU checks.
 - Root and firmware share `VERSION`/`CHANGELOG.md`; SDK and systems keep
   independent versions. Only SDK is published on Hex. Tags/releases, retirement,

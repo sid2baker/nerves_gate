@@ -89,16 +89,8 @@ true = connected
 
 Application.put_env(:nerves_gate, :simulator_node, :"simulator@127.0.0.1")
 
-# The session serves the simulator site, not the gateway UI. The gateway
-# Endpoint runs without a listener so scenarios can check its configuration.
-Application.put_env(:nerves_gate, :services, [
-  Simulator.QemuTests,
-  NervesGateWeb.Endpoint,
-  DevWeb.Endpoint
-])
-
-gateway = Application.fetch_env!(:nerves_gate, NervesGateWeb.Endpoint)
-Application.put_env(:nerves_gate, NervesGateWeb.Endpoint, Keyword.put(gateway, :server, false))
+# The workstation serves only the workbench. Each device serves its gateway UI.
+Application.put_env(:nerves_gate, :services, [Simulator.QemuTests, DevWeb.Endpoint])
 port = String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
 site = Application.fetch_env!(:nerves_gate_dev, DevWeb.Endpoint)
 

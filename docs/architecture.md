@@ -3,7 +3,7 @@
 Device domains own commands, admission, deadlines and persistence. The gateway UI
 reads a device-owned projection and submits commands through
 [`NervesGate`](../firmware/lib/nerves_gate.ex). EC100 and QEMU run the same
-firmware; workstation UIs connect to it over Erlang distribution. Third-party OTP
+firmware; the workbench observes devices over Erlang distribution. Third-party OTP
 applications run in the same BEAM and use only the SDK.
 
 ## Source map
@@ -129,10 +129,10 @@ from the SD card. See [applications](applications.md).
 
 ## Host mode and the simulator
 
-Firmware doubles as the gateway-UI library. Its host configuration starts no
-device services; only workstation launchers start `Dev.GatewayInit` and
-`NervesGateWeb.Endpoint`. Native networking dependencies compile on the host for
-their types but never start there.
+Devices serve the gateway UI; the workstation serves only the developer
+workbench. Firmware's host build supplies shared components, read models and
+checks, without starting device services or a gateway HTTP endpoint. Native
+networking dependencies compile on the host for their types but never start there.
 
 `Simulator` owns build, start, stop and reset; `Simulator.Device` owns each QEMU
 process, disk, QMP socket and Ethernet relay; `Simulator.QemuTests` admits

@@ -107,11 +107,8 @@ defmodule NervesGate.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.40", only: :docs, runtime: false},
-      # The root workbench declares these optional tools to reload the shared
-      # gateway UI; Mix compiles them before this application.
+      # Frontend tooling runs on the host, never in device firmware.
       {:volt, "~> 0.23.0", optional: true, targets: :host},
-      {:phoenix_live_reload, "~> 1.5", optional: true, targets: :host},
-      {:tidewave, "~> 0.9", optional: true, targets: :host},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
       {:reach, "~> 2.0", only: [:dev, :test], runtime: false},
       {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},

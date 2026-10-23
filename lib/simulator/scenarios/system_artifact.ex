@@ -48,7 +48,7 @@ defmodule Simulator.Scenarios.SystemArtifact do
     assert :erpc.call(vm.node, Application, :fetch_env!, [:nerves_gate, :backend_node]) == :local
     assert {:ok, _mount} = :erpc.call(vm.node, NervesGate.Recovery.DataInit, :check_data, [])
     assert :erpc.call(vm.node, NervesGate.Board, :get, [:recovery_adapter]) == nil
-    refute :erpc.call(vm.node, Code, :ensure_loaded?, [Dev.GatewayInit])
+    refute :erpc.call(vm.node, Code, :ensure_loaded?, [Dev.Application])
   end
 
   defp assert_restart_policy(vm) do
