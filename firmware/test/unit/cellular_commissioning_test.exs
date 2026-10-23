@@ -22,6 +22,7 @@ defmodule NervesGate.Network.CellularCommissioningTest do
 
     for {operation, params} <- [
           {:auto_unlock, []},
+          {:initialize, []},
           {:command, ["AT+CPIN=1234"]},
           {:set_pin_lock, ["true", "1234"]},
           {:refresh, ["1234"]},
@@ -29,6 +30,28 @@ defmodule NervesGate.Network.CellularCommissioningTest do
         ] do
       assert Cellular.parameters(operation, params) == {:error, :cellular_parameters}
     end
+  end
+
+  test "hot-plug setup changes only a known incorrect detection setting" do
+    assert Cellular.hotplug_commands({:ok, [~s(+QSIMDET: 1,1,"SIM1")]}, 1) == {:ok, []}
+    assert Cellular.hotplug_commands({:ok, ["+QSIMDET: 1,1"]}, 1) == {:ok, []}
+
+    for setting <- [~s(+QSIMDET: 0,0,"SIM1"), ~s(+QSIMDET: 1,0,"SIM1")] do
+      assert Cellular.hotplug_commands({:ok, [setting]}, 1) ==
+               {:ok, ["AT+QSIMDET=1,1", "AT+CFUN=0", "AT+CFUN=1"]}
+    end
+
+    for response <- [
+          {:error, :timeout},
+          {:ok, []},
+          {:ok, ["unexpected"]},
+          {:ok, [~s(+QSIMDET: 0,0,"SIM2")]}
+        ] do
+      assert Cellular.hotplug_commands(response, 1) == {:error, :cellular_setup_failed}
+    end
+
+    assert Cellular.hotplug_commands({:ok, ["+QSIMDET: 0,0"]}, nil) ==
+             {:error, :cellular_setup_failed}
   end
 
   test "SIM state, PIN protection and attempt counts stay unknown unless explicitly reported" do
@@ -82,8 +105,10 @@ defmodule NervesGate.Network.CellularCommissioningTest do
     disabled = put_in(status.config["network"]["internet"], %{"mode" => "ethernet"})
     assert Cellular.available(disabled) == {:error, :cellular_disabled}
     assert Cellular.available(disabled, :forget_pin) == :ok
+    assert Cellular.available(disabled, :forget_authentication) == :ok
+    assert Cellular.available(disabled, :save_authentication) == {:error, :cellular_disabled}
 
-    for op <- [:refresh, :unlock, :forget_pin] do
+    for op <- [:refresh, :unlock, :forget_pin, :save_authentication, :forget_authentication] do
       assert Cellular.available(%{status | phase: :cellular}, op) ==
                {:error, :operation_in_progress}
 
@@ -95,6 +120,7 @@ defmodule NervesGate.Network.CellularCommissioningTest do
     end
 
     assert Cellular.available(nil, :forget_pin) == {:error, :cellular_unsupported}
+    assert Cellular.available(nil, :forget_authentication) == {:error, :cellular_unsupported}
   end
 
   test "disabling or removing a modem clears observations but not saved PIN metadata" do

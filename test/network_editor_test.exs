@@ -41,7 +41,8 @@ defmodule Dev.NetworkEditorTest do
            ]
 
     assert Floki.find(document, "input[name='network[cellular_apn]'][required]") == []
-    assert Floki.text(document) =~ "direct USB"
+    assert Floki.text(document) =~ "enter it there to unlock and remember it"
+    refute Floki.text(document) =~ "direct USB"
     refute Floki.text(document) =~ "SIM must already be unlocked"
     refute Floki.text(document) =~ "PIN and account-password setup are not supported yet"
   end

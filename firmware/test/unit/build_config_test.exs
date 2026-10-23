@@ -17,7 +17,11 @@ defmodule NervesGate.BuildConfigTest do
         assert board == %{
                  cellular: %{
                    interface: "wwan0",
-                   config: %{type: VintageNetECM, vintage_net_ecm: %{at_tty: "ttyUSB2"}}
+                   sim_detect_level: 1,
+                   config: %{
+                     type: VintageNetECM,
+                     vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Network.EG800AK}
+                   }
                  },
                  buses_adapter: {NervesGate.Buses.EC100, nil},
                  indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"},

@@ -29,7 +29,6 @@ defmodule NervesGateWeb.NetworkLive do
       module={NervesGateWeb.CellularPanel}
       id="cellular-panel"
       projection={@projection}
-      access={@access}
     />
     """
   end

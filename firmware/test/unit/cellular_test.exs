@@ -44,6 +44,20 @@ defmodule NervesGate.Network.CellularTest do
     assert raw.source_config.type == VintageNetECM
   end
 
+  test "EC100's authentication hook runs in the standard ECM controller, not interface config" do
+    put_profile(put_in(@profile, [:config, :vintage_net_ecm, :modem], NervesGate.Network.EG800AK))
+    assert {:ok, [{"wwan0", config}]} = Cellular.configurations(@network)
+    raw = VintageNetECM.to_raw_config("wwan0", config, [])
+
+    assert {VintageNetECM.ATController, options} =
+             Enum.find(raw.child_specs, &match?({VintageNetECM.ATController, _}, &1))
+
+    assert options[:modem] == NervesGate.Network.EG800AK
+    assert raw.source_config.vintage_net_ecm.service_providers == [%{apn: "internet.example"}]
+    refute Map.has_key?(raw.source_config.vintage_net_ecm, :password)
+    refute Map.has_key?(raw.source_config.vintage_net_ecm, :username)
+  end
+
   test "Ethernet-only disables the modem without changing the recovery interface" do
     network = Map.put(@network, "internet", %{"mode" => "ethernet"})
 

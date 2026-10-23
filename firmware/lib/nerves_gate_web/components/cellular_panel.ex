@@ -15,13 +15,13 @@ defmodule NervesGateWeb.CellularPanel do
   def handle_event("refresh", _, socket), do: reply(socket, Backend.cellular_refresh())
 
   def handle_event("unlock", params, socket),
-    do: reply(socket, Backend.cellular_unlock(params["pin"], socket.assigns.access))
+    do: reply(socket, Backend.cellular_unlock(params["pin"]))
 
   def handle_event("save_pin", params, socket),
-    do: reply(socket, Backend.cellular_save_pin(params["pin"], socket.assigns.access))
+    do: reply(socket, Backend.cellular_save_pin(params["pin"]))
 
   def handle_event("forget_pin", _, socket),
-    do: reply(socket, Backend.cellular_forget_pin(socket.assigns.access))
+    do: reply(socket, Backend.cellular_forget_pin())
 
   def handle_event("change_pin", params, socket) do
     if params["new_pin"] == params["repeat_pin"],
@@ -30,8 +30,7 @@ defmodule NervesGateWeb.CellularPanel do
           socket,
           Backend.cellular_change_pin(
             params["current_pin"],
-            params["new_pin"],
-            socket.assigns.access
+            params["new_pin"]
           )
         ),
       else: reply(socket, {:error, %{message: "The new PINs do not match."}})
@@ -54,7 +53,7 @@ defmodule NervesGateWeb.CellularPanel do
       else:
         reply(
           socket,
-          Backend.cellular_set_pin_lock(enabled, params["pin"], socket.assigns.access)
+          Backend.cellular_set_pin_lock(enabled, params["pin"])
         )
   end
 
@@ -75,13 +74,10 @@ defmodule NervesGateWeb.CellularPanel do
 
   def render(assigns) do
     assigns =
-      assign(assigns,
-        cellular: Map.get(assigns.projection, :cellular, NervesGate.Network.Cellular.view(nil)),
-        credentials_allowed:
-          Backend.cellular_credentials_allowed?(
-            assigns.projection.network.observed,
-            assigns.access
-          )
+      assign(
+        assigns,
+        :cellular,
+        Map.get(assigns.projection, :cellular, NervesGate.Network.Cellular.view(nil))
       )
 
     content(assigns)
@@ -136,11 +132,8 @@ defmodule NervesGateWeb.CellularPanel do
             >
               This SIM needs carrier/phone recovery. PUK and PIN2 operations are not supported here. Never guess a code.
             </.notice>
-            <p :if={!@credentials_allowed} class="ui-help">
-              To enter SIM credentials, open the device's own UI over direct USB. Ethernet, VPN and workstation UI sessions cannot submit PINs.
-            </p>
             <form
-              :if={@credentials_allowed and @cellular.sim == :pin_required}
+              :if={@cellular.sim == :pin_required}
               id={"cellular-unlock-#{@generation}"}
               phx-submit="unlock"
               phx-target={@myself}
@@ -163,7 +156,7 @@ defmodule NervesGateWeb.CellularPanel do
               </p>
               <.button type="submit" disabled={!enabled?(@projection, "cellular.unlock")}>Unlock and save PIN</.button>
             </form>
-            <details :if={@credentials_allowed and @cellular.sim == :ready}>
+            <details :if={@cellular.sim == :ready}>
               <summary>Advanced SIM security</summary>
               <div class="ui-stack">
                 <p>
@@ -281,7 +274,7 @@ defmodule NervesGateWeb.CellularPanel do
         </.setting_row>
         <p :if={@cellular.supported} class="ui-help">{automatic_label(@cellular.auto_unlock)}</p>
         <.button
-          :if={@cellular.supported and @credentials_allowed and @cellular.pin_saved != false}
+          :if={@cellular.supported and @cellular.pin_saved != false}
           phx-click="forget_pin"
           phx-target={@myself}
           variant="secondary"

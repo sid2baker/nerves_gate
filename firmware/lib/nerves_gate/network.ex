@@ -69,7 +69,7 @@ defmodule NervesGate.Network do
   @spec conflicts(map() | nil, map()) :: list()
   defdelegate conflicts(observed, network), to: Policy
 
-  @doc "Accept one bounded cellular operation; observe status for completion. PINs stay in private device storage."
+  @doc "Accept one bounded cellular operation; observe status for completion. Credentials stay in private device storage."
   def cellular(operation, params, server \\ __MODULE__),
     do: GenServer.call(server, {:cellular, operation, params})
 
@@ -112,6 +112,7 @@ defmodule NervesGate.Network do
       recovering: match?({:restore, _}, error),
       observed: nil,
       cellular: Cellular.cached(),
+      cellular_controller: nil,
       trial_ms: Keyword.get(opts, :trial_ms, 60_000),
       poll_ms: Keyword.get(opts, :poll_ms, 1000),
       effect_ms: effect_ms,
@@ -319,6 +320,8 @@ defmodule NervesGate.Network do
   end
 
   defp refresh_cellular_if_due(state) do
+    controller = Cellular.controller()
+
     due =
       state.cellular.refreshed_at == nil or
         System.system_time(:millisecond) - state.cellular.refreshed_at >= 30_000
@@ -326,6 +329,17 @@ defmodule NervesGate.Network do
     cond do
       Cellular.available(public(state)) != :ok ->
         state
+
+      is_pid(controller) and controller != state.cellular_controller ->
+        # Record the attempt before starting it: an uncertain setup must not
+        # repeatedly reset the same modem. A new controller gets a fresh check.
+        state = %{
+          state
+          | cellular_controller: controller,
+            cellular: %{state.cellular | operation: :initialize, error: nil}
+        }
+
+        work(state, :cellular, nil, &Cellular.initialize/0)
 
       state.cellular.sim == :pin_required and state.cellular.auto_unlock == :ready ->
         state = %{state | cellular: %{state.cellular | operation: :auto_unlock, error: nil}}
@@ -378,7 +392,10 @@ defmodule NervesGate.Network do
                :cellular_pin_not_saved,
                :cellular_auto_unlock_blocked,
                :cellular_identity_unknown,
-               :cellular_read_failed
+               :cellular_read_failed,
+               :cellular_setup_failed,
+               :cellular_authentication_storage,
+               :cellular_authentication_parameters
              ] ->
           %{cellular | error: NervesGate.Error.from(reason)}
 

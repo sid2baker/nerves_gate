@@ -9,11 +9,32 @@ defmodule NervesGate.Error do
   def from(:cellular_parameters),
     do: new("invalid_parameters", "Use 4–8 digit SIM PINs and a boolean PIN-protection setting.")
 
+  def from(:cellular_authentication_parameters),
+    do:
+      new(
+        "invalid_parameters",
+        "PAP needs an explicit APN, a 1–64 character username and a 0–64 character password. Use printable ASCII without quotes or backslashes."
+      )
+
+  def from(:cellular_authentication_storage),
+    do:
+      new(
+        "cellular_authentication_storage",
+        "PAP credentials could not be saved reliably. Read cellular status before changing them again."
+      )
+
+  def from(:cellular_authentication_failed),
+    do:
+      new(
+        "cellular_authentication_failed",
+        "The modem's data context or authentication could not be configured. No data-call activation was attempted."
+      )
+
   def from(:cellular_disabled),
     do:
       new(
         "cellular_disabled",
-        "Enable and save a cellular Internet source before SIM operations."
+        "Enable and save a cellular Internet source before modem operations."
       )
 
   def from(:cellular_missing),
@@ -89,11 +110,11 @@ defmodule NervesGate.Error do
         "The modem did not report a known SIM state. Refresh later; unknown does not mean the SIM is absent."
       )
 
-  def from(:cellular_usb_required),
+  def from(:cellular_setup_failed),
     do:
       new(
-        "cellular_usb_required",
-        "SIM credentials require the device's own UI over verified direct USB. Remote/workstation and Ethernet sessions cannot submit PINs."
+        "cellular_setup_failed",
+        "SIM hot-plug setup did not complete. Check the modem before restarting cellular; no PIN was sent."
       )
 
   def from(:cellular_unsupported),

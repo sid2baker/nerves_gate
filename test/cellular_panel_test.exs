@@ -1,5 +1,5 @@
 defmodule Dev.CellularPanelTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   import Phoenix.LiveViewTest, only: [render_component: 2]
   alias NervesGate.Network.Cellular
   alias NervesGateWeb.{Backend, CellularPanel}
@@ -28,14 +28,17 @@ defmodule Dev.CellularPanelTest do
     assert Floki.find(document, "input[type=password][value]") == []
   end
 
-  test "non-USB UI has no credential or forgetting controls" do
-    for sim <- [:ready, :pin_required] do
-      html = panel(%{sim: sim, pin_saved: true}, false)
-      refute html =~ "type=\"password\""
-      refute html =~ "phx-submit=\"unlock\""
-      refute html =~ "phx-click=\"forget_pin\""
-      assert html =~ "direct USB"
-    end
+  test "SIM controls need no USB access observations" do
+    html = panel(%{sim: :pin_required, pin_saved: true})
+    assert html =~ "phx-submit=\"unlock\""
+    assert html =~ "phx-click=\"forget_pin\""
+    assert html =~ "type=\"password\""
+    refute html =~ "direct USB"
+
+    html = panel(%{sim: :ready})
+    assert html =~ "phx-submit=\"save_pin\""
+    assert html =~ "phx-submit=\"change_pin\""
+    assert html =~ "phx-submit=\"set_pin_lock\""
   end
 
   test "disabled modem preserves stored PIN and permits forgetting without changing protection" do
@@ -63,39 +66,44 @@ defmodule Dev.CellularPanelTest do
     assert panel(%{supported: false}) =~ "not supported on this target"
   end
 
-  test "credential admission requires local backend and independently verified USB endpoints" do
-    observed = %{
-      usb: %{
-        present: true,
-        link: true,
-        addresses: [%{address: "172.31.10.1", prefix_length: 30}]
-      },
-      ports: [],
-      bridge: %{}
-    }
+  test "credential commands and events need no USB access and never retain submitted PINs" do
+    previous = Application.fetch_env(:nerves_gate, :backend_node)
+    Application.put_env(:nerves_gate, :backend_node, nil)
 
-    access = %{local: "172.31.10.1", peer: {172, 31, 10, 2}}
-    assert Backend.cellular_credentials_allowed?(observed, access, :local)
-    refute Backend.cellular_credentials_allowed?(observed, access, :remote_node)
-    refute Backend.cellular_credentials_allowed?(observed, access, nil)
-    refute Backend.cellular_credentials_allowed?(observed, %{usb: true}, :local)
-    refute Backend.cellular_credentials_allowed?(nil, access, :local)
+    on_exit(fn ->
+      case previous do
+        {:ok, backend} -> Application.put_env(:nerves_gate, :backend_node, backend)
+        :error -> Application.delete_env(:nerves_gate, :backend_node)
+      end
+    end)
 
-    refute Backend.cellular_credentials_allowed?(
-             observed,
-             %{access | peer: {10, 1, 1, 2}},
-             :local
-           )
+    for result <- [
+          Backend.cellular_unlock("invalid"),
+          Backend.cellular_save_pin("invalid"),
+          Backend.cellular_forget_pin(),
+          Backend.cellular_change_pin("invalid", "invalid"),
+          Backend.cellular_set_pin_lock(true, "invalid")
+        ] do
+      assert {:error, %{code: "outcome_unknown"}} = result
+    end
 
-    overlapping = %{
-      observed
-      | ports: [%{addresses: [%{address: "172.31.10.2", prefix_length: 24}]}]
-    }
-
-    refute Backend.cellular_credentials_allowed?(overlapping, access, :local)
+    for {event, params} <- [
+          {"unlock", %{"pin" => "invalid"}},
+          {"save_pin", %{"pin" => "invalid"}},
+          {"forget_pin", %{}},
+          {"change_pin",
+           %{"current_pin" => "invalid", "new_pin" => "invalid", "repeat_pin" => "invalid"}},
+          {"set_pin_lock", %{"enabled" => "true", "pin" => "invalid"}}
+        ] do
+      socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, generation: 0, message: nil}}
+      assert {:noreply, updated} = CellularPanel.handle_event(event, params, socket)
+      assert updated.assigns.generation == 1
+      assert is_binary(updated.assigns.message)
+      refute inspect(updated.assigns) =~ "invalid"
+    end
   end
 
-  defp panel(changes, allowed \\ true) do
+  defp panel(changes) do
     cellular =
       Cellular.empty()
       |> Map.merge(%{supported: true, enabled: true, present: true})
@@ -106,11 +114,9 @@ defmodule Dev.CellularPanelTest do
         {"cellular.#{name}", %{enabled: true}}
       end)
 
-    render_component(&CellularPanel.content/1,
+    render_component(&CellularPanel.render/1,
       id: "cellular-test",
-      cellular: cellular,
-      credentials_allowed: allowed,
-      projection: %{actions: actions},
+      projection: %{actions: actions, cellular: cellular},
       myself: %Phoenix.LiveComponent.CID{cid: 1},
       generation: 0,
       message: nil

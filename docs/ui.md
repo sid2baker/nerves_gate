@@ -64,6 +64,10 @@ TCP/UDP port probes. Scans cannot overlap LAN trials and never change settings.
   is bundled in the external JavaScript asset; firmware keeps its strict CSP.
 - **Sharing:** the equipment LAN page controls its confirmed IPv4 subnet. Unknown
   is not Off. See [equipment sharing](networking.md#equipment-sharing).
+- **SIM PIN:** the Internet page offers Unlock and save PIN when required, on
+  Ethernet, VPN or USB. PIN commands are explicit, never replayed on reconnect;
+  advanced PIN/security controls appear once the SIM is ready. Use trusted
+  management access and HTTPS for remote entry.
 - **Buses:** pages distinguish unsupported targets, missing devices, disabled ports
   and active operations. See [CAN/RS485](buses.md).
 - **Identify** (Settings) blinks the status LEDs, then resumes current patterns.

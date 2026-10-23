@@ -12,7 +12,7 @@ defmodule NervesGate.Network.Cellular do
   naming belong to the BSP. Never use the recovery gadget's usb0.
   """
   alias NervesGate.Config
-  alias NervesGate.Network.CellularPIN
+  alias NervesGate.Network.{CellularAuthentication, CellularPIN, EG800AK}
 
   def profile do
     case NervesGate.Board.get(:cellular) do
@@ -54,6 +54,8 @@ defmodule NervesGate.Network.Cellular do
       sim: :unknown,
       pin_saved: nil,
       auto_unlock: :unknown,
+      authentication: :unknown,
+      authentication_apn: nil,
       pin_lock: :unknown,
       pin_attempts_remaining: nil,
       registration: :unknown,
@@ -101,7 +103,9 @@ defmodule NervesGate.Network.Cellular do
     end
   end
 
-  defp modem_available(_, :forget_pin), do: :ok
+  defp modem_available(_, operation) when operation in [:forget_pin, :forget_authentication],
+    do: :ok
+
   defp modem_available(%{enabled: false}, _), do: {:error, :cellular_disabled}
   defp modem_available(%{present: true}, _), do: :ok
   defp modem_available(_, _), do: {:error, :cellular_missing}
@@ -109,6 +113,14 @@ defmodule NervesGate.Network.Cellular do
   @doc false
   def parameters(:refresh, []), do: :ok
   def parameters(:forget_pin, []), do: :ok
+  def parameters(:forget_authentication, []), do: :ok
+
+  def parameters(:save_authentication, [apn, username, password]) do
+    if CellularAuthentication.valid?(apn, username, password),
+      do: :ok,
+      else: {:error, :cellular_authentication_parameters}
+  end
+
   def parameters(:save_pin, [pin]), do: valid_pins([pin])
   def parameters(:unlock, [pin]), do: valid_pins([pin])
   def parameters(:change_pin, [current, new]), do: valid_pins([current, new])
@@ -119,6 +131,73 @@ defmodule NervesGate.Network.Cellular do
     if Enum.all?(pins, &(is_binary(&1) and Regex.match?(~r/\A[0-9]{4,8}\z/, &1))),
       do: :ok,
       else: {:error, :cellular_parameters}
+  end
+
+  # Initialize once per ECM controller lifetime, using its existing UART owner.
+  # Profiles without a wired SIM-detect contact need no extra setup.
+  @doc false
+  def controller do
+    case profile() do
+      %{interface: name, sim_detect_level: level} when level in [0, 1] ->
+        GenServer.whereis(
+          {:via, Registry, {VintageNet.Interface.Registry, {VintageNetECM.ATController, name}}}
+        )
+
+      _ ->
+        nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc false
+  def initialize do
+    with %{interface: name, sim_detect_level: level} <- profile(),
+         {:ok, commands} <- hotplug_commands(command(name, "AT+QSIMDET?"), level),
+         :ok <- configure_hotplug(name, commands) do
+      read_result(name)
+    else
+      _ -> {:error, :cellular_setup_failed}
+    end
+  catch
+    _, _ -> {:error, :cellular_setup_failed}
+  end
+
+  @doc false
+  def hotplug_commands({:ok, lines}, level) when level in [0, 1] do
+    setting =
+      Enum.find_value(lines, fn line ->
+        case Regex.run(~r/\A\+QSIMDET:\s*([01]),\s*([01])(?:,"SIM1")?\s*\z/, line) do
+          [_, enabled, active] -> {enabled, active}
+          _ -> nil
+        end
+      end)
+
+    expected = {"1", Integer.to_string(level)}
+
+    case setting do
+      ^expected ->
+        {:ok, []}
+
+      {_, _} ->
+        # Applying the detect level needs one SIM/radio reinitialization, not a
+        # gateway reboot. Never reset an already-correct modem on each refresh.
+        {:ok, ["AT+QSIMDET=1,#{level}", "AT+CFUN=0", "AT+CFUN=1"]}
+
+      nil ->
+        {:error, :cellular_setup_failed}
+    end
+  end
+
+  def hotplug_commands(_, _), do: {:error, :cellular_setup_failed}
+
+  defp configure_hotplug(name, commands) do
+    Enum.reduce_while(commands, :ok, fn cmd, :ok ->
+      case command(name, cmd, 10_000) do
+        {:ok, _} -> {:cont, :ok}
+        _ -> {:halt, {:error, :cellular_setup_failed}}
+      end
+    end)
   end
 
   # OTP crash reports from the dependency can contain its last AT command.
@@ -134,12 +213,13 @@ defmodule NervesGate.Network.Cellular do
   defp redact({:cellular, operation, _}), do: {:cellular, operation, :redacted}
 
   defp redact({module, function, args})
-       when module in [__MODULE__, CellularPIN] and is_list(args),
+       when module in [__MODULE__, CellularPIN, CellularAuthentication] and is_list(args),
        do: {module, function, :redacted}
 
   defp redact(value) when is_binary(value) do
     cond do
       Regex.match?(~r/AT\+(?:CPIN|CPWD|CLCK)=/, value) -> "[REDACTED SIM COMMAND]"
+      Regex.match?(~r/AT\+(?:QICSGP|CGAUTH)=/, value) -> "[REDACTED CELLULAR COMMAND]"
       Regex.match?(~r/\+QCCID:\s*[0-9]/, value) -> "[REDACTED SIM ID]"
       true -> value
     end
@@ -166,7 +246,9 @@ defmodule NervesGate.Network.Cellular do
 
   defp sensitive_key?(key) do
     key = key |> to_string() |> String.downcase()
-    String.contains?(key, "pin") or key in ["fingerprint", "identity", "iccid", "imsi", "imei"]
+
+    String.contains?(key, "pin") or String.contains?(key, "password") or
+      key in ["username", "fingerprint", "identity", "iccid", "imsi", "imei"]
   end
 
   # Deliberately contain every worker exception here: dependency exception terms
@@ -185,11 +267,23 @@ defmodule NervesGate.Network.Cellular do
   end
 
   @doc false
-  def cached, do: Map.merge(empty(), CellularPIN.metadata())
+  def cached do
+    empty()
+    |> Map.merge(CellularPIN.metadata())
+    |> Map.merge(CellularAuthentication.metadata())
+  end
 
   @doc false
   def reset(data) do
-    cached = Map.take(data, [:pin_saved, :auto_unlock, :operation, :error])
+    cached =
+      Map.take(data, [
+        :pin_saved,
+        :auto_unlock,
+        :authentication,
+        :authentication_apn,
+        :operation,
+        :error
+      ])
 
     cached =
       if cached[:auto_unlock] in [:ready, :different_sim],
@@ -219,6 +313,17 @@ defmodule NervesGate.Network.Cellular do
   end
 
   defp execute(name, :refresh, []), do: read_result(name)
+
+  defp execute(_, operation, params)
+       when operation in [:save_authentication, :forget_authentication] do
+    with %{config: %{vintage_net_ecm: %{modem: EG800AK}}} <- profile(),
+         :ok <- save_authentication(operation, params) do
+      {:ok, cached()}
+    else
+      {:error, _} = error -> error
+      _ -> {:error, :cellular_unsupported}
+    end
+  end
 
   defp execute(_, :forget_pin, []) do
     with :ok <- CellularPIN.forget(), do: {:ok, cached()}
@@ -251,6 +356,11 @@ defmodule NervesGate.Network.Cellular do
       _ -> {:error, :cellular_sim_not_ready}
     end
   end
+
+  defp save_authentication(:save_authentication, [apn, username, password]),
+    do: CellularAuthentication.save(apn, username, password)
+
+  defp save_authentication(:forget_authentication, []), do: CellularAuthentication.forget()
 
   defp unlock_and_save(name, pin, expected_identity) do
     with :ok <- write(name, ~s(AT+CPIN="#{pin}")),
@@ -350,6 +460,7 @@ defmodule NervesGate.Network.Cellular do
         data,
         CellularPIN.metadata(if(sim in [:ready, :pin_required], do: identity(name)))
       )
+      |> Map.merge(CellularAuthentication.metadata())
 
     if sim == :ready or sim == :pin_required do
       registered = sim == :ready and data.registration in [:registered_home, :registered_roaming]

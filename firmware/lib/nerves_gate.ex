@@ -119,6 +119,21 @@ defmodule NervesGate do
   def cellular_forget_pin(opts \\ []),
     do: invoke(fn -> Network.cellular(:forget_pin, [], network(opts)) end) |> result()
 
+  @doc "Privately save PAP credentials for one explicit APN. Applied before the next fresh packet-context activation, not to an active session. Read status.cellular for storage completion; acceptance is not Internet verification."
+  @spec cellular_save_authentication(String.t(), String.t(), String.t(), keyword()) ::
+          command_result()
+  def cellular_save_authentication(apn, username, password, opts \\ []),
+    do:
+      invoke(fn ->
+        Network.cellular(:save_authentication, [apn, username, password], network(opts))
+      end)
+      |> result()
+
+  @doc "Forget private PAP credentials and disable modem authentication before the next fresh packet-context activation. Does not interrupt an active session."
+  @spec cellular_forget_authentication(keyword()) :: command_result()
+  def cellular_forget_authentication(opts \\ []),
+    do: invoke(fn -> Network.cellular(:forget_authentication, [], network(opts)) end) |> result()
+
   @doc "Request Tailscale connection/enrollment; optional `auth_key:` is used once, never saved. Returns acceptance."
   @spec remote_connect(String.t(), keyword()) :: command_result()
   def remote_connect(hostname, opts \\ []),

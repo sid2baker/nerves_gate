@@ -340,7 +340,7 @@ defmodule NervesGateWeb.NetworkEditor do
                       </p>
                     </details>
                     <p class="ui-help">
-                      After saving, check Cellular below. If the SIM needs a PIN, use the device's own UI over direct USB to unlock it.
+                      After saving, check Cellular below. If the SIM needs a PIN, enter it there to unlock and remember it.
                     </p>
                     <p :if={@form.params["internet_mode"] == "backup"} class="ui-help">
                       4G stays connected on standby. Connectivity checks can use mobile data. Existing connections may briefly interrupt during a switch.

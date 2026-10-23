@@ -52,12 +52,25 @@ names its CDC-ECM data interface `wwan0`; `VintageNetECM` drives it over
 `ttyUSB2` and gets IPv4 by DHCP. The modem's factory USB mode must stay ECM;
 firmware never changes it, and **never give the modem `usb0`**, the recovery link.
 
+The EC100 board's `:cellular` profile is:
+
 ```elixir
-config :nerves_gate, :cellular, %{
+%{
   interface: "wwan0",
-  config: %{type: VintageNetECM, vintage_net_ecm: %{at_tty: "ttyUSB2"}}
+  sim_detect_level: 1,
+  config: %{
+    type: VintageNetECM,
+    vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Network.EG800AK}
+  }
 }
 ```
+
+When cellular is enabled, Network checks SIM detection once per ECM controller
+lifetime through the controller's existing AT port. EC100 uses active-high
+hot-plug detection (`AT+QSIMDET=1,1`). If the setting differs, setup changes it and
+reinitializes the modem's SIM/radio function once; an already-correct setting
+causes no reset. A failed/uncertain setup is reported, not repeatedly reset on
+status refresh. No PIN is sent by this setup.
 
 QEMU has no modem (`cellular: nil`). 4G choices stay disabled until a modem is
 actually detected, and the backend rejects enabling cellular or changing its APN
@@ -66,20 +79,80 @@ is [filtered](#local-recovery-and-http-exposure) before networking starts.
 
 Cellular uses the network's default APN (an empty APN) unless you set
 **Advanced cellular settings → APN override**. Not every operator provides a
-default; business and IoT SIMs often need a specific APN. APN usernames and
-passwords are unsupported. Modem settings use the normal trial and rollback.
+default; business and IoT SIMs often need a specific APN. APN changes use the
+normal trial and rollback.
 
-Modem identity and AT/ECM commands are verified on hardware. Registration, DHCP,
-failover and PIN handling with a working SIM are not yet validated.
+#### PAP authentication
+
+EC100 supports optional PAP credentials through the administrative API (not yet
+through the web editor):
+
+```elixir
+:ok = NervesGate.cellular_save_authentication("operator.apn", username, password)
+# Observe status.cellular.operation and .error for storage completion.
+# Change APN using a normal network trial; verify cellular Internet before saving.
+:ok = NervesGate.cellular_forget_authentication()
+```
+
+Saving accepts one explicit APN, a 1–64 character username and a 0–64 character
+password. Credentials must be printable ASCII without quotes or backslashes.
+Saving and forgetting share Network's admission/worker, but are private storage
+operations, not connectivity trials; network rollback does not undo them. They
+do not interrupt an active data session. Saving needs cellular enabled and a
+present modem; forgetting also works while disabled or absent.
+
+The EC100 modem driver runs over VintageNetECM's existing UART. For an inactive
+packet context it reads the actual APN, including a trial APN, and applies
+`AT+QICSGP` (IPv4, PAP authentication mode 1) only on an exact credential-APN
+match. Other APNs, or no saved credentials, explicitly clear modem authentication
+(mode 0). It then activates the packet context with `AT+QIACT` before connecting
+the USB network adapter with `AT+QNETDEVCTL=1,<context>`. An already-active packet
+context is reused without rewriting credentials or reactivating it. Adapter
+status uses the fourth `QNETDEVCTL` response field (PDN state), not the first
+field (requested connection mode).
+
+Unknown contexts, invalid records or rejected/uncertain setup stop that
+activation; credentials are not silently retried without authentication. Normal
+ECM reconnects can retry PAP; this is unrelated to the one-attempt SIM PIN policy.
+Interface teardown disconnects the adapter and deactivates only its own packet
+context, so a new controller can configure a different APN/PAP profile. The
+network's separate IMS context is untouched. CHAP and IPv6 contexts are not
+supported by this integration.
+
+Credentials live at `["cellular", "authentication"]` in the persistent
+`NervesGate.Settings` table. They are **not encrypted**; data-partition backups,
+root access and VM crash dumps can expose them. The modem also receives and may
+retain them. Forget deletes the private record on successful storage completion
+and clears modem authentication before the next fresh packet-context activation,
+not during an active session. Factory reset erases the record; the next fresh
+packet-context activation clears modem authentication.
+Status exposes only `authentication` (`none`, `pap` or `unknown`) and
+`authentication_apn`, never the username/password. Interface configurations,
+projections and notifications carry no credentials; primary log filtering redacts
+credential-bearing AT commands and reports. Do not log API arguments or enter
+credentials in a shell history.
+
+The EG800AK supports `QICSGP`, not standard `CGAUTH`. Congstar IPv4/PAP,
+registration, DHCP, DNS and cellular-bound Internet connectivity have been
+verified on hardware, including automatic connection after a firmware reboot and
+reconnection after explicitly deactivating the packet context. TCP checks bound
+to `wwan0` prove these checks did not use Ethernet. Registration or a saved PAP
+record alone is not proof of Internet access.
+
+Modem identity, AT/ECM commands, SIM recognition after active-high detection setup,
+LTE registration and IPv4 data connectivity are verified on hardware. Live SIM
+removal/reinsertion and Ethernet/cellular failover still need qualification.
 
 ### SIM commissioning and saved PIN
 
 Once cellular is enabled, the Internet page shows SIM state, PIN protection,
 remaining attempts, registration, operator and signal. Unknown is not proof of a
-missing SIM, and Refresh is read-only. PIN entry is accepted only in the device's
-own UI over verified direct USB, or through the administrative
-[Elixir API](action-api.md). All SIM commands share Network's single worker, and
-VintageNetECM remains the only AT-port user.
+missing SIM, and Refresh is read-only. Enter the PIN there to unlock and remember
+it; USB is not required. SIM controls work over Ethernet, VPN or USB, and through
+the administrative [Elixir API](action-api.md). Use HTTPS when connecting remotely.
+The UI has no sign-in: anyone with access to it can submit SIM commands, so keep
+management access restricted to trusted users. All SIM commands share Network's
+single worker, and VintageNetECM remains the only AT-port user.
 
 - **Unlock and save PIN** sends one 4–8 digit PIN. After success and a fresh
   READY/identity check, the PIN is saved bound to a hash of the SIM's ICCID.

@@ -36,6 +36,8 @@ status = NervesGate.status()
 | `cellular_forget_pin(opts)` | `:ok`; private PIN deletion accepted, SIM protection unchanged |
 | `cellular_change_pin(current, new, opts)` | `:ok`; one SIM PIN change accepted |
 | `cellular_set_pin_lock(enabled, pin, opts)` | `:ok`; one SIM protection change accepted |
+| `cellular_save_authentication(apn, username, password, opts)` | `:ok`; private APN-bound PAP save accepted; applies before the next fresh packet-context activation |
+| `cellular_forget_authentication(opts)` | `:ok`; private PAP deletion accepted; modem authentication clears before the next fresh packet-context activation |
 | `remote_connect(hostname, opts)` | `:ok` after accepting connection/enrollment |
 | `remote_configure(hostname, opts)` | `:ok` after accepting a hostname change |
 | `remote_disconnect(opts)` | `:ok` after accepting `down`; enrollment is kept |
@@ -72,6 +74,15 @@ protection setting once, so **a wrong PIN consumes an attempt**. Saving, automat
 unlock and storage limits are described in
 [SIM commissioning](networking.md#sim-commissioning-and-saved-pin). Never log PIN
 arguments.
+
+EC100 PAP credentials use the two authentication commands above, not network
+settings. Observe `status.cellular.operation` and `.error` for storage completion;
+acceptance does not prove carrier authentication or Internet. These operations
+share Network's admission and private settings table, but network rollback does
+not undo them. Existing sessions are not interrupted. See
+[PAP authentication](networking.md#pap-authentication) for validation, APN binding,
+storage limits and modem clearing. Status includes only `authentication` and
+`authentication_apn`; never log username/password arguments.
 
 ## Completion and safety
 
@@ -145,7 +156,8 @@ Modbus. See [bus operations](buses.md).
 - `connections`: port roles, conflicts, per-uplink connectivity, selected Internet
   source, overall health and backup state.
 - `cellular`: modem/SIM observations, `pin_saved`, `auto_unlock`, operation and
-  error. No PIN, SIM identifier or binding hash. `auto_unlock` is `ready`, `blocked`,
+  error, plus PAP `authentication` and `authentication_apn`. No PIN, PAP credentials,
+  SIM identifier or binding hash. `auto_unlock` is `ready`, `blocked`,
   `different_sim`, `identity_unknown`, `off` or `unknown`.
 - `remote_access`: sanitized daemon observations, routes, operation and error.
 - `sharing`: equipment `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
