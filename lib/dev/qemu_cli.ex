@@ -112,7 +112,8 @@ defmodule Dev.QemuCLI do
 
     seen =
       Enum.reduce(run["rows"], seen, fn row, seen ->
-        if row["status"] in ["passed", "failed"] and not MapSet.member?(seen, row["id"]) do
+        if row["status"] in ["passed", "failed", "skipped"] and
+             not MapSet.member?(seen, row["id"]) do
           IO.puts("#{row["status"]}: #{row["id"]} (#{row["milliseconds"]} ms) #{row["detail"]}")
           MapSet.put(seen, row["id"])
         else
@@ -127,6 +128,9 @@ defmodule Dev.QemuCLI do
 
       "passed" ->
         :ok
+
+      "skipped" ->
+        Mix.raise("No applicable scenarios ran; inspect the reported requirements")
 
       _ ->
         Mix.raise("Simulator run failed; inspect the device page")

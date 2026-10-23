@@ -14,7 +14,8 @@ defmodule Simulator.Scenarios.Apps do
     # host mounts, arbitrary VMs, hardware adapters or physical cards are involved.
     mount = "/tmp/nerves-gate-apps"
     call(vm, File, :mkdir_p!, [mount])
-    call(vm, Application, :put_env, [:nerves_gate, :apps_device, nil])
+    board = call(vm, Application, :fetch_env!, [:nerves_gate, :board])
+    call(vm, Application, :put_env, [:nerves_gate, :board, %{board | apps_device: nil}])
     call(vm, Application, :put_env, [:nerves_gate, :apps_mount, mount])
     assert {:ok, %{available?: false}} = call(vm, NervesGate.Storage, :status, [])
     assert {:error, :storage_unavailable} = call(vm, NervesGate.Apps, :install, ["/missing.ez"])
@@ -73,7 +74,7 @@ defmodule Simulator.Scenarios.Apps do
       apps(vm, :uninstall, [:gate_fixture])
       call(vm, System, :cmd, ["umount", [mount]])
       call(vm, Application, :delete_env, [:nerves_gate, :apps_mount])
-      call(vm, Application, :put_env, [:nerves_gate, :apps_device, "/dev/vdb"])
+      call(vm, Application, :put_env, [:nerves_gate, :board, board])
 
       for version <- ~w(1.0.0 1.1.0 1.2.0),
           do: call(vm, File, :rm, ["/tmp/gate_fixture-#{version}.ez"])
@@ -130,7 +131,8 @@ defmodule Simulator.Scenarios.Apps do
     assert "preserved" = call(vm, File, :read!, [marker])
 
     # Refuse the mounted firmware disk, without a platform/target switch.
-    call(vm, Application, :put_env, [:nerves_gate, :apps_device, "/dev/vda"])
+    board = call(vm, Application, :fetch_env!, [:nerves_gate, :board])
+    call(vm, Application, :put_env, [:nerves_gate, :board, %{board | apps_device: "/dev/vda"}])
 
     try do
       await(fn -> storage.().card_id != id end)
@@ -138,7 +140,7 @@ defmodule Simulator.Scenarios.Apps do
       assert {:error, :storage_in_use} =
                call(vm, NervesGate.Storage, :setup, [:format, storage.().card_id, :erase_all_data])
     after
-      call(vm, Application, :put_env, [:nerves_gate, :apps_device, "/dev/vdb"])
+      call(vm, Application, :put_env, [:nerves_gate, :board, board])
     end
 
     await(fn -> storage.().filesystem == "ext4" end)

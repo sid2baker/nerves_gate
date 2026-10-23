@@ -36,8 +36,11 @@ OS processes, never device-target compilation in the workbench VM.
   holds the simulator-node script and bench configurations.
 - `lib/simulator/qemu_tests.ex`: shared UI/CLI/CI admission and reservations;
   independent devices can run concurrently; `devices: :all` reserves every device.
-- `lib/simulator/scenarios/`: real-QEMU scenarios. Extend them for I/O
-  checks, not hardware mocks or fake SDK backends.
+- `lib/dev/scenarios/`: portable platform/SDK contract scenarios; `Dev.Scenarios`
+  checks device/fixture requirements before preparation. `Dev.TestDevice` reads
+  running targets; `Dev.TestFixture` separates explicitly owned bench controls.
+- `lib/simulator/scenarios/`: QEMU-specific integration scenarios. Shared scenarios
+  also run through the existing QEMU owner. No hardware mocks or fake SDK backends.
 - `firmware/test/unit/`: pure policy, validation and codec tests; no devices.
 - `systems/`: Nerves systems. Artifact input changes require a system version bump.
 - Projections are read models. LiveViews subscribe to device-owned streams and

@@ -6,7 +6,7 @@ defmodule NervesGate.Network.Cellular do
   serialized command API, once only. A private SIM-bound PIN store supports
   automatic unlock after restart; no credential or SIM identifier is published.
 
-  `:nerves_gate, :cellular` is nil on platforms without a modem profile. A profile
+  The board's `:cellular` profile is nil on platforms without a modem. A profile
   contains `:interface` and a standard VintageNet `:config` (ECM, QMI or Mobile).
   EC100 uses the Quectel EG800AK's ECM data path. Power/reset and stable interface
   naming belong to the BSP. Never use the recovery gadget's usb0.
@@ -15,7 +15,7 @@ defmodule NervesGate.Network.Cellular do
   alias NervesGate.Network.CellularPIN
 
   def profile do
-    case Application.get_env(:nerves_gate, :cellular) do
+    case NervesGate.Board.get(:cellular) do
       %{interface: name, config: %{type: type} = config} = profile
       when is_binary(name) and is_atom(type) ->
         if Regex.match?(~r/\A(?:wwan|ppp|cell)[0-9]+\z/, name) and

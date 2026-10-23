@@ -85,7 +85,7 @@ defmodule NervesGate.Buses do
     Alarms.register(Keyword.get(opts, :name, __MODULE__), [:bus_port_unavailable])
 
     state = %{
-      adapter: Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :buses_adapter)),
+      adapter: Keyword.get(opts, :adapter, NervesGate.Board.get(:buses_adapter)),
       id: inspect(Keyword.get(opts, :name, __MODULE__) || self()),
       name: Keyword.get(opts, :name, __MODULE__),
       ports: [],

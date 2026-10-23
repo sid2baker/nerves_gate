@@ -19,10 +19,25 @@ applications run in the same BEAM and use only the SDK.
 | `lib/dev/` | Workbench sessions, apps, discovery, builds, firmware updates, factory provisioning and release checks |
 | `lib/dev_web/`, `config/`, `priv/dev/` | Workbench endpoint, LiveViews, CLI API and session launchers |
 | `lib/simulator.ex`, `lib/simulator/` | QEMU lifecycle, virtual hardware and the shared scenario runner |
-| `lib/simulator/scenarios/` | Real-QEMU integration scenarios |
+| `lib/dev/scenarios/`, `lib/dev/scenarios.ex` | Portable device/SDK assertions and requirement-aware execution |
+| `lib/dev/test_device.ex`, `lib/dev/test_fixture.ex` | Bounded device access and explicit host-side bench controls |
+| `lib/simulator/scenarios/` | QEMU-specific integration scenarios |
 | `priv/simulator/` | Simulator node script and bench configurations |
 | `priv/templates/` | SDK app scaffolding |
 | `systems/` | EC100 and QEMU Nerves systems |
+
+## Board configuration
+
+Each device target declares hardware wiring in `:nerves_gate, :board`:
+`firmware/config/ec100.exs` for EC100 and `x86_64.exs` for QEMU. The latter is not
+an arbitrary-PC hardware profile. `NervesGate.Board` reads the modem profile,
+bus/indicator/recovery adapters and storage paths for device domains. Host builds
+have no board hardware; the UI continues to use device-owned status.
+
+The Nerves system/BSP owns drivers, device trees, boot and Linux device naming.
+Board config selects hardware; domains own policy, deadlines and persistence;
+applications use the SDK. The current two-port network model is unchanged.
+EM300 support, including its three-port layout, is future work.
 
 ## Data flow
 
@@ -123,5 +138,18 @@ their types but never start there.
 process, disk, QMP socket and Ethernet relay; `Simulator.QemuTests` admits
 lifecycle, configuration, manual control and scenario runs. The workbench, CLI
 and CI share these modules and [the scenarios](development.md#scenarios).
-Scenarios may inspect private domains to verify recovery; that is not a public
-API. `.reach.exs` enforces API boundaries and pure status/policy code.
+Portable scenarios use `Dev.TestDevice` and declare device resources separately
+from fixture controls. `Dev.Scenarios` checks requirements before the owner's
+preparation callback. Unsupported hardware/control capabilities produce a skipped
+row with a reason. Missing declared hardware, assertions, unavailable devices and
+failed controls are failures, not skips. Link/enabled state does not determine
+hardware support. The runner never boots or resets a target by itself. QEMU
+admission, reservations, fault cleanup and failure disk replacement remain owned
+by `Simulator.QemuTests`.
+
+`Simulator.TestQemu` implements `Dev.TestFixture` for owned QEMU handles. Other
+benches can supply the same small host-only control contract, but no physical
+fixture or automatic physical-device runner is provided. Test controls are not
+part of the application SDK. Scenarios may inspect private domains to verify
+recovery; that is not a public API. Firmware's `.reach.exs` enforces API boundaries
+and pure status/policy code.

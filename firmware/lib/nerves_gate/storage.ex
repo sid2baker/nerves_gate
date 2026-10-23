@@ -314,7 +314,7 @@ defmodule NervesGate.Storage do
          do: File.rename(file <> ".tmp", file)
   end
 
-  defp device, do: Application.get_env(:nerves_gate, :apps_device)
+  defp device, do: NervesGate.Board.get(:apps_device)
   defp mountpoint, do: Application.get_env(:nerves_gate, :apps_mount, "/mnt/apps")
 
   defp root_mount, do: Enum.find(mounts(), &(&1.mount_point == mountpoint()))

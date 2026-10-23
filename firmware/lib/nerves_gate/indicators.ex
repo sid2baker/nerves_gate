@@ -53,10 +53,9 @@ defmodule NervesGate.Indicators do
 
     state = %{
       name: Keyword.get(opts, :name, __MODULE__),
-      adapter:
-        Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :indicators_adapter)),
+      adapter: Keyword.get(opts, :adapter, NervesGate.Board.get(:indicators_adapter)),
       recovery_adapter:
-        Keyword.get(opts, :recovery_adapter, Application.get_env(:nerves_gate, :recovery_adapter)),
+        Keyword.get(opts, :recovery_adapter, NervesGate.Board.get(:recovery_adapter)),
       remote: Keyword.get(opts, :remote, Remote),
       network: Keyword.get(opts, :network, Network),
       alarms: Keyword.get(opts, :alarms),

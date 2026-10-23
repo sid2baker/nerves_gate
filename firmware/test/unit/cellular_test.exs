@@ -15,13 +15,13 @@ defmodule NervesGate.Network.CellularTest do
   }
 
   setup do
-    previous = Application.fetch_env(:nerves_gate, :cellular)
-    Application.put_env(:nerves_gate, :cellular, @profile)
+    previous = Application.fetch_env(:nerves_gate, :board)
+    put_profile(@profile)
 
     on_exit(fn ->
       case previous do
-        {:ok, value} -> Application.put_env(:nerves_gate, :cellular, value)
-        :error -> Application.delete_env(:nerves_gate, :cellular)
+        {:ok, value} -> Application.put_env(:nerves_gate, :board, value)
+        :error -> Application.delete_env(:nerves_gate, :board)
       end
     end)
   end
@@ -52,7 +52,7 @@ defmodule NervesGate.Network.CellularTest do
   end
 
   test "platforms without a modem profile reject cellular before configuring interfaces" do
-    Application.put_env(:nerves_gate, :cellular, nil)
+    put_profile(nil)
     assert Cellular.profile() == nil
     assert Cellular.configurations(@network) == {:error, :cellular_unsupported}
     assert Cellular.configurations(%{"mode" => "unconfigured"}) == {:ok, []}
@@ -60,7 +60,7 @@ defmodule NervesGate.Network.CellularTest do
 
   test "profiles cannot assign a recovery, LAN or VPN interface to the modem" do
     for name <- ["usb0", "eth0", "br0", "tailscale0", "wwan0;reboot", "wwan"] do
-      Application.put_env(:nerves_gate, :cellular, %{@profile | interface: name})
+      put_profile(%{@profile | interface: name})
       assert Cellular.profile() == nil
       assert Cellular.configurations(@network) == {:error, :cellular_unsupported}
     end
@@ -97,6 +97,11 @@ defmodule NervesGate.Network.CellularTest do
     assert Policy.supported(nil, @network) == {:error, :cellular_unsupported}
     ethernet = Map.put(@network, "internet", %{"mode" => "ethernet"})
     assert Policy.supported(%{supported | cellular: nil}, ethernet) == :ok
+  end
+
+  defp put_profile(profile) do
+    board = Application.get_env(:nerves_gate, :board, %{})
+    Application.put_env(:nerves_gate, :board, Map.put(board, :cellular, profile))
   end
 
   test "backend admission rejects malformed, oversized and command-bearing APNs" do

@@ -71,10 +71,37 @@ and firmware; update them deliberately with `mix deps.update` and keep
 
 ## Scenarios
 
-UI, CLI and CI share the modules in `lib/simulator/scenarios/`. Extend them for
-hardware-facing behaviour instead of adding fake backends. Independent devices can
+UI, CLI and CI use one catalogue: portable scenarios in `lib/dev/scenarios/` plus
+QEMU-specific scenarios in `lib/simulator/scenarios/`. Independent QEMU devices can
 run concurrently; `devices: :all` reserves the whole bench and `fresh_disk`
 scenarios own disposable state. `tailscale_auth` is opt-in.
+
+Portable scenarios declare `requires: %{device: [...], fixture: [...]}`. The
+current device resources are `:ethernet`, `:cellular`, `:can` and `:rs485`;
+fixture capabilities describe bench controls, not product hardware. For example,
+`cable_loss` requires Ethernet plus `:ethernet_link` control. It discovers the
+configured Internet port, tests link loss and typed SDK events, and restores the
+link. Prepare a linked, addressed, separate Ethernet Internet port and an
+independent management path before running it. Read-only status/SDK checks need
+no fixture. QEMU platform/bus assertions remain under `qemu_status`/`qemu_sdk`.
+
+`Dev.Scenarios.run(module, %{device: target})` executes a portable scenario without
+QEMU preparation. A target has `:node`, optional diagnostics `:dir`, and optional
+`fixture: {module, handle}` implementing `Dev.TestFixture`. The caller must already
+own/reserve the authorized test target and manage its cleanup. No node discovery,
+boot, network reconfiguration or physical attachment happens automatically.
+Fixture requirements are checked before preparation. Unsupported hardware is
+skipped; declared hardware that is missing or unobserved fails the check. For
+example, a board without CAN skips a CAN scenario, but a declared CAN port that
+has disappeared does not. Disconnected/disabled ports remain supported; scenarios
+check their operating state. RPC/assertion/control failures remain failures.
+Skipped rows and reasons appear in the UI, CLI and CI; an entirely skipped run is
+not a pass.
+
+The only supplied fixture controls owned QEMU devices. A physical bench needs an
+explicitly authorized adapter and safe test wiring before fault scenarios can run;
+this is not permission to attach controls to a production gateway. Keep fixture
+controls out of the application SDK. Extend real scenarios, not fake backends.
 
 Host tests cover pure firmware policy and codecs, workbench and app tooling,
 discovery and release contracts. Firmware's Credo, Dialyzer, Reach and clone

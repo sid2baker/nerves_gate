@@ -24,8 +24,6 @@ config :nerves_gate,
     NervesGate.SDKBackend,
     NervesGateWeb.Endpoint
   ],
-  # Platforms opt into real modem hardware; QEMU has no cellular profile.
-  cellular: nil,
   network_adapter: {NervesGate.Network.Vintage, nil},
   remote_adapter: {NervesGate.Remote.Tailscaled, nil},
   equipment_adapter: {NervesGate.Equipment.Linux, nil}

@@ -1,9 +1,9 @@
-defmodule Simulator.Scenarios.PublicStatus do
+defmodule Simulator.Scenarios.QemuStatus do
   @moduledoc false
   import ExUnit.Assertions
   alias Simulator.TestQemu, as: Qemu
 
-  def spec, do: %{:name => "Public status describes the QEMU device and is JSON encodable"}
+  def spec, do: %{name: "QEMU reports its platform and rejects unsupported cellular operations"}
 
   def run(%{device: vm}) do
     status = Qemu.status(vm)

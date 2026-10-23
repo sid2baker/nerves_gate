@@ -1,1 +1,1 @@
-{"app.css":{"file":"css/app.css","imports":[],"css":[],"assets":["css/app.css"],"src":"app.css","isEntry":false,"dynamicImports":[]},"app.js":{"file":"js/app.js","imports":[],"css":[],"assets":[],"src":"app.js","isEntry":true,"dynamicImports":[]}}
+{"app.css":{"file":"css/app.css","imports":[],"assets":["css/app.css"],"css":[],"src":"app.css","isEntry":false,"dynamicImports":[]},"app.js":{"file":"js/app.js","imports":[],"assets":[],"css":[],"src":"app.js","isEntry":true,"dynamicImports":[]}}

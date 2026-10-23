@@ -2,6 +2,22 @@ defmodule Simulator.TestQemu do
   @moduledoc "Scenario assertions and cleanup for simulator-owned device handles."
   import ExUnit.Assertions
   alias Simulator.Network
+  @behaviour Dev.TestFixture
+
+  @impl true
+  def capabilities(_vm), do: [:qemu, :ethernet_link, :reboot, :power_cycle]
+
+  @impl true
+  def control(vm, :ethernet_link, [interface, up]) when is_boolean(up) do
+    case %{"eth0" => :lan1, "eth1" => :lan2}[interface] do
+      nil -> {:error, :unsupported_fixture_control}
+      port -> network(vm, %{cables: %{port => up}})
+    end
+  end
+
+  def control(vm, :reboot, []), do: reboot(vm)
+  def control(vm, :power_cycle, []), do: power_cycle(vm)
+  def control(_, _, _), do: {:error, :unsupported_fixture_control}
 
   def network(vm), do: Simulator.observe(vm).config
   def topology(vm), do: Network.connections(network(vm).internet)
@@ -130,40 +146,9 @@ defmodule Simulator.TestQemu do
     do:
       match?({:ok, "https://" <> _}, :erpc.call(vm.node, NervesGate, :remote_login_url, [], 2000))
 
-  def call(vm, function, args) do
-    result = :erpc.call(vm.node, NervesGate, function, args, 15_000)
-    log(vm, "api.log", {function, result})
-    result
-  end
-
-  def status(vm) do
-    status = :erpc.call(vm.node, NervesGate, :status, [], 2000)
-    log(vm, "snapshots.log", status)
-    status
-  catch
-    :error, {:erpc, _} -> nil
-  end
-
-  def await(vm, phase, predicate, timeout \\ 30_000) do
-    if report = Process.get(:qemu_report), do: report.(phase)
-    poll(vm, phase, predicate, System.monotonic_time(:millisecond) + timeout)
-  end
-
-  defp poll(vm, phase, predicate, deadline) do
-    status = status(vm)
-
-    cond do
-      status && predicate.(status) ->
-        status
-
-      System.monotonic_time(:millisecond) >= deadline ->
-        flunk("Timed out: #{phase}; diagnostics: #{vm.dir}")
-
-      true ->
-        Process.sleep(500)
-        poll(vm, phase, predicate, deadline)
-    end
-  end
+  defdelegate call(vm, function, args), to: Dev.TestDevice
+  defdelegate status(vm), to: Dev.TestDevice
+  defdelegate await(vm, phase, predicate, timeout \\ 30_000), to: Dev.TestDevice
 
   def cleanup do
     callbacks =
@@ -223,13 +208,5 @@ defmodule Simulator.TestQemu do
   defp fault(vm, key, label) do
     if report = Process.get(:qemu_fault), do: report.(vm.id, key, label)
     :ok
-  end
-
-  defp log(vm, file, value) do
-    File.write!(
-      Path.join(vm.dir, file),
-      "#{System.system_time(:millisecond)} #{inspect(value, limit: :infinity)}\n",
-      [:append]
-    )
   end
 end

@@ -8,15 +8,51 @@ defmodule NervesGate.BuildConfigTest do
       assert config[:nerves_runtime][:init_module] == NervesGate.Recovery.DataInit
       assert config[:nerves][:application_sort] == [init: [:nerves_runtime]]
 
+      board = config[:nerves_gate][:board]
+
+      # Hardware settings have one owner, not parallel top-level defaults.
+      for key <- Map.keys(board), do: refute(Keyword.has_key?(config[:nerves_gate], key))
+
       if target == :ec100 do
-        assert config[:nerves_gate][:cellular] == %{
-                 interface: "wwan0",
-                 config: %{type: VintageNetECM, vintage_net_ecm: %{at_tty: "ttyUSB2"}}
+        assert board == %{
+                 cellular: %{
+                   interface: "wwan0",
+                   config: %{type: VintageNetECM, vintage_net_ecm: %{at_tty: "ttyUSB2"}}
+                 },
+                 buses_adapter: {NervesGate.Buses.EC100, nil},
+                 indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"},
+                 recovery_adapter: {NervesGate.Recovery.EC100, nil},
+                 data_partition: "/sys/class/block/mmcblk0p3/dev",
+                 apps_device: "/dev/mmcblk1p1"
                }
+
+        assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
       else
-        assert config[:nerves_gate][:cellular] == nil
+        assert board == %{
+                 cellular: nil,
+                 buses_adapter: nil,
+                 indicators_adapter: nil,
+                 recovery_adapter: nil,
+                 data_partition: "/sys/class/block/vda4/dev",
+                 apps_device: "/dev/vdb"
+               }
+
+        assert config[:vintage_net][:config] == [
+                 {"usb0", %{type: VintageNetDirect}},
+                 {"eth2",
+                  %{
+                    type: VintageNetEthernet,
+                    ipv4: %{method: :static, address: "192.168.77.2", prefix_length: 24}
+                  }}
+               ]
       end
     end
+  end
+
+  test "host builds start no device services and declare no board hardware" do
+    config = Config.Reader.read!("config/config.exs", env: :test, target: :host)
+    assert config[:nerves_gate][:services] == []
+    refute Keyword.has_key?(config[:nerves_gate], :board)
   end
 
   test "code reload listeners are restricted to host development" do

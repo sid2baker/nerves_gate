@@ -15,20 +15,24 @@ defmodule Simulator.QemuTests do
   @run_limit 20
 
   def scenarios do
-    for path <- Enum.sort(Path.wildcard(Path.join(Dev.root(), "lib/simulator/scenarios/*.ex"))) do
-      id = Path.basename(path, ".ex")
-      module = Module.concat(Simulator.Scenarios, Macro.camelize(id))
-      spec = module.spec()
+    qemu =
+      for path <- Path.wildcard(Path.join(Dev.root(), "lib/simulator/scenarios/*.ex")) do
+        id = Path.basename(path, ".ex")
+        module = Module.concat(Simulator.Scenarios, Macro.camelize(id))
+        spec = module.spec()
 
-      %{
-        id: id,
-        module: module,
-        name: spec.name,
-        fresh_disk: Map.get(spec, :fresh_disk, false),
-        all: spec[:devices] == :all,
-        opt_in: spec[:opt_in] == true
-      }
-    end
+        %{
+          id: id,
+          module: module,
+          name: spec.name,
+          requires: %{fixture: [:qemu]},
+          fresh_disk: Map.get(spec, :fresh_disk, false),
+          all: spec[:devices] == :all,
+          opt_in: spec[:opt_in] == true
+        }
+      end
+
+    Enum.sort_by(qemu ++ Dev.Scenarios.all(), & &1.id)
   end
 
   def scenarios(selection) do
@@ -200,7 +204,8 @@ defmodule Simulator.QemuTests do
             end),
          :ok <- available(state, held) do
       owner = self()
-      context = %{device: state.handles[id], devices: state.handles}
+      devices = Map.new(state.handles, fn {id, vm} -> {id, Map.put(vm, :fixture, {Qemu, vm})} end)
+      context = %{device: devices[id], devices: devices}
 
       start_run(state, id, held, selection, scenarios, fn run_id ->
         execute(owner, run_id, context, scenarios)
@@ -683,10 +688,7 @@ defmodule Simulator.QemuTests do
     |> update_run(run_id, fn run ->
       rows = if uncertain, do: Enum.map(run.rows, &stopped/1), else: run.rows
 
-      status =
-        if not uncertain and Enum.all?(rows, &(&1.status == :passed)),
-          do: :passed,
-          else: :failed
+      status = if uncertain, do: :failed, else: Dev.Scenarios.result(rows)
 
       phase = if uncertain, do: "Control state uncertain; Reset the devices", else: "Finished"
       %{run | rows: rows, status: status, phase: phase}
@@ -740,7 +742,9 @@ defmodule Simulator.QemuTests do
   defp execute(owner, run_id, context, scenarios) do
     vm = context.device
     report_to(owner)
-    Process.put(:qemu_report, fn phase -> send(owner, {:phase, run_id, phase}) end)
+    report = fn phase -> send(owner, {:phase, run_id, phase}) end
+    Process.put(:qemu_report, report)
+    Process.put(:scenario_report, report)
 
     for scenario <- scenarios do
       send(owner, {:progress, run_id, scenario.id, %{status: :running}})
@@ -759,9 +763,9 @@ defmodule Simulator.QemuTests do
       # An uncertain control outcome forbids further commands. Cleanup failures stop
       # the worker and block its devices; neither can overwrite the original failure.
       if Process.get(:simulator_control_failed), do: exit(:simulator_control_failed)
-      Qemu.cleanup()
+      if result.status != :skipped, do: Qemu.cleanup()
 
-      if scenario.fresh_disk or result.status == :failed do
+      if result.status != :skipped and (scenario.fresh_disk or result.status == :failed) do
         send(
           owner,
           {:phase, run_id,
@@ -780,12 +784,13 @@ defmodule Simulator.QemuTests do
   end
 
   defp run_scenario(scenario, context, affected) do
-    if scenario.fresh_disk,
-      do: fresh_devices(affected, context.device, Map.get(scenario.module.spec(), :boot, [])),
-      else: baseline(context.device)
+    Dev.Scenarios.run(scenario, context, fn ->
+      if scenario.fresh_disk,
+        do: fresh_devices(affected, context.device, Map.get(scenario.module.spec(), :boot, [])),
+        else: baseline(context.device)
 
-    scenario.module.run(context)
-    %{status: :passed, detail: "OK"}
+      :ok
+    end)
   catch
     :exit, :simulator_control_failed -> exit(:simulator_control_failed)
     kind, reason -> %{status: :failed, detail: Exception.format(kind, reason, __STACKTRACE__)}

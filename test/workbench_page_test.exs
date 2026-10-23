@@ -217,6 +217,44 @@ defmodule DevWeb.WorkbenchPageTest do
     end
   end
 
+  test "skipped scenarios show their missing requirements instead of a pass" do
+    scenario = Dev.Scenarios.describe(Dev.Scenarios.CableLoss)
+    reason = "Missing requirements: fixture:ethernet_link"
+    row = %{id: scenario.id, status: :skipped, detail: reason, milliseconds: 0}
+
+    device = %{
+      owner: nil,
+      manual_action: nil,
+      blocked: false,
+      faults: %{},
+      topology: %{lan1: :internet, lan2: :equipment},
+      ui: "http://localhost:4001",
+      run: 1
+    }
+
+    view =
+      Map.merge(bench(), %{
+        scenarios: [scenario],
+        devices: %{gateway_a: device},
+        runs: [%{id: 1, rows: [row]}]
+      })
+
+    values =
+      assigns(
+        id: "gateway_a",
+        tab: "tests",
+        confirm_run: nil,
+        projection: NervesGate.Projection.disconnected().status
+      )
+      |> Keyword.merge(Map.to_list(DevWeb.DeviceLive.bench_assigns(view, "gateway_a")))
+
+    document = render_component(&DevWeb.DeviceLive.render/1, values) |> Floki.parse_document!()
+    result = Floki.find(document, "#scenario-cable_loss") |> Floki.text()
+    assert result =~ "skipped"
+    assert result =~ reason
+    refute result =~ "passed"
+  end
+
   test "factory provisioning defaults to backup and binds explicit skipping into review" do
     empty = render_component(&DevWeb.FactoryLive.render/1, assigns()) |> Floki.parse_document!()
     assert Floki.find(empty, "#review-factory select[name=firmware][disabled]") != []

@@ -2,7 +2,7 @@ import Config
 import_config "firmware.exs"
 
 # Physical EC100 hardware. Shared device services are in firmware.exs.
-config :nerves_gate,
+config :nerves_gate, :board, %{
   data_partition: "/sys/class/block/mmcblk0p3/dev",
   # Removable SPI SD card; provision its first partition as ext4 separately.
   apps_device: "/dev/mmcblk1p1",
@@ -13,6 +13,7 @@ config :nerves_gate,
   buses_adapter: {NervesGate.Buses.EC100, nil},
   recovery_adapter: {NervesGate.Recovery.EC100, nil},
   indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"}
+}
 
 # USB recovery is independent of LAN trials. Its DHCP server serves only USB.
 config :vintage_net, config: [{"usb0", %{type: VintageNetDirect}}]

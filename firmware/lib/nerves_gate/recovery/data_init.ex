@@ -19,7 +19,7 @@ defmodule NervesGate.Recovery.DataInit do
 
   @doc false
   def check_data do
-    with {:ok, device} <- File.read(Application.fetch_env!(:nerves_gate, :data_partition)) do
+    with {:ok, device} <- File.read(NervesGate.Board.fetch!(:data_partition)) do
       data_mount(MountInfo.get_mounts!(), String.trim(device))
     end
   end

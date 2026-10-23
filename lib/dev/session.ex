@@ -138,7 +138,7 @@ defmodule Dev.Session do
     client =
       Req.new(
         base_url: "http://localhost",
-        unix_socket: dir |> Path.join("http.sock") |> Path.relative_to_cwd(),
+        unix_socket: Path.relative_to_cwd(Path.join(dir, "http.sock"), force: true),
         retry: false,
         redirect: false,
         connect_options: [timeout: 200],

@@ -293,6 +293,9 @@ defmodule DevWeb.DeviceLive do
                 <span :if={@results[scenario.id].milliseconds} class="ui-help">
                   {duration(@results[scenario.id].milliseconds)}
                 </span>
+                <span :if={@results[scenario.id].status == :skipped} class="ui-help">
+                  {@results[scenario.id].detail}
+                </span>
               </div>
               <details :if={failure(@results[scenario.id])}>
                 <summary>Failure details</summary>
