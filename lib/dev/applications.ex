@@ -72,7 +72,7 @@ defmodule Dev.Applications do
     project!(path)
   end
 
-  def validate_name!(name) do
+  defp validate_name!(name) do
     unless is_binary(name) and Regex.match?(~r/\A[a-z][a-z0-9_]*\z/, name),
       do: raise(ArgumentError, "Names must contain lowercase letters, digits and underscores")
   end
