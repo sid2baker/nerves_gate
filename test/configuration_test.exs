@@ -41,6 +41,10 @@ defmodule Dev.ConfigurationTest do
       end
     end)
 
+    # Native subsystem checks share this VM. Like firmware's host checks, they
+    # may leave endpoint settings behind; configuration merging need not erase them.
+    Application.put_env(:nerves_gate, NervesGateWeb.Endpoint, server: false)
+
     assert :ok = Dev.configure()
 
     settings = Application.fetch_env!(:nerves_gate_dev, DevWeb.Endpoint)
@@ -51,6 +55,7 @@ defmodule Dev.ConfigurationTest do
     assert byte_size(settings[:secret_key_base]) >= 64
     assert is_binary(settings[:live_view][:signing_salt])
     assert Application.fetch_env!(:nerves_gate, :services) == []
-    assert Application.get_env(:nerves_gate, NervesGateWeb.Endpoint) == nil
+    refute Keyword.has_key?(config[:nerves_gate], NervesGateWeb.Endpoint)
+    refute Process.whereis(NervesGateWeb.Endpoint)
   end
 end
