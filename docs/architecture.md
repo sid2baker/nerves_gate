@@ -36,8 +36,8 @@ checkout's system sources. Only the SDK is published on Hex; see
 or host code reuse**. The workbench uses firmware components/layouts,
 `Projection`, `Status`, `NetworkStatus` and `Observations`. USB factory reconnection
 also uses `NervesGate.Linux.Netlink`. The explicit session additionally starts
-selected services through `NervesGate.Application`, as described below. The
-firmware dependency is therefore not just a convenient source directory.
+its own host service supervisor, as described below. The firmware application
+stays stopped; the dependency supplies shared code, not workstation supervision.
 
 ## Source map
 
@@ -55,7 +55,7 @@ firmware dependency is therefore not just a convenient source directory.
 | `lib/dev/test_device.ex`, `lib/dev/test_fixture.ex` | Bounded target access and explicitly owned bench controls |
 | `lib/simulator/scenarios/` | QEMU-specific integration scenarios |
 | `priv/simulator/`, `priv/templates/` | Trusted bench configs/scripts and ordinary SDK app scaffolding |
-| `test/`, `firmware/test/unit/`, `sdk/test/` | Host/tooling and shared UI tests, firmware unit tests, SDK tests |
+| `test/`, `firmware/test/{unit,web}/`, `sdk/test/` | Host/tooling and shared UI integration, firmware policy/web tests, SDK tests |
 | `systems/` | Nerves system artifact inputs, independently versioned |
 
 ## Host mode and the simulator
@@ -76,22 +76,30 @@ Dev.Supervisor (:nerves_gate_dev, one_for_one)
 ├─ Dev.Discovery
 └─ Dev.Operations
 
-NervesGate.Supervisor (:nerves_gate, rest_for_one)
-├─ NervesGate.PubSub
-├─ Simulator.QemuTests
-└─ DevWeb.Endpoint (configured under :nerves_gate_dev)
+session supervisor (also owns EPMD and simulator wrapper)
+└─ Dev.SessionServices (:nerves_gate_dev, rest_for_one)
+   ├─ NervesGate.PubSub
+   ├─ Simulator.QemuTests
+   └─ DevWeb.Endpoint (configured under :nerves_gate_dev)
 
 owned simulator BEAM
 └─ Simulator → per-device owners → QEMU, disks, QMP and Ethernet relays
 ```
 
 This is the actual wiring in [`priv/dev/session.exs`](../priv/dev/session.exs):
-root configuration defaults `:nerves_gate, :services` to `[]`, then the explicit
-session replaces it with `[Simulator.QemuTests, DevWeb.Endpoint]` and starts both
-applications. `NervesGate.Application` always prepends PubSub. There is no local
-gateway endpoint, VintageNet service or workstation Tailscale daemon. Host native
-networking dependencies compile for types/helpers but their device services do
-not start.
+root configuration leaves `:nerves_gate, :services` empty. The explicit session
+starts `:nerves_gate_dev` and attaches
+[`Dev.SessionServices`](../lib/dev/session_services.ex) to its existing supervisor.
+It never starts `:nerves_gate`. The shared PubSub name stays `NervesGate.PubSub`;
+the owner is the host session. Session shutdown stops the endpoint, runner and
+PubSub before the simulator wrapper and EPMD. A separate loopback Bandit child
+serves the browser; the endpoint's Unix listener serves CLI commands.
+
+There is no local gateway endpoint, VintageNet service or workstation Tailscale
+daemon. Host native networking dependencies compile for types/helpers but their
+device services do not start. The session sets its own distribution cookie;
+firmware cookie initialization and cellular credential filtering do not run on
+the workstation. Phoenix's endpoint code-reload plugs remain host-owned.
 
 The workbench listens on loopback and on a private Unix HTTP socket used by CLI
 commands. The session initiates distribution connections without an inbound UI
@@ -169,7 +177,7 @@ See [`firmware/config/firmware.exs`](../firmware/config/firmware.exs) and
 [`NervesGate.Application`](../firmware/lib/nerves_gate/application.ex). An earlier
 child's failure restarts later children. The device application is `transient`:
 an exhausted restart limit stops the BEAM and erlinit reboots the device. The
-host session's explicitly selected services are a different tree, not this list.
+host session's service supervisor is a separate host-owned tree, not this list.
 
 Workers are linked and bounded; domains stop and join owned workers before
 restoration or new work. Network trials, scans and sharing reply after completion;
@@ -282,8 +290,10 @@ host **before** target packaging. Workbench and gateway share one asset definiti
 and tracked output; devices only serve it. Host and target native ports must not
 be mixed. See [development](development.md#assets) and [CI](ci.md).
 
-Host tests cover policy/codecs, SDK packaging, gateway rendering/security and
-workbench contracts. Real I/O/recovery checks use the shared scenario runner:
+Firmware host tests cover policy/codecs and gateway rendering/security under
+`firmware/test/unit/` and `firmware/test/web/`. Root tests cover workbench
+contracts and genuine shared-asset/component integration; SDK tests cover SDK
+packaging. Real I/O/recovery checks use the shared scenario runner:
 portable cases declare device and fixture requirements; QEMU-specific cases stay
 in `lib/simulator/scenarios/`. Requirements are checked before preparation.
 Unsupported resources skip; missing declared hardware, unreachable devices and

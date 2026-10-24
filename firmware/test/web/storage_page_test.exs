@@ -1,4 +1,4 @@
-defmodule Dev.StoragePageTest do
+defmodule NervesGateWeb.StoragePageTest do
   use ExUnit.Case, async: true
   import Phoenix.LiveViewTest, only: [render_component: 2]
 

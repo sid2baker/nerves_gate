@@ -90,7 +90,6 @@ true = connected
 Application.put_env(:nerves_gate, :simulator_node, :"simulator@127.0.0.1")
 
 # The workstation serves only the workbench. Each device serves its gateway UI.
-Application.put_env(:nerves_gate, :services, [Simulator.QemuTests, DevWeb.Endpoint])
 port = String.to_integer(System.fetch_env!("QEMU_HTTP_PORT"))
 site = Application.fetch_env!(:nerves_gate_dev, DevWeb.Endpoint)
 
@@ -118,7 +117,7 @@ result =
     # The simulator's own dependencies (such as Req), then the workstation UI.
     {:ok, _} = Application.ensure_all_started(:nerves_gate_dev)
     if path = System.get_env("NERVES_GATE_APP"), do: {:ok, _} = Dev.Applications.open(path)
-    {:ok, _} = Application.ensure_all_started(:nerves_gate)
+    {:ok, _} = Supervisor.start_child(supervisor, Dev.SessionServices)
 
     if System.get_env("QEMU_CI") != "true" do
       [spec] =
@@ -168,7 +167,6 @@ result =
     end
   after
     if Process.whereis(NervesGate.PubSub), do: QemuTests.unsubscribe()
-    Application.stop(:nerves_gate)
     Supervisor.stop(supervisor, :normal, 30_000)
   end
 

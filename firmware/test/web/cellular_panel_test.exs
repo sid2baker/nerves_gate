@@ -1,4 +1,4 @@
-defmodule Dev.CellularPanelTest do
+defmodule NervesGateWeb.CellularPanelTest do
   use ExUnit.Case, async: false
   import Phoenix.LiveViewTest, only: [render_component: 2]
   alias NervesGate.Network.Cellular

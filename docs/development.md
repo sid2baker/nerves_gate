@@ -113,9 +113,12 @@ explicitly authorized adapter and safe test wiring before fault scenarios can ru
 this is not permission to attach controls to a production gateway. Keep fixture
 controls out of the application SDK. Extend real scenarios, not fake backends.
 
-Host tests cover pure firmware policy and codecs, workbench and app tooling,
-discovery and release contracts. Firmware's Credo, Dialyzer, Reach and clone
-checks run in root `mix ci`.
+Firmware host tests cover policy/codecs in `firmware/test/unit/` and gateway
+rendering/socket security in `firmware/test/web/`. Root tests cover workbench and
+app tooling, discovery, release contracts and shared UI integration. Root `mix ci`
+enters firmware natively and runs both firmware directories once; moved gateway
+tests are not duplicated at the root. Firmware's Credo, Dialyzer, Reach and clone
+checks also run in root `mix ci`.
 
 ## Assets
 

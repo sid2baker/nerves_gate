@@ -1,4 +1,4 @@
-defmodule Dev.NetworkEditorTest do
+defmodule NervesGateWeb.NetworkEditorTest do
   use ExUnit.Case, async: true
   import Phoenix.LiveViewTest, only: [render_component: 2]
   alias NervesGateWeb.{NetworkEditor, NetworkForm}

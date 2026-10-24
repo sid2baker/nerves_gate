@@ -100,6 +100,8 @@ defmodule NervesGate.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.40", only: :docs, runtime: false},
+      # Gateway host tests and Volt share the same host-only HTML parser.
+      {:floki, "~> 0.38", targets: :host},
       # Frontend tooling runs on the host, never in device firmware.
       {:volt, "~> 0.23.0", optional: true, targets: :host},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
