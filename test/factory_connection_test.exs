@@ -1,6 +1,6 @@
-defmodule Dev.FactoryConnectionTest do
+defmodule Workbench.FactoryConnectionTest do
   use ExUnit.Case, async: true
-  alias Dev.FactoryConnection, as: Connection
+  alias Workbench.FactoryConnection, as: Connection
   require Phoenix.LiveViewTest
 
   @tag :tmp_dir

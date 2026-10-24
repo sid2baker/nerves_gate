@@ -4,7 +4,7 @@ Applications are trusted OTP applications in the firmware's BEAM. They can crash
 or block the VM; the SDK is an API boundary, not a security sandbox. There is no
 hot-code upgrade or dependency solver.
 
-For the published-package workflow, see [App development](app-development.md).
+For ordinary SDK app projects and packaging, see [App development](app-development.md).
 
 ## Storage
 
@@ -55,10 +55,10 @@ For administrative automation, read the detected card ID, then make a choice:
 
 ```elixir
 storage = NervesGate.status().storage
-NervesGate.storage_setup(:use, storage.card_id) # preserves data
-NervesGate.storage_setup(:skip)                 # no card required
+NervesGate.Storage.setup(:use, storage.card_id) # preserves data
+NervesGate.Storage.setup(:skip)                 # no card required
 # Destructive, only after explicit user consent:
-NervesGate.storage_setup(:format, storage.card_id, :erase_all_data)
+NervesGate.Storage.setup(:format, storage.card_id, :erase_all_data)
 ```
 
 Commands acknowledge admission promptly. Observe `NervesGate.status().storage`
@@ -70,11 +70,13 @@ A missing formatter is reported without erasing the card.
 Build with the SDK's `mix nerves_gate.package`. The archive is standard OTP layout,
 not a custom package format. Its main `.app` declares the required SDK range in
 `:nerves_gate_sdk_requirement` and may declare a health-check MFA in
-`:nerves_gate_health_check`. The generator provides both.
+`:nerves_gate_health_check`. The app template provides both.
 
 The installer checks archive paths, sizes, application specifications, BEAM module
 identities, dependencies, SDK compatibility and platform/module conflicts before
-adding any code paths. Code is extracted to a new staging directory and renamed
+adding any code paths. Workbench/platform application and module names are
+reserved, including obsolete platform names; those archives cannot be installed.
+Code is extracted to a new staging directory and renamed
 into place; an installed version is never overwritten. App/module names reserved
 by another installed application cannot be reused. Dependencies bundled privately
 belong to one application; platform libraries are shared and never stopped by the
@@ -101,7 +103,7 @@ works on an already-up interface in normal mode. SDK calls never configure the
 interface. An administrator must explicitly configure normal mode, for example:
 
 ```elixir
-NervesGate.bus_configure("can0", %{
+NervesGate.Buses.configure("can0", %{
   "enabled" => true, "bitrate" => 250_000, "listen_only" => false
 })
 ```

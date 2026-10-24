@@ -1,10 +1,10 @@
-defmodule Dev.DevicesTest do
+defmodule Workbench.DevicesTest do
   use ExUnit.Case, async: true
 
   test "only owned inventory is simulated, regardless of advertised kind, name or target" do
-    {:ok, gateway} = Dev.Discovery.manual("ec100.example.ts.net")
+    {:ok, gateway} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
     gateway = Map.merge(gateway, %{name: "gateway_a", target: "x86_64", kind: :simulated})
-    devices = Dev.Devices.list(bench(), %{devices: [gateway]})
+    devices = Workbench.Devices.list(bench(), %{devices: [gateway]})
     assert [physical] = Enum.filter(devices, &(&1.kind == :physical))
     assert physical.path == "/devices/physical/ec100.example.ts.net"
     assert physical.status == "Unverified"
@@ -16,12 +16,12 @@ defmodule Dev.DevicesTest do
   end
 
   test "type and case-insensitive search filters compose" do
-    {:ok, gateway} = Dev.Discovery.manual("ec100.example.ts.net")
-    devices = Dev.Devices.list(bench(), %{devices: [gateway]})
-    assert [%{kind: :simulated}] = Dev.Devices.filter(devices, "simulated", " GATEWAY ")
-    assert [%{kind: :physical}] = Dev.Devices.filter(devices, "all", "EXAMPLE.TS.NET")
-    assert Dev.Devices.filter(devices, "physical", "gateway_a") == []
-    assert length(Dev.Devices.filter(devices, "all", "")) == 2
+    {:ok, gateway} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
+    devices = Workbench.Devices.list(bench(), %{devices: [gateway]})
+    assert [%{kind: :simulated}] = Workbench.Devices.filter(devices, "simulated", " GATEWAY ")
+    assert [%{kind: :physical}] = Workbench.Devices.filter(devices, "all", "EXAMPLE.TS.NET")
+    assert Workbench.Devices.filter(devices, "physical", "gateway_a") == []
+    assert length(Workbench.Devices.filter(devices, "all", "")) == 2
   end
 
   defp bench do

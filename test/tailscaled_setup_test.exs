@@ -1,4 +1,4 @@
-defmodule Dev.TailscaledSetupTest do
+defmodule Workbench.TailscaledSetupTest do
   use ExUnit.Case, async: true
 
   @tag :tmp_dir
@@ -20,7 +20,7 @@ defmodule Dev.TailscaledSetupTest do
     File.mkdir!(cache)
     File.cp!(archive, Path.join(cache, "tailscale_1.104.1_amd64-#{checksum}.tgz"))
     destination = Path.join(dir, "overlay/usr/sbin/tailscaled")
-    installer = Path.join(Dev.root(), "deps/tailscaled_ex/lib/tailscaled/installer.ex")
+    installer = Path.join(Workbench.root(), "deps/tailscaled_ex/lib/tailscaled/installer.ex")
 
     script = """
     Code.require_file(#{inspect(installer)})

@@ -1,4 +1,4 @@
-defmodule Dev.ArtifactReleaseTest do
+defmodule Workbench.ArtifactReleaseTest do
   use ExUnit.Case, async: false
   alias Mix.Tasks.Nerves.Artifact.Release, as: Release
 

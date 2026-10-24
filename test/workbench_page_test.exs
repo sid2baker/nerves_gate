@@ -1,10 +1,10 @@
-defmodule DevWeb.WorkbenchPageTest do
+defmodule WorkbenchWeb.WorkbenchPageTest do
   use ExUnit.Case, async: true
   import Phoenix.LiveViewTest, only: [render_component: 2]
 
   test "overview is a small landing page, not a collection of configuration forms" do
     document =
-      render_component(&DevWeb.OverviewLive.render/1, assigns()) |> Floki.parse_document!()
+      render_component(&WorkbenchWeb.OverviewLive.render/1, assigns()) |> Floki.parse_document!()
 
     assert Floki.find(document, "#workbench-overview") != []
     assert Floki.find(document, "form") == []
@@ -18,7 +18,7 @@ defmodule DevWeb.WorkbenchPageTest do
     operation = %{operation() | kind: "firmware", status: :running, output: "Building image"}
 
     document =
-      render_component(&DevWeb.Layouts.app/1,
+      render_component(&WorkbenchWeb.Layouts.app/1,
         operation: operation,
         live_action: :devices,
         error: nil,
@@ -37,7 +37,7 @@ defmodule DevWeb.WorkbenchPageTest do
 
     document =
       render_component(
-        &DevWeb.ApplicationsLive.render/1,
+        &WorkbenchWeb.ApplicationsLive.render/1,
         assigns(applications: [app], app_id: nil, app: nil)
       )
       |> Floki.parse_document!()
@@ -50,7 +50,7 @@ defmodule DevWeb.WorkbenchPageTest do
 
     document =
       render_component(
-        &DevWeb.ApplicationsLive.render/1,
+        &WorkbenchWeb.ApplicationsLive.render/1,
         assigns(applications: [app], app_id: "demo", app: app)
       )
       |> Floki.parse_document!()
@@ -62,12 +62,14 @@ defmodule DevWeb.WorkbenchPageTest do
   end
 
   test "unified directory shows simulated and unverified physical devices with safe separate links" do
-    {:ok, gateway} = Dev.Discovery.manual("ec100.example.ts.net")
+    {:ok, gateway} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
     bench = bench()
     discovery = %{status: :idle, devices: [gateway], error: nil}
-    devices = Dev.Devices.list(bench, discovery)
+    devices = Workbench.Devices.list(bench, discovery)
     values = assigns(devices: devices, discovery: discovery, kind: "all", query: "")
-    document = render_component(&DevWeb.DevicesLive.render/1, values) |> Floki.parse_document!()
+
+    document =
+      render_component(&WorkbenchWeb.DevicesLive.render/1, values) |> Floki.parse_document!()
 
     assert Floki.find(
              document,
@@ -85,14 +87,17 @@ defmodule DevWeb.WorkbenchPageTest do
     assert Floki.find(document, "[phx-click=lifecycle]") == []
 
     filtered =
-      render_component(&DevWeb.DevicesLive.render/1, Keyword.put(values, :kind, "simulated"))
+      render_component(
+        &WorkbenchWeb.DevicesLive.render/1,
+        Keyword.put(values, :kind, "simulated")
+      )
       |> Floki.parse_document!()
 
     assert Floki.find(filtered, "#device-directory tr[data-device-kind=physical]") == []
   end
 
   test "physical review stays on its selected device and typed confirmation never leaks to another device" do
-    {:ok, device} = Dev.Discovery.manual("ec100.example.ts.net")
+    {:ok, device} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
 
     review = %{
       address: device.address,
@@ -109,7 +114,8 @@ defmodule DevWeb.WorkbenchPageTest do
     values = assigns(device: device, tab: "firmware", operation: %{operation() | review: review})
 
     document =
-      render_component(&DevWeb.PhysicalDeviceLive.render/1, values) |> Floki.parse_document!()
+      render_component(&WorkbenchWeb.PhysicalDeviceLive.render/1, values)
+      |> Floki.parse_document!()
 
     assert Floki.find(document, "#review-firmware input[name=address]") == []
     assert Floki.find(document, "#review-firmware input[name=port]") == []
@@ -127,18 +133,22 @@ defmodule DevWeb.WorkbenchPageTest do
     other = %{device | address: "other.local"}
 
     document =
-      render_component(&DevWeb.PhysicalDeviceLive.render/1, Keyword.put(values, :device, other))
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        Keyword.put(values, :device, other)
+      )
       |> Floki.parse_document!()
 
     assert Floki.find(document, "#firmware-confirmation") == []
   end
 
   test "physical overview is read-only and a review links back to its firmware tab" do
-    {:ok, device} = Dev.Discovery.manual("ec100.example.ts.net")
+    {:ok, device} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
     values = assigns(device: device, tab: "overview")
 
     document =
-      render_component(&DevWeb.PhysicalDeviceLive.render/1, values) |> Floki.parse_document!()
+      render_component(&WorkbenchWeb.PhysicalDeviceLive.render/1, values)
+      |> Floki.parse_document!()
 
     assert Floki.find(document, "form") == []
     assert Floki.find(document, "button[phx-click=read_info]") != []
@@ -148,16 +158,17 @@ defmodule DevWeb.WorkbenchPageTest do
     assert Floki.find(document, "nav[aria-label='Device sections'] a[href$='?tab=firmware']") !=
              []
 
-    assert DevWeb.Components.operation_path(%{review: %{address: device.address}}) ==
+    assert WorkbenchWeb.Components.operation_path(%{review: %{address: device.address}}) ==
              "/devices/physical/ec100.example.ts.net?tab=firmware"
   end
 
   test "firmware picker lists image versions and disables review until an image exists" do
-    {:ok, device} = Dev.Discovery.manual("ec100.example.ts.net")
+    {:ok, device} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
     values = assigns(device: device, tab: "firmware")
 
     empty =
-      render_component(&DevWeb.PhysicalDeviceLive.render/1, values) |> Floki.parse_document!()
+      render_component(&WorkbenchWeb.PhysicalDeviceLive.render/1, values)
+      |> Floki.parse_document!()
 
     assert Floki.find(empty, "#review-firmware select[disabled]") != []
     assert Floki.find(empty, "#review-firmware button[type=submit][disabled]") != []
@@ -165,7 +176,10 @@ defmodule DevWeb.WorkbenchPageTest do
     images = [%{path: "/built/ec100.fw", version: "0.2.0-dev", build: "ec100_dev/nerves_gate.fw"}]
 
     document =
-      render_component(&DevWeb.PhysicalDeviceLive.render/1, Keyword.put(values, :images, images))
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        Keyword.put(values, :images, images)
+      )
       |> Floki.parse_document!()
 
     assert Floki.find(document, "select[name=firmware] option[value='/built/ec100.fw']") != []
@@ -174,7 +188,7 @@ defmodule DevWeb.WorkbenchPageTest do
   end
 
   test "read information only shows whitelisted SSH observations and their timestamp" do
-    {:ok, device} = Dev.Discovery.manual("ec100.example.ts.net")
+    {:ok, device} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
 
     device =
       Map.merge(device, %{
@@ -188,7 +202,7 @@ defmodule DevWeb.WorkbenchPageTest do
 
     document =
       render_component(
-        &DevWeb.PhysicalDeviceLive.render/1,
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
         assigns(device: device, tab: "overview")
       )
       |> Floki.parse_document!()
@@ -209,8 +223,12 @@ defmodule DevWeb.WorkbenchPageTest do
           projection: NervesGate.Projection.disconnected().status
         )
 
-      values = Keyword.merge(values, Map.to_list(DevWeb.DeviceLive.bench_assigns(bench(), id)))
-      document = render_component(&DevWeb.DeviceLive.render/1, values) |> Floki.parse_document!()
+      values =
+        Keyword.merge(values, Map.to_list(WorkbenchWeb.DeviceLive.bench_assigns(bench(), id)))
+
+      document =
+        render_component(&WorkbenchWeb.DeviceLive.render/1, values) |> Floki.parse_document!()
+
       assert Floki.find(document, "[data-device-kind=simulated]") != [] == (id == "gateway_a")
       assert Floki.find(document, "#test-results") == []
       assert Floki.find(document, "#review-firmware") == []
@@ -219,7 +237,7 @@ defmodule DevWeb.WorkbenchPageTest do
   end
 
   test "skipped scenarios show their missing requirements instead of a pass" do
-    scenario = Dev.Scenarios.describe(Dev.Scenarios.CableLoss)
+    scenario = Scenarios.describe(Scenarios.Cases.CableLoss)
     reason = "Missing requirements: fixture:ethernet_link"
     row = %{id: scenario.id, status: :skipped, detail: reason, milliseconds: 0}
 
@@ -247,9 +265,11 @@ defmodule DevWeb.WorkbenchPageTest do
         confirm_run: nil,
         projection: NervesGate.Projection.disconnected().status
       )
-      |> Keyword.merge(Map.to_list(DevWeb.DeviceLive.bench_assigns(view, "gateway_a")))
+      |> Keyword.merge(Map.to_list(WorkbenchWeb.DeviceLive.bench_assigns(view, "gateway_a")))
 
-    document = render_component(&DevWeb.DeviceLive.render/1, values) |> Floki.parse_document!()
+    document =
+      render_component(&WorkbenchWeb.DeviceLive.render/1, values) |> Floki.parse_document!()
+
     assert Floki.attribute(document, "#device-ui-link", "href") == ["http://localhost:4001"]
     result = Floki.find(document, "#scenario-cable_loss") |> Floki.text()
     assert result =~ "skipped"
@@ -258,7 +278,9 @@ defmodule DevWeb.WorkbenchPageTest do
   end
 
   test "factory provisioning defaults to backup and binds explicit skipping into review" do
-    empty = render_component(&DevWeb.FactoryLive.render/1, assigns()) |> Floki.parse_document!()
+    empty =
+      render_component(&WorkbenchWeb.FactoryLive.render/1, assigns()) |> Floki.parse_document!()
+
     assert Floki.find(empty, "#review-factory select[name=firmware][disabled]") != []
     assert Floki.find(empty, "#confirm-factory") == []
     assert Floki.find(empty, "input[type=password]") == []
@@ -289,7 +311,7 @@ defmodule DevWeb.WorkbenchPageTest do
     }
 
     document =
-      render_component(&DevWeb.FactoryLive.render/1, assigns(operation: operation))
+      render_component(&WorkbenchWeb.FactoryLive.render/1, assigns(operation: operation))
       |> Floki.parse_document!()
 
     assert Floki.find(
@@ -302,14 +324,14 @@ defmodule DevWeb.WorkbenchPageTest do
     assert Floki.text(document) =~ "ERASE EC100 101"
     assert Floki.text(document) =~ "full eMMC user-area backup"
     assert Floki.text(document) =~ "waits up to three minutes"
-    assert DevWeb.Components.operation_path(operation) == "/factory"
+    assert WorkbenchWeb.Components.operation_path(operation) == "/factory"
 
     no_backup =
       Map.merge(review, %{backup_enabled: false, confirmation: "ERASE EC100 101 WITHOUT BACKUP"})
 
     skipped =
       render_component(
-        &DevWeb.FactoryLive.render/1,
+        &WorkbenchWeb.FactoryLive.render/1,
         assigns(operation: %{operation | review: no_backup})
       )
       |> Floki.parse_document!()
@@ -320,11 +342,11 @@ defmodule DevWeb.WorkbenchPageTest do
     assert Floki.text(Floki.find(skipped, "#confirm-factory button")) =~ "WITHOUT BACKUP"
     refute Floki.text(skipped) =~ "will be saved before the first write"
 
-    {:ok, device} = Dev.Discovery.manual("ec100.local")
+    {:ok, device} = Workbench.LANDiscovery.manual("ec100.local")
 
     other =
       render_component(
-        &DevWeb.PhysicalDeviceLive.render/1,
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
         assigns(device: device, tab: "firmware", operation: operation)
       )
       |> Floki.parse_document!()
@@ -354,7 +376,7 @@ defmodule DevWeb.WorkbenchPageTest do
       |> Map.put(:recovery, %{backup: "/backups/readbacks", backup_enabled: false})
 
     connected =
-      render_component(&DevWeb.FactoryLive.render/1, assigns(operation: operation))
+      render_component(&WorkbenchWeb.FactoryLive.render/1, assigns(operation: operation))
       |> Floki.parse_document!()
 
     assert Floki.text(connected) =~ "Connected over USB"
@@ -372,7 +394,7 @@ defmodule DevWeb.WorkbenchPageTest do
     }
 
     document =
-      render_component(&DevWeb.FactoryLive.render/1, assigns(operation: timeout))
+      render_component(&WorkbenchWeb.FactoryLive.render/1, assigns(operation: timeout))
       |> Floki.parse_document!()
 
     assert Floki.text(document) =~ "factory" or Floki.text(document) =~ "Factory"
@@ -385,7 +407,7 @@ defmodule DevWeb.WorkbenchPageTest do
   end
 
   test "USB device information is not presented as verified SSH identity" do
-    {:ok, device} = Dev.Discovery.manual("172.31.210.1")
+    {:ok, device} = Workbench.LANDiscovery.manual("172.31.210.1")
 
     device =
       Map.merge(device, %{
@@ -397,7 +419,7 @@ defmodule DevWeb.WorkbenchPageTest do
 
     document =
       render_component(
-        &DevWeb.PhysicalDeviceLive.render/1,
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
         assigns(device: device, tab: "overview")
       )
       |> Floki.parse_document!()
@@ -419,7 +441,7 @@ defmodule DevWeb.WorkbenchPageTest do
     }
 
     document =
-      render_component(&DevWeb.FactoryLive.render/1, assigns(operation: operation))
+      render_component(&WorkbenchWeb.FactoryLive.render/1, assigns(operation: operation))
       |> Floki.parse_document!()
 
     assert Floki.text(Floki.find(document, "[role=alert]")) =~ "could not open or claim"
@@ -440,7 +462,7 @@ defmodule DevWeb.WorkbenchPageTest do
       |> Map.put(:recovery, %{backup: "/backups/owned-recovery"})
 
     document =
-      render_component(&DevWeb.FactoryLive.render/1, assigns(operation: operation))
+      render_component(&WorkbenchWeb.FactoryLive.render/1, assigns(operation: operation))
       |> Floki.parse_document!()
 
     assert Floki.text(document) =~ "Preserve recovery files:"
@@ -451,13 +473,13 @@ defmodule DevWeb.WorkbenchPageTest do
 
   test "firmware builds and destructive bench controls have separate pages" do
     firmware =
-      render_component(&DevWeb.FirmwareLive.render/1, assigns()) |> Floki.parse_document!()
+      render_component(&WorkbenchWeb.FirmwareLive.render/1, assigns()) |> Floki.parse_document!()
 
     assert Floki.find(firmware, "#build-firmware select[name=target] option[value=ec100]") != []
     assert Floki.find(firmware, "[phx-click=lifecycle], #review-firmware") == []
 
     simulator =
-      render_component(&DevWeb.SimulatorLive.render/1, assigns(confirm_reset: true))
+      render_component(&WorkbenchWeb.SimulatorLive.render/1, assigns(confirm_reset: true))
       |> Floki.parse_document!()
 
     assert Floki.find(simulator, "#simulator-lifecycle #start-devices") != []
@@ -468,16 +490,16 @@ defmodule DevWeb.WorkbenchPageTest do
 
   test "all pages share one LiveView session and network identities cannot route into simulator details" do
     for {path, view, action} <- [
-          {"/", DevWeb.OverviewLive, :overview},
-          {"/devices", DevWeb.DevicesLive, :devices},
-          {"/devices/physical/ec100.local", DevWeb.PhysicalDeviceLive, :devices},
-          {"/devices/gateway_a", DevWeb.DeviceLive, :devices},
-          {"/apps", DevWeb.ApplicationsLive, :apps},
-          {"/firmware", DevWeb.FirmwareLive, :firmware},
-          {"/factory", DevWeb.FactoryLive, :factory},
-          {"/simulator", DevWeb.SimulatorLive, :simulator}
+          {"/", WorkbenchWeb.OverviewLive, :overview},
+          {"/devices", WorkbenchWeb.DevicesLive, :devices},
+          {"/devices/physical/ec100.local", WorkbenchWeb.PhysicalDeviceLive, :devices},
+          {"/devices/gateway_a", WorkbenchWeb.DeviceLive, :devices},
+          {"/apps", WorkbenchWeb.ApplicationsLive, :apps},
+          {"/firmware", WorkbenchWeb.FirmwareLive, :firmware},
+          {"/factory", WorkbenchWeb.FactoryLive, :factory},
+          {"/simulator", WorkbenchWeb.SimulatorLive, :simulator}
         ] do
-      route = Phoenix.Router.route_info(DevWeb.Router, "GET", path, "localhost")
+      route = Phoenix.Router.route_info(WorkbenchWeb.Router, "GET", path, "localhost")
       assert {^view, ^action, _, %{name: :workbench}} = route.phoenix_live_view
     end
   end

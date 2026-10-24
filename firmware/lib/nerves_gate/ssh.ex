@@ -7,13 +7,30 @@ defmodule NervesGate.SSH do
   @behaviour :ssh_server_key_api
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
-  def status, do: GenServer.call(__MODULE__, :status)
-  def add_key(key), do: GenServer.call(__MODULE__, {:add, key})
-  def remove_key(fingerprint), do: GenServer.call(__MODULE__, {:remove, fingerprint})
+
+  def status do
+    case Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
+      {:error, _} -> unavailable()
+      status -> status
+    end
+  end
+
+  def add_key(key), do: Error.protect(fn -> GenServer.call(__MODULE__, {:add, key}) end)
+
+  def remove_key(fingerprint),
+    do: Error.protect(fn -> GenServer.call(__MODULE__, {:remove, fingerprint}) end)
+
   def observe, do: Observations.subscribe([{Observations.table(), ["ssh"]}])
 
   def unavailable,
-    do: %{available: false, keys: [], error: Error.from(:ssh_keys_unavailable)}
+    do: %{
+      available: false,
+      keys: [],
+      error: %{
+        code: "ssh_keys_unavailable",
+        message: "SSH keys could not be read or saved. Existing keys have not been replaced."
+      }
+    }
 
   # NervesSSH creates the host-key files; let OTP load their supported format.
   # Only user authorization is ours, not host-key generation or storage.
@@ -31,8 +48,19 @@ defmodule NervesGate.SSH do
   def init(_) do
     state =
       case Keys.load() do
-        {:ok, keys} -> %{keys: keys, loaded: true, error: nil}
-        {:error, _} -> %{keys: [], loaded: false, error: :ssh_keys_unavailable}
+        {:ok, keys} ->
+          %{keys: keys, loaded: true, error: nil}
+
+        {:error, _} ->
+          %{
+            keys: [],
+            loaded: false,
+            error: %{
+              code: "ssh_keys_unavailable",
+              message:
+                "SSH keys could not be read or saved. Existing keys have not been replaced."
+            }
+          }
       end
 
     {:ok, publish(state)}
@@ -45,7 +73,13 @@ defmodule NervesGate.SSH do
     do: {:reply, Enum.any?(state.keys, &(&1.key == key)), state}
 
   def handle_call(_, _, %{loaded: false} = state),
-    do: {:reply, {:error, :ssh_keys_unavailable}, state}
+    do:
+      {:reply,
+       {:error,
+        %{
+          code: "ssh_keys_unavailable",
+          message: "SSH keys could not be read or saved. Existing keys have not been replaced."
+        }}, state}
 
   def handle_call({:add, text}, _, state) do
     case Keys.add(state.keys, text) do
@@ -57,7 +91,13 @@ defmodule NervesGate.SSH do
   def handle_call({:remove, fingerprint}, _, state) do
     if Enum.any?(state.keys, &(&1.fingerprint == fingerprint)),
       do: save(Enum.reject(state.keys, &(&1.fingerprint == fingerprint)), state),
-      else: {:reply, {:error, :ssh_key_not_found}, state}
+      else:
+        {:reply,
+         {:error,
+          %{
+            code: "ssh_key_not_found",
+            message: "This SSH key is no longer present. Refresh the key list."
+          }}, state}
   end
 
   defp save(keys, state) do
@@ -71,7 +111,7 @@ defmodule NervesGate.SSH do
     %{
       available: state.loaded,
       keys: Enum.map(state.keys, &Map.take(&1, [:fingerprint, :type, :comment])),
-      error: state.error && Error.from(state.error)
+      error: state.error && Error.safe(state.error)
     }
   end
 
@@ -79,4 +119,15 @@ defmodule NervesGate.SSH do
     Observations.put(["ssh", "keys"], public(state))
     state
   end
+
+  @doc false
+  def available(%{available: true}), do: :ok
+
+  def available(_),
+    do:
+      {:error,
+       %{
+         code: "ssh_keys_unavailable",
+         message: "SSH keys could not be read or saved. Existing keys have not been replaced."
+       }}
 end

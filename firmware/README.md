@@ -1,27 +1,35 @@
 # Device firmware
 
-The Nerves Gate runtime and shared gateway UI, for EC100 and x86_64 QEMU. Device
-domains own commands, admission, persistence and deadlines. Apps use the SDK;
-workstation tooling never substitutes fake hardware services.
+Nerves Gate runtime and shared gateway UI for EC100 and owned x86_64 QEMU devices.
+Domains own named commands, admission, persistence and deadlines. `NervesGate`
+provides direct `status/0` and caller-owned `subscribe/0`; applications use the
+separate typed SDK. Workstation tooling never substitutes fake hardware services.
 
-This is an independent Nerves project inside the developer-platform checkout.
-It reads the root `VERSION`; it is not published as a Hex package.
+This is an independent Nerves project inside the workbench checkout. It reads the
+root `VERSION` and `CHANGELOG.md`; it is not published as a Hex package.
+
+Run from the repository root:
 
 ```sh
-cd firmware
-export NERVES_GATE_LOCAL_DEPS=1 # use this checkout's system sources, as setup does
-mix deps.get --check-locked
-mix ci                         # host checks and pure unit tests; no device
-MIX_TARGET=x86_64 mix firmware  # build only, never flash hardware
+mix setup                 # tools, locked dependencies and artifacts; boots nothing
+mix firmware x86_64       # host assets, then isolated QEMU firmware build
+mix firmware ec100        # host assets, then isolated EC100 firmware build
+mix firmware ec100 --env prod
 ```
 
-Use root `mix setup` first for host tools, tailscaled and system artifacts.
-Device builds always run in a separate process from the workbench and root host
-checks. A physical EC100 build selects `MIX_TARGET=ec100`; its system artifact is
-separate and must be available. Building does not authorize updating hardware.
+Device builds never run in the workbench VM, boot a guest or flash hardware.
+EC100's separately published system artifact must be available. A build is not
+authorization to update/reprovision a physical device or reset saved settings.
+Incompatible saved cellular driver configuration fails startup before UART access;
+there is no driver compatibility alias or automatic migration/erasure.
 
-Host config starts no device domains. Root `mix dev.ui DEVICE` explicitly starts
-the shared gateway UI against a running simulated or development gateway.
+Host config starts no device domains. Root host checks enter this project through
+native `Mix.Project.in_project/4`; unit/policy/codecs live in `test/unit/` and
+gateway rendering/socket-security checks in `test/web/`. Real I/O uses the shared
+owned-device scenarios. `mix dev` serves the workbench, not a gateway command proxy;
+open each running device's own gateway URL. Gateway Elixir/HEEx changes require
+rebuilt guests and an explicitly authorized runtime cutover.
 
-See the [public API](lib/nerves_gate.ex), [architecture](../docs/architecture.md),
-[applications](../docs/applications.md) and [platform changelog](../CHANGELOG.md).
+See the [domain API index](lib/nerves_gate.ex), [administrative API](../docs/action-api.md),
+[architecture](../docs/architecture.md), [development](../docs/development.md),
+[applications](../docs/applications.md) and [changelog](../CHANGELOG.md).

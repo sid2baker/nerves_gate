@@ -1,6 +1,6 @@
-defmodule Dev.AdmissionTest do
+defmodule Workbench.AdmissionTest do
   use ExUnit.Case, async: false
-  alias Simulator.QemuTests
+  alias Scenarios.Runner
   alias Simulator.Network
 
   setup do
@@ -14,7 +14,7 @@ defmodule Dev.AdmissionTest do
   test "an install reserves its device until the worker exits" do
     path = Path.join(System.tmp_dir!(), "absent-#{System.unique_integer([:positive])}.ez")
     from = {self(), make_ref()}
-    {:reply, {:ok, run}, state} = QemuTests.handle_call({:install, :a, path}, from, state())
+    {:reply, {:ok, run}, state} = Runner.handle_call({:install, :a, path}, from, state())
     assert state.view.devices.a.owner == run
     assert state.view.devices.b.owner == nil
     assert map_size(state.workers) == 1
@@ -28,20 +28,20 @@ defmodule Dev.AdmissionTest do
           {:configure, {:put, "c", "lan1"}},
           {:stop_session, "anything", self()}
         ] do
-      assert {:reply, {:error, _}, ^state} = QemuTests.handle_call(request, from, state)
+      assert {:reply, {:error, _}, ^state} = Runner.handle_call(request, from, state)
     end
 
     [{pid, %{ref: ref}}] = Map.to_list(state.workers)
     assert_receive {:progress, ^run, "install", %{status: :running} = result}
-    {:noreply, state} = QemuTests.handle_info({:progress, run, "install", result}, state)
+    {:noreply, state} = Runner.handle_info({:progress, run, "install", result}, state)
     assert_receive {:phase, ^run, _}
     assert_receive {:progress, ^run, "install", %{status: :failed} = result}
-    {:noreply, state} = QemuTests.handle_info({:progress, run, "install", result}, state)
+    {:noreply, state} = Runner.handle_info({:progress, run, "install", result}, state)
     assert_receive {:finished, ^run}
-    {:noreply, state} = QemuTests.handle_info({:finished, run}, state)
+    {:noreply, state} = Runner.handle_info({:finished, run}, state)
     assert state.view.devices.a.owner == run
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
-    {:noreply, state} = QemuTests.handle_info({:DOWN, ref, :process, pid, :normal}, state)
+    {:noreply, state} = Runner.handle_info({:DOWN, ref, :process, pid, :normal}, state)
     assert state.view.devices.a.owner == nil
     refute state.view.devices.a.blocked
     assert state.workers == %{}
@@ -56,35 +56,35 @@ defmodule Dev.AdmissionTest do
           put_in(state().view.devices.a.blocked, true)
         ] do
       assert {:reply, {:error, _}, ^state} =
-               QemuTests.handle_call({:install, :a, "/tmp/app.ez"}, from, state)
+               Runner.handle_call({:install, :a, "/tmp/app.ez"}, from, state)
     end
 
     for path <- [nil, "relative.ez", "/tmp/app.txt"] do
       state = state()
 
       assert {:reply, {:error, _}, ^state} =
-               QemuTests.handle_call({:install, :a, path}, from, state)
+               Runner.handle_call({:install, :a, path}, from, state)
     end
   end
 
   test "console details require idle manual ownership and expose no credentials" do
     from = {self(), make_ref()}
     state = state()
-    assert {:reply, {:error, _}, ^state} = QemuTests.handle_call({:console, :a}, from, state)
+    assert {:reply, {:error, _}, ^state} = Runner.handle_call({:console, :a}, from, state)
     state = put_in(state.view.devices.a.owner, :manual)
 
     state =
       put_in(state.handles.a, %{address: "127.0.0.2", forwards: %{usb: 22}, secret: "private"})
 
     assert {:reply, {:ok, %{address: "127.0.0.2", port: 22}}, ^state} =
-             QemuTests.handle_call({:console, :a}, from, state)
+             Runner.handle_call({:console, :a}, from, state)
 
     for state <- [
           put_in(state.view.devices.a.blocked, true),
           put_in(state.view.devices.a.manual_action, "release"),
           put_in(state.view.blocked, true)
         ] do
-      assert {:reply, {:error, _}, ^state} = QemuTests.handle_call({:console, :a}, from, state)
+      assert {:reply, {:error, _}, ^state} = Runner.handle_call({:console, :a}, from, state)
     end
   end
 

@@ -1,9 +1,7 @@
 defmodule NervesGate.Status do
-  @moduledoc "Pure status builder behind `NervesGate.status/1`. No process, cache or command execution."
-  alias NervesGate.{Buses, Config, Equipment, Indicators, Network, Remote}
+  @moduledoc "Pure status builder behind `NervesGate.status/0`. No process, cache or command execution."
+  alias NervesGate.{Buses, Cellular, Config, Equipment, Error, Indicators, Network, Remote}
   alias NervesGate.Equipment.Subnet
-  alias NervesGate.Error
-  alias NervesGate.Network.Cellular
   alias NervesGate.Observations.Network, as: NetworkObservation
   alias NervesGate.Remote.Sharing
 
@@ -20,9 +18,9 @@ defmodule NervesGate.Status do
     cellular = cellular_supported?(status)
 
     %{
-      version: 7,
+      version: 8,
       system: system,
-      backend: %{available: true, error: nil},
+      device: %{available: true, error: nil},
       network: network(status),
       connections: connections(status),
       cellular: Cellular.view(status),
@@ -32,7 +30,7 @@ defmodule NervesGate.Status do
         failover: cellular,
         remote_enrollment: remote.available
       },
-      remote_access: remote,
+      remote: remote,
       sharing: sharing(status, remote),
       equipment: equipment(status, equipment),
       indicators: indicators,
@@ -45,7 +43,7 @@ defmodule NervesGate.Status do
 
   @doc "An empty view, not a cached or simulated device snapshot."
   def disconnected do
-    error = Error.new("backend_disconnected", "The device is disconnected or not responding.")
+    error = Error.new("device_disconnected", "The device is disconnected or not responding.")
     system = %{firmware: "—", target: "—", node: :nonode@nohost, elixir: "—", otp: "—"}
 
     status =
@@ -61,7 +59,7 @@ defmodule NervesGate.Status do
 
     %{
       status
-      | backend: %{available: false, error: error},
+      | device: %{available: false, error: error},
         actions:
           Map.new(status.actions, fn {name, action} ->
             {name, %{action | enabled: false, reason: error}}
@@ -76,32 +74,43 @@ defmodule NervesGate.Status do
 
   # Presentation metadata only. Admission belongs to the domain servers.
   defp actions(status, remote, equipment, indicators, buses, ssh) do
-    trial = if status && status.trial, do: :ok, else: {:error, :no_matching_trial}
-    confirm = if trial == :ok and not status.ready, do: {:error, :not_connected}, else: trial
+    trial = Network.Policy.trial_available(status, :cancel)
+    confirm = Network.Policy.trial_available(status, :confirm)
     remote_ready = Remote.Policy.available(remote)
-    ssh_ready = ssh_available(ssh)
+    ssh_ready = NervesGate.SSH.available(ssh)
 
     %{
       "network.validate" => action("Review settings", ["network"], :ok),
       "network.propose" => action("Try settings", ["network"], lan_available(status)),
       "network.confirm" => action("Keep settings", ["trial_id"], confirm),
       "network.cancel" => action("Restore saved settings", ["trial_id"], trial),
-      "cellular.refresh" => action("Refresh cellular status", [], cellular_available(status)),
+      "cellular.refresh" => action("Refresh cellular status", [], Cellular.available(status)),
       "cellular.unlock" =>
-        action("Unlock SIM", ["pin"], cellular_available(status, :pin_required)),
+        action("Unlock SIM", ["pin"], Cellular.sim_available(status, :pin_required)),
       "cellular.change_pin" =>
-        action("Change SIM PIN", ["current_pin", "new_pin"], cellular_available(status, :ready)),
+        action(
+          "Change SIM PIN",
+          ["current_pin", "new_pin"],
+          Cellular.sim_available(status, :ready)
+        ),
       "cellular.set_pin_lock" =>
-        action("Set SIM PIN protection", ["enabled", "pin"], cellular_available(status, :ready)),
+        action(
+          "Set SIM PIN protection",
+          ["enabled", "pin"],
+          Cellular.sim_available(status, :ready)
+        ),
       "cellular.save_pin" =>
-        action("Verify and save SIM PIN", ["pin"], cellular_available(status, :ready)),
-      "cellular.forget_pin" => action("Forget saved PIN", [], cellular_forget_available(status)),
+        action("Verify and save SIM PIN", ["pin"], Cellular.sim_available(status, :ready)),
+      "cellular.forget_pin" =>
+        action("Forget saved PIN", [], Cellular.available(status, :forget_pin)),
       "remote.connect" => action("Connect Tailscale", ["hostname"], remote_ready),
       "remote.configure" => action("Save device name", ["hostname"], remote_ready),
       "remote.disconnect" => action("Disconnect Tailscale", [], remote_ready),
       "remote.login_url" => action("Continue Tailscale login", [], remote_ready),
-      "equipment.scan" => action("Scan equipment subnet", [], scan_available(status, equipment)),
-      "equipment.label" => action("Save label", ["id", "label"], labels_available(equipment)),
+      "equipment.scan" =>
+        action("Scan equipment subnet", [], Equipment.scan_available(status, equipment)),
+      "equipment.label" =>
+        action("Save label", ["id", "label"], Equipment.labels_available(equipment)),
       "equipment.share" =>
         action(
           "Share equipment",
@@ -109,10 +118,10 @@ defmodule NervesGate.Status do
           sharing_available(status, remote)
         ),
       "equipment.unshare" => action("Turn sharing off", [], unshare_available(status, remote)),
-      "bus.configure" =>
+      "buses.configure" =>
         action("Configure bus", ["port", "enabled"], Buses.Policy.available(buses)),
-      "bus.capture" => action("Capture bus", ["port"], Buses.Policy.available(buses)),
-      "bus.modbus_read" =>
+      "buses.capture" => action("Capture bus", ["port"], Buses.Policy.available(buses)),
+      "buses.modbus_read" =>
         action(
           "Read Modbus registers",
           ["port", "unit", "function", "address", "count", "authorized"],
@@ -120,32 +129,10 @@ defmodule NervesGate.Status do
         ),
       "ssh.add_key" => action("Add SSH key", ["public_key"], ssh_ready),
       "ssh.remove_key" => action("Remove SSH key", ["fingerprint"], ssh_ready),
-      "identify" => action("Identify gateway", [], identify_available(indicators))
+      "indicators.identify" =>
+        action("Identify gateway", [], Indicators.Policy.available(indicators))
     }
   end
-
-  defp cellular_available(nil), do: {:error, :unavailable}
-  defp cellular_available(status), do: Cellular.available(status)
-
-  defp cellular_forget_available(nil), do: {:error, :unavailable}
-  defp cellular_forget_available(status), do: Cellular.available(status, :forget_pin)
-
-  defp cellular_available(status, sim) do
-    with :ok <- cellular_available(status) do
-      if Cellular.view(status).sim == sim, do: :ok, else: {:error, :cellular_sim_changed}
-    end
-  end
-
-  defp ssh_available(%{available: true}), do: :ok
-  defp ssh_available(_), do: {:error, :ssh_keys_unavailable}
-
-  defp identify_available(%{recovery: %{action: action}}) when not is_nil(action),
-    do: {:error, :operation_in_progress}
-
-  defp identify_available(%{led: %{identifying: true}}), do: {:error, :operation_in_progress}
-  defp identify_available(%{led: %{restore_pending: true}}), do: {:error, :led_restore_failed}
-  defp identify_available(%{led: %{available: true}}), do: :ok
-  defp identify_available(_), do: {:error, :led_unavailable}
 
   defp sharing(status, remote) do
     subnet =
@@ -197,33 +184,11 @@ defmodule NervesGate.Status do
     end
   end
 
-  defp scan_available(_, %{available: false}) do
-    {:error, :equipment_unavailable}
-  end
-
-  defp scan_available(status, _) do
-    with :ok <- Network.Policy.available(status), {:ok, _} <- Subnet.active(status) do
-      :ok
-    end
-  end
-
-  defp labels_available(%{available: false}) do
-    {:error, :equipment_unavailable}
-  end
-
-  defp labels_available(%{labels_error: nil}) do
-    :ok
-  end
-
-  defp labels_available(_) do
-    {:error, :labels_unavailable}
-  end
-
   defp action(label, required, result) do
     reason =
       case result do
         :ok -> nil
-        {:error, reason} -> Error.from(reason)
+        {:error, reason} -> NervesGate.Error.safe(reason)
       end
 
     %{label: label, required: required, enabled: reason == nil, reason: reason}
@@ -238,7 +203,7 @@ defmodule NervesGate.Status do
 
     %{
       mode: settings && settings["mode"],
-      suggested_internet_port: Network.Discovery.internet_port(ports),
+      suggested_internet_port: NervesGate.Network.Suggestions.internet_port(ports),
       ports: Enum.map(ports, &Map.put(&1, :role, port_role(settings, &1.name))),
       cellular: observed && Map.get(observed, :cellular),
       internet: internet_connection(internet, uplinks),
@@ -274,7 +239,10 @@ defmodule NervesGate.Status do
       setup_completed: false,
       recovering: false,
       ready: false,
-      error: Error.from(:unavailable)
+      error: %{
+        code: "unavailable",
+        message: "Network control is unavailable. Reconnect and read the current state."
+      }
     }
   end
 

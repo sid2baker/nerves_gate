@@ -8,7 +8,7 @@ Ordinary **Run all** and `mix test.qemu` selections exclude `tailscale_auth`;
 select it explicitly to enroll real test devices.
 
 The scenario uses the three-device configuration in `priv/simulator/tailnet.exs`. Each guest
-enrolls through `NervesGate.remote_connect/2`. In CI,
+enrolls through `NervesGate.Remote.connect/2`. In CI,
 `Tailscaled.Testing.auth_key/1` creates a different single-use, ephemeral,
 pre-approved key for each guest through GitHub OIDC. Unused keys expire after ten
 minutes. No reusable auth key or OAuth secret is stored in GitHub or simulator

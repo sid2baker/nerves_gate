@@ -30,7 +30,12 @@ defmodule NervesGate.Buses.EC100 do
         with {:ok, frames} <- CAN.capture(name), do: {:ok, %{frames: frames}}
 
       _ ->
-        {:error, :can_not_passive}
+        {:error,
+         %{
+           code: "can_not_passive",
+           message:
+             "CAN capture requires an enabled interface in listen-only mode. Configure it in Settings."
+         }}
     end
   end
 

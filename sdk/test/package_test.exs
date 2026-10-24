@@ -61,10 +61,13 @@ defmodule NervesGateSDK.PackageTest do
              Package.validate(package, Map.put(installed, :other, package.main), "0.1.0")
   end
 
-  test "rejects a bundled developer platform even without it installed", context do
+  test "rejects bundled host platforms even without them installed", context do
     assert {:ok, package} = context |> archive() |> Package.read()
-    package = %{package | apps: [%{package.main | app: :nerves_gate_dev}]}
-    assert {:error, :application_conflict} = Package.validate(package, %{}, "0.1.0")
+
+    for app <- [:nerves_gate_workbench, :nerves_gate_dev] do
+      bundled = %{package | apps: [%{package.main | app: app}]}
+      assert {:error, :application_conflict} = Package.validate(bundled, %{}, "0.1.0")
+    end
   end
 
   test "rejects traversal, absolute paths, duplicate entries and arbitrary files", context do

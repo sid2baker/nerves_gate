@@ -1,10 +1,9 @@
 defmodule NervesGate.Remote.Tailscaled do
   @moduledoc "Firmware adapter. The daemon owns identity and settings; never copy credentials into gateway config."
-  @behaviour NervesGate.Remote.Adapter
+
   alias NervesGate.Remote.Policy
 
-  @impl true
-  def observations(_) do
+  def observations do
     paths = [
       ["state"],
       ["auth", "state"],
@@ -19,11 +18,12 @@ defmodule NervesGate.Remote.Tailscaled do
     Enum.map(paths, &{Tailscaled.Properties, &1})
   end
 
-  @impl true
-  def snapshot(_) do
-    if :ets.whereis(Tailscaled.Properties) == :undefined,
-      do: NervesGate.Remote.Policy.unavailable(),
-      else: daemon_snapshot()
+  def snapshot do
+    if :ets.whereis(Tailscaled.Properties) == :undefined do
+      NervesGate.Remote.Policy.unavailable()
+    else
+      daemon_snapshot()
+    end
   end
 
   defp daemon_snapshot do
@@ -43,23 +43,22 @@ defmodule NervesGate.Remote.Tailscaled do
     }
   end
 
-  @impl true
-  def execute(:connect, %{hostname: hostname} = params, _) do
+  def execute(:connect, %{hostname: hostname} = params) do
     with :ok <- Tailscaled.update_configuration(%{hostname: hostname, accept_dns: false}) do
       connect(params)
     end
   end
 
-  def execute(:configure, %{hostname: hostname}, _),
+  def execute(:configure, %{hostname: hostname}),
     do: Tailscaled.update_configuration(%{hostname: hostname, accept_dns: false})
 
-  def execute(:disconnect, _, _) do
+  def execute(:disconnect, _) do
     Tailscaled.down()
   end
 
-  def execute(:serve, %{dns_name: dns_name}, _) do
+  def execute(:serve, %{dns_name: dns_name}) do
     # Recheck inside the worker: the identity may change after admission.
-    case snapshot(nil) |> Policy.sanitize() |> Policy.serve_dns_name(nil) do
+    case snapshot() |> Policy.sanitize() |> Policy.serve_dns_name(nil) do
       ^dns_name when is_binary(dns_name) ->
         Tailscaled.update_configuration(%{
           serve: [%{https: 443, to: "http://127.0.0.1:4000"}]
@@ -70,7 +69,7 @@ defmodule NervesGate.Remote.Tailscaled do
     end
   end
 
-  def execute(operation, params, _)
+  def execute(operation, params)
       when operation in [:sharing_enable, :sharing_disable, :sharing_sync] do
     # Refresh is a serialized Controller read, not a write replay. Earlier
     # accepted changes finish first, even if their original caller was killed.
@@ -83,16 +82,23 @@ defmodule NervesGate.Remote.Tailscaled do
          %{advertise_routes: ^routes} <- Tailscaled.get_configuration() do
       {:ok, routes}
     else
-      _ -> {:error, :sharing_unknown}
+      _ ->
+        {:error,
+         %{
+           code: "sharing_unknown",
+           message:
+             "Sharing state is unknown. Turn sharing off and wait for confirmation before changing LAN settings."
+         }}
     end
   end
 
   defp write_routes(:sharing_sync, _), do: :ok
   defp write_routes(_, routes), do: Tailscaled.update_configuration(%{advertise_routes: routes})
 
-  @impl true
-  def login_url(_) do
-    if :ets.whereis(Tailscaled.Properties) != :undefined, do: Tailscaled.get(["auth", "url"])
+  def login_url do
+    if :ets.whereis(Tailscaled.Properties) != :undefined do
+      Tailscaled.get(["auth", "url"])
+    end
   end
 
   defp connect(%{auth_key: key}) do

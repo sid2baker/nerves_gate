@@ -18,13 +18,30 @@ defmodule NervesGate.Buses.ModbusTest do
           <<1, 3, 2, 0, 12>>,
           <<1, 3, 4, 0, 12, 255, 255, 0>>
         ] do
-      assert Modbus.response(Modbus.checksum(payload), @request) == {:error, :modbus_response}
+      assert Modbus.response(Modbus.checksum(payload), @request) ==
+               {:error,
+                %{
+                  code: "modbus_response",
+                  message:
+                    "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
+                }}
     end
 
     assert Modbus.response(<<1, 3, 4, 0, 12, 255, 255, 0, 0>>, @request) ==
-             {:error, :modbus_response}
+             {:error,
+              %{
+                code: "modbus_response",
+                message:
+                  "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
+              }}
 
-    assert Modbus.response(<<>>, @request) == {:error, :modbus_response}
+    assert Modbus.response(<<>>, @request) ==
+             {:error,
+              %{
+                code: "modbus_response",
+                message:
+                  "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
+              }}
   end
 
   test "bounds requests and recognizes fragmented replies and exceptions" do

@@ -12,6 +12,7 @@ defmodule NervesGate.Recovery.DataInit do
     Nerves.Runtime.Init.init_application_partition()
 
     with {:ok, _mount} <- check_data(),
+         :ok <- NervesGate.Network.Vintage.check_saved_cellular(),
          :ok <- NervesGate.Network.Vintage.prepare_cellular_input() do
       :ignore
     end
@@ -33,10 +34,19 @@ defmodule NervesGate.Recovery.DataInit do
              &("rw" in &1 and "ro" not in &1)
            ),
            do: {:ok, mount},
-           else: {:error, :data_partition_unavailable}
+           else:
+             {:error,
+              %{
+                code: "data_partition_unavailable",
+                message: "The EC100 data partition is not mounted read-write as ext4."
+              }}
 
       _ ->
-        {:error, :data_partition_unavailable}
+        {:error,
+         %{
+           code: "data_partition_unavailable",
+           message: "The EC100 data partition is not mounted read-write as ext4."
+         }}
     end
   end
 end

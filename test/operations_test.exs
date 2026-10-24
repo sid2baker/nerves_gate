@@ -1,8 +1,8 @@
-defmodule Dev.OperationsTest do
+defmodule Workbench.OperationsTest do
   use ExUnit.Case, async: true
 
   test "busy and stopping admission rejects operations, lifecycle and session shutdown" do
-    {:ok, idle} = Dev.Operations.init(nil)
+    {:ok, idle} = Workbench.Operations.init(nil)
     from = {self(), make_ref()}
 
     for state <- [%{idle | task: %{ref: make_ref()}}, %{idle | stopping: true}] do
@@ -16,25 +16,30 @@ defmodule Dev.OperationsTest do
             {:lifecycle, "reset"},
             {:stop_session, "session"}
           ] do
-        assert {:reply, {:error, _}, ^state} = Dev.Operations.handle_call(request, from, state)
+        assert {:reply, {:error, _}, ^state} =
+                 Workbench.Operations.handle_call(request, from, state)
       end
 
-      assert {:reply, view, ^state} = Dev.Operations.handle_call(:snapshot, from, state)
+      assert {:reply, view, ^state} = Workbench.Operations.handle_call(:snapshot, from, state)
       assert view == state.view
     end
   end
 
   test "factory and SSH confirmations cannot consume each other's reviews" do
-    {:ok, idle} = Dev.Operations.init(nil)
+    {:ok, idle} = Workbench.Operations.init(nil)
     from = {self(), make_ref()}
 
     assert {:reply, {:error, _}, ^idle} =
-             Dev.Operations.handle_call({:confirm_factory, "id", "text", "true"}, from, idle)
+             Workbench.Operations.handle_call(
+               {:confirm_factory, "id", "text", "true"},
+               from,
+               idle
+             )
 
     ssh = %{idle | review: %{public: %{address: "ec100.local"}}}
 
     assert {:reply, {:error, _}, ^ssh} =
-             Dev.Operations.handle_call({:confirm_factory, "id", "text", "true"}, from, ssh)
+             Workbench.Operations.handle_call({:confirm_factory, "id", "text", "true"}, from, ssh)
 
     factory = %{
       idle
@@ -45,10 +50,14 @@ defmodule Dev.OperationsTest do
     }
 
     assert {:reply, {:error, _}, ^factory} =
-             Dev.Operations.handle_call({:confirm_firmware, "id", "ec100.local"}, from, factory)
+             Workbench.Operations.handle_call(
+               {:confirm_firmware, "id", "ec100.local"},
+               from,
+               factory
+             )
 
     assert {:reply, {:error, _}, ^factory} =
-             Dev.Operations.handle_call(
+             Workbench.Operations.handle_call(
                {:confirm_factory, "wrong-id", "ERASE EC100 101", "true"},
                from,
                factory
@@ -57,15 +66,20 @@ defmodule Dev.OperationsTest do
 
   @tag :tmp_dir
   test "factory expiry drops only the snapshot and never a retained backup", %{tmp_dir: root} do
-    {:ok, idle} = Dev.Operations.init(nil)
+    {:ok, idle} = Workbench.Operations.init(nil)
     dir = Path.join(root, "snapshot")
     backup = Path.join(root, "backup")
     File.mkdir!(dir)
     File.mkdir!(backup)
     plan = %{dir: dir, public: %{kind: :factory, token: "token", backup: backup}}
     state = %{idle | review: plan, view: %{idle.view | review: plan.public}}
-    assert {:noreply, ^state} = Dev.Operations.handle_info({:expire_review, "old-token"}, state)
-    assert {:noreply, expired} = Dev.Operations.handle_info({:expire_review, "token"}, state)
+
+    assert {:noreply, ^state} =
+             Workbench.Operations.handle_info({:expire_review, "old-token"}, state)
+
+    assert {:noreply, expired} =
+             Workbench.Operations.handle_info({:expire_review, "token"}, state)
+
     assert expired.review == nil
     assert expired.view.review == nil
     assert expired.view.result =~ "MASKROM"
@@ -83,14 +97,14 @@ defmodule Dev.OperationsTest do
           {{:timeout, "private command"}, "timeout"},
           {{:unexpected, "private reason"}, "unexpected termination"}
         ] do
-      {:ok, idle} = Dev.Operations.init(nil)
+      {:ok, idle} = Workbench.Operations.init(nil)
       ref = make_ref()
       recovery = %{backup: "/backups/owned-recovery"}
       view = %{idle.view | kind: "factory_provision", status: :running, recovery: recovery}
       state = %{idle | task: %{ref: ref}, view: view}
 
       assert {:noreply, failed} =
-               Dev.Operations.handle_info({:DOWN, ref, :process, self(), reason}, state)
+               Workbench.Operations.handle_info({:DOWN, ref, :process, self(), reason}, state)
 
       assert failed.task == nil
       assert failed.view.status == :failed
@@ -103,7 +117,7 @@ defmodule Dev.OperationsTest do
   end
 
   test "verified-flash phase survives reconnect timeout, exception and worker death" do
-    {:ok, idle} = Dev.Operations.init(nil)
+    {:ok, idle} = Workbench.Operations.init(nil)
     ref = make_ref()
 
     state = %{
@@ -115,7 +129,7 @@ defmodule Dev.OperationsTest do
     message = "Factory provisioning verified; device reset."
 
     assert {:noreply, verified} =
-             Dev.Operations.handle_info({:factory_verified, self(), message}, state)
+             Workbench.Operations.handle_info({:factory_verified, self(), message}, state)
 
     assert verified.view.flash_verified
     assert verified.view.connection.status == :waiting
@@ -128,7 +142,7 @@ defmodule Dev.OperationsTest do
           {ref, {:error, "private error"}},
           {:DOWN, ref, :process, self(), :killed}
         ] do
-      assert {:noreply, done} = Dev.Operations.handle_info(event, verified)
+      assert {:noreply, done} = Workbench.Operations.handle_info(event, verified)
       assert done.task == nil
       assert done.view.status == :succeeded
       assert done.view.result == message
@@ -137,11 +151,11 @@ defmodule Dev.OperationsTest do
     end
 
     assert {:noreply, ^idle} =
-             Dev.Operations.handle_info({:factory_verified, self(), message}, idle)
+             Workbench.Operations.handle_info({:factory_verified, self(), message}, idle)
   end
 
   test "successful factory reconnect exposes observed USB information separately from the flash result" do
-    {:ok, idle} = Dev.Operations.init(nil)
+    {:ok, idle} = Workbench.Operations.init(nil)
     ref = make_ref()
 
     state = %{
@@ -162,7 +176,7 @@ defmodule Dev.OperationsTest do
     connection = %{status: :connected, device: info}
 
     assert {:noreply, done} =
-             Dev.Operations.handle_info(
+             Workbench.Operations.handle_info(
                {ref, {:factory_complete, "Flash verified", connection}},
                state
              )
@@ -172,9 +186,13 @@ defmodule Dev.OperationsTest do
   end
 
   test "unknown workbench operations never start a worker" do
-    {:ok, idle} = Dev.Operations.init(nil)
+    {:ok, idle} = Workbench.Operations.init(nil)
 
     assert {:reply, {:error, _}, ^idle} =
-             Dev.Operations.handle_call({:start, "publish", nil, nil}, {self(), make_ref()}, idle)
+             Workbench.Operations.handle_call(
+               {:start, "publish", nil, nil},
+               {self(), make_ref()},
+               idle
+             )
   end
 end

@@ -11,12 +11,6 @@ defmodule NervesGate.Observations do
 
   def put(path, value), do: PropertyTable.put(@table, path, value)
 
-  def sources({module, context}) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :observations, 1),
-      do: module.observations(context),
-      else: []
-  end
-
   @doc false
   def subscribe_runtime(server), do: server |> GenServer.call(:observations) |> subscribe()
 
@@ -30,7 +24,12 @@ defmodule NervesGate.Observations do
         :ok = PropertyTable.subscribe(table, path)
         {:cont, :ok}
       else
-        {:halt, {:error, :unavailable}}
+        {:halt,
+         {:error,
+          %{
+            code: "unavailable",
+            message: "Network control is unavailable. Reconnect and read the current state."
+          }}}
       end
     end)
   end

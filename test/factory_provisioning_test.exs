@@ -1,6 +1,6 @@
-defmodule Dev.FactoryProvisioningTest do
+defmodule Workbench.FactoryProvisioningTest do
   use ExUnit.Case, async: true
-  alias Dev.FactoryProvisioning, as: Factory
+  alias Workbench.FactoryProvisioning, as: Factory
 
   @maskrom "DevNo=1 Vid=0x2207,Pid=0x350f,LocationID=101 Maskrom\n"
   @loader "DevNo=1 Vid=0x2207,Pid=0x350f,LocationID=101 Loader\n"

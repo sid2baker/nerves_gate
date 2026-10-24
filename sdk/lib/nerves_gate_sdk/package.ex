@@ -125,7 +125,13 @@ defmodule NervesGateSDK.Package do
       Enum.any?(
         package.apps,
         &(&1.app in (@shared ++
-                       [:nerves_gate, :nerves_gate_sim, :nerves_gate_new, :nerves_gate_dev]) or
+                       [
+                         :nerves_gate,
+                         :nerves_gate_sim,
+                         :nerves_gate_new,
+                         :nerves_gate_dev,
+                         :nerves_gate_workbench
+                       ]) or
               Map.has_key?(installed, &1.app))
       ) ->
         {:error, :application_conflict}

@@ -1,6 +1,7 @@
 defmodule NervesGateWeb.NetworkForm do
   @moduledoc false
-  alias NervesGate.{Config, Network.Discovery}
+  alias NervesGate.Config
+  alias NervesGate.Network.Suggestions, as: Suggestions
 
   def from_settings(network, :internet) do
     fresh = network && network["mode"] == "unconfigured"
@@ -54,7 +55,7 @@ defmodule NervesGateWeb.NetworkForm do
   end
 
   def internet_port(%{"internet_mode" => "cellular"}, _), do: nil
-  def internet_port(%{"internet_port" => "auto"}, ports), do: Discovery.internet_port(ports)
+  def internet_port(%{"internet_port" => "auto"}, ports), do: Suggestions.internet_port(ports)
   def internet_port(params, _), do: blank(params["internet_port"])
 
   def to_network(params, _ports, %{"mode" => "shared"} = base, :internet) do

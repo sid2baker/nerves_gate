@@ -56,11 +56,11 @@ defmodule NervesGateWeb.BusesLive do
         %{"bus" => %{"port" => port} = params},
         %{assigns: %{port_name: port}} = socket
       ) do
-    reply(socket, NervesGateWeb.Backend.bus_configure(port, params))
+    reply(socket, NervesGate.Buses.configure(port, params))
   end
 
   def handle_event("capture", %{"port" => port}, %{assigns: %{port_name: port}} = socket) do
-    reply(socket, NervesGateWeb.Backend.bus_capture(port))
+    reply(socket, NervesGate.Buses.capture(port))
   end
 
   def handle_event(
@@ -77,7 +77,7 @@ defmodule NervesGateWeb.BusesLive do
         %{assigns: %{port_name: port, live_action: :rs485}} = socket
       ) do
     socket = assign(socket, :modbus, modbus_form(Map.put(params, "authorized", "false")))
-    reply(socket, NervesGateWeb.Backend.modbus_read(port, params))
+    reply(socket, NervesGate.Buses.modbus_read(port, params))
   end
 
   def handle_event(_, _, socket) do

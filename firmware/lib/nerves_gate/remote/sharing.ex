@@ -6,7 +6,14 @@ defmodule NervesGate.Remote.Sharing do
   def scope(%{config: %{"network" => %{"mode" => "ports"}}} = status),
     do: Subnet.from_status(status)
 
-  def scope(_), do: {:error, :sharing_dedicated_only}
+  def scope(_),
+    do:
+      {:error,
+       %{
+         code: "sharing_dedicated_only",
+         message:
+           "Sharing requires a confirmed, dedicated equipment port. Shared LAN and USB cannot be advertised."
+       }}
 
   def enable(status, remote) do
     with :ok <- Policy.available(remote),
@@ -25,7 +32,15 @@ defmodule NervesGate.Remote.Sharing do
   end
 
   def known(%{sharing: %{uncertain: [], ready: true}}), do: :ok
-  def known(_), do: {:error, :sharing_unknown}
+
+  def known(_),
+    do:
+      {:error,
+       %{
+         code: "sharing_unknown",
+         message:
+           "Sharing state is unknown. Turn sharing off and wait for confirmation before changing LAN settings."
+       }}
 
   # External advertisements may also depend on the LAN. Do not guess which ones
   # are safe to leave behind during a role/subnet change. Rollback is independent.
@@ -33,9 +48,23 @@ defmodule NervesGate.Remote.Sharing do
     with :ok <- known(remote),
          :ok <- Policy.available(remote),
          routes when is_list(routes) <- remote.advertised_routes do
-      if routes == [], do: :ok, else: {:error, :sharing_active}
+      if routes == [],
+        do: :ok,
+        else:
+          {:error,
+           %{
+             code: "sharing_active",
+             message:
+               "Turn equipment sharing off before changing LAN settings. Remove any other subnet advertisements in Tailscale as well."
+           }}
     else
-      _ -> {:error, :sharing_unknown}
+      _ ->
+        {:error,
+         %{
+           code: "sharing_unknown",
+           message:
+             "Sharing state is unknown. Turn sharing off and wait for confirmation before changing LAN settings."
+         }}
     end
   end
 
@@ -49,5 +78,12 @@ defmodule NervesGate.Remote.Sharing do
       when is_binary(route) and is_list(routes),
       do: {:ok, List.delete(routes, route)}
 
-  def change(_, _, _), do: {:error, :sharing_unknown}
+  def change(_, _, _),
+    do:
+      {:error,
+       %{
+         code: "sharing_unknown",
+         message:
+           "Sharing state is unknown. Turn sharing off and wait for confirmation before changing LAN settings."
+       }}
 end

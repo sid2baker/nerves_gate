@@ -12,7 +12,7 @@ config :nerves_gate, :board, %{
     sim_detect_level: 1,
     config: %{
       type: VintageNetECM,
-      vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Network.EG800AK}
+      vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
     }
   },
   buses_adapter: {NervesGate.Buses.EC100, nil},

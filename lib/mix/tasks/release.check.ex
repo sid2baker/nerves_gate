@@ -16,11 +16,11 @@ defmodule Mix.Tasks.Release.Check do
       end
 
     root = Path.expand("../../..", __DIR__)
-    info = Dev.Release.metadata!(tag, root)
+    info = Workbench.Release.metadata!(tag, root)
 
     case operation do
       "prepare" ->
-        Dev.Release.prepare!(
+        Workbench.Release.prepare!(
           tag,
           root,
           System.fetch_env!("GITHUB_OUTPUT"),
@@ -28,16 +28,16 @@ defmodule Mix.Tasks.Release.Check do
         )
 
       "dependencies" ->
-        Dev.Release.dependencies!(info, root)
+        Workbench.Release.dependencies!(info, root)
 
       "unpublished" ->
-        Dev.Release.unpublished!(info)
+        Workbench.Release.unpublished!(info)
 
       "verify" ->
-        Dev.Release.verify!(info, System.fetch_env!("NOTES_FILE"))
+        Workbench.Release.verify!(info, System.fetch_env!("NOTES_FILE"))
 
       "check" ->
-        Dev.Release.dependencies!(info, root)
+        Workbench.Release.dependencies!(info, root)
         Mix.shell().info("#{info.tag}\n\n#{info.notes}")
     end
   end

@@ -46,4 +46,34 @@ defmodule NervesGate.Indicators.Policy do
   def value(:fast, now), do: phase(now, 125)
 
   defp phase(now, half_period), do: Integer.mod(Integer.floor_div(now, half_period), 2)
+
+  @doc false
+  def identify_available(%{recovery: %{action: action}}) when not is_nil(action),
+    do:
+      {:error,
+       %{code: "operation_in_progress", message: "Wait for the current operation to finish."}}
+
+  def available(%{led: %{identifying: true}}),
+    do:
+      {:error,
+       %{code: "operation_in_progress", message: "Wait for the current operation to finish."}}
+
+  def available(%{led: %{restore_pending: true}}),
+    do:
+      {:error,
+       %{
+         code: "led_restore_failed",
+         message:
+           "Could not apply the status LEDs. Identify is blocked; LED control will be retried."
+       }}
+
+  def available(%{led: %{available: true}}), do: :ok
+
+  def available(_),
+    do:
+      {:error,
+       %{
+         code: "led_unavailable",
+         message: "A status LED is unavailable or controlled by a kernel trigger."
+       }}
 end

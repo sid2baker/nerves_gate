@@ -1,9 +1,10 @@
-defmodule Dev.ScenariosTest do
+defmodule Workbench.ScenariosTest do
   use ExUnit.Case, async: true
-  alias Dev.{Scenarios, TestDevice}
+  alias Scenarios
+  alias Scenarios.Device, as: Device
 
-  # These exercise execution/requirement policy, not simulated hardware or an SDK
-  # backend. They never make RPC calls or control a device.
+  # These exercise requirements and bounded transport failures, not simulated
+  # hardware or an SDK backend. They never control a device.
   defmodule Passing do
     def spec, do: %{name: "Execution order", requires: %{device: [], fixture: []}}
     def run(_), do: send(self(), :body)
@@ -88,22 +89,25 @@ defmodule Dev.ScenariosTest do
   end
 
   test "fixture controls are never inferred from a node or board" do
-    assert TestDevice.fixture_capabilities(%{node: :qemu, target: :x86_64}) == []
-    assert TestDevice.control(%{}, :power_cycle) == {:error, :unsupported_fixture_control}
+    assert Device.fixture_capabilities(%{node: :qemu, target: :x86_64}) == []
+    assert Device.control(%{}, :power_cycle) == {:error, :unsupported_fixture_control}
 
-    target = %{fixture: {Simulator.TestQemu, %{}}}
-    assert TestDevice.control(target, :format_disk) == {:error, :unsupported_fixture_control}
+    assert Device.fixture_capabilities(%{fixture: {Scenarios.Qemu, %{owner: self()}}}) == []
+
+    target = %{fixture: {:qemu, %{owner: self()}}}
+    assert :ethernet_link in Device.fixture_capabilities(target)
+    assert Device.control(target, :format_disk) == {:error, :unsupported_fixture_control}
 
     for name <- ["usb0", "eth2", "lo", "../eth0"] do
-      assert TestDevice.control(target, :ethernet_link, [name, false]) ==
+      assert Device.control(target, :ethernet_link, [name, false]) ==
                {:error, :unsupported_fixture_control}
     end
   end
 
   test "declared resources stay supported when disconnected or disabled" do
     status = hardware_status()
-    assert TestDevice.resources(status) == [:ethernet, :cellular, :can, :rs485]
-    assert :ok = TestDevice.assert_present(status, [:ethernet, :cellular, :can, :rs485])
+    assert Device.resources(status) == [:ethernet, :cellular, :can, :rs485]
+    assert :ok = Device.assert_present(status, [:ethernet, :cellular, :can, :rs485])
   end
 
   test "unsupported hardware skips rather than failing a presence check" do
@@ -113,12 +117,12 @@ defmodule Dev.ScenariosTest do
         buses: %{available: false, ports: []}
     }
 
-    assert TestDevice.resources(status) == [:ethernet]
+    assert Device.resources(status) == [:ethernet]
 
     assert {:skip, "Missing requirements: device:can, device:rs485, device:cellular"} =
              Scenarios.requirements(
                %{device: [:can, :rs485, :cellular]},
-               %{device: TestDevice.resources(status)}
+               %{device: Device.resources(status)}
              )
   end
 
@@ -128,25 +132,25 @@ defmodule Dev.ScenariosTest do
       ports = Enum.map(status.buses.ports, &Map.put(&1, :present, present))
       status = put_in(status.buses.ports, ports)
 
-      assert TestDevice.resources(status) == [:ethernet, :cellular, :can, :rs485]
+      assert Device.resources(status) == [:ethernet, :cellular, :can, :rs485]
 
       assert :ok =
                Scenarios.requirements(%{device: [:can, :rs485]}, %{
-                 device: TestDevice.resources(status)
+                 device: Device.resources(status)
                })
 
       assert_raise ExUnit.AssertionError, ~r/Expected hardware missing or unobserved: can0/, fn ->
-        TestDevice.assert_present(status, [:can])
+        Device.assert_present(status, [:can])
       end
 
       assert_raise ExUnit.AssertionError,
                    ~r/Expected hardware missing or unobserved: ttyS3/,
                    fn ->
-                     TestDevice.assert_present(status, [:rs485])
+                     Device.assert_present(status, [:rs485])
                    end
 
       # Broken hardware unrelated to this scenario must not prevent its execution.
-      assert :ok = TestDevice.assert_present(status, [:ethernet])
+      assert :ok = Device.assert_present(status, [:ethernet])
     end
   end
 
@@ -157,37 +161,53 @@ defmodule Dev.ScenariosTest do
       assert_raise ExUnit.AssertionError,
                    ~r/Expected hardware missing or unobserved: enp1s0/,
                    fn ->
-                     TestDevice.assert_present(status, [:ethernet])
+                     Device.assert_present(status, [:ethernet])
                    end
 
       status = put_in(hardware_status(), [:cellular, :present], present)
-      assert :cellular in TestDevice.resources(status)
+      assert :cellular in Device.resources(status)
 
       assert_raise ExUnit.AssertionError,
                    ~r/Expected hardware missing or unobserved: cellular modem/,
                    fn ->
-                     TestDevice.assert_present(status, [:cellular])
+                     Device.assert_present(status, [:cellular])
                    end
     end
   end
 
   test "portable and QEMU scenarios share one catalogue with unique IDs" do
-    scenarios = Simulator.QemuTests.scenarios()
+    scenarios = Scenarios.all()
     ids = Enum.map(scenarios, & &1.id)
     assert ids == Enum.sort(ids)
     assert ids == Enum.uniq(ids)
 
-    for scenario <- Scenarios.all() do
-      assert scenario in scenarios
-      assert :qemu not in Map.get(scenario.requires, :fixture, [])
+    portable = ~w(cable_loss invalid_configuration invalid_trial_ids public_status sdk)
+    assert length(scenarios) == 43
+
+    for scenario <- scenarios do
+      assert Enum.sort(Map.keys(scenario.requires)) == [:device, :fixture]
+      assert is_boolean(scenario.fresh_disk)
+      assert is_boolean(scenario.all)
+      assert is_boolean(scenario.opt_in)
+      assert :qemu in scenario.requires.fixture == scenario.id not in portable
     end
 
-    assert [%{module: Dev.Scenarios.PublicStatus}] =
-             Simulator.QemuTests.scenarios("public_status")
+    assert [%{module: Scenarios.Cases.PublicStatus}] =
+             Scenarios.select("public_status")
 
-    assert [%{module: Dev.Scenarios.Sdk}] = Simulator.QemuTests.scenarios("sdk")
-    assert [%{requires: %{fixture: [:qemu]}}] = Simulator.QemuTests.scenarios("power_trial")
-    assert [%{module: Simulator.Scenarios.QemuSdk}] = Simulator.QemuTests.scenarios("qemu_sdk")
+    assert [%{module: Scenarios.Cases.Sdk}] = Scenarios.select("sdk")
+    assert [%{requires: %{fixture: [:qemu]}}] = Scenarios.select("power_trial")
+    assert [%{module: Scenarios.Cases.QemuSdk}] = Scenarios.select("qemu_sdk")
+  end
+
+  test "an uncertain RPC stops the worker before further commands or cleanup" do
+    device = %{node: :cutover_unreachable@localhost}
+
+    assert catch_exit(Device.rpc(device, NervesGate.Network, :confirm, ["not-sent"])) ==
+             :simulator_control_failed
+
+    assert Process.get(:simulator_control_failed)
+    assert catch_exit(Device.rpc(%{node: node()}, Kernel, :self)) == :simulator_control_failed
   end
 
   defp hardware_status do

@@ -37,19 +37,19 @@ See [app development](docs/app-development.md).
 ```sh
 mix format --force
 mix ci                                       # host checks; no devices
-mix test.qemu --only sdk --device gateway_a  # against your running mix dev
+mix test.qemu --only sdk --device gateway_a    # against your running mix dev
 ```
 
 | Path | Contents |
 | --- | --- |
-| `lib/dev/`, `lib/dev_web/` | Workbench, app tools, discovery, builds, updates and release checks |
-| `lib/simulator/` | QEMU devices, virtual networking, scenarios and runner |
+| `lib/workbench/`, `lib/workbench_web/` | Workbench, app tools, discovery, builds, updates and release checks |
+| `lib/simulator/` | Owned QEMU devices and private virtual networking |
+| `lib/scenarios/` | One scenario catalogue/runner, device access and owned-QEMU checks |
 | `firmware/` | Device runtime and gateway UI (separate Nerves project) |
 | `sdk/` | App contract and packaging (separately versioned, published on Hex) |
 | `systems/` | EC100 and QEMU Nerves systems |
 
 Read [development](docs/development.md), [architecture](docs/architecture.md),
-the [architecture review and recommendations](docs/architecture-review.md),
 [CI](docs/ci.md), [releases](docs/releases.md) and the [changelog](CHANGELOG.md).
 
 ## Device documentation

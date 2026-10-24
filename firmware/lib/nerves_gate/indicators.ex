@@ -2,8 +2,8 @@ defmodule NervesGate.Indicators do
   @moduledoc """
   Three status LEDs and fixed, release-only button gestures.
 
-  `identify/1` overrides the LEDs for five seconds, then resumes current status.
-  `status/1` is read-only; `observe/1` subscribes the caller to change hints.
+  `identify/0` overrides the LEDs for five seconds, then resumes current status.
+  `status/0` is read-only; `observe/0` subscribes the caller to change hints.
   Recovery runs in one bounded worker and is never automatically retried.
   """
   use GenServer
@@ -14,19 +14,29 @@ defmodule NervesGate.Indicators do
   @tick_ms 125
 
   def start_link(opts \\ []),
-    do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+    do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc "Identify for five seconds, rejecting overlap and unavailable LED channels."
-  @spec identify(GenServer.server()) :: :ok | {:error, term()}
-  def identify(server \\ __MODULE__), do: GenServer.call(server, :identify)
+
+  def identify do
+    case Error.protect(fn -> GenServer.call(__MODULE__, :identify) end) do
+      {:error, reason} -> {:error, Error.safe(reason)}
+      result -> result
+    end
+  end
 
   @doc "Read current LED patterns, button availability and the last recovery outcome."
-  @spec status(GenServer.server()) :: map()
-  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+
+  def status do
+    case Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
+      {:error, _} -> unavailable()
+      status -> status
+    end
+  end
 
   @doc "Subscribe to change hints; reread status after each notification."
-  @spec observe(GenServer.server()) :: :ok | {:error, :unavailable}
-  def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
+
+  def observe, do: Error.protect(fn -> Observations.subscribe_runtime(__MODULE__) end)
 
   def unavailable do
     %{
@@ -48,18 +58,13 @@ defmodule NervesGate.Indicators do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    Alarms.register(Keyword.get(opts, :name, __MODULE__), [:led_restore_failed, :recovery_failed])
+    Alarms.register(__MODULE__, [:led_restore_failed, :recovery_failed])
     normal = Policy.normal(%{}, false, :unknown)
 
     state = %{
-      name: Keyword.get(opts, :name, __MODULE__),
-      adapter: Keyword.get(opts, :adapter, NervesGate.Board.get(:indicators_adapter)),
-      recovery_adapter:
-        Keyword.get(opts, :recovery_adapter, NervesGate.Board.get(:recovery_adapter)),
-      remote: Keyword.get(opts, :remote, Remote),
-      network: Keyword.get(opts, :network, Network),
-      alarms: Keyword.get(opts, :alarms),
-      clock: Keyword.get(opts, :clock, fn -> System.monotonic_time(:millisecond) end),
+      name: __MODULE__,
+      adapter: NervesGate.Board.get(:indicators_adapter),
+      recovery_adapter: NervesGate.Board.get(:recovery_adapter),
       poll_ms: Keyword.get(opts, :poll_ms, 5_000),
       identify_ms: Keyword.get(opts, :identify_ms, 5_000),
       recovery_ms: Keyword.get(opts, :recovery_ms, 15_000),
@@ -141,12 +146,30 @@ defmodule NervesGate.Indicators do
 
   def handle_info({:DOWN, ref, :process, _, _}, %{worker: {%Task{ref: ref}, timer}} = state) do
     Process.cancel_timer(timer)
-    {:noreply, recovery_complete(state, {:error, :recovery_outcome_unknown})}
+
+    {:noreply,
+     recovery_complete(
+       state,
+       {:error,
+        %{
+          code: "recovery_outcome_unknown",
+          message: "Recovery did not complete in time or its result was lost. No retry was sent."
+        }}
+     )}
   end
 
   def handle_info({:recovery_timeout, ref}, %{worker: {%Task{ref: ref} = task, _}} = state) do
     Task.shutdown(task, :brutal_kill)
-    {:noreply, recovery_complete(state, {:error, :recovery_outcome_unknown})}
+
+    {:noreply,
+     recovery_complete(
+       state,
+       {:error,
+        %{
+          code: "recovery_outcome_unknown",
+          message: "Recovery did not complete in time or its result was lost. No retry was sent."
+        }}
+     )}
   end
 
   def handle_info(_, state), do: {:noreply, state}
@@ -179,8 +202,8 @@ defmodule NervesGate.Indicators do
     |> render()
   end
 
-  defp subscribe(state) do
-    for server <- [state.network, state.remote], not is_nil(server) do
+  defp subscribe(_state) do
+    for server <- [Network, Remote] do
       safely(
         fn -> server |> GenServer.call(:observations, 100) |> Observations.subscribe() end,
         :ok
@@ -197,18 +220,18 @@ defmodule NervesGate.Indicators do
   end
 
   defp observations(state) do
-    remote = safely(fn -> GenServer.call(state.remote, :status, 100) end, Remote.unavailable())
-    network = safely(fn -> GenServer.call(state.network, :status, 100) end, nil)
+    remote = safely(fn -> GenServer.call(Remote, :status, 100) end, Remote.unavailable())
+    network = safely(fn -> GenServer.call(Network, :status, 100) end, nil)
     internet = Observations.Network.internet(network).online
 
     alarms =
-      safely(state.alarms || fn -> Alarms.indication(state.network, state.remote) end, :unknown)
+      safely(fn -> Alarms.indication(Network, Remote) end, :unknown)
 
     %{state | normal: Policy.normal(remote, internet, alarms)}
   end
 
   defp render(state) do
-    now = state.clock.()
+    now = System.monotonic_time(:millisecond)
     until = if state.identify_until && now < state.identify_until, do: state.identify_until
     state = %{state | identify_until: until}
     patterns = Policy.override(state.normal, override(state, now))
@@ -248,12 +271,21 @@ defmodule NervesGate.Indicators do
 
   defp start_identify(%{identify_until: until, recovery: %{action: action}} = state)
        when not is_nil(until) or not is_nil(action),
-       do: {{:error, :operation_in_progress}, state}
+       do:
+         {{:error,
+           %{code: "operation_in_progress", message: "Wait for the current operation to finish."}},
+          state}
 
   defp start_identify(state) do
     if Enum.all?(state.values, fn {_, value} -> not is_nil(value) end),
-      do: {:ok, %{state | identify_until: state.clock.() + state.identify_ms}},
-      else: {{:error, :led_unavailable}, state}
+      do:
+        {:ok, %{state | identify_until: System.monotonic_time(:millisecond) + state.identify_ms}},
+      else:
+        {{:error,
+          %{
+            code: "led_unavailable",
+            message: "A status LED is unavailable or controlled by a kernel trigger."
+          }}, state}
   end
 
   defp connect_button(%{button: nil, adapter: {module, context}} = state) do
@@ -270,7 +302,7 @@ defmodule NervesGate.Indicators do
   defp uncertain?(_), do: false
 
   defp button_event({:ev_key, :key_prog1, value}, state) do
-    {gesture, action} = Button.event(value, state.clock.(), state.gesture)
+    {gesture, action} = Button.event(value, System.monotonic_time(:millisecond), state.gesture)
 
     last =
       if gesture.pressed_at && is_nil(state.gesture.pressed_at),
@@ -302,9 +334,18 @@ defmodule NervesGate.Indicators do
   defp recovery_complete(state, result) do
     error =
       case result do
-        :ok -> nil
-        {:error, reason} -> Error.from(reason)
-        _ -> Error.from(:recovery_outcome_unknown)
+        :ok ->
+          nil
+
+        {:error, reason} ->
+          NervesGate.Error.safe(reason)
+
+        _ ->
+          %{
+            code: "recovery_outcome_unknown",
+            message:
+              "Recovery did not complete in time or its result was lost. No retry was sent."
+          }
       end
 
     Alarms.report(:recovery_failed, state.name, error != nil)
@@ -319,14 +360,42 @@ defmodule NervesGate.Indicators do
   end
 
   defp read_led(%{adapter: {module, context}}, led),
-    do: safely(fn -> module.read_led(led, context) end, {:error, :led_unavailable})
+    do:
+      safely(
+        fn -> module.read_led(led, context) end,
+        {:error,
+         %{
+           code: "led_unavailable",
+           message: "A status LED is unavailable or controlled by a kernel trigger."
+         }}
+      )
 
-  defp read_led(_, _), do: {:error, :led_unavailable}
+  defp read_led(_, _),
+    do:
+      {:error,
+       %{
+         code: "led_unavailable",
+         message: "A status LED is unavailable or controlled by a kernel trigger."
+       }}
 
   defp write_led(%{adapter: {module, context}}, led, value),
-    do: safely(fn -> module.write_led(led, value, context) end, {:error, :led_unavailable})
+    do:
+      safely(
+        fn -> module.write_led(led, value, context) end,
+        {:error,
+         %{
+           code: "led_unavailable",
+           message: "A status LED is unavailable or controlled by a kernel trigger."
+         }}
+      )
 
-  defp write_led(_, _, _), do: {:error, :led_unavailable}
+  defp write_led(_, _, _),
+    do:
+      {:error,
+       %{
+         code: "led_unavailable",
+         message: "A status LED is unavailable or controlled by a kernel trigger."
+       }}
 
   defp safely(fun, fallback) do
     fun.()
@@ -343,7 +412,7 @@ defmodule NervesGate.Indicators do
       button: %{
         available: state.button != nil,
         armed: state.gesture.released_at != nil,
-        feedback: to_string(Button.feedback(state.gesture, state.clock.())),
+        feedback: to_string(Button.feedback(state.gesture, System.monotonic_time(:millisecond))),
         last_pressed_at: state.last_press
       },
       led: %{
@@ -352,11 +421,26 @@ defmodule NervesGate.Indicators do
         restore_pending: state.error == :led_restore_failed,
         channels: Map.new(state.values, fn {led, value} -> {led, not is_nil(value)} end),
         patterns: public_patterns(state.patterns),
-        error: state.error && Error.from(state.error)
+        error: state.error && led_error(state.error)
       },
       recovery: state.recovery
     }
   end
+
+  defp led_error(:led_unavailable),
+    do: %{
+      code: "led_unavailable",
+      message: "A status LED is unavailable or controlled by a kernel trigger."
+    }
+
+  defp led_error(:led_restore_failed),
+    do: %{
+      code: "led_restore_failed",
+      message:
+        "Could not apply the status LEDs. Identify is blocked; LED control will be retried."
+    }
+
+  defp led_error(error), do: Error.safe(error)
 
   defp public_patterns(patterns),
     do: Map.new(patterns, fn {led, pattern} -> {led, to_string(pattern)} end)

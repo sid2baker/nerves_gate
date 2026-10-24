@@ -5,11 +5,10 @@ defmodule Simulator do
 
   @config_header """
   # Ordinary data, not a scenario DSL. The simulator site edits the devices and
-  # their Internet wiring. All devices use the same firmware build; set
-  # factory_firmware to a compatible older artifact for cross-version work.
+  # their Internet wiring. All devices use the same current firmware build.
   """
 
-  def script(name), do: Path.join(Dev.root(), "priv/simulator/#{name}.exs")
+  def script(name), do: Path.join(Workbench.root(), "priv/simulator/#{name}.exs")
   def start_link(config), do: GenServer.start_link(__MODULE__, config, name: __MODULE__)
   def subscribe(node), do: GenServer.call({__MODULE__, node}, {:subscribe, self()})
   def lifecycle(node, action), do: GenServer.call({__MODULE__, node}, {:lifecycle, action})
@@ -33,15 +32,13 @@ defmodule Simulator do
   def config(path, dir) do
     {config, _} = Code.eval_file(path)
     true = is_map(config.devices) and map_size(config.devices) in 1..253
-    local_project = Path.join(Dev.root(), "firmware")
+    local_project = Path.join(Workbench.root(), "firmware")
     local? = config.firmware == :local
 
     firmware =
       if local?,
         do: Path.join(local_project, "_build/x86_64_dev/nerves/images/nerves_gate.fw"),
         else: Path.expand(config.firmware, Path.dirname(path))
-
-    factory = Path.expand(Map.get(config, :factory_firmware, firmware), Path.dirname(path))
 
     project =
       if local?,
@@ -54,7 +51,6 @@ defmodule Simulator do
       raw: config,
       dir: dir,
       firmware: firmware,
-      factory_firmware: factory,
       firmware_project: project
     })
   end
@@ -423,8 +419,7 @@ defmodule Simulator do
         address: address,
         node: :"nerves_gate@#{address}",
         dir: Path.join(config.dir, Atom.to_string(id)),
-        firmware: config.firmware,
-        factory_firmware: config.factory_firmware
+        firmware: config.firmware
       })
     end)
   end
@@ -433,8 +428,8 @@ defmodule Simulator do
     Simulator.Prerequisites.check!()
 
     if project = config[:firmware_project] do
-      if project == Path.join(Dev.root(), "firmware") do
-        Dev.Builds.firmware!("x86_64", report)
+      if project == Path.join(Workbench.root(), "firmware") do
+        Workbench.Builds.firmware!("x86_64", report)
       else
         status =
           Simulator.BuildOutput.run(
@@ -458,7 +453,7 @@ defmodule Simulator do
       end
     end
 
-    unless File.regular?(config.firmware) and File.regular?(config.factory_firmware) do
+    unless File.regular?(config.firmware) do
       raise "QEMU firmware image not found. Supply a prebuilt image or run mix setup in the repository."
     end
   end

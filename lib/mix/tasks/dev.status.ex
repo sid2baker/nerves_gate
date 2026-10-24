@@ -5,6 +5,6 @@ defmodule Mix.Tasks.Dev.Status do
 
   def run([]) do
     Mix.Task.run("compile")
-    IO.puts(Dev.Session.describe(Dev.Session.status()))
+    IO.puts(Workbench.Session.describe(Workbench.Session.status()))
   end
 end

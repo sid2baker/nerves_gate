@@ -1,4 +1,4 @@
-defmodule Dev.AssetsTest do
+defmodule Workbench.AssetsTest do
   use ExUnit.Case, async: false
   @moduletag :tmp_dir
 
@@ -20,7 +20,7 @@ defmodule Dev.AssetsTest do
   } do
     owner = self()
     target = Mix.target()
-    assert :ok = Dev.Builds.assets!(&send(owner, {:progress, &1}))
+    assert :ok = Workbench.Builds.assets!(&send(owner, {:progress, &1}))
     assert_received {:progress, "Building frontend assets"}
     assert Mix.target() == target
 
@@ -40,7 +40,7 @@ defmodule Dev.AssetsTest do
   test "asset failures abort the firmware pipeline before target compilation", %{tmp_dir: dir} do
     Application.put_env(:volt, :entry, Path.join(dir, "missing.js"))
 
-    firmware = Dev.MixProject.project()[:aliases][:firmware]
+    firmware = Workbench.MixProject.project()[:aliases][:firmware]
 
     ExUnit.CaptureIO.capture_io(fn ->
       assert_raise RuntimeError, ~r/Asset build failed/, fn ->
@@ -51,13 +51,13 @@ defmodule Dev.AssetsTest do
 
   test "workbench and standalone host builds read the same asset configuration" do
     root =
-      Config.Reader.read!(Path.join(Dev.root(), "config/config.exs"),
+      Config.Reader.read!(Path.join(Workbench.root(), "config/config.exs"),
         env: :dev,
         target: :host
       )
 
     firmware =
-      Config.Reader.read!(Path.join(Dev.root(), "firmware/config/host.exs"),
+      Config.Reader.read!(Path.join(Workbench.root(), "firmware/config/host.exs"),
         env: :dev,
         target: :host
       )

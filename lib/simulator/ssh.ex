@@ -1,15 +1,12 @@
 defmodule Simulator.SSH do
   @moduledoc "Real SSH recovery, provisioning and firmware transport for owned simulator devices."
 
-  def connect(device, options \\ []) do
+  def connect(device, port, options) do
     :ssh.connect(
       String.to_charlist(device.address),
-      device.forwards.usb,
+      port,
       options ++
         [
-          user: ~c"root",
-          password: ~c"nerves_gate",
-          auth_methods: ~c"password",
           silently_accept_hosts: true,
           save_accepted_host: false,
           user_interaction: false,
@@ -49,14 +46,14 @@ defmodule Simulator.SSH do
 
   def provision(connection, config) do
     for key <- Map.get(config, :ssh_keys, []) do
-      :ok = request(connection, "NervesGate.ssh_add_key(#{inspect(key)})")
+      :ok = request(connection, "NervesGate.SSH.add_key(#{inspect(key)})")
     end
 
     if settings = config[:network] do
       await_action(connection, "network.propose", deadline(30_000))
-      {:ok, trial} = request(connection, "NervesGate.network_propose(#{inspect(settings)})")
+      {:ok, trial} = request(connection, "NervesGate.Network.propose(#{inspect(settings)})")
       await_action(connection, "network.confirm", deadline(30_000))
-      :ok = request(connection, "NervesGate.network_confirm(#{inspect(trial)})")
+      :ok = request(connection, "NervesGate.Network.confirm(#{inspect(trial)})")
     end
 
     :ok

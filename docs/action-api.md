@@ -1,12 +1,15 @@
-# Public API
+# Administrative API
 
-[`NervesGate`](../firmware/lib/nerves_gate.ex) exposes named, documented, typed functions
-for LiveView, IEx/SSH and other interfaces. Commands return results; queries return
-status. No client object or dispatcher is needed.
+Device commands belong to named domain modules. [`NervesGate`](../firmware/lib/nerves_gate.ex)
+provides only `status/0`, caller-owned `subscribe/0` and a domain API index. The
+administrative API is separate from the typed [application SDK](../sdk/README.md).
+There is no client object, command dispatcher or configurable server routing.
 
 ## Read, act, read again
 
 ```elixir
+alias NervesGate.Network
+
 :ok = NervesGate.subscribe()
 status = NervesGate.status()
 
@@ -16,73 +19,82 @@ settings = %{
   "eth1" => nil
 }
 
-{:ok, settings} = NervesGate.network_validate(settings)
-{:ok, id} = NervesGate.network_propose(settings)
+{:ok, settings} = Network.validate(settings)
+{:ok, id} = Network.propose(settings)
 
-# Check connectivity, then keep the trial or call network_cancel(id).
-:ok = NervesGate.network_confirm(id)
+# Check connectivity, then keep the trial or call Network.cancel(id).
+:ok = Network.confirm(id)
 status = NervesGate.status()
 ```
 
+The names below are under `NervesGate`. Configuration uses validated string keys;
+hostname/trial IDs are plain strings. Failures return
+`{:error, %{code: code, message: message}}`, never raw library/driver errors.
+
 | Function | Success |
 | --- | --- |
-| `network_validate(settings)` | `{:ok, normalized_settings}`; pure, no device required |
-| `network_propose(settings, opts)` | `{:ok, trial_id}` after temporary application |
-| `network_confirm(trial_id, opts)` | `:ok` after saving interface settings |
-| `network_cancel(trial_id, opts)` | `:ok` after restoration |
-| `cellular_refresh(opts)` | `:ok`; read-only SIM/modem refresh accepted |
-| `cellular_unlock(pin, opts)` | `:ok`; one unlock and private SIM-bound PIN save accepted |
-| `cellular_save_pin(pin, opts)` | `:ok`; one PIN verification and private save accepted |
-| `cellular_forget_pin(opts)` | `:ok`; private PIN deletion accepted, SIM protection unchanged |
-| `cellular_change_pin(current, new, opts)` | `:ok`; one SIM PIN change accepted |
-| `cellular_set_pin_lock(enabled, pin, opts)` | `:ok`; one SIM protection change accepted |
-| `cellular_save_authentication(apn, username, password, opts)` | `:ok`; private APN-bound PAP save accepted; applies before the next fresh packet-context activation |
-| `cellular_forget_authentication(opts)` | `:ok`; private PAP deletion accepted; modem authentication clears before the next fresh packet-context activation |
-| `remote_connect(hostname, opts)` | `:ok` after accepting connection/enrollment |
-| `remote_configure(hostname, opts)` | `:ok` after accepting a hostname change |
-| `remote_disconnect(opts)` | `:ok` after accepting `down`; enrollment is kept |
-| `remote_login_url(opts)` | `{:ok, url_or_nil}`; private query |
-| `equipment_scan(opts)` | `:ok` after a bounded ARP scan |
-| `equipment_label(id, label, opts)` | `:ok` after saving a scope-local label |
-| `equipment_share(opts)` | `:ok` after equipment subnet advertisement readback |
-| `equipment_unshare(opts)` | `:ok` after equipment subnet withdrawal readback |
-| `identify(opts)` | `:ok` once five-second identification starts |
-| `ssh_add_key(public_key)` | `:ok` after validating and saving one OpenSSH public key |
-| `ssh_remove_key(fingerprint)` | `:ok` after saving removal; existing SSH sessions remain open |
-| `bus_configure(port, params, opts)` | `:ok`; CAN configuration accepted or RS485 opt-in changed |
-| `bus_capture(port, opts)` | `:ok`; receive-only capture accepted |
-| `modbus_read(port, params, opts)` | `:ok`; one authorized RTU read accepted |
-| `status(opts)` | Current status map, read directly from domains |
-| `subscribe(opts)` | `:ok`; subscriptions belong to the caller |
+| `Network.validate(settings)` | `{:ok, normalized_settings}`; pure, no device required |
+| `Network.propose(settings, opts \\ [])` | `{:ok, trial_id}` after temporary application |
+| `Network.confirm(trial_id)` | `:ok` after saving interface settings |
+| `Network.cancel(trial_id)` | `:ok` after restoration |
+| `Cellular.refresh()` | `:ok`; read-only SIM/modem refresh accepted |
+| `Cellular.unlock(pin)` | `:ok`; one unlock and private SIM-bound PIN save accepted |
+| `Cellular.save_pin(pin)` | `:ok`; one PIN verification and private save accepted |
+| `Cellular.forget_pin()` | `:ok`; private PIN deletion accepted, SIM protection unchanged |
+| `Cellular.change_pin(current, new)` | `:ok`; one SIM PIN change accepted |
+| `Cellular.set_pin_lock(enabled, pin)` | `:ok`; one SIM protection change accepted |
+| `Cellular.save_authentication(apn, username, password)` | `:ok`; private APN-bound PAP save accepted |
+| `Cellular.forget_authentication()` | `:ok`; private PAP deletion accepted |
+| `Remote.connect(hostname, opts \\ [])` | `:ok`; connection/enrollment accepted |
+| `Remote.configure(hostname, opts \\ [])` | `:ok`; hostname change accepted |
+| `Remote.disconnect()` | `:ok`; `down` accepted, enrollment kept |
+| `Remote.login_url()` | `{:ok, url_or_nil}`; explicit private read |
+| `Equipment.scan()` | `:ok` after a bounded ARP scan |
+| `Equipment.label(id, label)` | `:ok` after saving a scope-local label |
+| `Equipment.share()` | `:ok` after equipment subnet advertisement readback |
+| `Equipment.unshare()` | `:ok` after equipment subnet withdrawal readback |
+| `Indicators.identify()` | `:ok` once five-second identification starts |
+| `SSH.add_key(public_key)` | `:ok` after validating/saving one OpenSSH public key |
+| `SSH.remove_key(fingerprint)` | `:ok` after saving removal; existing sessions stay open |
+| `Buses.configure(port, params)` | `:ok`; CAN configuration or RS485 opt-in accepted |
+| `Buses.capture(port)` | `:ok`; receive-only capture accepted |
+| `Buses.modbus_read(port, params)` | `:ok`; one authorized RTU read accepted |
+| `Storage.setup(action, card_id \\ nil, confirmation \\ nil)` | `:ok`; storage setup accepted |
+| `Distribution.cookie()` | `{:ok, cookie}`; explicit private read |
+| `System.info()` | Sanitized `%{firmware: ..., target: ..., node: ..., elixir: ..., otp: ...}` |
+| `NervesGate.status()` | Current administrative map, read directly from domains |
+| `NervesGate.subscribe()` | `:ok`; subscriptions belong to the caller |
 
-`opts` is always an optional keyword list. Configuration uses validated string
-keys; hostname and trial ID are plain strings. Failures return
-`{:error, %{code: code, message: message}}`, never raw adapter errors.
+Only `Network.propose/2`, `Remote.connect/2` and `Remote.configure/2` have command
+options: Network accepts `:expected` and trusted `:access`; Remote connect accepts
+`:expected` and transient `:auth_key`; configure accepts `:expected`. There are no
+server-swapping options or alternate instance arguments.
 
-`remote_connect(hostname, auth_key: key)` enrolls with an auth key instead of a
-browser sign-in link. Only the bounded remote worker uses the key; it is never
-persisted or included in status or events. Do not log it or put it in configuration.
+`Remote.connect(hostname, auth_key: key)` uses an auth key instead of browser
+sign-in. Only the bounded worker uses it; it is never persisted or published.
+Do not log it or put it in configuration.
 
-Cellular settings add `"internet" => %{"mode" => "cellular", "apn" => ""}` without
-an Ethernet Internet role, or `"mode" => "backup"` with one. An empty APN requests
-the network default. Validation checks shape only; enabling cellular or changing
-its APN also needs a [detected modem](networking.md#cellular-modem).
+## Cellular
 
-SIM commands only acknowledge acceptance: observe `status.cellular.operation` and
-`.error`. PINs are 4–8 ASCII digits. `cellular_save_pin` reapplies the existing
-protection setting once, so **a wrong PIN consumes an attempt**. Saving, automatic
-unlock and storage limits are described in
-[SIM commissioning](networking.md#sim-commissioning-and-saved-pin). Never log PIN
-arguments.
+Network settings add `"internet" => %{"mode" => "cellular", "apn" => ""}` without
+an Ethernet Internet role, or `"mode" => "backup"` with one. Empty APN requests the
+network default. Shape validation is pure; enabling cellular or changing its APN
+also requires a [detected modem](networking.md#cellular-modem).
 
-EC100 PAP credentials use the two authentication commands above, not network
-settings. Observe `status.cellular.operation` and `.error` for storage completion;
-acceptance does not prove carrier authentication or Internet. These operations
-share Network's admission and private settings table, but network rollback does
-not undo them. Existing sessions are not interrupted. See
-[PAP authentication](networking.md#pap-authentication) for validation, APN binding,
-storage limits and modem clearing. Status includes only `authentication` and
-`authentication_apn`; never log username/password arguments.
+SIM commands acknowledge **acceptance**, not completion. Observe
+`status.cellular.operation` and `.error`. PINs are 4–8 ASCII digits. Saving the PIN
+of a ready SIM reapplies its current protection setting once: **a wrong PIN
+consumes an attempt**. One-attempt auto-unlock, SIM binding, storage and uncertainty
+rules are in [SIM commissioning](networking.md#sim-commissioning-and-saved-pin).
+Never log PIN arguments.
+
+PAP commands store credentials separately from network settings. Observe cellular
+operation/error for storage completion; acceptance proves neither carrier
+authentication nor Internet. APN-matched credentials apply before the next fresh
+packet-context activation. Existing sessions are not interrupted. These operations
+share Network's single worker, but trial rollback does not undo private credential
+writes. Status includes only `authentication` and `authentication_apn`, never
+username/password. See [PAP](networking.md#pap-authentication).
 
 ## Completion and safety
 
@@ -90,49 +102,57 @@ Editors pass the saved configuration they started from:
 
 ```elixir
 base = NervesGate.status().network.desired
-# Build a candidate that preserves settings outside this editor's scope.
-{:ok, id} = NervesGate.network_propose(candidate, expected: base)
+# Build a candidate preserving settings outside this editor's scope.
+{:ok, id} = NervesGate.Network.propose(candidate, expected: base)
 ```
 
-Network compares `:expected` with its saved configuration before applying anything.
-A mismatch returns `stale_network`: reload rather than replaying the old candidate.
-Without `:expected`, the candidate replaces the whole configuration.
+Network checks `:expected` before effects. A mismatch returns `stale_network`:
+reload rather than replaying. Without `:expected`, the candidate replaces the whole
+configuration. Remote editors similarly use
+`Remote.configure(name, expected: base)` or `Remote.connect(name, expected: base)`;
+a changed hostname returns `stale_remote` before a daemon write.
 
-Tailscale editors likewise pass the hostname they started from:
-`remote_configure(name, expected: base)` or `remote_connect(name, expected: base)`.
-Remote returns `stale_remote` if the hostname has changed, before any daemon write.
+Confirmation requires the **exact current trial ID**. Only trusted server code
+may supply `:access` from actual socket observations for first USB setup. Never
+derive it from form parameters/forwarded headers. Immediately-ready USB setup
+waits for auto-save; otherwise it returns a pending trial. See
+[saving and rollback](networking.md#saving-and-rollback).
 
-Confirmation requires the **exact current trial ID**. Only trusted server code may
-pass `:access` to verify first setup through USB; never derive it from request
-parameters or forwarded headers. Immediately-ready USB setup waits for auto-save;
-otherwise it returns a pending trial. See [saving and rollback](networking.md#saving-and-rollback).
+| Command family | When the call succeeds |
+| --- | --- |
+| Network trial, scan, sharing, label and SSH keys | After the requested bounded effect/readback or persistence |
+| Cellular, Remote, Buses and Storage | After admission; observe `operation`, `error` and applicable `result`/readiness |
+| Identify | After starting the bounded identification period |
 
-Remote and bus acceptance is **not completion**. Observe `remote_access.operation`
-and `.error`, or `buses.operation`, `.error` and `.result`. Each domain runs one
-operation at a time. Private enrollment URLs come only from `remote_login_url/1`;
-never log them or put them in status, notifications or shared UI assigns.
+Remote completion is in `status.remote`, not a private URL. Bus completion is in
+`status.buses`. Private `Remote.login_url/0` and `Distribution.cookie/0` results
+belong only in the requesting view; never log, broadcast or put them in status.
 
-Network calls time out after 15 seconds; sharing allows 70. On `outcome_unknown`,
-**read status before considering a retry**. A caller timeout does not cancel
-admitted work. Commands are not replayed; the separate SIM auto-unlock policy
-above can use a saved, verified PIN after a fresh PIN-required observation.
+Trial/scan calls allow 15 seconds; equipment sharing allows 70. Other calls are
+bounded too. Missing owners return unavailable; a lost process-call reply returns
+`outcome_unknown`. A caller timeout does not cancel admitted work. **Read state
+before considering a retry**; never blindly replay writes or PIN attempts.
+Exceptions/throws unrelated to the protected `GenServer.call` exit boundary are
+not converted into successful or generic command results.
 
-Use the facade's `equipment_scan`, `equipment_share` and `equipment_unshare`, not
-internal worker entry points: they hold Network's cross-domain admission guard.
-Sharing takes no caller-supplied route. See [equipment sharing](networking.md#equipment-sharing).
+Use `Equipment.scan/share/unshare`, not private worker helpers: they hold Network's
+cross-domain admission. Cellular uses the same worker; there is no independent
+cellular process. Sharing accepts no caller-supplied route. See
+[equipment sharing](networking.md#equipment-sharing).
 
-Commands perform no access control. UI `actions` and `capabilities` are
-presentation metadata, **not authorization**; every interface must control access
-before calling commands. There is no public or web reboot or factory-reset command.
+Commands do not authenticate callers. `actions`/`capabilities` are presentation
+metadata, **not authorization**. The gateway currently trusts reachable management
+users, so restrict Ethernet/VPN/USB access. There is no public/web reboot or
+factory-reset command.
 
 ## Bus parameters
 
 ```elixir
-NervesGate.bus_configure("can0", %{"enabled" => true, "bitrate" => 125000})
-NervesGate.bus_capture("can0")
+NervesGate.Buses.configure("can0", %{"enabled" => true, "bitrate" => 125_000})
+NervesGate.Buses.capture("can0")
 
-NervesGate.bus_configure("ttyS3", %{"enabled" => true})
-NervesGate.modbus_read("ttyS3", %{
+NervesGate.Buses.configure("ttyS3", %{"enabled" => true})
+NervesGate.Buses.modbus_read("ttyS3", %{
   "unit" => 1, "function" => 3, "address" => 0, "count" => 2,
   "authorized" => true
 })
@@ -140,64 +160,59 @@ NervesGate.modbus_read("ttyS3", %{
 
 Only can0/can1 and ttyS3/ttyS4 are eligible. Numbers also accept decimal strings;
 booleans accept `"true"`/`"false"`. Modbus `authorized` means the operator approved
-that request and ensured there is no other master; it is not access control.
+that request and ensured no other master; it is not access control.
 
-Results include `port`, `kind`, `completed_at` and bounded `data`: `frames` for CAN,
-`hex`/`bytes` for serial, or `unit`/`function`/`address`/`count`/`registers` for
-Modbus. See [bus operations](buses.md).
+Results include `port`, `kind`, `completed_at` and bounded `data`: CAN `frames`,
+serial `hex`/`bytes`, or Modbus `unit`/`function`/`address`/`count`/`registers`.
+See [bus operations](buses.md). Storage choice/erase confirmation is documented in
+[application storage](applications.md#commissioning).
 
 ## Status
 
-`status/1` reads domains independently; it is **not an atomic snapshot**.
-[`Status`](../firmware/lib/nerves_gate/status.ex) builds the JSON-encodable v7 map:
+`NervesGate.status/0` reads domains independently: it is **not an atomic snapshot**.
+Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v8**:
 
-- `version`, `system`: shape version and firmware/runtime information.
+- `version`, `system`: schema version and sanitized firmware/runtime identity.
+- `device`: availability/error; a disconnected projection client sets unavailable.
 - `network`: saved settings, trial, observations, readiness, recovery and errors.
-- `connections`: port roles, conflicts, per-uplink connectivity, selected Internet
+- `connections`: roles, conflicts, per-uplink connectivity, selected Internet
   source, overall health and backup state.
-- `cellular`: modem/SIM observations, `pin_saved`, `auto_unlock`, operation and
-  error, plus PAP `authentication` and `authentication_apn`. No PIN, PAP credentials,
-  SIM identifier or binding hash. `auto_unlock` is `ready`, `blocked`,
-  `different_sim`, `identity_unknown`, `off` or `unknown`.
-- `remote_access`: sanitized daemon observations, routes, operation and error.
+- `cellular`: modem/SIM observations, `pin_saved`, `auto_unlock`, operation/error,
+  PAP `authentication`/`authentication_apn`. No PIN, credentials, SIM identity or
+  binding hash. Auto-unlock is `ready`, `blocked`, `different_sim`,
+  `identity_unknown`, `off` or `unknown`.
+- `remote`: sanitized daemon observations, routes, operation and error.
 - `sharing`: equipment `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
   `other_routes` untouched by the control.
-- `equipment`: scoped neighbors, labels and scan status.
-- `indicators`: availability, button state, LED patterns, identification and recovery.
-- `buses`: support, ports, configuration/observations, operation, result and errors.
-- `ssh`: availability, public-key fingerprints/types/comments and persistence errors.
-- `capabilities`, `actions`: presentation-only availability, labels and reasons.
+- `equipment`: scoped neighbors, labels and scan state.
+- `indicators`: availability, button state, LED patterns, identify/recovery state.
+- `buses`: ports, support, observations, operation, result and errors.
+- `ssh`: public-key fingerprints/types/comments and persistence errors.
+- `storage`: detected card, commissioning choice, readiness, operation and error.
+- `capabilities`, `actions`: presentation-only availability, labels and safe reasons.
+  Action names are domain-qualified, including `buses.configure`, `buses.capture`,
+  `buses.modbus_read` and `indicators.identify`.
 
-Unknown routes are `nil`, not empty. Advertisements prove neither approval nor
-reachability. There is no cross-domain revision lock.
+Unknown routes are `nil`, not empty. Advertisements prove neither route approval
+nor reachability. There is no cross-domain revision lock, and the SDK does not
+return this administrative map.
 
-## Subscriptions
+## Subscriptions and implementations
 
-`subscribe/1` binds the caller to workflow metadata and adapter observations.
-Notifications (`%PropertyTable.Event{}` or subsystem tuples) are **hints to re-read
-status**, not snapshots. Subscribe before reading and again after reconnecting or a
-domain restart. Caller death removes subscriptions.
+`NervesGate.subscribe/0` subscribes the actual caller to workflow and infrastructure
+observation hints. `%PropertyTable.Event{}`/subsystem tuples mean **re-read status**,
+not complete snapshots. Subscribe before reading and afresh after reconnect or an
+owner restart. Caller death removes subscriptions.
 
-LiveViews use the device-owned projection stream instead; see
+LiveViews use the device-owned projection stream instead, with explicit local or
+remote read-only sources. Gateway commands remain local; see
 [UI projection](architecture.md#ui-projection).
 
-## Domain APIs and explicit instances
-
-Each domain documents its own commands and accepts a server reference:
-[Network](../firmware/lib/nerves_gate/network.ex), [Remote](../firmware/lib/nerves_gate/remote.ex),
-[Equipment](../firmware/lib/nerves_gate/equipment.ex), [Indicators](../firmware/lib/nerves_gate/indicators.ex)
-and [Buses](../firmware/lib/nerves_gate/buses.ex). Direct calls use ordinary OTP exit
-behavior; the facade normalizes process-call failures.
-
-Facade options select instances:
-
-```elixir
-opts = [network: network_server, remote: remote_server]
-:ok = NervesGate.subscribe(opts)
-status = NervesGate.status(opts)
-```
-
-Other options are `:equipment`, `:indicators` and `:buses`.
-[SSH](../firmware/lib/nerves_gate/ssh.ex) is a single device-owned store. See the
-[portable scenarios](../lib/dev/scenarios) and
-[QEMU-specific scenarios](../lib/simulator/scenarios) for examples against real devices.
+Public owners document their own interfaces: [Network](../firmware/lib/nerves_gate/network.ex),
+[Cellular](../firmware/lib/nerves_gate/cellular.ex), [Remote](../firmware/lib/nerves_gate/remote.ex),
+[Equipment](../firmware/lib/nerves_gate/equipment.ex), [Indicators](../firmware/lib/nerves_gate/indicators.ex),
+[Buses](../firmware/lib/nerves_gate/buses.ex), [SSH](../firmware/lib/nerves_gate/ssh.ex)
+and [Storage](../firmware/lib/nerves_gate/storage.ex). Fixed infrastructure and raw
+cellular helpers are private implementation boundaries, not alternate client APIs.
+See [scenarios](../lib/scenarios/cases) for bounded explicit domain RPCs against
+owned devices.

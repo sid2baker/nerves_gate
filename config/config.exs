@@ -10,7 +10,7 @@ config :nerves_gate,
 config :phoenix, :json_library, Jason
 config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret", "public_key"]
 
-config :nerves_gate_dev, DevWeb.Endpoint,
+config :nerves_gate_workbench, WorkbenchWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],
   http: [ip: {127, 0, 0, 1}, port: 4000],
@@ -24,13 +24,15 @@ import_config "../firmware/config/assets.exs"
 
 if config_env() == :dev do
   config :phoenix, :plug_init_mode, :runtime
-  config :phoenix_live_reload, dirs: [Path.join(firmware, "lib/nerves_gate_web"), "lib/dev_web"]
 
-  config :nerves_gate_dev, DevWeb.Endpoint,
+  config :phoenix_live_reload,
+    dirs: [Path.join(firmware, "lib/nerves_gate_web"), "lib/workbench_web"]
+
+  config :nerves_gate_workbench, WorkbenchWeb.Endpoint,
     code_reloader: true,
     debug_errors: true,
-    reloadable_apps: [:nerves_gate, :nerves_gate_dev],
-    live_reload: [patterns: [~r"lib/(nerves_gate_web|dev_web)/.*(ex|heex)$"]]
+    reloadable_apps: [:nerves_gate, :nerves_gate_workbench],
+    live_reload: [patterns: [~r"lib/(nerves_gate_web|workbench_web)/.*(ex|heex)$"]]
 
   config :phoenix_live_view, debug_heex_annotations: true, debug_attributes: true
 end

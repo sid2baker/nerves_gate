@@ -15,7 +15,7 @@ defmodule NervesGateWeb.DashboardLive do
     assigns =
       assign(assigns,
         settings: settings,
-        remote: assigns.projection.remote_access,
+        remote: assigns.projection.remote,
         distribution_node: assigns.projection.system.node
       )
 

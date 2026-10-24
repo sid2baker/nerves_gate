@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Dev.Stop do
   def run([]) do
     Mix.Task.run("compile")
 
-    case Dev.Session.stop() do
+    case Workbench.Session.stop() do
       :ok -> IO.puts("No simulator session is running; the session lock is free.")
       {:error, message} -> Mix.raise(message)
     end

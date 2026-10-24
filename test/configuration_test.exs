@@ -1,10 +1,10 @@
-defmodule Dev.ConfigurationTest do
+defmodule Workbench.ConfigurationTest do
   use ExUnit.Case, async: false
 
   test "device discovery advertises only public metadata and never starts on the host" do
     for target <- [:ec100, :x86_64] do
       config =
-        Config.Reader.read!(Path.join(Dev.root(), "firmware/config/firmware.exs"),
+        Config.Reader.read!(Path.join(Workbench.root(), "firmware/config/firmware.exs"),
           env: :dev,
           target: target
         )
@@ -18,16 +18,35 @@ defmodule Dev.ConfigurationTest do
                Enum.sort([
                  "product=Nerves Gate",
                  "platform=#{target}",
-                 "version=#{Dev.version()}"
+                 "version=#{Workbench.version()}"
                ])
     end
 
     refute Enum.any?(Application.started_applications(), &(elem(&1, 0) == :mdns_lite))
   end
 
+  test "code reload watches the gateway and workbench namespaces" do
+    config =
+      Config.Reader.read!(Path.join(Workbench.root(), "config/config.exs"),
+        env: :dev,
+        target: :host
+      )
+
+    endpoint = config[:nerves_gate_workbench][WorkbenchWeb.Endpoint]
+    assert endpoint[:reloadable_apps] == [:nerves_gate, :nerves_gate_workbench]
+    patterns = endpoint[:live_reload][:patterns]
+
+    for path <- [
+          "firmware/lib/nerves_gate_web/live/dashboard_live.ex",
+          "lib/workbench_web/overview_live.ex"
+        ] do
+      assert Enum.any?(patterns, &Regex.match?(&1, path))
+    end
+  end
+
   test "runtime secrets preserve Bandit and the endpoint host configuration" do
     config =
-      Config.Reader.read!(Path.join(Dev.root(), "config/config.exs"),
+      Config.Reader.read!(Path.join(Workbench.root(), "config/config.exs"),
         env: Mix.env(),
         target: :host
       )
@@ -45,9 +64,9 @@ defmodule Dev.ConfigurationTest do
     # may leave endpoint settings behind; configuration merging need not erase them.
     Application.put_env(:nerves_gate, NervesGateWeb.Endpoint, server: false)
 
-    assert :ok = Dev.configure()
+    assert :ok = Workbench.configure()
 
-    settings = Application.fetch_env!(:nerves_gate_dev, DevWeb.Endpoint)
+    settings = Application.fetch_env!(:nerves_gate_workbench, WorkbenchWeb.Endpoint)
     assert settings[:adapter] == Bandit.PhoenixAdapter
     assert settings[:pubsub_server] == NervesGate.PubSub
     assert settings[:http][:ip] == {127, 0, 0, 1}

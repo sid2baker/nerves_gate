@@ -59,7 +59,13 @@ defmodule NervesGate.Apps do
   def handle_call({:storage_setup, action, card_id, confirmation}, _, state) do
     if action in [:format, :skip] and
          (map_size(state.entries) != 0 or map_size(state.running) != 0) do
-      {:reply, {:error, :applications_installed}, state}
+      {:reply,
+       {:error,
+        %{
+          code: "applications_installed",
+          message:
+            "Uninstall applications before skipping or formatting their storage. Uninstalling preserves data; formatting erases it."
+        }}, state}
     else
       {:reply, Storage.admit(action, card_id, confirmation), state}
     end

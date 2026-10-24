@@ -12,12 +12,20 @@ defmodule NervesGate.Equipment.Subnet do
         build("br0", address)
 
       _ ->
-        {:error, :equipment_unconfigured}
+        {:error,
+         %{
+           code: "equipment_unconfigured",
+           message: "Configure and save a static equipment address first."
+         }}
     end
   end
 
   def from_status(_) do
-    {:error, :network_unavailable}
+    {:error,
+     %{
+       code: "network_unavailable",
+       message: "Wait for network settings to be confirmed and recovery to finish."
+     }}
   end
 
   @doc "Active work requires the confirmed address, physical link and expected topology."
@@ -26,8 +34,16 @@ defmodule NervesGate.Equipment.Subnet do
          true <- ready?(scope, status) do
       {:ok, scope}
     else
-      false -> {:error, :equipment_not_ready}
-      error -> error
+      false ->
+        {:error,
+         %{
+           code: "equipment_not_ready",
+           message:
+             "The confirmed equipment address and link must be present before scanning or sharing."
+         }}
+
+      error ->
+        error
     end
   end
 
@@ -83,7 +99,13 @@ defmodule NervesGate.Equipment.Subnet do
     end
   end
 
-  def build(_, _), do: {:error, :equipment_unconfigured}
+  def build(_, _),
+    do:
+      {:error,
+       %{
+         code: "equipment_unconfigured",
+         message: "Configure and save a static equipment address first."
+       }}
 
   def contains?(scope, address) do
     case Config.ipv4(address) do

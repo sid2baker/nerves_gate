@@ -2,7 +2,7 @@ defmodule NervesGateWeb.NetworkEditor do
   @moduledoc "Separate drafts sharing the device-owned network trial workflow."
   use Phoenix.LiveComponent
   alias NervesGate.Network
-  alias NervesGateWeb.{Backend, NetworkForm}
+  alias NervesGateWeb.NetworkForm
   import NervesGateWeb.NetworkStatus, only: [port_label: 1]
   import NervesGateWeb.CoreComponents
 
@@ -76,7 +76,7 @@ defmodule NervesGateWeb.NetworkEditor do
          ) do
       {:ok, network} ->
         result =
-          Backend.network_propose(network,
+          NervesGate.Network.propose(network,
             access: socket.assigns.access,
             expected: socket.assigns.base
           )
@@ -89,13 +89,13 @@ defmodule NervesGateWeb.NetworkEditor do
   end
 
   def handle_event("confirm", params, socket),
-    do: reply(socket, Backend.network_confirm(params["trial_id"]))
+    do: reply(socket, NervesGate.Network.confirm(params["trial_id"]))
 
   def handle_event("cancel", params, socket),
-    do: reply(assign(socket, own_save: false), Backend.network_cancel(params["trial_id"]))
+    do: reply(assign(socket, own_save: false), NervesGate.Network.cancel(params["trial_id"]))
 
   @doc false
-  def refresh_observations(socket, %{backend: %{available: false}} = projection),
+  def refresh_observations(socket, %{device: %{available: false}} = projection),
     do: assign(socket, :projection, projection)
 
   def refresh_observations(socket, projection), do: refresh(socket, projection)
@@ -498,7 +498,7 @@ defmodule NervesGateWeb.NetworkEditor do
   defp internet_status(name, ports) do
     case Enum.find(ports, &(&1.name == name)) do
       nil -> "Not installed"
-      port -> Network.Discovery.status(port)
+      port -> NervesGate.Network.Suggestions.status(port)
     end
   end
 end

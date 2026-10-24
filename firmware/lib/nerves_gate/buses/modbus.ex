@@ -15,7 +15,13 @@ defmodule NervesGate.Buses.Modbus do
          true <- crc(payload) == received do
       decode(payload, unit, function, count)
     else
-      _ -> {:error, :modbus_response}
+      _ ->
+        {:error,
+         %{
+           code: "modbus_response",
+           message:
+             "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
+         }}
     end
   end
 
@@ -36,7 +42,14 @@ defmodule NervesGate.Buses.Modbus do
   defp decode(<<unit, exception, code>>, unit, function, _) when exception == function + 128,
     do: {:error, {:modbus_exception, code}}
 
-  defp decode(_, _, _, _), do: {:error, :modbus_response}
+  defp decode(_, _, _, _),
+    do:
+      {:error,
+       %{
+         code: "modbus_response",
+         message:
+           "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
+       }}
 
   defp crc_bit(_, value) when (value &&& 1) == 1, do: bxor(value >>> 1, 0xA001)
   defp crc_bit(_, value), do: value >>> 1

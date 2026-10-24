@@ -1,4 +1,4 @@
-defmodule Dev.SessionTest do
+defmodule Workbench.SessionTest do
   use ExUnit.Case, async: false
 
   @tag :tmp_dir
@@ -16,7 +16,7 @@ defmodule Dev.SessionTest do
       # An absolute Unix socket address this long makes gen_tcp exit(:badarg).
       # Traversing up to the session keeps its address short and usable.
       assert Path.relative_to_cwd(socket) == socket
-      assert Dev.Session.connect(dir, 1_000) == nil
+      assert Workbench.Session.connect(dir, 1_000) == nil
     end)
   end
 end

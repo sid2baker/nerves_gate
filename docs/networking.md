@@ -60,13 +60,26 @@ The EC100 board's `:cellular` profile is:
   sim_detect_level: 1,
   config: %{
     type: VintageNetECM,
-    vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Network.EG800AK}
+    vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
   }
 }
 ```
 
-When cellular is enabled, Network checks SIM detection once per ECM controller
-lifetime through the controller's existing AT port. EC100 uses active-high
+`Cellular.Profile` owns board/config generation; `Cellular.SIM` owns SIM/PIN
+lifecycle and `Cellular.Authentication` owns private APN-bound PAP.
+`Cellular.Modem` implements the VintageNetECM modem contract and bounded UART
+commands. Public `Cellular` operations share Network's single worker: there is no
+separate Cellular GenServer or second UART owner.
+
+Before VintageNet restores saved connections, startup checks the saved cellular
+configuration and its modem callback module. An unavailable/incompatible saved
+driver fails startup visibly, before opening the UART; it is not aliased, silently
+migrated or erased. Deployments with incompatible saved settings need a separately
+authorized reprovision/reset procedure. A build alone is not permission to erase
+network settings, app data or credentials.
+
+When cellular is enabled, SIM detection is checked once per ECM controller
+lifetime through that controller's existing AT port. EC100 uses active-high
 hot-plug detection (`AT+QSIMDET=1,1`). If the setting differs, setup changes it and
 reinitializes the modem's SIM/radio function once; an already-correct setting
 causes no reset. A failed/uncertain setup is reported, not repeatedly reset on
@@ -88,10 +101,10 @@ EC100 supports optional PAP credentials through the administrative API (not yet
 through the web editor):
 
 ```elixir
-:ok = NervesGate.cellular_save_authentication("operator.apn", username, password)
+:ok = NervesGate.Cellular.save_authentication("operator.apn", username, password)
 # Observe status.cellular.operation and .error for storage completion.
 # Change APN using a normal network trial; verify cellular Internet before saving.
-:ok = NervesGate.cellular_forget_authentication()
+:ok = NervesGate.Cellular.forget_authentication()
 ```
 
 Saving accepts one explicit APN, a 1–64 character username and a 0–64 character
@@ -321,7 +334,10 @@ Restrict both ports in tailnet and network policy, and never expose them publicl
 
 **Overview → Erlang distribution** shows the node name and cookie. Anyone who can
 read the page and reach these ports can run arbitrary code on the gateway. The
-cookie is not in `NervesGate.status()` or broadcasts.
+cookie comes from the explicit private `NervesGate.Distribution.cookie/0` read,
+cached only by the requesting view, never `NervesGate.status()` or broadcasts.
+Cookie display is not USB-only: restrict every management interface to trusted
+users. USB verification for first-network auto-save/password recovery is separate.
 
 OTP creates `$HOME/.erlang.cookie` (normally `/root/.erlang.cookie`) on the data
 partition: it survives reboots and updates, and factory reset erases it. `MIX_ENV=dev`
@@ -379,8 +395,8 @@ Manage SSH public keys under **Settings**. Keys grant full access, including IEx
 SFTP and firmware uploads. Changes are saved to
 `/data/nerves_gate/ssh_authorized_keys` before taking effect. Build-time
 `NERVES_GATE_SSH_KEYS` and configured NervesSSH keys seed the store only on first
-use or after factory reset. Use `NervesGate.ssh_add_key/1` and `ssh_remove_key/1`,
-not NervesSSH's key APIs.
+use or after factory reset. Use `NervesGate.SSH.add_key/1` and
+`NervesGate.SSH.remove_key/1`, not NervesSSH's key APIs.
 
 ## Logs across reboots
 

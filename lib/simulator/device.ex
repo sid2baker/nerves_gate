@@ -193,7 +193,11 @@ defmodule Simulator.Device do
 
   defp connect(vm) do
     Qemu.poll(vm, "USB recovery SSH", 90_000, fn ->
-      case SSH.connect(vm) do
+      case SSH.connect(vm, vm.forwards.usb,
+             user: ~c"root",
+             password: ~c"nerves_gate",
+             auth_methods: ~c"password"
+           ) do
         {:ok, connection} -> connection
         {:error, _} -> nil
       end

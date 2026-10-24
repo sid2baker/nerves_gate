@@ -43,7 +43,11 @@ defmodule NervesGateWeb.StoragePageTest do
         available: true,
         present: true,
         operation: :format,
-        error: NervesGate.Error.from(:storage_format_failed)
+        error: %{
+          code: "storage_format_failed",
+          message:
+            "Formatting failed. Card data may have been erased. Check the card before retrying."
+        }
       })
 
     assert html =~ "Formatting and mounting"

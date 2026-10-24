@@ -1,10 +1,10 @@
-defmodule Dev.DependencyLocksTest do
+defmodule Workbench.DependencyLocksTest do
   use ExUnit.Case, async: true
 
   test "all shared workstation and firmware dependencies have identical locks" do
     locks =
       for path <- ["mix.lock", "firmware/mix.lock"],
-          do: {path, Mix.Dep.Lock.read(Path.join(Dev.root(), path))}
+          do: {path, Mix.Dep.Lock.read(Path.join(Workbench.root(), path))}
 
     for {left, a} <- locks,
         {right, b} <- locks,

@@ -4,11 +4,15 @@
 
 ### Breaking changes
 
+- Administrative commands now live on their owning `NervesGate.Network`, `Cellular`, `Remote`, `Equipment`, `Buses`, `Indicators`, `SSH` and `Storage` modules. `NervesGate` exposes only `status/0` and `subscribe/0`; use `NervesGate.System.info/0` for identity and explicit domain reads for private login URLs/cookies. Server-injection options and remote gateway-command routing are removed.
+- Administrative status/projections use schema 8: `device` replaces `backend`, `remote` replaces `remote_access`, and action names include `buses.configure`, `buses.capture`, `buses.modbus_read` and `indicators.identify`. SDK observations remain a separate typed contract.
+- Host modules/application are `Workbench`, `WorkbenchWeb` and `:nerves_gate_workbench`; host session metadata uses `WORKBENCH_*` and `_build/workbench/`. Scenarios share one `Scenarios` catalogue/runner and explicit owned-QEMU fixture. Update host tools and disposable guest firmware together; old live sessions and firmware are not supported by the new tools.
+- Cellular code now lives under `NervesGate.Cellular`, including `Cellular.Modem`. Saved interface settings referencing an unavailable modem driver fail startup before UART access; there is no automatic migration or erasure. Physical deployment requires a separately authorized settings reprovision/reset procedure.
 - Use the platform checkout as the developer environment. Create/open ordinary SDK applications directly in the workbench, or use `mix app.new PATH`; no generator archive or solution manifest is needed.
 - App test, package and install commands take an application directory. The optional `mix dev PATH` opens that application; plain `mix dev` starts the workbench. QEMU scenarios use `mix test.qemu`.
 - Firmware and simulator versions follow the platform version. The SDK retains its independent version and Hex package; firmware, simulator and generator are no longer published on Hex. Existing 0.1.x packages remain available.
 - Simulated devices use firmware built locally from the platform checkout by default.
-- The simulator is part of the root project: `NervesGateSim` modules are now `Simulator` in `lib/simulator/`, and bench configurations moved from `sim/priv/qemu/` to `priv/simulator/`. Tailnet gateway discovery for `mix dev.ui` is `Dev.TailnetDiscovery`.
+- The simulator is part of the root project: `NervesGateSim` modules are now `Simulator` in `lib/simulator/`, and bench configurations moved from `sim/priv/qemu/` to `priv/simulator/`. Gateway discovery belongs to the workbench.
 
 ### Added
 

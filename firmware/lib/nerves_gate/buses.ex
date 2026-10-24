@@ -8,17 +8,16 @@ defmodule NervesGate.Buses do
 
   ## Commands
 
-  `configure/3`, `capture/2` and `modbus_read/3` return `:ok` when accepted,
+  `configure/2`, `capture/1` and `modbus_read/2` return `:ok` when accepted,
   or `{:error, reason}`. CAN configuration and diagnostics complete asynchronously;
   RS485 configuration changes its in-memory opt-in immediately. Only one worker
-  runs at a time. Read `status/1` for completion, errors and results.
+  runs at a time. Read `status/0` for completion, errors and results.
 
   ## Queries and notifications
 
-  `status/1` returns detected ports, the current operation and the last result.
-  `observe/1` subscribes the caller to changes. Idle observations never open UARTs
+  `status/0` returns detected ports, the current operation and the last result.
+  `observe/0` subscribes the caller to changes. Idle observations never open UARTs
   or transmit traffic. Serial opt-in and results reset on restart.
-  The optional server argument defaults to this module.
 
   `:bus_port_unavailable` reports a missing, known enabled port. CAN enablement
   comes from observations; RS485 from explicit opt-in. Missing observations never
@@ -34,11 +33,28 @@ defmodule NervesGate.Buses do
   @serial_ports %{"rs485_1" => "ttyS3", "rs485_2" => "ttyS4"}
 
   @doc false
-  def sdk(operation, arguments), do: GenServer.call(__MODULE__, {:sdk, operation, arguments})
+  def sdk(operation, arguments) do
+    case GenServer.call(__MODULE__, {:sdk, operation, arguments}) do
+      {:error, %{code: code}} -> {:error, sdk_error(code)}
+      result -> result
+    end
+  end
+
+  # The typed SDK retains atoms, never administrative error maps. This runs in
+  # the actual SDK caller, preserving ownership of subscriptions and UART claims.
+  defp sdk_error("bus_unsupported"), do: :bus_unsupported
+  defp sdk_error("bus_missing"), do: :bus_missing
+  defp sdk_error("bus_disabled"), do: :bus_disabled
+  defp sdk_error("bus_failed"), do: :bus_failed
+  defp sdk_error("bus_timeout"), do: :bus_timeout
+  defp sdk_error("can_not_passive"), do: :can_not_passive
+  defp sdk_error("port_claimed"), do: :port_claimed
+  defp sdk_error("operation_in_progress"), do: :operation_in_progress
+  defp sdk_error(_), do: :port_unavailable
 
   @doc false
   def start_link(opts \\ []),
-    do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+    do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc """
   Configure can0/can1 or opt ttyS3/ttyS4 in or out of diagnostics.
@@ -48,13 +64,22 @@ defmodule NervesGate.Buses do
   `"listen_only" => false` to permit SDK transmission; passive diagnostics still
   require listen-only mode. RS485 uses fixed 9600 8N1.
   """
-  @spec configure(String.t(), map(), GenServer.server()) :: :ok | {:error, term()}
-  def configure(port, params, server \\ __MODULE__),
-    do: GenServer.call(server, {:configure, port, params})
+
+  def configure(port, params) do
+    case Error.protect(fn -> GenServer.call(__MODULE__, {:configure, port, params}) end) do
+      {:error, reason} -> {:error, Error.safe(reason)}
+      result -> result
+    end
+  end
 
   @doc "Start receive-only capture on an enabled port: up to five seconds, 200 frames or 4096 bytes."
-  @spec capture(String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def capture(port, server \\ __MODULE__), do: GenServer.call(server, {:capture, port})
+
+  def capture(port) do
+    case Error.protect(fn -> GenServer.call(__MODULE__, {:capture, port}) end) do
+      {:error, reason} -> {:error, Error.safe(reason)}
+      result -> result
+    end
+  end
 
   @doc """
   Request one authorized Modbus RTU read on ttyS3/ttyS4, without retry.
@@ -63,17 +88,26 @@ defmodule NervesGate.Buses do
   `"function"` 3 or 4, `"address"` zero-based 0–65535, and `"count"` 1–32
   without crossing address 65535. The operator must ensure no other master is active.
   """
-  @spec modbus_read(String.t(), map(), GenServer.server()) :: :ok | {:error, term()}
-  def modbus_read(port, params, server \\ __MODULE__),
-    do: GenServer.call(server, {:modbus_read, port, params})
+
+  def modbus_read(port, params) do
+    case Error.protect(fn -> GenServer.call(__MODULE__, {:modbus_read, port, params}) end) do
+      {:error, reason} -> {:error, Error.safe(reason)}
+      result -> result
+    end
+  end
 
   @doc "Subscribe the caller to bus status/result hints; reread status on notification."
-  @spec observe(GenServer.server()) :: :ok | {:error, :unavailable}
-  def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
+
+  def observe, do: Error.protect(fn -> Observations.subscribe_runtime(__MODULE__) end)
 
   @doc "Read ports, operation, result and error. An accepted operation finishes when operation is nil."
-  @spec status(GenServer.server()) :: map()
-  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+
+  def status do
+    case Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
+      {:error, _} -> unavailable()
+      status -> status
+    end
+  end
 
   @doc false
   def unavailable,
@@ -82,12 +116,12 @@ defmodule NervesGate.Buses do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
-    Alarms.register(Keyword.get(opts, :name, __MODULE__), [:bus_port_unavailable])
+    Alarms.register(__MODULE__, [:bus_port_unavailable])
 
     state = %{
-      adapter: Keyword.get(opts, :adapter, NervesGate.Board.get(:buses_adapter)),
-      id: inspect(Keyword.get(opts, :name, __MODULE__) || self()),
-      name: Keyword.get(opts, :name, __MODULE__),
+      adapter: NervesGate.Board.get(:buses_adapter),
+      id: inspect(__MODULE__),
+      name: __MODULE__,
       ports: [],
       enabled: %{"ttyS3" => false, "ttyS4" => false},
       worker: nil,
@@ -149,11 +183,31 @@ defmodule NervesGate.Buses do
   end
 
   def handle_info({:DOWN, ref, :process, _, _}, %{worker: {%Task{ref: ref}, _}} = state),
-    do: {:noreply, complete(state, {:error, :bus_failed})}
+    do:
+      {:noreply,
+       complete(
+         state,
+         {:error,
+          %{
+            code: "bus_failed",
+            message:
+              "Bus operation failed. Check wiring, permissions and interface state. Settings may be partially applied; no retry was sent."
+          }}
+       )}
 
   def handle_info({:timeout, ref}, %{worker: {%Task{ref: ref} = task, _}} = state) do
     Task.shutdown(task, :brutal_kill)
-    {:noreply, complete(state, {:error, :bus_timeout})}
+
+    {:noreply,
+     complete(
+       state,
+       {:error,
+        %{
+          code: "bus_timeout",
+          message:
+            "Bus operation exceeded its time limit and was stopped. Recheck interface state; no retry was sent."
+        }}
+     )}
   end
 
   def handle_info(:poll, state) do
@@ -312,11 +366,24 @@ defmodule NervesGate.Buses do
   defp sdk_call(_, _, _, state), do: {:reply, {:error, :invalid_request}, state}
 
   defp hardware(%{adapter: {NervesGate.Buses.EC100, _}}), do: :ok
-  defp hardware(_), do: {:error, :bus_unsupported}
+
+  defp hardware(_),
+    do:
+      {:error,
+       %{
+         code: "bus_unsupported",
+         message: "Bus diagnostics are unsupported on this target or unavailable."
+       }}
 
   defp unclaimed(state, name) do
     if Enum.any?(state.claims, fn {_, claim} -> claim.name == name end),
-      do: {:error, :port_claimed},
+      do:
+        {:error,
+         %{
+           code: "port_claimed",
+           message:
+             "An application owns this RS485 port. Stop it or release its claim before diagnostics."
+         }},
       else: :ok
   end
 
@@ -482,18 +549,14 @@ defmodule NervesGate.Buses do
         "Device returned Modbus exception #{code}. No retry was sent."
       )
 
-  defp failure(reason)
-       when reason in [
-              :modbus_response,
-              :modbus_timeout,
-              :serial_busy,
-              :can_not_passive,
-              :bus_timeout,
-              :bus_failed
-            ],
-       do: Error.from(reason)
+  defp failure(%{code: _, message: _} = error), do: Error.safe(error)
 
-  defp failure(_), do: Error.from(:bus_failed)
+  defp failure(_),
+    do: %{
+      code: "bus_failed",
+      message:
+        "Bus operation failed. Check wiring, permissions and interface state. Settings may be partially applied; no retry was sent."
+    }
 
   defp refresh(%{adapter: nil} = state), do: state
 

@@ -1,6 +1,6 @@
-defmodule Dev.ReleaseToolingTest do
+defmodule Workbench.ReleaseToolingTest do
   use ExUnit.Case, async: false
-  alias Dev.Release
+  alias Workbench.Release
 
   test "release metadata requires a known tag, exact version and canonical dated notes" do
     root = Path.join(System.tmp_dir!(), "gate_notes_#{System.unique_integer([:positive])}")
@@ -47,7 +47,7 @@ defmodule Dev.ReleaseToolingTest do
 
     info = Release.metadata!("v0.2.0", root)
     assert info.project == "."
-    assert info.app == "nerves_gate_dev"
+    assert info.app == "nerves_gate_workbench"
     assert info.notes == "### Added\n\n- Workbench."
     assert :ok = Release.dependencies!(info, root)
     assert_raise RuntimeError, fn -> Release.metadata!("v0.2.1", root) end

@@ -6,6 +6,9 @@ defmodule NervesGate.Distribution do
   """
   require Logger
 
+  @doc "Read the private distribution cookie. Never publish or log it."
+  def cookie, do: {:ok, Node.get_cookie()}
+
   def ensure_started(remote) do
     # Called by the device-owned Remote service; launchers name workstation nodes.
     case Application.get_env(:nerves_gate, :development_node) || node_name(remote) do

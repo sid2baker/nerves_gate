@@ -42,17 +42,17 @@ jobs:
           echo "RELEASE_DIR=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
       - name: Validate version and canonical changelog
         id: metadata
-        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check prepare "$RELEASE_TAG"
+        run: mise exec -- elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check prepare "$RELEASE_TAG"
       - name: Require a tagged commit from main
         run: |
           test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor HEAD origin/main
       - name: Reject unsupported Hex dependencies
-        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check dependencies "$RELEASE_TAG"
+        run: mise exec -- elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check dependencies "$RELEASE_TAG"
       - name: Require unpublished outputs
         env:
           GH_TOKEN: ${{ github.token }}
-        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check unpublished "$RELEASE_TAG"
+        run: mise exec -- elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check unpublished "$RELEASE_TAG"
       - name: Test and inspect the SDK payload
         if: steps.metadata.outputs.project == 'sdk'
         working-directory: sdk
@@ -97,4 +97,4 @@ jobs:
       - name: Verify public release outputs
         env:
           GH_TOKEN: ${{ github.token }}
-        run: mise exec -- elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check verify "$RELEASE_TAG"
+        run: mise exec -- elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check verify "$RELEASE_TAG"

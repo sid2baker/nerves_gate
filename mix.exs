@@ -1,4 +1,4 @@
-defmodule Dev.MixProject do
+defmodule Workbench.MixProject do
   use Mix.Project
 
   # Setup can load this OTP-only installer before dependencies are compiled.
@@ -15,7 +15,7 @@ defmodule Dev.MixProject do
     Mix.target(:host)
 
     [
-      app: :nerves_gate_dev,
+      app: :nerves_gate_workbench,
       version: @version,
       elixir: "~> 1.20",
       listeners: if(Mix.env() == :dev, do: [Phoenix.CodeReloader], else: []),
@@ -45,7 +45,7 @@ defmodule Dev.MixProject do
 
   # No UI, devices, networking services or release actions start implicitly.
   def application,
-    do: [extra_applications: [:logger, :crypto, :ssh, :eex], mod: {Dev.Application, []}]
+    do: [extra_applications: [:logger, :crypto, :ssh, :eex], mod: {Workbench.Application, []}]
 
   def cli, do: [preferred_envs: [ci: :test, "test.qemu": :test]]
 
@@ -106,7 +106,7 @@ defmodule Dev.MixProject do
 
     Mix.Task.run("app.config")
     env = if env == "prod", do: :prod, else: :dev
-    Dev.Builds.firmware!(target, &Mix.shell().info(&1), env)
+    Workbench.Builds.firmware!(target, &Mix.shell().info(&1), env)
   end
 
   defp format(args), do: Mix.Tasks.Format.run(args)
@@ -122,7 +122,7 @@ defmodule Dev.MixProject do
     Mix.Task.clear()
     Mix.Task.run("loadconfig")
     Mix.Task.run("compile", ["--warnings-as-errors"])
-    Dev.Builds.assets!(&Mix.shell().info(&1))
+    Workbench.Builds.assets!(&Mix.shell().info(&1))
     Mix.Tasks.Format.run(["--check-formatted"])
     Mix.Task.run("test")
   end

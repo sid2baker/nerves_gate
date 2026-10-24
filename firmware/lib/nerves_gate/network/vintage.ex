@@ -1,9 +1,9 @@
 defmodule NervesGate.Network.Vintage do
   @moduledoc "Firmware adapter. USB is never part of a port-role change. No Ethernet DHCP server or NAT."
-  @behaviour NervesGate.Network.Adapter
+
   import Bitwise
   alias NervesGate.Config
-  alias NervesGate.Network.{Cellular, LAN}
+  alias NervesGate.Network.LAN
   require Logger
 
   # Listed first in the firmware services: one-time routing setup before Network
@@ -23,6 +23,24 @@ defmodule NervesGate.Network.Vintage do
     _exception in [MatchError, ErlangError] ->
       Logger.warning("IPv4 subnet forwarding setup failed; local web access remains available.")
       :ignore
+  end
+
+  # Inspect persistence before VintageNet opens the UART. An incompatible saved
+  # driver must stop startup, not enter a controller crash/reopen loop. Never
+  # migrate or erase settings as a side effect of a firmware source cutover.
+  @doc false
+  def check_saved_cellular do
+    case NervesGate.Cellular.Profile.get() do
+      %{interface: name} ->
+        case VintageNet.Persistence.call(:load, [name]) do
+          {:ok, config} -> NervesGate.Cellular.Profile.check_saved(config)
+          {:error, :enoent} -> :ok
+          _ -> NervesGate.Cellular.Profile.check_saved(nil)
+        end
+
+      nil ->
+        :ok
+    end
   end
 
   # DataInit calls this before VintageNet can restore a saved cellular link.
@@ -69,21 +87,18 @@ defmodule NervesGate.Network.Vintage do
     if tool == "iptables", do: [replies, dhcp, drop], else: [replies, drop]
   end
 
-  @impl true
-  def observations(_), do: [{VintageNet, ["interface"]}]
-
-  @impl true
-  def load(_) do
-    with {:ok, configs} <- saved_configurations(),
-         {:ok, network} <- from_configurations(configs),
-         do: {:ok, Config.from_network(network)}
+  def observations do
+    [{VintageNet, ["interface"]}]
   end
 
-  @impl true
-  def save(network, _) do
-    # configure/3 skips identical configurations and logs persistence failures.
-    # Save explicitly so confirming a temporary configuration really persists it
-    # and reports errors. These are VintageNet's files, not an application journal.
+  def load do
+    with {:ok, configs} <- saved_configurations(),
+         {:ok, network} <- from_configurations(configs) do
+      {:ok, NervesGate.Config.from_network(network)}
+    end
+  end
+
+  def save(network) do
     with {:ok, configs} <- all_configurations(network) do
       Enum.reduce_while(configs, :ok, &save_interface/2)
     end
@@ -233,11 +248,13 @@ defmodule NervesGate.Network.Vintage do
     end
   end
 
-  @impl true
-  def apply_config(network, _), do: apply_network(network, false)
+  def apply_config(network) do
+    apply_network(network, false)
+  end
 
-  @impl true
-  def restore(network, _), do: apply_network(network, true)
+  def restore(network) do
+    apply_network(network, true)
+  end
 
   defp apply_network(network, force) do
     with {:ok, configs} <- all_configurations(network) do
@@ -246,7 +263,7 @@ defmodule NervesGate.Network.Vintage do
   end
 
   defp all_configurations(network) do
-    with {:ok, cellular} <- Cellular.configurations(network),
+    with {:ok, cellular} <- NervesGate.Cellular.Profile.configurations(network),
          do: {:ok, configurations(network) ++ cellular}
   end
 
@@ -341,9 +358,10 @@ defmodule NervesGate.Network.Vintage do
       else: :ok
   end
 
-  @impl true
-  def snapshot(_) do
-    if :ets.whereis(VintageNet) != :undefined, do: interfaces()
+  def snapshot do
+    if :ets.whereis(VintageNet) != :undefined do
+      interfaces()
+    end
   end
 
   defp interfaces do
@@ -352,13 +370,13 @@ defmodule NervesGate.Network.Vintage do
       bridge: interface("br0"),
       ports: Enum.map(["eth0", "eth1"], &interface/1),
       usb: interface("usb0"),
-      cellular_supported: NervesGate.Network.Cellular.profile() != nil,
+      cellular_supported: NervesGate.Cellular.Profile.get() != nil,
       cellular: cellular_interface()
     }
   end
 
   defp cellular_interface do
-    if profile = Cellular.profile() do
+    if profile = NervesGate.Cellular.Profile.get() do
       config = get(profile.interface, "config") || %{}
 
       options =

@@ -21,7 +21,7 @@ defmodule NervesGate.ProjectionServer do
   @impl true
   def init(_) do
     bind()
-    inputs = Map.new([:system | @domains], &{&1, NervesGate.status_input(&1)})
+    inputs = Map.new([:system | @domains], &{&1, read(&1)})
     {:ok, %{projection: Projection.new(inputs), clients: %{}, dirty: MapSet.new()}}
   end
 
@@ -87,8 +87,17 @@ defmodule NervesGate.ProjectionServer do
     %{state | dirty: Enum.reduce(domains, state.dirty, &MapSet.put(&2, &1))}
   end
 
+  defp read(:network), do: NervesGate.Network.status()
+  defp read(:remote), do: NervesGate.Remote.status()
+  defp read(:equipment), do: NervesGate.Equipment.status()
+  defp read(:indicators), do: NervesGate.Indicators.status()
+  defp read(:buses), do: NervesGate.Buses.status()
+  defp read(:ssh), do: NervesGate.SSH.status()
+  defp read(:storage), do: NervesGate.Storage.commissioning()
+  defp read(:system), do: NervesGate.System.info()
+
   defp refresh(domain, state) do
-    value = NervesGate.status_input(domain)
+    value = read(domain)
 
     if value == Map.fetch!(state.projection.inputs, domain) do
       state

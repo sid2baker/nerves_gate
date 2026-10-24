@@ -51,15 +51,15 @@ jobs:
         run: mise exec -- mix setup
       - name: Two-device simulator scenarios
         run: |
-          mkdir -p _build/qemu-tests
+          mkdir -p _build/simulator
           set -o pipefail
-          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci 2>&1 | tee _build/qemu-tests/suite.log
+          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci 2>&1 | tee _build/simulator/suite.log
       - name: Retain diagnostics (never VM disks)
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: simulator-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: _build/qemu-tests/**/*.log
+          path: _build/simulator/**/*.log
           if-no-files-found: ignore
           retention-days: 14
 

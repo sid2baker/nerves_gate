@@ -1,6 +1,6 @@
-defmodule Dev.FirmwareCommandTest do
+defmodule Workbench.FirmwareCommandTest do
   use ExUnit.Case, async: true
-  alias Dev.FirmwareCommand
+  alias Workbench.FirmwareCommand
 
   test "short commands can exit immediately without an output-acknowledgement EPIPE" do
     printf = System.find_executable("printf")

@@ -7,7 +7,10 @@ this development loop.
 
 Navigation is **Overview · Equipment · Settings**. Open a connection or physical
 port for its settings and diagnostics. Pages share the device-owned projection;
-form drafts stay separate from live observations.
+form drafts stay separate from live observations. The shared read model is schema
+v8 (`device` availability, `remote` observations and domain-qualified actions).
+Gateway views subscribe to the local source before reading, clear availability
+on owner loss and obtain a fresh snapshot on resubscription.
 
 ## Pages
 
@@ -22,6 +25,7 @@ form drafts stay separate from live observations.
 | RS485 1 / 2 | `/equipment/rs485/1`, `/equipment/rs485/2` | Opt-in, passive capture and one-shot Modbus reads |
 | CAN 1 / 2 | `/equipment/can/1`, `/equipment/can/2` | Listen-only configuration, counters and capture |
 | Settings | `/settings` | Separate/joined LAN ports, joined-network address, SSH keys and device information |
+| Application storage | `/storage` | Card commissioning, readiness and explicit format confirmation |
 
 Equipment hides a port used solely for Internet without renumbering the other.
 Unassigned LAN ports and all buses stay visible, including disabled or unavailable
@@ -73,13 +77,16 @@ TCP/UDP port probes. Scans cannot overlap LAN trials and never change settings.
 - **Identify** (Settings) blinks the status LEDs, then resumes current patterns.
   There is no web reboot or reset. See [LEDs and button](indicators.md).
 
-Gateway commands run on the device serving the page. QEMU reports EC100
-peripherals as unavailable. The UI has no sign-in; see
+Gateway commands call public domain APIs locally on the device serving the page;
+there is no remote command backend. Sign-in URLs and distribution cookies are
+explicit private reads cached only in the requesting view, never the projection.
+Cookie display, like SIM controls, is available over trusted management interfaces,
+not restricted to USB. QEMU reports EC100 peripherals as unavailable. The UI has no sign-in; see
 [HTTP exposure](networking.md#local-recovery-and-http-exposure).
 
 ## Developer workbench
 
-`mix dev` serves `lib/dev_web/` at localhost:4000:
+`mix dev` serves `lib/workbench_web/` at localhost:4000:
 
 | Page | Route | Purpose |
 | --- | --- | --- |
@@ -96,7 +103,9 @@ The **Simulated · QEMU** badge comes only from the simulator's own inventory, n
 from names or advertisements. Physical entries are unverified until **Read device
 information** queries the gateway over authenticated SSH. Rendering a page never
 probes devices, starts devices, builds firmware or sends updates; the Devices page
-only starts a bounded mDNS browse. Physical devices never get QEMU controls.
+only starts a bounded mDNS browse. Physical devices never get QEMU controls. The simulated-device page explicitly
+subscribes to that owned guest's remote **read-only** projection; it is not a
+remote gateway-command proxy.
 
 Operations belong to the backend: navigating away does not cancel them, and their
 status and output stay visible on every page. UI and CLI call the same operations,

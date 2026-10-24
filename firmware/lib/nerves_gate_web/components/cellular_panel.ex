@@ -2,7 +2,6 @@ defmodule NervesGateWeb.CellularPanel do
   @moduledoc "SIM commissioning beside Internet settings. Credentials are never LiveView drafts."
   use Phoenix.LiveComponent
   import NervesGateWeb.CoreComponents
-  alias NervesGateWeb.Backend
 
   def update(assigns, socket) do
     {:ok,
@@ -12,23 +11,23 @@ defmodule NervesGateWeb.CellularPanel do
      |> assign_new(:message, fn -> nil end)}
   end
 
-  def handle_event("refresh", _, socket), do: reply(socket, Backend.cellular_refresh())
+  def handle_event("refresh", _, socket), do: reply(socket, NervesGate.Cellular.refresh())
 
   def handle_event("unlock", params, socket),
-    do: reply(socket, Backend.cellular_unlock(params["pin"]))
+    do: reply(socket, NervesGate.Cellular.unlock(params["pin"]))
 
   def handle_event("save_pin", params, socket),
-    do: reply(socket, Backend.cellular_save_pin(params["pin"]))
+    do: reply(socket, NervesGate.Cellular.save_pin(params["pin"]))
 
   def handle_event("forget_pin", _, socket),
-    do: reply(socket, Backend.cellular_forget_pin())
+    do: reply(socket, NervesGate.Cellular.forget_pin())
 
   def handle_event("change_pin", params, socket) do
     if params["new_pin"] == params["repeat_pin"],
       do:
         reply(
           socket,
-          Backend.cellular_change_pin(
+          NervesGate.Cellular.change_pin(
             params["current_pin"],
             params["new_pin"]
           )
@@ -53,7 +52,7 @@ defmodule NervesGateWeb.CellularPanel do
       else:
         reply(
           socket,
-          Backend.cellular_set_pin_lock(enabled, params["pin"])
+          NervesGate.Cellular.set_pin_lock(enabled, params["pin"])
         )
   end
 
@@ -77,7 +76,7 @@ defmodule NervesGateWeb.CellularPanel do
       assign(
         assigns,
         :cellular,
-        Map.get(assigns.projection, :cellular, NervesGate.Network.Cellular.view(nil))
+        Map.get(assigns.projection, :cellular, NervesGate.Cellular.view(nil))
       )
 
     content(assigns)

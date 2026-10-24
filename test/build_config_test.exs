@@ -1,4 +1,4 @@
-defmodule Dev.BuildConfigTest do
+defmodule Workbench.BuildConfigTest do
   use ExUnit.Case, async: false
 
   test "root configuration selects host even when the caller selected a device target" do
@@ -8,7 +8,7 @@ defmodule Dev.BuildConfigTest do
     try do
       for target <- [:ec100, :x86_64] do
         Mix.target(target)
-        assert Dev.MixProject.project()[:app] == :nerves_gate_dev
+        assert Workbench.MixProject.project()[:app] == :nerves_gate_workbench
         assert Mix.target() == :host
         assert System.get_env("MIX_TARGET") == inherited
       end
@@ -18,7 +18,7 @@ defmodule Dev.BuildConfigTest do
   end
 
   test "firmware command rejects unsupported targets and environments before building" do
-    firmware = Dev.MixProject.project()[:aliases][:firmware]
+    firmware = Workbench.MixProject.project()[:aliases][:firmware]
 
     for args <- [
           ["unknown"],
@@ -37,7 +37,7 @@ defmodule Dev.BuildConfigTest do
       for env <- [:dev, :test, :docs, :prod] do
         Mix.env(env)
 
-        assert Dev.MixProject.project()[:listeners] ==
+        assert Workbench.MixProject.project()[:listeners] ==
                  if(env == :dev, do: [Phoenix.CodeReloader], else: [])
       end
     after

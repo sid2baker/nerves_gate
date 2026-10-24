@@ -1,8 +1,8 @@
 defmodule NervesGateWeb.CellularPanelTest do
   use ExUnit.Case, async: false
   import Phoenix.LiveViewTest, only: [render_component: 2]
-  alias NervesGate.Network.Cellular
-  alias NervesGateWeb.{Backend, CellularPanel}
+  alias NervesGate.Cellular
+  alias NervesGateWeb.CellularPanel
 
   test "unlock form explains private storage and never uses change events or credential values" do
     html = panel(%{sim: :pin_required})
@@ -67,24 +67,16 @@ defmodule NervesGateWeb.CellularPanelTest do
   end
 
   test "credential commands and events need no USB access and never retain submitted PINs" do
-    previous = Application.fetch_env(:nerves_gate, :backend_node)
-    Application.put_env(:nerves_gate, :backend_node, nil)
-
-    on_exit(fn ->
-      case previous do
-        {:ok, backend} -> Application.put_env(:nerves_gate, :backend_node, backend)
-        :error -> Application.delete_env(:nerves_gate, :backend_node)
-      end
-    end)
+    assert Process.whereis(NervesGate.Network) == nil
 
     for result <- [
-          Backend.cellular_unlock("invalid"),
-          Backend.cellular_save_pin("invalid"),
-          Backend.cellular_forget_pin(),
-          Backend.cellular_change_pin("invalid", "invalid"),
-          Backend.cellular_set_pin_lock(true, "invalid")
+          NervesGate.Cellular.unlock("invalid"),
+          NervesGate.Cellular.save_pin("invalid"),
+          NervesGate.Cellular.forget_pin(),
+          NervesGate.Cellular.change_pin("invalid", "invalid"),
+          NervesGate.Cellular.set_pin_lock(true, "invalid")
         ] do
-      assert {:error, %{code: "outcome_unknown"}} = result
+      assert {:error, %{code: "unavailable"}} = result
     end
 
     for {event, params} <- [

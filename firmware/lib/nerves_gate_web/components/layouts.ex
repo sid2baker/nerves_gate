@@ -50,10 +50,10 @@ defmodule NervesGateWeb.Layouts do
         </.notice>
       </div>
       <.notice
-        :if={!@projection.backend.available}
+        :if={!@projection.device.available}
         tone="warning"
         role="alert"
-        id="backend-disconnected"
+        id="device-disconnected"
       >
         Device disconnected. Reconnecting… Commands are disabled and will not be retried.
         Unconfirmed network changes restore automatically on the device.

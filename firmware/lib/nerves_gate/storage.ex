@@ -10,13 +10,26 @@ defmodule NervesGate.Storage do
   alias NervesGateSDK.Storage.Status
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
-  def commissioning, do: GenServer.call(__MODULE__, :commissioning)
-  def observe, do: Observations.subscribe_runtime(__MODULE__)
+
+  def commissioning do
+    case Error.protect(fn -> GenServer.call(__MODULE__, :commissioning) end) do
+      {:error, _} -> unavailable()
+      status -> status
+    end
+  end
+
+  def observe, do: Error.protect(fn -> Observations.subscribe_runtime(__MODULE__) end)
 
   # Apps checks lifecycle admission before handing setup to this domain. All
   # storage work then belongs here, not in a UI process or an RPC worker.
-  def setup(action, card_id \\ nil, confirmation \\ nil),
-    do: GenServer.call(NervesGate.Apps, {:storage_setup, action, card_id, confirmation})
+  def setup(action, card_id \\ nil, confirmation \\ nil) do
+    case Error.protect(fn ->
+           GenServer.call(NervesGate.Apps, {:storage_setup, action, card_id, confirmation})
+         end) do
+      {:error, reason} -> {:error, Error.safe(reason)}
+      result -> result
+    end
+  end
 
   @doc false
   def admit(action, card_id, confirmation),
@@ -66,7 +79,11 @@ defmodule NervesGate.Storage do
     do: {:reply, [{Observations.table(), ["storage"]}], state}
 
   def handle_call({:setup, _, _, _}, _, %{worker: worker} = state) when worker != nil,
-    do: {:reply, {:error, :operation_in_progress}, state}
+    do:
+      {:reply,
+       {:error,
+        %{code: "operation_in_progress", message: "Wait for the current operation to finish."}},
+       state}
 
   def handle_call({:setup, :skip, _, _}, _, state) do
     # A regular unmount refuses open files; never silently detach busy apps.
@@ -86,13 +103,25 @@ defmodule NervesGate.Storage do
          :ok <- safe_device() do
       begin_setup(state, action, current)
     else
-      false -> {:reply, {:error, :storage_card_changed}, state}
-      error -> {:reply, error, state}
+      false ->
+        {:reply,
+         {:error,
+          %{
+            code: "storage_card_changed",
+            message:
+              "The card is missing or has changed. Review the detected card before continuing."
+          }}, state}
+
+      error ->
+        {:reply, error, state}
     end
   end
 
   def handle_call({:setup, _, _, _}, _, state),
-    do: {:reply, {:error, :storage_setup_invalid}, state}
+    do:
+      {:reply,
+       {:error, Error.new("invalid_parameters", "Choose use, skip or format for storage setup.")},
+       state}
 
   @impl true
   def handle_info(:poll, state) do
@@ -114,19 +143,39 @@ defmodule NervesGate.Storage do
       case result do
         :ok ->
           case save(state.file, :use) do
-            :ok -> %{state | choice: :use, error: nil}
-            _ -> %{state | choice: :pending, error: Error.from(:storage_save_failed)}
+            :ok ->
+              %{state | choice: :use, error: nil}
+
+            _ ->
+              %{
+                state
+                | choice: :pending,
+                  error: %{
+                    code: "storage_save_failed",
+                    message: "Could not save the storage setup choice."
+                  }
+              }
           end
 
         {:error, reason} ->
-          %{state | error: Error.from(reason)}
+          %{state | error: NervesGate.Error.safe(reason)}
       end
 
     {:noreply, publish(next)}
   end
 
   def handle_info({:DOWN, ref, :process, _, _}, %{worker: %{task: %Task{ref: ref}}} = state),
-    do: {:noreply, publish(%{state | worker: nil, error: Error.from(:storage_setup_failed)})}
+    do:
+      {:noreply,
+       publish(%{
+         state
+         | worker: nil,
+           error: %{
+             code: "storage_setup_failed",
+             message:
+               "Storage setup failed. Inspect the card before retrying; formatting may have erased data."
+           }
+       })}
 
   def handle_info(_, state), do: {:noreply, state}
 
@@ -149,8 +198,14 @@ defmodule NervesGate.Storage do
       {:reply, :ok, state}
     else
       case save(state.file, :pending) do
-        :ok -> {:reply, :ok, start(%{state | choice: :pending, card: current}, action)}
-        _ -> {:reply, {:error, :storage_save_failed}, state}
+        :ok ->
+          {:reply, :ok, start(%{state | choice: :pending, card: current}, action)}
+
+        _ ->
+          {:reply,
+           {:error,
+            %{code: "storage_save_failed", message: "Could not save the storage setup choice."}},
+           state}
       end
     end
   end
@@ -164,9 +219,25 @@ defmodule NervesGate.Storage do
   end
 
   defp allowed(:format, _, :erase_all_data), do: :ok
-  defp allowed(:format, _, _), do: {:error, :storage_confirmation_required}
+
+  defp allowed(:format, _, _),
+    do:
+      {:error,
+       %{
+         code: "storage_confirmation_required",
+         message: "Confirm that all data on this card will be erased."
+       }}
+
   defp allowed(:use, %{filesystem: "ext4"}, _), do: :ok
-  defp allowed(:use, _, _), do: {:error, :storage_filesystem}
+
+  defp allowed(:use, _, _),
+    do:
+      {:error,
+       %{
+         code: "storage_filesystem",
+         message:
+           "This card cannot be used as-is. Application storage needs ext4; formatting erases all existing card data."
+       }}
 
   defp prepare(action, id) do
     with :ok <- safe_device(),
@@ -177,8 +248,16 @@ defmodule NervesGate.Storage do
          :ok <- cmd("mount", ["-t", "ext4", "-o", "nodev,nosuid", device(), mountpoint()]) do
       :ok
     else
-      false -> {:error, :storage_card_changed}
-      {:error, _} = error -> error
+      false ->
+        {:error,
+         %{
+           code: "storage_card_changed",
+           message:
+             "The card is missing or has changed. Review the detected card before continuing."
+         }}
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -187,16 +266,36 @@ defmodule NervesGate.Storage do
   defp maybe_format(:format) do
     case System.find_executable("mke2fs") do
       nil ->
-        {:error, :storage_format_unavailable}
+        {:error,
+         %{
+           code: "storage_format_unavailable",
+           message:
+             "This firmware does not include mke2fs. Prepare the card externally or install firmware with the formatting tool."
+         }}
 
       tool ->
         case MuonTrap.cmd(tool, ["-F", "-t", "ext4", "-L", "apps", device()],
                timeout: 120_000,
                stderr_to_stdout: true
              ) do
-          {_, 0} -> :ok
-          {_, :timeout} -> {:error, :storage_format_timeout}
-          _ -> {:error, :storage_format_failed}
+          {_, 0} ->
+            :ok
+
+          {_, :timeout} ->
+            {:error,
+             %{
+               code: "storage_format_timeout",
+               message:
+                 "Formatting timed out. Card data may have been erased; inspect storage before retrying."
+             }}
+
+          _ ->
+            {:error,
+             %{
+               code: "storage_format_failed",
+               message:
+                 "Formatting failed. Card data may have been erased. Check the card before retrying."
+             }}
         end
     end
   end
@@ -227,9 +326,23 @@ defmodule NervesGate.Storage do
             (mount.mount_point == mountpoint() and mount.major_minor != own_id)
         end)
 
-      if unsafe?, do: {:error, :storage_in_use}, else: :ok
+      if unsafe?,
+        do:
+          {:error,
+           %{
+             code: "storage_in_use",
+             message:
+               "The disk is used by another filesystem. System storage and busy cards cannot be formatted."
+           }},
+        else: :ok
     else
-      _ -> {:error, :storage_card_changed}
+      _ ->
+        {:error,
+         %{
+           code: "storage_card_changed",
+           message:
+             "The card is missing or has changed. Review the detected card before continuing."
+         }}
     end
   end
 
@@ -349,12 +462,25 @@ defmodule NervesGate.Storage do
   defp cmd(command, args) do
     case System.find_executable(command) do
       nil ->
-        {:error, :storage_setup_failed}
+        {:error,
+         %{
+           code: "storage_setup_failed",
+           message:
+             "Storage setup failed. Inspect the card before retrying; formatting may have erased data."
+         }}
 
       tool ->
         case MuonTrap.cmd(tool, args, timeout: 5_000, stderr_to_stdout: true) do
-          {_, 0} -> :ok
-          _ -> {:error, :storage_mount_failed}
+          {_, 0} ->
+            :ok
+
+          _ ->
+            {:error,
+             %{
+               code: "storage_mount_failed",
+               message:
+                 "Could not mount or unmount the card. It may be busy, damaged or have unsupported filesystem features."
+             }}
         end
     end
   end

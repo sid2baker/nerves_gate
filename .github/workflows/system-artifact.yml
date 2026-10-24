@@ -64,7 +64,7 @@ jobs:
         run: mise exec -- mix deps.get --check-locked
       - name: Check version, inputs and existing release
         id: release
-        run: mise exec -- elixir -r ../lib/dev/artifact_release.ex -S mix nerves.artifact.release check
+        run: mise exec -- elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release check
       - name: Restore system source downloads
         if: steps.release.outputs.publish == 'true'
         id: downloads
@@ -77,14 +77,14 @@ jobs:
             system-downloads-${{ inputs.target }}-v2-
       - name: Fetch Buildroot sources before compilation
         if: steps.release.outputs.publish == 'true'
-        run: mise exec -- elixir -r ../lib/dev/artifact_release.ex -S mix nerves.artifact.release source
+        run: mise exec -- elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release source
       - name: Build system artifact
         if: steps.release.outputs.publish == 'true'
         # Nerves 2's container runner requests a TTY, including noninteractive builds.
         run: script -q -e -c "mise exec -- mix nerves.artifact.build $SYSTEM_APP" /dev/null < /dev/null
       - name: Collect Buildroot legal info, source archive and checksums
         if: steps.release.outputs.publish == 'true' && inputs.target == 'ec100'
-        run: mise exec -- elixir -r ../lib/dev/artifact_release.ex -S mix nerves.artifact.release collect
+        run: mise exec -- elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release collect
       - name: Save system source downloads, including after failure
         if: ${{ !cancelled() && steps.release.outputs.publish == 'true' && steps.downloads.outcome == 'success' }}
         uses: actions/cache/save@v6
@@ -93,7 +93,7 @@ jobs:
           key: ${{ steps.downloads.outputs.cache-primary-key }}
       - name: Publish immutable system release
         if: steps.release.outputs.publish == 'true'
-        run: mise exec -- elixir -r ../lib/dev/artifact_release.ex -S mix nerves.artifact.release publish
+        run: mise exec -- elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release publish
       - name: Verify download without the build cache
         run: mise exec -- mix nerves.artifact.get
         env:

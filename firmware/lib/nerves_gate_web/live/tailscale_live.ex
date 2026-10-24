@@ -1,13 +1,13 @@
 defmodule NervesGateWeb.TailscaleLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  alias NervesGateWeb.{Backend, RemoteStatus}
+  alias NervesGateWeb.RemoteStatus
   alias Phoenix.LiveView.JS
 
   def mount(_, _, socket) do
     socket = NervesGateWeb.Observations.subscribe(socket, &__MODULE__.refresh_observations/2)
     if connected?(socket), do: Process.send_after(self(), :check_login, 1000)
-    remote = socket.assigns.projection.remote_access
+    remote = socket.assigns.projection.remote
 
     {:ok,
      assign(socket,
@@ -47,7 +47,7 @@ defmodule NervesGateWeb.TailscaleLive do
 
     if socket.assigns.request != nil or socket.assigns.login_requested,
       do: {:noreply, socket},
-      else: submit(socket, socket.assigns.projection.remote_access.state, params)
+      else: submit(socket, socket.assigns.projection.remote.state, params)
   end
 
   def handle_event("show-login", _, socket),
@@ -65,7 +65,7 @@ defmodule NervesGateWeb.TailscaleLive do
   def handle_event("disconnect", _, socket) do
     socket = socket |> clear_flash() |> assign(disconnecting: false)
 
-    case Backend.remote_disconnect() do
+    case NervesGate.Remote.disconnect() do
       :ok -> {:noreply, socket |> clear_login() |> assign(request: :disconnect)}
       {:error, error} -> {:noreply, put_flash(socket, :error, error.message)}
     end
@@ -91,22 +91,23 @@ defmodule NervesGateWeb.TailscaleLive do
   end
 
   defp command("online", _, params, base),
-    do: Backend.remote_configure(params["hostname"], expected: base)
+    do: NervesGate.Remote.configure(params["hostname"], expected: base)
 
   defp command(_, "auth_key", params, base),
-    do: Backend.remote_connect(params["hostname"], auth_key: params["auth_key"], expected: base)
+    do:
+      NervesGate.Remote.connect(params["hostname"], auth_key: params["auth_key"], expected: base)
 
   defp command(_, "link", params, base),
-    do: Backend.remote_connect(params["hostname"], expected: base)
+    do: NervesGate.Remote.connect(params["hostname"], expected: base)
 
   @doc false
-  def refresh_observations(socket, %{backend: %{available: false}} = projection),
+  def refresh_observations(socket, %{device: %{available: false}} = projection),
     do: socket |> assign(projection: projection, request: nil, pending_name: nil) |> clear_login()
 
   def refresh_observations(socket, projection) do
-    previous = socket.assigns.projection.remote_access
+    previous = socket.assigns.projection.remote
     socket = assign(socket, projection: projection)
-    remote = projection.remote_access
+    remote = projection.remote
 
     if previous == remote do
       socket
@@ -121,7 +122,7 @@ defmodule NervesGateWeb.TailscaleLive do
 
   def handle_info(:check_login, socket) do
     Process.send_after(self(), :check_login, 1000)
-    {:noreply, read_login(socket, socket.assigns.projection.remote_access)}
+    {:noreply, read_login(socket, socket.assigns.projection.remote)}
   end
 
   defp notify(socket, %{error: error}, %{error: previous})
@@ -227,7 +228,7 @@ defmodule NervesGateWeb.TailscaleLive do
          auth_state: auth
        })
        when auth in ["authenticating", "needs_login"] do
-    case Backend.remote_login_url(socket.assigns.projection_backend) do
+    case NervesGate.Remote.login_url() do
       {:ok, url} -> login_url(socket, url)
       _ -> login_url(socket, nil)
     end
@@ -244,7 +245,7 @@ defmodule NervesGateWeb.TailscaleLive do
     do: assign(socket, login_url: nil, login_open: false, login_requested: false)
 
   def render(assigns) do
-    remote = assigns.projection.remote_access
+    remote = assigns.projection.remote
     busy = remote.operation != nil or assigns.request != nil
     assigns = assign(assigns, remote: remote, busy: busy, waiting: assigns.login_requested)
 

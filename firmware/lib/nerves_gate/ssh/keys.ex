@@ -32,21 +32,48 @@ defmodule NervesGate.SSH.Keys do
          fingerprint: to_string(:ssh.hostkey_fingerprint(:sha256, key))
        }}
     else
-      _ -> {:error, :invalid_ssh_key}
+      _ ->
+        {:error,
+         %{
+           code: "invalid_ssh_key",
+           message:
+             "Paste one OpenSSH public key (Ed25519, RSA or ECDSA), without key options. Never paste a private key."
+         }}
     end
   rescue
     _ in [ArgumentError, FunctionClauseError, MatchError, ErlangError] ->
-      {:error, :invalid_ssh_key}
+      {:error,
+       %{
+         code: "invalid_ssh_key",
+         message:
+           "Paste one OpenSSH public key (Ed25519, RSA or ECDSA), without key options. Never paste a private key."
+       }}
   end
 
-  def parse(_), do: {:error, :invalid_ssh_key}
+  def parse(_),
+    do:
+      {:error,
+       %{
+         code: "invalid_ssh_key",
+         message:
+           "Paste one OpenSSH public key (Ed25519, RSA or ECDSA), without key options. Never paste a private key."
+       }}
 
   def add(keys, text) do
     with {:ok, entry} <- parse(text) do
       cond do
-        Enum.any?(keys, &(&1.fingerprint == entry.fingerprint)) -> {:ok, keys}
-        length(keys) >= @limit -> {:error, :ssh_key_limit}
-        true -> {:ok, keys ++ [entry]}
+        Enum.any?(keys, &(&1.fingerprint == entry.fingerprint)) ->
+          {:ok, keys}
+
+        length(keys) >= @limit ->
+          {:error,
+           %{
+             code: "ssh_key_limit",
+             message: "The 32-key limit has been reached. Remove an unused key first."
+           }}
+
+        true ->
+          {:ok, keys ++ [entry]}
       end
     end
   end
@@ -73,7 +100,12 @@ defmodule NervesGate.SSH.Keys do
          :ok <- sync_directory(Path.dirname(directory)) do
       :ok
     else
-      _ -> {:error, :ssh_keys_unavailable}
+      _ ->
+        {:error,
+         %{
+           code: "ssh_keys_unavailable",
+           message: "SSH keys could not be read or saved. Existing keys have not been replaced."
+         }}
     end
   end
 
@@ -112,16 +144,32 @@ defmodule NervesGate.SSH.Keys do
          {:ok, text} <- File.read(path) do
       parse_lines(String.split(text, "\n", trim: true))
     else
-      {:error, :enoent} -> {:error, :enoent}
-      _ -> {:error, :ssh_keys_unavailable}
+      {:error, :enoent} ->
+        {:error, :enoent}
+
+      _ ->
+        {:error,
+         %{
+           code: "ssh_keys_unavailable",
+           message: "SSH keys could not be read or saved. Existing keys have not been replaced."
+         }}
     end
   end
 
   defp parse_lines(lines) do
     Enum.reduce_while(lines, {:ok, []}, fn line, {:ok, keys} ->
       case add(keys, line) do
-        {:ok, keys} -> {:cont, {:ok, keys}}
-        _ -> {:halt, {:error, :ssh_keys_unavailable}}
+        {:ok, keys} ->
+          {:cont, {:ok, keys}}
+
+        _ ->
+          {:halt,
+           {:error,
+            %{
+              code: "ssh_keys_unavailable",
+              message:
+                "SSH keys could not be read or saved. Existing keys have not been replaced."
+            }}}
       end
     end)
   end

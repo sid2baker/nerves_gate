@@ -54,7 +54,13 @@ defmodule NervesGate.Linux.CAN do
         :ok
       end
     else
-      _ -> {:error, :can_not_passive}
+      _ ->
+        {:error,
+         %{
+           code: "can_not_passive",
+           message:
+             "CAN capture requires an enabled interface in listen-only mode. Configure it in Settings."
+         }}
     end
   end
 

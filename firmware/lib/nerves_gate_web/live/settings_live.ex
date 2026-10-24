@@ -14,7 +14,7 @@ defmodule NervesGateWeb.SettingsLive do
   def handle_event("add-key", %{"ssh" => %{"public_key" => key}}, socket) do
     socket = clear_flash(socket)
 
-    case NervesGateWeb.Backend.ssh_add_key(key) do
+    case NervesGate.SSH.add_key(key) do
       :ok ->
         {:noreply,
          socket
@@ -29,7 +29,7 @@ defmodule NervesGateWeb.SettingsLive do
   def handle_event("remove-key", %{"fingerprint" => fingerprint}, socket) do
     socket = clear_flash(socket)
 
-    case NervesGateWeb.Backend.ssh_remove_key(fingerprint) do
+    case NervesGate.SSH.remove_key(fingerprint) do
       :ok ->
         {:noreply,
          put_flash(socket, :info, "SSH key removed. Existing SSH sessions remain open.")}
@@ -40,7 +40,7 @@ defmodule NervesGateWeb.SettingsLive do
   end
 
   def handle_event("identify", _, socket) do
-    result = NervesGateWeb.Backend.identify()
+    result = NervesGate.Indicators.identify()
     socket = clear_flash(socket)
 
     case result do
@@ -55,7 +55,7 @@ defmodule NervesGateWeb.SettingsLive do
 
   def render(assigns) do
     ~H"""
-    <.page_header title="Settings" description={@projection.remote_access.hostname || "Nerves Gate"} />
+    <.page_header title="Settings" description={@projection.remote.hostname || "Nerves Gate"} />
     <.live_component
       module={NervesGateWeb.NetworkEditor}
       id="lan-ports-editor"
@@ -165,7 +165,7 @@ defmodule NervesGateWeb.SettingsLive do
       <.button
         id="identify-gateway"
         phx-click="identify"
-        disabled={!@projection.actions["identify"].enabled}
+        disabled={!@projection.actions["indicators.identify"].enabled}
       >
         Identify gateway
       </.button>

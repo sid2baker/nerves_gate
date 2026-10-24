@@ -15,7 +15,6 @@ defmodule SimulatorTest do
 
     config = Simulator.config(path, dir)
     assert config.firmware == Path.join(dir, "firmware/gate.fw")
-    assert config.factory_firmware == config.firmware
     assert config.firmware_project == Path.join(dir, "firmware")
     assert config.raw.firmware == "firmware/gate.fw"
 

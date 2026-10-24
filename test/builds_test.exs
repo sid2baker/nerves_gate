@@ -1,4 +1,4 @@
-defmodule Dev.BuildsTest do
+defmodule Workbench.BuildsTest do
   use ExUnit.Case, async: true
 
   @tag :tmp_dir
@@ -34,9 +34,9 @@ defmodule Dev.BuildsTest do
       "not firmware"
     )
 
-    images = Dev.Builds.images(root)
+    images = Workbench.Builds.images(root)
     assert Enum.sort(Enum.map(images, & &1.version)) == ["0.1.0", "0.2.0-dev"]
     assert Enum.all?(images, &File.regular?(&1.path))
-    assert Dev.Builds.images(Path.join(root, "empty")) == []
+    assert Workbench.Builds.images(Path.join(root, "empty")) == []
   end
 end

@@ -12,7 +12,12 @@ defmodule NervesGate.Indicators.EC100 do
          {:ok, value} when value in ["0", "1"] <- read(path, "brightness") do
       {:ok, String.to_integer(value)}
     else
-      _ -> {:error, :led_unavailable}
+      _ ->
+        {:error,
+         %{
+           code: "led_unavailable",
+           message: "A status LED is unavailable or controlled by a kernel trigger."
+         }}
     end
   end
 
@@ -24,7 +29,12 @@ defmodule NervesGate.Indicators.EC100 do
          {:ok, ^value} <- read_led(led, root) do
       :ok
     else
-      _ -> {:error, :led_unavailable}
+      _ ->
+        {:error,
+         %{
+           code: "led_unavailable",
+           message: "A status LED is unavailable or controlled by a kernel trigger."
+         }}
     end
   end
 
@@ -33,7 +43,8 @@ defmodule NervesGate.Indicators.EC100 do
          {:ok, pid} <- InputEvent.start_link(path: path, receiver: receiver) do
       {:ok, pid, path}
     else
-      _ -> {:error, :button_unavailable}
+      _ ->
+        {:error, %{code: "button_unavailable", message: "The EC100 user button is unavailable."}}
     end
   end
 
@@ -54,8 +65,11 @@ defmodule NervesGate.Indicators.EC100 do
       end)
 
     case matches do
-      [entry] -> {:ok, "/dev/input/" <> Path.basename(entry)}
-      _ -> {:error, :button_unavailable}
+      [entry] ->
+        {:ok, "/dev/input/" <> Path.basename(entry)}
+
+      _ ->
+        {:error, %{code: "button_unavailable", message: "The EC100 user button is unavailable."}}
     end
   end
 

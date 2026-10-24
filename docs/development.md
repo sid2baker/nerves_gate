@@ -59,14 +59,21 @@ Devices stay stopped until an explicit Start, which builds local firmware when
 selected and creates disposable disks. Stop keeps disks; Reset erases them. After
 device-code changes, including gateway Elixir/HEEx, rebuild firmware, Reset and
 Start. Open the device's gateway link to use its UI; the workstation serves only
-the workbench. `Simulator.QemuTests` admits every
-lifecycle change, fault, installation and scenario run; UI button state is only
-presentation.
+the workbench. `Scenarios.Runner` admits every lifecycle change, fault,
+installation and scenario run; UI button state is only presentation. Host tools
+and guests must come from the same checkout; coordinate session replacement and
+disposable-device resets explicitly when updating incompatible firmware.
 
 The simulator owns QEMU processes, QMP sockets, disks and Ethernet relays. Each
 device has private socket networks; libslirp provides real traffic without host
-networking changes. `_build/qemu-dev/session.lock` is held with flock until
-cleanup finishes: never delete it to bypass ownership.
+networking changes. `_build/workbench/session.lock` is held with flock until
+cleanup finishes: never delete it to bypass ownership. Session metadata and its
+private CLI socket live in that directory; simulator disks/diagnostics live under
+`_build/simulator/`. Internal session inputs are `WORKBENCH_SESSION_ID`,
+`WORKBENCH_SESSION_DIR`, `WORKBENCH_HTTP_SOCKET`, `WORKBENCH_HTTP_PORT`,
+`WORKBENCH_CI` and `WORKBENCH_SCENARIO`. `QEMU_SIM_CONFIG`/`QEMU_SIM_DIR` configure
+the actual simulator. The launcher manages these inputs; ordinary app development
+needs none of them.
 
 Device builds and user apps run in separate, supervised OS processes. Repository
 host checks for `sdk/` and `firmware/` run in-VM through `Mix.Project.in_project/4`;
@@ -81,37 +88,40 @@ deliberately with `mix deps.update` and keep `--check-locked`.
 
 ## Scenarios
 
-UI, CLI and CI use one catalogue: portable scenarios in `lib/dev/scenarios/` plus
-QEMU-specific scenarios in `lib/simulator/scenarios/`. Independent QEMU devices can
-run concurrently; `devices: :all` reserves the whole bench and `fresh_disk`
-scenarios own disposable state. `tailscale_auth` is opt-in.
+UI, CLI and CI use the explicit `Scenarios` catalogue and `Scenarios.Runner`;
+every case lives in `lib/scenarios/cases/`. Independent devices can run
+concurrently; `devices: :all` reserves the whole bench and `fresh_disk` scenarios
+own disposable state. `tailscale_auth` is opt-in. Global workbench operations have
+a separate admission owner, `Workbench.Operations`.
 
-Portable scenarios declare `requires: %{device: [...], fixture: [...]}`. The
-current device resources are `:ethernet`, `:cellular`, `:can` and `:rs485`;
-fixture capabilities describe bench controls, not product hardware. For example,
-`cable_loss` requires Ethernet plus `:ethernet_link` control. It discovers the
-configured Internet port, tests link loss and typed SDK events, and restores the
-link. Prepare a linked, addressed, separate Ethernet Internet port and an
-independent management path before running it. Read-only status/SDK checks need
-no fixture. QEMU platform/bus assertions remain under `qemu_status`/`qemu_sdk`.
+Every case declares `requires: %{device: [...], fixture: [...]}`. Device resources
+are `:ethernet`, `:cellular`, `:can` and `:rs485`; fixture capabilities describe
+owned controls, not product hardware. QEMU-specific cases require `:qemu`.
+`cable_loss` requires Ethernet and `:ethernet_link`: it discovers the configured
+Internet port, checks link loss and typed SDK events, then restores the link.
+Prepare a linked, addressed, separate Internet port and independent management
+path. Read-only status/SDK cases need no fixture. QEMU-specific assertions are
+`qemu_status`/`qemu_sdk`.
 
-`Dev.Scenarios.run(module, %{device: target})` executes a portable scenario without
-QEMU preparation. A target has `:node`, optional diagnostics `:dir`, and optional
-`fixture: {module, handle}` implementing `Dev.TestFixture`. The caller must already
-own/reserve the authorized test target and manage its cleanup. No node discovery,
-boot, network reconfiguration or physical attachment happens automatically.
-Fixture requirements are checked before preparation. Unsupported hardware is
-skipped; declared hardware that is missing or unobserved fails the check. For
-example, a board without CAN skips a CAN scenario, but a declared CAN port that
-has disappeared does not. Disconnected/disabled ports remain supported; scenarios
-check their operating state. RPC/assertion/control failures remain failures.
-Skipped rows and reasons appear in the UI, CLI and CI; an entirely skipped run is
-not a pass.
+`Scenarios.run(module, %{device: target})` performs no default QEMU preparation.
+Targets have `:node`, optional diagnostics `:dir` and optional
+`fixture: {:qemu, owned_handle}`. The caller must already own/reserve the
+authorized disposable target and manage cleanup. There is no configurable fixture
+module, automatic discovery, physical attachment or grant of control from a node
+name. The only supplied control fixture is owned QEMU.
 
-The only supplied fixture controls owned QEMU devices. A physical bench needs an
-explicitly authorized adapter and safe test wiring before fault scenarios can run;
-this is not permission to attach controls to a production gateway. Keep fixture
-controls out of the application SDK. Extend real scenarios, not fake backends.
+Requirements are checked **before** preparation. Unsupported resources skip;
+missing/unobserved declared hardware fails. A board without CAN skips a CAN case,
+but a declared port that disappeared does not. Disabled/disconnected ports remain
+supported; cases also check operating state. RPC/assertion/control failures are
+failures, not skips. An entirely skipped run is not a pass.
+
+`Scenarios.Device.rpc(device, module, function, args)` is bounded, explicit and
+never retried. A lost transport reply blocks subsequent writes/controls and
+cleanup until explicit recovery, because the guest may have accepted the command.
+Read-only status polling is separate. Deliberate process faults live in
+`Scenarios.Recovery`, which discovers children through owning supervisors. Keep
+these controls out of the SDK and extend real scenarios, not fake backends.
 
 Firmware host tests cover policy/codecs in `firmware/test/unit/` and gateway
 rendering/socket security in `firmware/test/web/`. Root tests cover workbench and
@@ -133,14 +143,15 @@ firmware build in an isolated process. Asset failures stop packaging. Volt never
 runs on the device. No separate asset command or environment flag is required.
 `mix ci` also builds assets without building firmware or starting devices.
 
-For an asset-only diagnostic build, run `mix assets.build` in `firmware/`.
-Commit the resulting `firmware/priv/static/assets/` files with their sources.
+For an asset-only diagnostic build, firmware provides `mix assets.build`
+(`volt.build --tailwind`); repository tooling enters that host project natively.
+Include the resulting `firmware/priv/static/assets/` files with their sources.
 `NERVES_GATE_LOCAL_DEPS` selects local system/BSP sources for internal device
 builds; the build pipeline sets it automatically. It is not an asset setting.
 
 ## Diagnostics and limits
 
-- Bench diagnostics are in `_build/qemu-tests/<session>/<device>/`; boot failures
+- Bench diagnostics are in `_build/simulator/<session>/<device>/`; boot failures
   leave `console-*.log`, `qemu.log` and `boot.log`.
 - Never copy login URLs, cookies, CSRF tokens, keys or VM identity disks into logs,
   issues or artifacts.

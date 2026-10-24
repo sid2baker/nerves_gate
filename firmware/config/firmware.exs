@@ -4,8 +4,6 @@ import Config
 # Nothing in this file configures the workstation UI. The platform files add
 # only real hardware differences; the device application is otherwise identical.
 config :nerves_gate,
-  # The UI calls this device's own services; the workstation uses a remote node.
-  backend_node: :local,
   services: [
     NervesGate.Network.Vintage,
     {PropertyTable, name: NervesGate.Properties},
@@ -23,10 +21,7 @@ config :nerves_gate,
     NervesGate.ProjectionServer,
     NervesGate.SDKBackend,
     NervesGateWeb.Endpoint
-  ],
-  network_adapter: {NervesGate.Network.Vintage, nil},
-  remote_adapter: {NervesGate.Remote.Tailscaled, nil},
-  equipment_adapter: {NervesGate.Equipment.Linux, nil}
+  ]
 
 config :nerves_gate_sdk, :backend, NervesGate.SDKBackend
 

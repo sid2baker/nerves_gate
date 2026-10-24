@@ -1,17 +1,17 @@
-defmodule Dev.TargetBuildTest do
+defmodule Workbench.TargetBuildTest do
   use ExUnit.Case, async: true
   @moduletag :tmp_dir
 
   test "reads the ELF interpreter, not an arbitrary embedded musl string" do
-    assert Dev.TargetBuild.interpreter(elf("/lib/ld-musl-x86_64.so.1")) ==
+    assert Workbench.TargetBuild.interpreter(elf("/lib/ld-musl-x86_64.so.1")) ==
              "/lib/ld-musl-x86_64.so.1"
 
-    assert Dev.TargetBuild.interpreter(
+    assert Workbench.TargetBuild.interpreter(
              elf("/lib64/ld-linux-x86-64.so.2") <> "/lib/ld-musl-x86_64.so.1"
            ) == "/lib64/ld-linux-x86-64.so.2"
 
     for invalid <- ["", "not ELF", binary_part(elf("loader"), 0, 80)] do
-      assert Dev.TargetBuild.interpreter(invalid) == nil
+      assert Workbench.TargetBuild.interpreter(invalid) == nil
     end
   end
 
@@ -22,14 +22,14 @@ defmodule Dev.TargetBuildTest do
       File.write!(path, elf("/lib/ld-musl-x86_64.so.1"))
     end
 
-    assert :ok = Dev.TargetBuild.verify!(dir)
+    assert :ok = Workbench.TargetBuild.verify!(dir)
 
     File.write!(
       Path.join(dir, "firmware/_build/x86_64_dev/lib/vintage_net/priv/if_monitor"),
       elf("/lib64/ld-linux-x86-64.so.2")
     )
 
-    assert_raise RuntimeError, ~r/not a musl/, fn -> Dev.TargetBuild.verify!(dir) end
+    assert_raise RuntimeError, ~r/not a musl/, fn -> Workbench.TargetBuild.verify!(dir) end
   end
 
   defp elf(loader) do

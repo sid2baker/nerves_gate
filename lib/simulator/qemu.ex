@@ -6,7 +6,7 @@ defmodule Simulator.Qemu do
     {_, 0} =
       MuonTrap.cmd(
         "fwup",
-        ["-q", "-a", "-i", vm.factory_firmware, "-d", image_path(vm), "-t", "complete"],
+        ["-q", "-a", "-i", vm.firmware, "-d", image_path(vm), "-t", "complete"],
         env: [{"NERVES_SERIAL_NUMBER", vm.serial}],
         stderr_to_stdout: true
       )
@@ -176,7 +176,11 @@ defmodule Simulator.Qemu do
   """
 
   defp guest_facts(vm) do
-    case SSH.connect(vm) do
+    case SSH.connect(vm, vm.forwards.usb,
+           user: ~c"root",
+           password: ~c"nerves_gate",
+           auth_methods: ~c"password"
+         ) do
       {:ok, connection} ->
         try do
           # A string: the host must not create atoms from guest replies.

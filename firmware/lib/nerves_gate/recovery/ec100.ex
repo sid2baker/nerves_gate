@@ -19,10 +19,18 @@ defmodule NervesGate.Recovery.EC100 do
             :ok
 
           {:update, _} ->
-            {:error, :firmware_update_pending}
+            {:error,
+             %{
+               code: "firmware_update_pending",
+               message: "An SSH firmware upload was admitted. Reboot before recovery."
+             }}
 
           _ ->
-            {:error, :recovery_already_requested}
+            {:error,
+             %{
+               code: "recovery_already_requested",
+               message: "Recovery was already requested. No second attempt was sent."
+             }}
         end
       end,
       [node()]
@@ -64,8 +72,16 @@ defmodule NervesGate.Recovery.EC100 do
       # Default immediate reboot. No separate reboot, cleanup or writer restart
       # after this call, including on an error or an ambiguous timeout.
       case Nerves.Runtime.FwupOps.factory_reset() do
-        :ok -> :ok
-        _ -> {:error, :factory_reset_incomplete}
+        :ok ->
+          :ok
+
+        _ ->
+          {:error,
+           %{
+             code: "factory_reset_incomplete",
+             message:
+               "Factory reset did not complete. Services remain stopped; no retry was sent."
+           }}
       end
     end
   end
@@ -109,8 +125,16 @@ defmodule NervesGate.Recovery.EC100 do
   defp stop_all(items, stop) do
     Enum.reduce_while(items, :ok, fn item, :ok ->
       case stop.(item) do
-        :ok -> {:cont, :ok}
-        _ -> {:halt, {:error, :data_quiesce_failed}}
+        :ok ->
+          {:cont, :ok}
+
+        _ ->
+          {:halt,
+           {:error,
+            %{
+              code: "data_quiesce_failed",
+              message: "Could not stop data writers. Reset was aborted; services stay stopped."
+            }}}
       end
     end)
   end
@@ -129,13 +153,27 @@ defmodule NervesGate.Recovery.EC100 do
       |> data_mounts(device)
       |> Enum.reduce_while(:ok, fn path, :ok ->
         case System.cmd("umount", [path], stderr_to_stdout: true) do
-          {_, 0} -> {:cont, :ok}
-          _ -> {:halt, {:error, :data_unmount_failed}}
+          {_, 0} ->
+            {:cont, :ok}
+
+          _ ->
+            {:halt,
+             {:error,
+              %{
+                code: "data_unmount_failed",
+                message:
+                  "Could not unmount all data mounts. Reset was aborted; services stay stopped."
+              }}}
         end
       end)
 
     if result == :ok and data_mounts(MountInfo.get_mounts!(), device) == [],
       do: :ok,
-      else: {:error, :data_unmount_failed}
+      else:
+        {:error,
+         %{
+           code: "data_unmount_failed",
+           message: "Could not unmount all data mounts. Reset was aborted; services stay stopped."
+         }}
   end
 end

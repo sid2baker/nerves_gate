@@ -1,4 +1,4 @@
-defmodule Dev.SystemContractTest do
+defmodule Workbench.SystemContractTest do
   use ExUnit.Case, async: false
 
   test "release lookup, canonical notes and immutable source checks" do
@@ -109,8 +109,8 @@ defmodule Dev.SystemContractTest do
     git!(root, ["commit", "--quiet", "-m", "System inputs"])
     git!(root, ["tag", tag])
     assert :ok = Release.verify_pending_sources!(tag, system, repository)
-    File.mkdir_p!(Path.join(root, "lib/dev"))
-    File.write!(Path.join(root, "lib/dev/artifact_release.ex"), "publisher repair")
+    File.mkdir_p!(Path.join(root, "lib/mix/tasks"))
+    File.write!(Path.join(root, "lib/mix/tasks/nerves.artifact.release.ex"), "publisher repair")
     git!(root, ["add", "."])
     git!(root, ["commit", "--quiet", "-m", "Repair publisher only"])
     refute git!(root, ["rev-parse", "HEAD"]) == git!(root, ["rev-parse", tag])

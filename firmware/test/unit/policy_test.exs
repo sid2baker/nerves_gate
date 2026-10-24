@@ -31,11 +31,23 @@ defmodule NervesGate.PolicyTest do
     assert Labels.normalize("  Pump  ") == {:ok, "Pump"}
 
     for label <- [nil, <<255>>, "bad\nlabel", String.duplicate("x", 65)] do
-      assert Labels.normalize(label) == {:error, :invalid_label}
+      assert Labels.normalize(label) ==
+               {:error,
+                %{
+                  code: "invalid_label",
+                  message: "Use a label of at most 64 characters without control characters."
+                }}
     end
 
     labels = Map.new(1..256, &{to_string(&1), "label"})
-    assert Labels.put(labels, "new", "label") == {:error, :label_limit}
+
+    assert Labels.put(labels, "new", "label") ==
+             {:error,
+              %{
+                code: "label_limit",
+                message: "The 256-label limit has been reached. Remove an unused label first."
+              }}
+
     assert {:ok, updated} = Labels.put(labels, "1", "")
     refute Map.has_key?(updated, "1")
     assert {:ok, _} = Labels.put(labels, "1", "replacement")

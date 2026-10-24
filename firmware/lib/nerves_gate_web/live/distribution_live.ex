@@ -11,16 +11,14 @@ defmodule NervesGateWeb.DistributionLive do
   defp refresh(socket, projection) do
     cookie =
       cond do
-        not projection.backend.available ->
+        not projection.device.available ->
           nil
 
         not Map.has_key?(socket.assigns, :cookie) or
-          not socket.assigns.projection.backend.available or
+          not socket.assigns.projection.device.available or
             socket.assigns.projection.system.node != projection.system.node ->
-          case NervesGateWeb.Backend.distribution_cookie() do
-            {:ok, cookie} -> cookie
-            {:error, _} -> nil
-          end
+          {:ok, cookie} = NervesGate.Distribution.cookie()
+          cookie
 
         true ->
           socket.assigns.cookie

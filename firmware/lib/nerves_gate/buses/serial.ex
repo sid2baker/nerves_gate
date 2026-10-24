@@ -49,8 +49,16 @@ defmodule NervesGate.Buses.Serial do
          :ok <- UART.write(uart, Modbus.request(params), 500) do
       receive_response(uart, <<>>, params, now() + 1_000)
     else
-      {:ok, _traffic} -> {:error, :serial_busy}
-      error -> error
+      {:ok, _traffic} ->
+        {:error,
+         %{
+           code: "serial_busy",
+           message:
+             "Serial traffic was observed before the request. Nothing was sent; do not compete with another master."
+         }}
+
+      error ->
+        error
     end
   end
 
@@ -72,7 +80,12 @@ defmodule NervesGate.Buses.Serial do
   defp receive_response(uart, data, params, deadline) do
     cond do
       byte_size(data) > 512 ->
-        {:error, :modbus_response}
+        {:error,
+         %{
+           code: "modbus_response",
+           message:
+             "Invalid or unrelated Modbus response (address, function, length or CRC). No retry was sent."
+         }}
 
       Modbus.complete?(data, params) ->
         with {:ok, registers} <- Modbus.response(data, params) do
@@ -80,7 +93,11 @@ defmodule NervesGate.Buses.Serial do
         end
 
       now() >= deadline ->
-        {:error, :modbus_timeout}
+        {:error,
+         %{
+           code: "modbus_timeout",
+           message: "No complete Modbus response within one second. No retry was sent."
+         }}
 
       true ->
         case UART.read(uart, max(1, deadline - now())) do

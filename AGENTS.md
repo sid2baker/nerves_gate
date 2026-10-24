@@ -1,86 +1,94 @@
 # Nerves Gate
 
-## KISS
+## KISS: deep modules, narrow interfaces
 
 - Prefer direct Elixir/OTP and the simplest design solving today's problem.
-- Keep one implementation per operation. Remove obsolete code; avoid speculative
-  frameworks, plugin registries and configuration layers.
-- Document the current system, not replaced implementations.
+- Judge modules by the knowledge they hide, not line count. Keep wrappers owning
+  real policy, transport or hardware; remove wrappers that only rename calls.
+- One concept, one name, one implementation. No mirrored command facades, generic
+  operation dispatchers, single-implementation adapters or speculative frameworks.
+- Keep seams for real board variation and the published typed SDK contract.
+- Create safe errors where their meaning is known; no global reason catalogue.
+- Document the current system, not the history of replaced code.
 
-## Elixir only
+## Projects and ownership
 
-- Application logic, tests and development tooling are Elixir. Prefer Req for HTTP.
-- External tools are for actual firmware, networking, QEMU and Git operations.
-
-## Structure and ownership
-
-The root is the host-only developer platform (`:nerves_gate_dev`), not an umbrella.
-`sdk/` and `firmware/` remain independent Mix projects. Root host checks use native
-`Mix.Project.in_project/4`; do not shell out to Mix for repository host orchestration.
-Device builds and user apps are exceptions: they require isolated supervised
-OS processes, never device-target compilation in the workbench VM.
-
-- `lib/dev/`: sessions, app projects, LAN discovery, builds, operation coordination and release tools.
-- `lib/dev_web/`: workbench UI and CLI API. UI and CLI call ordinary shared APIs,
-  not Mix tasks. Backend validation is authoritative.
-- `config/`, `priv/dev/`: workstation configuration and owned launch scripts.
-- `priv/templates/`: ordinary SDK app scaffolding; app projects live outside this checkout.
-- `firmware/lib/nerves_gate/`: device domains own admission, deadlines and persistence.
-- `firmware/lib/nerves_gate.ex`: public API; status stays a direct domain query.
-- `firmware/lib/nerves_gate_web/`: gateway UI served by EC100 and QEMU; shared components also serve the workbench.
-- `firmware/lib/nerves_gate/{sdk_backend,apps,storage}.ex`: SDK translation, trusted
-  app lifecycle and SD storage. `NervesGate.Buses` owns CAN/RS485 access.
-- `sdk/`: typed app contract and packaging. Never expose firmware status maps or
-  administrative commands through the SDK.
-- `lib/simulator.ex`, `lib/simulator/`: owned real QEMU hardware; `priv/simulator/`
-  holds the simulator-node script and bench configurations.
-- `lib/simulator/qemu_tests.ex`: shared UI/CLI/CI admission and reservations;
-  independent devices can run concurrently; `devices: :all` reserves every device.
-- `lib/dev/scenarios/`: portable platform/SDK contract scenarios; `Dev.Scenarios`
-  checks device/fixture requirements before preparation. `Dev.TestDevice` reads
-  running targets; `Dev.TestFixture` separates explicitly owned bench controls.
-- `lib/simulator/scenarios/`: QEMU-specific integration scenarios. Shared scenarios
-  also run through the existing QEMU owner. No hardware mocks or fake SDK backends.
-- `firmware/test/unit/`: pure policy, validation and codec tests; no devices.
-- `systems/`: Nerves systems. Artifact input changes require a system version bump.
-- Projections are read models. LiveViews subscribe to device-owned streams and
-  keep drafts separate. UI availability never replaces backend validation.
+- Application logic, tests and development tooling are Elixir. Prefer Req for HTTP;
+  use external tools for actual firmware, networking, QEMU and Git operations.
+- Root is `:nerves_gate_workbench`, not an umbrella. `firmware/`, `sdk/` and
+  `systems/*` remain independent projects with distinct targets and releases.
+- `lib/workbench/`, `lib/workbench_web/`, `priv/workbench/`: host sessions, builds,
+  apps, discovery, physical tools and workbench UI. Ordinary tasks start no session.
+- `lib/simulator.ex`, `lib/simulator/`: separate simulator BEAM and owned disposable
+  QEMU processes, disks and private networks. Never attach controls to arbitrary VMs.
+- `lib/scenarios.ex`, `lib/scenarios/`: one catalogue, runner and real scenarios.
+  Check explicit requirements before preparation. Independent devices can run
+  concurrently; `devices: :all` reserves every device and excludes manual controls.
+- Scenario reservations and global `Workbench.Operations` admission protect
+  different resources. Unknown RPC/control outcomes block further control/cleanup.
+- `firmware/lib/nerves_gate/`: domains own commands, validation, admission,
+  deadlines and persistence. Use named public domain functions, not infrastructure.
+- `NervesGate.status/0` directly reads domains independently; `subscribe/0` belongs
+  to the caller. `NervesGate` is a read/subscribe entry point and domain API index.
+- Cellular and equipment network effects share Network's single worker/trial
+  admission. A separate API module does not need a separate GenServer.
+- Gateway LiveViews call local domains. Workbench device views explicitly subscribe
+  to a remote **read-only** projection; there is no remote gateway-command proxy.
+- Projections are sanitized read models, never authority. Subscribe before reading,
+  resubscribe fresh after loss, and keep drafts separate. UI availability never
+  replaces backend validation. Pure policies/read models perform no effects.
+- SDK observations and administrative status/commands are distinct contracts.
+  Preserve actual calling-PID ownership of subscriptions and bus claims; no Tasks
+  proxying those calls. Trusted apps share the BEAM; the SDK is not a sandbox.
+- Keep genuine sharing through the firmware path dependency without starting its
+  application on the host. Do not add a common library/UI kit without measured need.
 
 ## Safety
 
-- Tests use only disposable supervised QEMU devices on private socket networks.
-  Never attach drivers to arbitrary VMs.
-- Never flash physical hardware, change workstation networking/VPN or stop
-  unrelated processes without explicit authorization.
-- Never expose private login URLs, cookies, CSRF tokens, keys or VM identity disks
-  in projections, logs, notifications or uploaded artifacts.
+- Never flash physical devices, wipe storage, change workstation networking/VPN,
+  or stop unrelated processes without explicit authorization.
+- Breaking source changes do not authorize resetting a live bench or saved settings.
+  Never delete locks/disks to force a cutover. Stale saved modem drivers fail closed;
+  physical reprovisioning/reset is a separately authorized procedure.
+- Keep login URLs, cookies, CSRF tokens, PINs/PAP credentials, private keys, SIM
+  identifiers and VM identity disks out of projections, logs and uploaded artifacts.
+- Physical SSH verifies known hosts; permissive owned-QEMU trust stays separate.
+- Acceptance is not completion. A timeout does not cancel work. Never blindly retry
+  writes, PIN attempts, firmware uploads or uncertain controls.
 
 ## Development and validation
 
-- Run commands at the root. `mix setup` prepares projects and artifacts without
-  building device firmware or booting devices.
-- The user owns `mix dev [APP_DIRECTORY]`. Do not start/stop that session or boot its
-  devices without authorization; ask the user to start it if unavailable.
+- Run commands at the root. `mix setup` prepares tools/artifacts without building
+  device firmware or booting devices. Apps are ordinary external Mix projects.
+- The user owns `mix dev [APP_DIRECTORY]`. Do not launch/stop that session or
+  boot/reset devices without authorization. Ask for an available session if needed.
 - Focused checks use `mix test.qemu --only ID [--device ID]` against that session.
-  `--ci` creates a separate disposable bench and needs explicit authorization.
-- Open a device's gateway link for its UI. After gateway Elixir/HEEx changes, rebuild firmware and Reset/Start the disposable QEMU device.
-- Root `mix ci` runs all host checks/tests and may be run by agents. Never weaken
-  `--check-locked`, compiler checks or deadlines.
-- `mix format --force` formats the root and subsystems, excluding system inputs.
-- Root `mix firmware [x86_64 | ec100] [--env dev | prod]`, workbench Build and local
-  QEMU builds prepare assets on the host before isolated target compilation.
-  `mix ci` builds assets too; `mix assets.build` in `firmware/` is only an
-  asset-only diagnostic. Commit `firmware/priv/static/assets/` with their sources.
-- Test changed behaviour. Documentation-only changes need no QEMU checks.
-- Root and firmware share `VERSION`/`CHANGELOG.md`; SDK and systems keep
-  independent versions. Only SDK is published on Hex. Tags/releases, retirement,
-  pushes and physical-device operations require a request.
-- Release checks live under `lib/dev/`. Protected CI is the publisher; do not put
-  publishing credentials into the workbench process.
+  Never use `--ci` to launch another bench without explicit authorization.
+- Root tests own host tooling/shared UI integration; firmware `test/unit/` and
+  `test/web/` own policy/codecs/gateway checks; SDK tests own its typed contract.
+  Extend real scenarios instead of adding a hardware-mock suite or fake SDK backend.
+- Repository host checks use native `Mix.Project.in_project/4` with state restoration.
+  Target compilation and external app builds require isolated supervised OS
+  processes, never target application compilation in the workbench VM.
+- Run focused checks, warnings-as-errors compilation, formatting, architecture and
+  whitespace checks. Never weaken `--check-locked`, deadlines or fault coverage.
+- Full `mix ci` is expensive and belongs to the user unless separately requested.
+  Report source, artifact, runtime and full-CI results distinctly.
+- `mix format --force` formats root/subprojects, excluding system inputs.
+- Firmware's host `mix assets.build` builds shared assets. Root
+  `mix firmware [x86_64 | ec100] [--env dev | prod]`, workbench Build and local QEMU
+  builds prepare assets before
+  isolated target compilation. Include changed `firmware/priv/static/assets/` with
+  sources. Gateway Elixir/HEEx changes require rebuilt guests.
+- Documentation-only changes need no QEMU checks. Do not claim unperformed checks.
+- Root/firmware share `VERSION` and `CHANGELOG.md`; SDK/systems keep independent
+  versions. System inputs require a system version bump. Only SDK goes to Hex.
+  Tags, publishing, retirement, commits, pushes and physical operations need a request.
+- Protected CI owns publishing credentials; never put them in the workbench VM.
 
 ## Start here
 
 - [Architecture](docs/architecture.md)
 - [Development](docs/development.md)
 - [App development](docs/app-development.md)
-- [Public API](firmware/lib/nerves_gate.ex)
+- [Domain API index](firmware/lib/nerves_gate.ex)

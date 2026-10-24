@@ -21,7 +21,8 @@ firmware/simulator Hex release is required.
 2. Run host checks, the external application flow, target builds and focused QEMU
    checks appropriate to the change.
 3. Run `mix release.check TAG`. This validates exact version, notes and SDK
-   publication dependencies without publishing.
+   publication dependencies without publishing. A `-dev` version and entries in
+   `Unreleased` describe ongoing development, not a releasable tag.
 4. Commit and push only when requested, then create/push the immutable tag only
    with release authorization.
 5. `.github/workflows/release.yml` validates the tag is on main, requires outputs
@@ -46,7 +47,7 @@ The workflow uses the same `release.check` task with explicit `prepare`,
 allows metadata validation before compiling workstation tooling:
 
 ```sh
-elixir -r lib/dev/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check sdk/v0.1.0
+elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check sdk/v0.1.0
 ```
 
 Only the platform, the SDK and the two systems are released. Older firmware,
@@ -62,12 +63,12 @@ system source merely to adjust workstation tooling.
 
 `system-releases.yml` calls `system-artifact.yml` for EC100 and QEMU on main when
 system paths change. It validates the source contract before creating artifacts.
-The task stays dependency-free under `lib/dev/artifact_release.ex` and is preloaded
-into the isolated firmware/Nerves command:
+The task stays dependency-free under `lib/mix/tasks/nerves.artifact.release.ex`
+and is preloaded into the isolated firmware/Nerves command:
 
 ```sh
 cd firmware
-MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/dev/artifact_release.ex -S mix nerves.artifact.release plan
+MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release plan
 ```
 
 `plan` is local/read-only. `check` inspects remote publication state; `publish`
@@ -88,6 +89,21 @@ limits](../systems/nerves_system_ec100/SOURCES.md#buildroot-source-and-license-c
 legal-info does not collect the prebuilt external toolchain's source archives.
 Review the reports and arrange any additional required source distribution before
 publishing; the archive's existence alone is not proof of compliance.
+
+For local source/license collection, run these current checkout commands from
+`firmware/` on Linux with Docker or Podman and an empty `dist/`:
+
+```sh
+MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release source
+MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 mix nerves.artifact.build nerves_system_ec100
+MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release collect
+(cd dist && sha256sum --check SHA256SUMS)
+```
+
+System documentation such as `SOURCES.md` is itself fingerprinted input and may
+contain paths from the tooling used to publish that system. Use the commands above
+and the current shared workflow; do not change a published system's inputs merely
+to update host helper paths.
 
 Existing uploaded bytes are not replaced. Validate a changed QEMU system with the
 owned `system_artifact` scenario before an authorized release. Firmware locks

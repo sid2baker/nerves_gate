@@ -1,16 +1,15 @@
 defmodule NervesGateWeb.StorageLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  alias NervesGateWeb.Backend
 
   on_mount({NervesGateWeb.Observations, :status})
 
   def mount(_, _, socket), do: {:ok, assign(socket, format_card: nil)}
 
   def handle_event("use", %{"card" => id}, socket),
-    do: command(socket, Backend.storage_setup(:use, id))
+    do: command(socket, NervesGate.Storage.setup(:use, id))
 
-  def handle_event("skip", _, socket), do: command(socket, Backend.storage_setup(:skip))
+  def handle_event("skip", _, socket), do: command(socket, NervesGate.Storage.setup(:skip))
 
   def handle_event("review-format", %{"card" => id}, socket),
     do: {:noreply, assign(clear_flash(socket), :format_card, id)}
@@ -20,7 +19,7 @@ defmodule NervesGateWeb.StorageLive do
 
   def handle_event("format", %{"erase" => "yes"}, %{assigns: %{format_card: id}} = socket)
       when is_binary(id),
-      do: command(socket, Backend.storage_setup(:format, id, :erase_all_data))
+      do: command(socket, NervesGate.Storage.setup(:format, id, :erase_all_data))
 
   def handle_event("format", _, socket),
     do:

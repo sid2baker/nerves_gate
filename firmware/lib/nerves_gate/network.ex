@@ -4,33 +4,38 @@ defmodule NervesGate.Network do
 
   ## Commands
 
-  `propose/4` applies settings temporarily and returns `{:ok, trial_id}`.
-  `confirm/2` saves that trial; `cancel/2` restores saved settings. Both return
+  `propose/2` applies settings temporarily and returns `{:ok, trial_id}`.
+  `confirm/1` saves that trial; `cancel/1` restores saved settings. Both return
   `:ok` after completion. Rejected or failed commands return `{:error, reason}`.
   Manual trials expire after 60 seconds. First setup through verified USB may
   auto-save within 15 seconds. A caller timeout does not cancel admitted work.
 
   ## Queries and notifications
 
-  `validate/1`, `ready?/2` and `conflicts/2` are pure checks. `status/1` reads the
-  current trial, settings and interfaces. Subscribe with `observe/1` before
+  `validate/1`, `ready?/2` and `conflicts/2` are pure checks. `status/0` reads the
+  current trial, settings and interfaces. Subscribe with `observe/0` before
   reading; notifications are hints to read again, not complete status maps.
 
-  The server argument defaults to this module. VintageNet owns saved settings.
+  VintageNet owns saved settings.
   Failed restoration sets `:network_restore_failed`; successful restoration clears it.
   """
   use GenServer
-  alias NervesGate.{Alarms, Config, Observations, Remote}
-  alias NervesGate.Network.{Access, Adapter, Cellular, Policy}
+  alias NervesGate.{Alarms, Cellular, Config, Observations, Remote}
+  alias NervesGate.Network.{Access, Policy}
   alias NervesGate.Remote.Sharing
 
   @doc false
   def start_link(opts \\ []),
-    do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+    do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc "Validate and normalize string-keyed settings without reading or changing hardware."
-  @spec validate(map()) :: {:ok, map()} | {:error, term()}
-  defdelegate validate(network), to: Config, as: :validate_network
+  @spec validate(map()) :: {:ok, map()} | {:error, NervesGate.Error.t()}
+  def validate(network) do
+    case Config.validate_network(network) do
+      {:error, message} -> {:error, NervesGate.Error.new("invalid_parameters", message)}
+      result -> result
+    end
+  end
 
   @doc """
   Apply a temporary trial and return its ID after application.
@@ -40,26 +45,41 @@ defmodule NervesGate.Network do
   observations of both socket endpoints, never user input; omit it for manual setup.
   Supply `expected` to reject a draft if the saved network settings have changed.
   """
-  @spec propose(map(), GenServer.server(), map() | nil, map() | :any) ::
-          {:ok, String.t()} | {:error, term()}
-  def propose(network, server \\ __MODULE__, access \\ nil, expected \\ :any),
-    do: GenServer.call(server, {:propose, network, access, expected}, 15_000)
+  @spec propose(map(), keyword()) :: {:ok, String.t()} | {:error, NervesGate.Error.t()}
+  def propose(network, opts \\ []) do
+    with {:ok, network} <- validate(network) do
+      call({:propose, network, opts[:access], Keyword.get(opts, :expected, :any)}, 15_000)
+    end
+  end
 
-  @doc "Save the matching, unexpired trial after checking current readiness. Replies after saving."
-  @spec confirm(String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def confirm(id, server \\ __MODULE__), do: GenServer.call(server, {:confirm, id}, 15_000)
+  @doc "Persist the matching, unexpired trial after checking readiness."
+  def confirm(id), do: trial(:confirm, id)
 
-  @doc "Cancel the matching trial. Replies after saved settings have been restored."
-  @spec cancel(String.t(), GenServer.server()) :: :ok | {:error, term()}
-  def cancel(id, server \\ __MODULE__), do: GenServer.call(server, {:cancel, id}, 15_000)
+  @doc "Restore saved settings for the matching trial."
+  def cancel(id), do: trial(:cancel, id)
 
-  @doc "Read config, trial, observed interfaces, phase, readiness, recovery and the last error."
-  @spec status(GenServer.server()) :: map()
-  def status(server \\ __MODULE__), do: GenServer.call(server, :status)
+  @doc "Read independent domain state, or nil while its owner is unavailable."
+  def status do
+    case call(:status) do
+      {:error, _} -> nil
+      status -> Map.update!(status, :error, &error/1)
+    end
+  end
 
-  @doc "Subscribe the caller to network workflow and adapter properties; read status afterward."
-  @spec observe(GenServer.server()) :: :ok | {:error, :unavailable}
-  def observe(server \\ __MODULE__), do: Observations.subscribe_runtime(server)
+  @doc "Subscribe the calling process before reading status."
+  def observe, do: NervesGate.Error.protect(fn -> Observations.subscribe_runtime(__MODULE__) end)
+
+  defp trial(operation, id) when is_binary(id), do: call({operation, id}, 15_000)
+
+  defp trial(_, _),
+    do: {:error, NervesGate.Error.new("invalid_parameters", "Supply a trial ID string.")}
+
+  defp call(request, timeout \\ 5_000) do
+    case NervesGate.Error.protect(fn -> GenServer.call(__MODULE__, request, timeout) end) do
+      {:error, reason} -> {:error, error(reason)}
+      result -> result
+    end
+  end
 
   @doc "Check that observed topology/settings match the proposal, without subnet conflicts."
   @spec ready?(map() | nil, map()) :: boolean()
@@ -69,39 +89,23 @@ defmodule NervesGate.Network do
   @spec conflicts(map() | nil, map()) :: list()
   defdelegate conflicts(observed, network), to: Policy
 
-  @doc "Accept one bounded cellular operation; observe status for completion. Credentials stay in private device storage."
-  def cellular(operation, params, server \\ __MODULE__),
-    do: GenServer.call(server, {:cellular, operation, params})
-
-  # Cross-domain operations share the LAN worker; clients use NervesGate.equipment_*.
-  @doc false
-  def scan(equipment, server \\ __MODULE__),
-    do: GenServer.call(server, {:scan, equipment}, 15_000)
-
-  @doc false
-  def sharing(operation, params, server \\ __MODULE__),
-    do: GenServer.call(server, {:sharing, operation, params}, 70_000)
-
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
 
-    Alarms.register(Keyword.get(opts, :name, __MODULE__), [
+    Alarms.register(__MODULE__, [
       :network_restore_failed,
       :internet_unavailable,
       :internet_backup,
       :cellular_unavailable
     ])
 
-    adapter = Keyword.get(opts, :adapter, Application.fetch_env!(:nerves_gate, :network_adapter))
     effect_ms = Keyword.get(opts, :effect_ms, 10_000)
-    {config, error} = load(adapter, effect_ms)
+    {config, error} = load(effect_ms)
 
     state = %{
-      name: Keyword.get(opts, :name, __MODULE__),
-      id: inspect(Keyword.get(opts, :name, __MODULE__) || self()),
-      adapter: adapter,
-      remote: Keyword.get(opts, :remote, NervesGate.Remote),
+      name: __MODULE__,
+      id: inspect(__MODULE__),
       config: config,
       error: error,
       trial: nil,
@@ -134,13 +138,13 @@ defmodule NervesGate.Network do
     {:reply, sources(state), state}
   end
 
-  def handle_call({:scan, equipment}, from, state) do
+  def handle_call(:scan, from, state) do
     state = refresh(state)
 
     with :ok <- Policy.available(public(state)),
          {:ok, scope} <- NervesGate.Equipment.Subnet.active(public(state)) do
       {:noreply,
-       work(state, :scan, from, fn -> NervesGate.Equipment.scan(scope, equipment) end)
+       work(state, :scan, from, fn -> NervesGate.Equipment.perform_scan(scope) end)
        |> publish()}
     else
       error -> {:reply, error, state}
@@ -183,7 +187,7 @@ defmodule NervesGate.Network do
   defp propose(state, input, access, expected, from) do
     with :ok <- Policy.available(public(state)),
          :ok <- check_expected(state, expected),
-         {:ok, network} <- Config.validate_network(input),
+         {:ok, network} <- validate(input),
          :ok <- Policy.supported(state.observed, network, state.config["network"]),
          :ok <- lan_change(state) do
       auto = not state.config["setup_completed"] and Access.usb?(state.observed, access)
@@ -205,7 +209,8 @@ defmodule NervesGate.Network do
           proposal_reply: {from, {:ok, trial.id}}
       }
 
-      {:pending, work(state, :apply, nil, fn -> Adapter.apply_config(state.adapter, network) end)}
+      {:pending,
+       work(state, :apply, nil, fn -> NervesGate.Network.Vintage.apply_config(network) end)}
     else
       error -> {error, state}
     end
@@ -214,11 +219,24 @@ defmodule NervesGate.Network do
   defp check_expected(_state, :any), do: :ok
 
   defp check_expected(state, expected) do
-    if state.config["network"] == expected, do: :ok, else: {:error, :stale_network}
+    if state.config["network"] == expected,
+      do: :ok,
+      else:
+        {:error,
+         %{
+           code: "stale_network",
+           message:
+             "Network settings changed in another session. Reload saved settings before editing."
+         }}
   end
 
   defp execute_trial(_, _, _, %{worker: worker} = state) when not is_nil(worker),
-    do: {{:error, :recovery_in_progress}, state}
+    do:
+      {{:error,
+        %{
+          code: "recovery_in_progress",
+          message: "Wait for saved settings to be restored before trying again."
+        }}, state}
 
   defp execute_trial(operation, id, from, state) do
     case Policy.matching(public(state), id) do
@@ -232,9 +250,19 @@ defmodule NervesGate.Network do
 
   defp execute(:confirm, from, state) do
     cond do
-      expired?(state) -> {:pending, expire(state, from)}
-      not ready?(state) -> {{:error, :not_connected}, state}
-      true -> {:pending, save(state, from)}
+      expired?(state) ->
+        {:pending, expire(state, from)}
+
+      not ready?(state) ->
+        {{:error,
+          %{
+            code: "not_connected",
+            message:
+              "Port settings are not ready to save. Check the connection status and any address conflicts below."
+          }}, state}
+
+      true ->
+        {:pending, save(state, from)}
     end
   end
 
@@ -247,7 +275,17 @@ defmodule NervesGate.Network do
         save(state, nil)
 
       conflicted?(state) ->
-        restore(state, :conflicting_networks, nil, {:error, :conflicting_networks})
+        restore(
+          state,
+          :conflicting_networks,
+          nil,
+          {:error,
+           %{
+             code: "conflicting_networks",
+             message:
+               "Network addresses overlap. Previous settings have been restored. Choose different Ethernet, cellular, equipment and USB subnets."
+           }}
+        )
 
       true ->
         finish_proposal(state)
@@ -320,36 +358,18 @@ defmodule NervesGate.Network do
   end
 
   defp refresh_cellular_if_due(state) do
-    controller = Cellular.controller()
-
-    due =
-      state.cellular.refreshed_at == nil or
-        System.system_time(:millisecond) - state.cellular.refreshed_at >= 30_000
-
-    cond do
-      Cellular.available(public(state)) != :ok ->
+    case Cellular.next(public(state), state.cellular_controller) do
+      nil ->
         state
 
-      is_pid(controller) and controller != state.cellular_controller ->
-        # Record the attempt before starting it: an uncertain setup must not
-        # repeatedly reset the same modem. A new controller gets a fresh check.
+      {controller, operation, fun} ->
         state = %{
           state
           | cellular_controller: controller,
-            cellular: %{state.cellular | operation: :initialize, error: nil}
+            cellular: %{state.cellular | operation: operation, error: nil}
         }
 
-        work(state, :cellular, nil, &Cellular.initialize/0)
-
-      state.cellular.sim == :pin_required and state.cellular.auto_unlock == :ready ->
-        state = %{state | cellular: %{state.cellular | operation: :auto_unlock, error: nil}}
-        work(state, :cellular, nil, &Cellular.auto_unlock/0)
-
-      due ->
-        start_cellular(state, :refresh, [])
-
-      true ->
-        state
+        work(state, :cellular, nil, fun)
     end
   end
 
@@ -367,51 +387,15 @@ defmodule NervesGate.Network do
     %{state | worker: %{task: task, timer: timer, operation: operation, from: from}}
   end
 
-  defp complete(state, %{operation: :cellular}, result) do
-    cellular =
-      case result do
-        {:ok, data} ->
-          data
-
-        {:error, _} ->
-          %{Cellular.cached() | error: NervesGate.Error.from(:cellular_outcome_unknown)}
-      end
-
-    cellular = %{cellular | operation: nil, refreshed_at: System.system_time(:millisecond)}
-    # Keep the exact safe domain error, never raw UART responses or task reasons.
-    cellular =
-      case result do
-        {:error, reason}
-        when reason in [
-               :cellular_incorrect_pin,
-               :cellular_sim_changed,
-               :cellular_sim_not_ready,
-               :cellular_resume_failed,
-               :cellular_unsupported,
-               :cellular_pin_storage,
-               :cellular_pin_not_saved,
-               :cellular_auto_unlock_blocked,
-               :cellular_identity_unknown,
-               :cellular_read_failed,
-               :cellular_setup_failed,
-               :cellular_authentication_storage,
-               :cellular_authentication_parameters
-             ] ->
-          %{cellular | error: NervesGate.Error.from(reason)}
-
-        _ ->
-          cellular
-      end
-
-    %{state | cellular: cellular}
-  end
+  defp complete(state, %{operation: :cellular}, result),
+    do: %{state | cellular: Cellular.complete(result)}
 
   defp complete(state, %{operation: :sharing, from: from}, result) do
     reply(
       from,
       case result do
         {:ok, _routes} -> :ok
-        error -> error
+        {:error, reason} -> {:error, error(reason)}
       end
     )
 
@@ -419,6 +403,12 @@ defmodule NervesGate.Network do
   end
 
   defp complete(state, %{operation: :scan, from: from}, result) do
+    result =
+      case result do
+        {:error, reason} -> {:error, error(reason)}
+        success -> success
+      end
+
     reply(from, result)
     state
   end
@@ -460,7 +450,7 @@ defmodule NervesGate.Network do
   end
 
   defp save(state, from),
-    do: work(state, :save, from, fn -> Adapter.save(state.adapter, state.trial.network) end)
+    do: work(state, :save, from, fn -> NervesGate.Network.Vintage.save(state.trial.network) end)
 
   defp restore(state, reason, from, result) do
     state =
@@ -473,7 +463,7 @@ defmodule NervesGate.Network do
     state = %{state | recovering: true, error: if(reason == :cancelled, do: nil, else: reason)}
 
     work(state, :restore, {from, result}, fn ->
-      Adapter.restore(state.adapter, state.config["network"])
+      NervesGate.Network.Vintage.restore(state.config["network"])
     end)
   end
 
@@ -497,7 +487,14 @@ defmodule NervesGate.Network do
 
   defp expire(state, from) do
     {state, waiting} = stop_work(state)
-    restore(state, :expired, from || waiting, {:error, :expired})
+
+    restore(
+      state,
+      :expired,
+      from || waiting,
+      {:error,
+       %{code: "expired", message: "The trial expired. Previous settings are being restored."}}
+    )
   end
 
   defp stop_work(%{worker: nil} = state), do: {state, nil}
@@ -525,7 +522,7 @@ defmodule NervesGate.Network do
   defp reply(from, result), do: GenServer.reply(from, result)
 
   defp refresh(state) do
-    case Adapter.snapshot(state.adapter) do
+    case NervesGate.Network.Vintage.snapshot() do
       nil ->
         %{state | observed: nil, error: state.error || {:discovery, :unavailable}}
 
@@ -548,7 +545,7 @@ defmodule NervesGate.Network do
       trial: state.trial,
       observed: state.observed,
       cellular: state.cellular,
-      error: state.error,
+      error: error(state.error),
       recovering: state.recovering,
       ready: ready?(state),
       phase: phase(state)
@@ -570,7 +567,7 @@ defmodule NervesGate.Network do
   defp sources(state),
     do: [
       {Observations.table(), Observations.workflow("network", state.id)}
-      | Observations.sources(state.adapter)
+      | NervesGate.Network.Vintage.observations()
     ]
 
   defp publish(state) do
@@ -607,15 +604,15 @@ defmodule NervesGate.Network do
   defp cellular_fault(connection) when connection in [:lan, :disconnected], do: true
   defp cellular_fault(_), do: nil
 
-  defp load(adapter, timeout) do
-    case bounded(fn -> Adapter.load(adapter) end, timeout) do
-      {:ok, config} -> {config, restore_loaded(adapter, config, timeout)}
+  defp load(timeout) do
+    case bounded(fn -> NervesGate.Network.Vintage.load() end, timeout) do
+      {:ok, config} -> {config, restore_loaded(config, timeout)}
       {:error, reason} -> {nil, {:load, reason}}
     end
   end
 
-  defp restore_loaded(adapter, config, timeout) do
-    case bounded(fn -> Adapter.restore(adapter, config["network"]) end, timeout) do
+  defp restore_loaded(config, timeout) do
+    case bounded(fn -> NervesGate.Network.Vintage.restore(config["network"]) end, timeout) do
       :ok -> nil
       {:error, reason} -> {:restore, reason}
     end
@@ -625,30 +622,42 @@ defmodule NervesGate.Network do
     task = Task.async(fun)
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} -> result
-      {:exit, reason} -> {:error, {:worker_failed, reason}}
-      nil -> {:error, :operation_timeout}
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        {:error, {:worker_failed, reason}}
+
+      nil ->
+        {:error, %{code: "operation_timeout", message: "The operation exceeded its time limit."}}
     end
   end
 
-  defp lan_change(state), do: remote_snapshot(state.remote) |> Sharing.lan_change()
+  defp lan_change(_state), do: Remote.status() |> Sharing.lan_change()
 
   defp sharing_params(:sharing_enable, _, state) do
-    Sharing.enable(public(state), remote_snapshot(state.remote))
+    Sharing.enable(public(state), Remote.status())
   end
 
   defp sharing_params(:sharing_disable, _, state) do
-    Sharing.disable(public(state), remote_snapshot(state.remote))
+    Sharing.disable(public(state), Remote.status())
   end
 
-  defp sharing_params(_, _, _), do: {:error, :sharing_unknown}
+  defp sharing_params(_, _, _),
+    do:
+      {:error,
+       %{
+         code: "sharing_unknown",
+         message:
+           "Sharing state is unknown. Turn sharing off and wait for confirmation before changing LAN settings."
+       }}
 
   defp share(state, operation, params, from) do
-    work(state, :sharing, from, fn -> Remote.sharing(operation, params, state.remote) end)
+    work(state, :sharing, from, fn -> Remote.sharing(operation, params) end)
   end
 
   defp reconcile_sharing(%{worker: nil, trial: nil, recovering: false} = state) do
-    maybe_sync(state, remote_snapshot(state.remote))
+    maybe_sync(state, Remote.status())
   end
 
   defp reconcile_sharing(state), do: state
@@ -663,11 +672,52 @@ defmodule NervesGate.Network do
 
   defp maybe_sync(state, _), do: state
 
-  defp remote_snapshot(server) do
-    Remote.status(server)
-  catch
-    :exit, {_, {GenServer, :call, _}} -> Remote.unavailable()
-  end
+  defp error(nil), do: nil
+
+  defp error({:apply, _}),
+    do: %{code: "apply_failed", message: "Could not apply settings. Restoring saved settings."}
+
+  defp error({:save, _}),
+    do: %{code: "save_failed", message: "Could not save settings. Restoring saved settings."}
+
+  defp error({:restore, _}),
+    do: %{
+      code: "recovery_in_progress",
+      message: "Wait for saved settings to be restored before trying again."
+    }
+
+  defp error({:load, _}),
+    do: %{
+      code: "invalid_saved_config",
+      message: "Saved settings could not be read. Use recovery SSH or serial."
+    }
+
+  defp error({:discovery, _}),
+    do: %{code: "discovery_failed", message: "Connection status is unavailable."}
+
+  defp error(:expired),
+    do: %{code: "expired", message: "The trial expired. Previous settings are being restored."}
+
+  defp error(:conflicting_networks),
+    do: %{
+      code: "conflicting_networks",
+      message:
+        "Network addresses overlap. Previous settings have been restored. Choose different Ethernet, cellular, equipment and USB subnets."
+    }
+
+  defp error(:operation_timeout),
+    do: %{
+      code: "operation_timeout",
+      message: "The operation exceeded its time limit. Read the current state before retrying."
+    }
+
+  defp error({:worker_failed, _}),
+    do: %{
+      code: "outcome_unknown",
+      message: "The command reply was lost. Read the current state before retrying."
+    }
+
+  defp error(reason), do: NervesGate.Error.safe(reason)
 
   defp now, do: System.monotonic_time(:millisecond)
 end

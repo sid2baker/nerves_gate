@@ -37,8 +37,8 @@ defmodule NervesGate.SDKBackend do
   def init(_) do
     identity = %Info{
       id: Nerves.Runtime.serial_number(),
-      model: to_string(NervesGate.target()),
-      firmware_version: NervesGate.version(),
+      model: to_string(NervesGate.System.info().target),
+      firmware_version: NervesGate.System.info().firmware,
       sdk_version: to_string(Application.spec(:nerves_gate_sdk, :vsn))
     }
 

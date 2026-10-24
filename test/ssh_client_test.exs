@@ -1,4 +1,4 @@
-defmodule Dev.SSHClientTest do
+defmodule Workbench.SSHClientTest do
   use ExUnit.Case, async: true
 
   @tag :tmp_dir
@@ -18,15 +18,15 @@ defmodule Dev.SSHClientTest do
     ]
 
     refute :ssh_file.is_host_key(public, peer, 22, :"ssh-rsa", options)
-    assert Dev.SSHClient.is_host_key(public, peer, 22, :"ssh-rsa", options)
+    assert Workbench.SSHHostKeys.is_host_key(public, peer, 22, :"ssh-rsa", options)
     unknown = Keyword.put(options, :key_cb_private, host: ~c"unknown.example", agent: false)
-    refute Dev.SSHClient.is_host_key(public, peer, 22, :"ssh-rsa", unknown)
+    refute Workbench.SSHHostKeys.is_host_key(public, peer, 22, :"ssh-rsa", unknown)
     changed = {:RSAPublicKey, elem(public, 1) + 2, elem(public, 2)}
-    refute Dev.SSHClient.is_host_key(changed, peer, 22, :"ssh-rsa", options)
-    refute Dev.SSHClient.is_host_key(public, peer, 2222, :"ssh-rsa", options)
+    refute Workbench.SSHHostKeys.is_host_key(changed, peer, 22, :"ssh-rsa", options)
+    refute Workbench.SSHHostKeys.is_host_key(public, peer, 2222, :"ssh-rsa", options)
 
     assert {:error, :host_key_not_accepted} =
-             Dev.SSHClient.add_host_key(~c"unknown.example", 22, public, options)
+             Workbench.SSHHostKeys.add_host_key(~c"unknown.example", 22, public, options)
 
     assert File.read!(path) == contents
   end

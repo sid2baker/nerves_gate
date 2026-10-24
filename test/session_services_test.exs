@@ -1,37 +1,43 @@
-defmodule Dev.SessionServicesTest do
+defmodule Workbench.SessionServicesTest do
   use ExUnit.Case, async: false
 
   test "the explicit session owns its services without starting firmware or devices" do
     refute firmware_started?()
     refute Process.whereis(NervesGate.Supervisor)
-    refute Process.whereis(Dev.SessionServices)
-    refute Process.whereis(DevWeb.Endpoint)
+    refute Process.whereis(Workbench.SessionServices)
+    refute Process.whereis(WorkbenchWeb.Endpoint)
 
-    previous = Application.fetch_env(:nerves_gate, :simulator_node)
-    endpoint = Application.fetch_env!(:nerves_gate_dev, DevWeb.Endpoint)
+    previous = Application.fetch_env(:nerves_gate_workbench, :simulator_node)
+    endpoint = Application.fetch_env!(:nerves_gate_workbench, WorkbenchWeb.Endpoint)
 
     on_exit(fn ->
       case previous do
-        {:ok, node} -> Application.put_env(:nerves_gate, :simulator_node, node)
-        :error -> Application.delete_env(:nerves_gate, :simulator_node)
+        {:ok, node} -> Application.put_env(:nerves_gate_workbench, :simulator_node, node)
+        :error -> Application.delete_env(:nerves_gate_workbench, :simulator_node)
       end
 
-      Application.put_env(:nerves_gate_dev, DevWeb.Endpoint, endpoint)
+      Application.put_env(:nerves_gate_workbench, WorkbenchWeb.Endpoint, endpoint)
     end)
 
     # The real lifecycle owner starts empty. No QEMU process or network is created.
     start_supervised!({Simulator, %{devices: %{}}})
-    Application.put_env(:nerves_gate, :simulator_node, node())
-    Application.put_env(:nerves_gate_dev, DevWeb.Endpoint, Keyword.put(endpoint, :server, false))
-    supervisor = start_supervised!(Dev.SessionServices)
+    Application.put_env(:nerves_gate_workbench, :simulator_node, node())
 
-    assert {:ok, {flags, children}} = Dev.SessionServices.init([])
+    Application.put_env(
+      :nerves_gate_workbench,
+      WorkbenchWeb.Endpoint,
+      Keyword.put(endpoint, :server, false)
+    )
+
+    supervisor = start_supervised!(Workbench.SessionServices)
+
+    assert {:ok, {flags, children}} = Workbench.SessionServices.init([])
     assert flags.strategy == :rest_for_one
 
     assert Enum.map(children, & &1.id) == [
              Phoenix.PubSub.Supervisor,
-             Simulator.QemuTests,
-             DevWeb.Endpoint
+             Scenarios.Runner,
+             WorkbenchWeb.Endpoint
            ]
 
     processes =
@@ -41,22 +47,22 @@ defmodule Dev.SessionServicesTest do
       end
 
     assert Process.whereis(NervesGate.PubSub)
-    assert Process.whereis(Simulator.QemuTests)
-    assert Process.whereis(DevWeb.Endpoint)
-    assert DevWeb.Endpoint.config(:server) == false
-    assert Simulator.QemuTests.snapshot().lifecycle.status == :stopped
+    assert Process.whereis(Scenarios.Runner)
+    assert Process.whereis(WorkbenchWeb.Endpoint)
+    assert WorkbenchWeb.Endpoint.config(:server) == false
+    assert Scenarios.Runner.snapshot().lifecycle.status == :stopped
     assert Simulator.devices() == %{}
-    assert :ok = Simulator.QemuTests.subscribe()
-    assert :ok = Simulator.QemuTests.unsubscribe()
+    assert :ok = Scenarios.Runner.subscribe()
+    assert :ok = Scenarios.Runner.unsubscribe()
     refute firmware_started?()
     refute Process.whereis(NervesGate.Supervisor)
     refute Process.whereis(NervesGateWeb.Endpoint)
 
-    :ok = stop_supervised(Dev.SessionServices)
+    :ok = stop_supervised(Workbench.SessionServices)
     for {pid, ref} <- processes, do: assert_receive({:DOWN, ^ref, :process, ^pid, _})
     refute Process.whereis(NervesGate.PubSub)
-    refute Process.whereis(Simulator.QemuTests)
-    refute Process.whereis(DevWeb.Endpoint)
+    refute Process.whereis(Scenarios.Runner)
+    refute Process.whereis(WorkbenchWeb.Endpoint)
     assert Process.whereis(Simulator)
     assert Simulator.devices() == %{}
     refute firmware_started?()

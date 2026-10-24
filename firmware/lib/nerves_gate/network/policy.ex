@@ -2,21 +2,63 @@ defmodule NervesGate.Network.Policy do
   @moduledoc "Pure trial admission, topology readiness and observed subnet conflict checks."
   alias NervesGate.Config
 
-  def available(nil), do: {:error, :unavailable}
-  def available(%{config: nil}), do: {:error, :invalid_saved_config}
-  def available(%{recovering: true}), do: {:error, :recovery_in_progress}
-  def available(%{trial: trial}) when not is_nil(trial), do: {:error, :trial_in_progress}
+  def available(nil),
+    do:
+      {:error,
+       %{
+         code: "unavailable",
+         message: "Network control is unavailable. Reconnect and read the current state."
+       }}
+
+  def available(%{config: nil}),
+    do:
+      {:error,
+       %{
+         code: "invalid_saved_config",
+         message: "Saved settings could not be read. Use recovery SSH or serial."
+       }}
+
+  def available(%{recovering: true}),
+    do:
+      {:error,
+       %{
+         code: "recovery_in_progress",
+         message: "Wait for saved settings to be restored before trying again."
+       }}
+
+  def available(%{trial: trial}) when not is_nil(trial),
+    do: {:error, %{code: "trial_in_progress", message: "Another client already started a trial."}}
 
   def available(%{phase: phase}) when phase not in [:idle, :pending] do
-    {:error, :operation_in_progress}
+    {:error,
+     %{code: "operation_in_progress", message: "Wait for the current operation to finish."}}
   end
 
   def available(_) do
     :ok
   end
 
+  @doc false
+  def trial_available(%{trial: trial, ready: ready}, operation) when not is_nil(trial) do
+    if operation == :confirm and not ready,
+      do:
+        {:error,
+         %{
+           code: "not_connected",
+           message:
+             "Port settings are not ready to save. Check the connection status and any address conflicts below."
+         }},
+      else: :ok
+  end
+
+  def trial_available(_, _), do: matching(nil, nil)
+
   def matching(%{trial: %{id: id}}, id), do: :ok
-  def matching(_, _), do: {:error, :no_matching_trial}
+
+  def matching(_, _),
+    do:
+      {:error,
+       %{code: "no_matching_trial", message: "This trial has ended. Review your settings again."}}
 
   def supported(observed, network, current \\ nil) do
     cond do
@@ -24,13 +66,23 @@ defmodule NervesGate.Network.Policy do
         :ok
 
       not match?(%{cellular_supported: true}, observed) ->
-        {:error, :cellular_unsupported}
+        {:error,
+         %{
+           code: "cellular_unsupported",
+           message:
+             "Cellular setup needs a qualified modem driver and dedicated interface in this firmware."
+         }}
 
       Config.internet(network) == Config.internet(current) ->
         :ok
 
       not match?(%{cellular: %{present: true}}, observed) ->
-        {:error, :cellular_missing}
+        {:error,
+         %{
+           code: "cellular_missing",
+           message:
+             "The configured cellular interface is not detected. Check modem power and USB enumeration."
+         }}
 
       true ->
         :ok

@@ -136,12 +136,18 @@ defmodule NervesGate.Remote.Policy do
         "Tailscale stopped responding. The change may still complete; check its status before retrying."
       )
 
-  def result_error({:error, :outcome_unknown}),
-    do:
-      Error.new(
-        "remote_outcome_unknown",
-        "Tailscale operation was interrupted. Some settings may have changed; check its status before retrying."
-      )
+  def result_error(
+        {:error,
+         %{
+           code: "outcome_unknown",
+           message: "The command reply was lost. Read the current state before retrying."
+         }}
+      ),
+      do:
+        Error.new(
+          "remote_outcome_unknown",
+          "Tailscale operation was interrupted. Some settings may have changed; check its status before retrying."
+        )
 
   def result_error(_),
     do:

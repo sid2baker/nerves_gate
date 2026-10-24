@@ -1,6 +1,6 @@
-defmodule Dev.FirmwareUpdateTest do
+defmodule Workbench.FirmwareUpdateTest do
   use ExUnit.Case, async: true
-  alias Dev.FirmwareUpdate
+  alias Workbench.FirmwareUpdate
 
   test "image and authenticated device must have matching product and platform" do
     image =
@@ -60,7 +60,7 @@ defmodule Dev.FirmwareUpdateTest do
     assert options[:user_interaction] == false
     assert options[:auth_methods] == ~c"publickey"
     assert options[:user] == ~c"nerves_gate"
-    assert {Dev.SSHClient, callback} = options[:key_cb]
+    assert {Workbench.SSHHostKeys, callback} = options[:key_cb]
     assert callback[:host] == ~c"ec100.example.ts.net"
     assert callback[:agent] == not is_nil(System.get_env("SSH_AUTH_SOCK"))
     refute Keyword.has_key?(options, :preferred_algorithms)
@@ -111,34 +111,37 @@ defmodule Dev.FirmwareUpdateTest do
       expires: System.monotonic_time(:millisecond) + 60_000
     }
 
-    {:ok, idle} = Dev.Operations.init(nil)
+    {:ok, idle} = Workbench.Operations.init(nil)
     ref = make_ref()
 
     assert {:noreply, ready} =
-             Dev.Operations.handle_info({ref, {:review, plan}}, %{idle | task: %{ref: ref}})
+             Workbench.Operations.handle_info({ref, {:review, plan}}, %{idle | task: %{ref: ref}})
 
     assert ready.view.review == public
     refute inspect(ready.view) =~ "not projected"
     refute inspect(ready.view) =~ snapshot
 
     assert {:reply, {:error, _}, ^ready} =
-             Dev.Operations.handle_call(
+             Workbench.Operations.handle_call(
                {:confirm_firmware, "stale", public.address},
                {self(), make_ref()},
                ready
              )
 
     assert File.exists?(snapshot)
-    assert {:noreply, expired} = Dev.Operations.handle_info({:expire_review, "review"}, ready)
+
+    assert {:noreply, expired} =
+             Workbench.Operations.handle_info({:expire_review, "review"}, ready)
+
     assert expired.review == nil
     refute File.exists?(snapshot_dir)
   end
 
   test "an update cannot be confirmed without a prepared review" do
-    {:ok, state} = Dev.Operations.init(nil)
+    {:ok, state} = Workbench.Operations.init(nil)
 
     assert {:reply, {:error, _}, ^state} =
-             Dev.Operations.handle_call(
+             Workbench.Operations.handle_call(
                {:confirm_firmware, "guessed", "ec100.example.ts.net"},
                {self(), make_ref()},
                state

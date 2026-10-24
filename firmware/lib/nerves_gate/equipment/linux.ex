@@ -4,19 +4,15 @@ defmodule NervesGate.Equipment.Linux do
   alias NervesGate.Equipment.Subnet
   alias NervesGate.Linux.Netlink
 
-  @behaviour NervesGate.Equipment.Adapter
-  @impl true
-  def load_labels(_) do
+  def load_labels do
     NervesGate.Equipment.Labels.load()
   end
 
-  @impl true
-  def save_labels(labels, _) do
+  def save_labels(labels) do
     NervesGate.Equipment.Labels.save(labels)
   end
 
-  @impl true
-  def neighbors(scope, _) do
+  def neighbors(scope) do
     with {:ok, index} <- :net.if_name2index(String.to_charlist(scope.interface)),
          {:ok, messages} <-
            Netlink.request(30, 0x301, <<2, 0, 0::16, index::native-32, 0::32>>) do
@@ -52,8 +48,7 @@ defmodule NervesGate.Equipment.Linux do
 
   def neighbor(_, _, _), do: nil
 
-  @impl true
-  def scan(scope, _) do
+  def scan(scope) do
     with {:ok, index} <- :net.if_name2index(String.to_charlist(scope.interface)),
          {:ok, mac} <- File.read("/sys/class/net/#{scope.interface}/address"),
          {:ok, mac} <- parse_mac(String.trim(mac)),
