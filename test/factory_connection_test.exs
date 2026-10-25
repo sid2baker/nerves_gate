@@ -22,6 +22,7 @@ defmodule Workbench.FactoryConnectionTest do
   } do
     File.mkdir!(Path.join(root, "enxusb"))
     File.ln_s!("../../../1-2.5/1-2.5:1.0", Path.join([root, "enxusb", "device"]))
+    assert Connection.usb_paths(root) == ["1-2.5"]
     usb = address(~c"enxusb", {172, 31, 211, 2}, {255, 255, 255, 252})
     [peer] = Connection.peers([usb], "1-2.5", root)
     assert peer.address == "172.31.211.1"
@@ -49,6 +50,7 @@ defmodule Workbench.FactoryConnectionTest do
              Connection.information(html, "0.3.0-dev")
 
     refute inspect(info) =~ "private"
+    assert {:ok, %{version: "0.3.0-dev"}} = Connection.information(html, nil)
     assert {:error, :firmware_mismatch} = Connection.information(page("old", "ec100"), "new")
     assert {:error, :firmware_mismatch} = Connection.information(page("new", "x86_64"), "new")
     assert {:error, :invalid_information} = Connection.information("<h1>Another site</h1>", "new")

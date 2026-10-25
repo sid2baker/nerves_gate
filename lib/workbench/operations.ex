@@ -15,6 +15,12 @@ defmodule Workbench.Operations do
   def confirm_firmware(id, address),
     do: GenServer.call(__MODULE__, {:confirm_firmware, id, address})
 
+  def review_reboot(address, management \\ "ssh"),
+    do: GenServer.call(__MODULE__, {:review_reboot, address, management})
+
+  def confirm_reboot(id, address), do: GenServer.call(__MODULE__, {:confirm_reboot, id, address})
+  def cancel_observation(address), do: GenServer.call(__MODULE__, {:cancel_observation, address})
+
   def review_factory(params), do: GenServer.call(__MODULE__, {:review_factory, params})
 
   def confirm_factory(id, text, identified),
@@ -22,6 +28,32 @@ defmodule Workbench.Operations do
 
   def init(_), do: {:ok, %{task: nil, review: nil, stopping: false, view: view(:idle, nil)}}
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
+
+  def handle_call(
+        {:cancel_observation, address},
+        _,
+        %{task: %{pid: pid}, view: %{kind: kind, context: %{subject: address}}} = state
+      )
+      when kind in ["hardware_failover", "reboot_verify"] do
+    send(pid, :cancel_hardware_observation)
+
+    {:reply, :ok,
+     %{
+       state
+       | view: %{
+           state.view
+           | output:
+               "Cancellation requested. Wait for the bounded read to finish; restore Ethernet cables. Do not repeat a button action."
+         }
+     }}
+  end
+
+  def handle_call({:cancel_observation, _}, _, state),
+    do:
+      {:reply,
+       {:error,
+        "Only this device's active failover or reboot observation can be cancelled; writes cannot be cancelled here"},
+       state}
 
   def handle_call(_, _, %{stopping: true} = state),
     do: {:reply, {:error, "The workbench session is stopping"}, state}
@@ -51,6 +83,48 @@ defmodule Workbench.Operations do
       %{address: params["address"]}
     )
   end
+
+  def handle_call({:review_reboot, address, management}, _, state) do
+    with :ok <- admitted("device_info", address) do
+      start_task(
+        state,
+        "reboot_review",
+        fn _ ->
+          {:review, Workbench.Hardware.review_reboot!(address, management)}
+        end,
+        nil,
+        %{subject: address, device: nil}
+      )
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call(
+        {:confirm_reboot, id, address},
+        _,
+        %{review: %{public: %{kind: :reboot}}} = state
+      ) do
+    try do
+      :ok = Workbench.Hardware.confirm_reboot!(state.review, id, address)
+      plan = state.review
+
+      start_task(
+        %{state | review: nil},
+        "reboot_verify",
+        fn report ->
+          Workbench.Hardware.observe_reboot!(plan, report)
+        end,
+        nil,
+        %{subject: plan.public.address, device: nil}
+      )
+    rescue
+      error in ArgumentError -> {:reply, {:error, Exception.message(error)}, state}
+    end
+  end
+
+  def handle_call({:confirm_reboot, _, _}, _, state),
+    do: {:reply, {:error, "Review this device's reboot observation first"}, state}
 
   def handle_call({:review_factory, params}, _, state) do
     start_task(state, "factory_review", fn report ->
@@ -90,6 +164,9 @@ defmodule Workbench.Operations do
   def handle_call({:confirm_firmware, _, _}, _, %{review: %{public: %{kind: :factory}}} = state),
     do: {:reply, {:error, "This is a factory review, not an SSH update"}, state}
 
+  def handle_call({:confirm_firmware, _, _}, _, %{review: %{public: %{kind: :reboot}}} = state),
+    do: {:reply, {:error, "This is a reboot observation review, not a firmware update"}, state}
+
   def handle_call({:confirm_firmware, _, _}, _, %{review: nil} = state),
     do: {:reply, {:error, "Review the firmware and device first"}, state}
 
@@ -102,7 +179,7 @@ defmodule Workbench.Operations do
         %{state | review: nil},
         "firmware_update",
         fn report ->
-          {:ok, Workbench.FirmwareUpdate.update!(plan, report)}
+          Workbench.FirmwareUpdate.update!(plan, report)
         end,
         nil,
         %{address: plan.public.address}
@@ -124,15 +201,30 @@ defmodule Workbench.Operations do
           result =
             case kind do
               "firmware" -> Workbench.Builds.firmware!(app || "x86_64", report)
+              "find_usb" -> Workbench.Hardware.discover!()
+              "hardware_test" -> Workbench.Hardware.run!(app, device)
+              "hardware_failover" -> Workbench.Hardware.failover!(app, device, report)
+              "hardware_diagnostics" -> Workbench.Hardware.diagnostics!(app)
               "test" -> Workbench.Applications.test!(app, report)
               "package" -> Workbench.Applications.package!(app, report)
               "install" -> Workbench.Applications.install!(app, device, report)
             end
 
-          {:ok, inspect(result)}
+          case kind do
+            kind when kind in ["hardware_test", "hardware_failover"] -> {:hardware_checks, result}
+            "hardware_diagnostics" -> {:diagnostics, result}
+            _ -> {:ok, inspect(result)}
+          end
         end,
         nil,
-        %{subject: app, device: device}
+        %{
+          subject: app,
+          device:
+            if(kind in ["hardware_test", "hardware_failover", "hardware_diagnostics"],
+              do: nil,
+              else: device
+            )
+        }
       )
     else
       {:error, _} = error -> {:reply, error, state}
@@ -215,6 +307,12 @@ defmodule Workbench.Operations do
       else: {:error, "Add the device address first"}
   end
 
+  defp admitted("find_usb", _), do: :ok
+
+  defp admitted(kind, address)
+       when kind in ["hardware_test", "hardware_failover", "hardware_diagnostics"],
+       do: admitted("device_info", address)
+
   defp admitted("firmware", "ec100"), do: :ok
 
   defp admitted("firmware", target) when target in [nil, "x86_64"] do
@@ -257,10 +355,16 @@ defmodule Workbench.Operations do
            | status: :awaiting_confirmation,
              review: plan.public,
              result:
-               if(Map.get(plan.public, :kind) == :factory,
-                 do: "Factory review complete. Transport loaded into RAM only; no eMMC writes.",
-                 else: "Review complete. No firmware has been sent."
-               )
+               case Map.get(plan.public, :kind) do
+                 :factory ->
+                   "Factory review complete. Transport loaded into RAM only; no eMMC writes."
+
+                 :reboot ->
+                   "Reboot observation reviewed. Do not press the button until observation is armed. No reboot command was sent."
+
+                 _ ->
+                   "Review complete. No firmware has been sent."
+               end
          }
      }}
   end
@@ -287,6 +391,40 @@ defmodule Workbench.Operations do
         result: message,
         flash_verified: true,
         connection: connection
+      })
+
+    {:noreply, finish_info_read(state, view)}
+  end
+
+  def handle_info({ref, {:diagnostics, report}}, %{task: %{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+
+    view =
+      Map.merge(state.view, %{
+        status: :succeeded,
+        diagnostic_report: report,
+        result:
+          "Sanitized diagnostic snapshot collected over verified SSH. No raw logs, credentials or SIM identifiers included."
+      })
+
+    {:noreply, finish_info_read(state, view)}
+  end
+
+  def handle_info({ref, {:hardware_checks, result}}, %{task: %{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    status = Scenarios.result(result.rows)
+
+    view =
+      Map.merge(state.view, %{
+        status: if(status == :passed, do: :succeeded, else: :failed),
+        checks: result,
+        result:
+          if(state.view.kind == "hardware_failover",
+            do:
+              "Operator-assisted backup failover: #{status}. Restore all Ethernet cables, including after failure or cancellation. No network configuration was changed.",
+            else:
+              "Read-only SSH readiness: #{status}. Configuration and failover transitions were not changed or exercised."
+          )
       })
 
     {:noreply, finish_info_read(state, view)}
@@ -336,9 +474,11 @@ defmodule Workbench.Operations do
 
   def handle_info({:expire_review, id}, %{review: %{public: %{token: id}}} = state) do
     message =
-      if Map.get(state.review.public, :kind) == :factory,
-        do: "Factory review expired; re-enter MASKROM before reviewing again",
-        else: "Firmware review expired"
+      case Map.get(state.review.public, :kind) do
+        :factory -> "Factory review expired; re-enter MASKROM before reviewing again"
+        :reboot -> "Reboot observation review expired. Review again before pressing the button."
+        _ -> "Firmware review expired"
+      end
 
     GenServer.cast(self(), :read_discovered)
     {:noreply, %{drop_review(state) | view: %{view(:idle, nil) | result: message}}}
@@ -349,6 +489,7 @@ defmodule Workbench.Operations do
   defp drop_review(state) do
     case state.review do
       %{public: %{kind: :factory}} = plan -> Workbench.FactoryProvisioning.cleanup(plan)
+      %{public: %{kind: :reboot}} -> :ok
       plan -> Workbench.FirmwareUpdate.cleanup(plan)
     end
 

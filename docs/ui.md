@@ -92,13 +92,55 @@ not restricted to USB. QEMU reports EC100 peripherals as unavailable. The UI has
 | --- | --- | --- |
 | Home | `/` | Resume applications/runs, current operation and actionable bench problems |
 | Devices | `/devices` | Physical gateways and owned QEMU devices, with filters |
-| Physical device | `/devices/physical/:address` | Verified-SSH information read, gateway link and firmware update |
+| Physical device | `/devices/physical/:address` | Overview, read-only SSH checks, USB-only disruptive tests and reviewed device procedures |
 | Simulated device | `/devices/:id` | Read-only observations, gateway link and diagnostic fault/wiring state |
 | Develop → Applications | `/develop`, `/develop/applications`, `/develop/applications/:id` | Create/open SDK projects; test, package, install and run on owned QEMU |
 | Develop → Firmware | `/develop/firmware` | Build, owned QEMU Start/Stop/Reset and wiring, test/debug device selection, results and action log in one workspace |
 | Firmware → Scenarios | `/develop/firmware/scenarios/:id` | Confirm runs and inspect device results; return to the firmware workspace |
 | Firmware → Manual debugging | `/develop/firmware/manual/:id` | Explicitly acquire manual control, inject reversible faults, inspect console instructions and release control |
 | Provision | `/provision` | Guided initial EC100 USB MASKROM preparation, destructive review and verification |
+
+Physical workspaces separate **Hardware tests** from **Procedures**. Use **Find
+USB gateways** to add EC100s found over an existing independent USB management
+network. Read-only hardware readiness checks explicitly select Ethernet, 4G or
+Ethernet with 4G backup and work over verified SSH on LAN, Tailscale or USB. No
+independent USB connection is required. They do not configure the selected
+profile, unlock a SIM, interrupt a link or prove failover/failback. The disruptive
+assisted failover test still fails closed without independent USB management,
+even if LAN/Tailscale works.
+The separate **assisted failover test** requires explicit cellular-data and cable
+disruption consent. A human disconnects Ethernet when prompted, while the
+workbench observes physical link loss and online 4G takeover over USB, then
+prompts restoration and verifies Ethernet preference with 4G still ready. Each
+phase has a two-minute deadline. Identity, firmware and boot must stay unchanged;
+USB loss or a changed trial fails closed. Restore all cables after failure,
+cancellation or a lost workbench connection. No automatic cable fixture exists.
+
+**Procedures** links setup/restore to the native gateway Internet, remote-access
+and settings editors; the workbench never proxies configuration/PIN commands.
+Sanitized diagnostic snapshots work over verified SSH without USB and contain
+only public identity/boot and readiness
+fields, not raw logs/settings/credentials/SIM identifiers. Reports stay in the
+owning workspace for review/copying; no file is uploaded automatically.
+
+**Reboot and verify** reviews identity and the current boot over LAN/Tailscale SSH
+or explicitly selected independent USB, requires typed
+address confirmation, then arms a three-minute observation window. The operator
+uses the physical button once as instructed; there is no remote reboot command.
+A different boot ID, the same identity and firmware, validated firmware and healthy
+network state must be observed over the reviewed management connection. Remote
+management may not return; that leaves verification incomplete, never a retry. Reviews expire after ten
+minutes and are consumed once. Observation can be stopped cooperatively after a
+bounded read; it cannot undo a physical action or cancel a firmware write.
+
+**SSH update, reboot and verify** is available over LAN/Tailscale without USB and
+reuses the firmware review and typed confirmation, then checks a new boot,
+identity, version and ready state. Independent USB verification is a separate,
+stricter choice that binds SSH to the direct interface. Standard SSH updates also
+remain available with manual verification. **Factory reset**
+is a deliberate physical-button recovery checklist, not a remote erase button;
+full USB MASKROM reprovisioning has its own destructive review. See
+[firmware updates](firmware-updates.md) and [button recovery](indicators.md).
 
 The main navigation has four destinations: **Home · Develop · Devices · Provision**.
 Develop switches between application and firmware workspaces locally. Firmware keeps

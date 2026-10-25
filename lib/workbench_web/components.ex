@@ -52,6 +52,31 @@ defmodule WorkbenchWeb.Components do
         Full eMMC backup was explicitly skipped. Readbacks are verification artifacts, not a backup of the previous firmware/data.
       </.notice>
       <code :if={@operation.output} class="bench-output">{@operation.output}</code>
+      <p :if={@operation[:checks]}>
+        {if @operation.kind == "hardware_failover",
+          do: "Assisted test profile:",
+          else: "Read-only readiness profile:"} {@operation.checks.profile}
+      </p>
+      <p
+        :if={@operation[:checks] && @operation.checks[:observed]}
+        class="ui-help"
+        id="hardware-observed-network"
+      >
+        Observed profile: {@operation.checks.observed["mode"] || "unknown"} ·
+        selected: {@operation.checks.observed["selected"] || "none"} ·
+        Ethernet: {@operation.checks.observed["ethernet"] || "unknown"} ·
+        4G: {@operation.checks.observed["cellular"] || "unknown"} ·
+        Internet: {@operation.checks.observed["health"] || "unknown"}
+      </p>
+      <pre :if={@operation[:diagnostic_report]} class="ui-bus-data" id="hardware-diagnostic-report">{Jason.encode!(@operation.diagnostic_report, pretty: true)}</pre>
+      <ul :if={@operation[:checks]} class="bench-scenarios" id="hardware-check-results">
+        <li :for={row <- @operation.checks.rows}>
+          <strong>{row.id}</strong>
+          ·
+          <.status tone={result_tone(row.status)}>{row.status}</.status>
+          <pre :if={row.detail != ""} class="ui-bus-data">{row.detail}</pre>
+        </li>
+      </ul>
       <p :if={@operation.result && @operation.status != :failed} class="dev-result">
         {@operation.result}
       </p>
@@ -92,6 +117,38 @@ defmodule WorkbenchWeb.Components do
     """
   end
 
+  attr(:operation, :map, required: true)
+  attr(:address, :string, required: true)
+  attr(:kinds, :list, required: true)
+
+  def procedure_result(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :matches,
+        assigns.operation.kind in assigns.kinds and
+          hd(String.split(operation_path(assigns.operation), "?")) ==
+            Workbench.Devices.physical_path(assigns.address)
+      )
+
+    ~H"""
+    <div :if={@matches} class="ui-stack">
+      <.notice
+        :if={
+          @operation.status == :running && @operation.kind in ["hardware_failover", "reboot_verify"]
+        }
+        id="hardware-observation-running"
+      >
+        <p>
+          Follow the progress instructions here. Restore Ethernet cables if the test fails or the workbench disconnects. Stopping observation waits for the current bounded read; it cannot undo a physical action.
+        </p>
+        <.button phx-click="cancel_observation" variant="secondary">Stop observation</.button>
+      </.notice>
+      <.operation operation={@operation} />
+    </div>
+    """
+  end
+
   attr(:review, :map, required: true)
 
   def firmware_confirmation(assigns) do
@@ -101,6 +158,12 @@ defmodule WorkbenchWeb.Components do
       <p>{@review.current_version} → {@review.version} · serial {@review.serial}</p>
       <p>{@review.firmware}</p>
       <code>SHA-256: {@review.sha256}</code>
+      <p :if={@review[:verify_ssh]}>
+        SSH update-and-verify procedure. Reconnect verification requires the same identity, a new boot, reviewed firmware and healthy state. If LAN/Tailscale access does not return, inspect the device; no update is retried.
+      </p>
+      <p :if={@review[:verify_usb]}>
+        USB update-and-verify procedure · {@review.management}. A new boot, reviewed version, unchanged identity and healthy state must be observed. An incomplete verification never retries the upload.
+      </p>
       <p>
         Review expires after ten minutes. Keep power connected. Type the exact reviewed
         hostname/address to authorize this update and reboot.
@@ -114,7 +177,13 @@ defmodule WorkbenchWeb.Components do
           autocomplete="off"
           required
         />
-        <.button type="submit" variant="danger">Update firmware and reboot</.button>
+        <.button type="submit" variant="danger">
+          {cond do
+            @review[:verify_usb] -> "Update, reboot and verify over USB"
+            @review[:verify_ssh] -> "Update, reboot and verify over SSH"
+            true -> "Update firmware and reboot"
+          end}
+        </.button>
       </form>
     </.notice>
     """
@@ -134,6 +203,16 @@ defmodule WorkbenchWeb.Components do
   def operation_path(%{context: %{address: address}}) when is_binary(address),
     do: Workbench.Devices.physical_path(address) <> "?tab=firmware"
 
+  def operation_path(%{kind: kind, context: %{subject: address}})
+      when kind in ["hardware_diagnostics", "reboot_review", "reboot_verify"],
+      do: Workbench.Devices.physical_path(address) <> "?tab=firmware"
+
+  def operation_path(%{kind: kind, context: %{subject: address}})
+      when kind in ["hardware_test", "hardware_failover"],
+      do: Workbench.Devices.physical_path(address) <> "?tab=tests"
+
+  def operation_path(%{kind: "find_usb"}), do: "/devices"
+
   def operation_path(%{kind: "device_info", context: %{subject: address}}),
     do: Workbench.Devices.physical_path(address)
 
@@ -148,6 +227,12 @@ defmodule WorkbenchWeb.Components do
 
   def operation_label(nil), do: "No operation"
   def operation_label("device_info"), do: "Read device information"
+  def operation_label("find_usb"), do: "Find USB gateways"
+  def operation_label("hardware_test"), do: "Hardware readiness"
+  def operation_label("hardware_failover"), do: "Assisted Ethernet / 4G failover"
+  def operation_label("hardware_diagnostics"), do: "Diagnostic snapshot"
+  def operation_label("reboot_review"), do: "Reboot observation review"
+  def operation_label("reboot_verify"), do: "Observe physical-button reboot"
   def operation_label("firmware_review"), do: "Firmware review"
   def operation_label("firmware_update"), do: "Firmware update"
   def operation_label("factory_review"), do: "Factory review"

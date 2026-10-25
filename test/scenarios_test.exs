@@ -182,14 +182,19 @@ defmodule Workbench.ScenariosTest do
     assert ids == Enum.uniq(ids)
 
     portable = ~w(cable_loss invalid_configuration invalid_trial_ids public_status sdk)
-    assert length(scenarios) == 43
+    assert length(scenarios) == 45
 
     for scenario <- scenarios do
       assert Enum.sort(Map.keys(scenario.requires)) == [:device, :fixture]
       assert is_boolean(scenario.fresh_disk)
       assert is_boolean(scenario.all)
       assert is_boolean(scenario.opt_in)
-      assert :qemu in scenario.requires.fixture == scenario.id not in portable
+
+      assert :qemu in scenario.requires.fixture ==
+               scenario.id not in ["hardware_readiness", "hardware_backup" | portable]
+
+      assert :usb_management in scenario.requires.fixture == (scenario.id == "hardware_backup")
+      assert :ssh_management in scenario.requires.fixture == (scenario.id == "hardware_readiness")
     end
 
     assert [%{module: Scenarios.Cases.PublicStatus}] =

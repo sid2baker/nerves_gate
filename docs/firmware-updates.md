@@ -5,7 +5,7 @@ provisioning over USB. Finding a device or opening a page never writes to it.
 
 ## Build
 
-On **Firmware**, choose **EC100 physical controller** or **x86_64 QEMU** and
+On **Develop → Firmware**, choose **EC100 physical hardware** or **x86_64 QEMU** and
 **Build firmware**. Builds run in a separate process, never flash hardware, and
 show the resulting `.fw` path. EC100 builds use the published EC100 system
 artifact; see [system releases](releases.md#systems) for local system builds.
@@ -13,8 +13,9 @@ artifact; see [system releases](releases.md#systems) for local system builds.
 ## Update over SSH
 
 1. On **Devices**, add the gateway's hostname or IPv4 address (Tailscale DNS
-   names work). This stores an unverified entry and connects nowhere.
-2. On its **Firmware** tab, pick an image. The list shows EC100 archives in
+   names work). Discovery/manual additions attempt one verified, read-only SSH identity read.
+2. On its **Procedures** tab, choose **Standard SSH update · verify manually**
+   and pick an image. The list shows EC100 archives in
    `firmware/_build/ec100_*/nerves/images/` with their real versions.
 3. **Review firmware and device** checks the archive, snapshots it privately,
    verifies the SSH host key and reads the device's identity. It sends nothing.
@@ -33,6 +34,80 @@ confirmed once. The device's own fwup checks and data partition are untouched.
 **Read device information** on a device's Overview tab performs the same verified
 SSH identity read without a review. Results are kept for the session with a
 timestamp; this is not a live connection.
+
+## SSH reconnect verification (no USB required)
+
+On **Procedures**, **SSH update, reboot and verify** is the default for LAN,
+Tailscale and USB addresses. The same immutable image review, host-key checks and
+typed one-use confirmation apply. Review captures serial and boot ID; these are
+rechecked immediately before the single upload. Read-only reconnect probes then
+wait up to about three minutes for a different boot, unchanged serial, reviewed
+version, validated firmware and healthy network state. If LAN/Tailscale access
+does not return, verification is incomplete, not permission to upload again.
+No independent USB link is claimed by this mode. Use the stricter USB option
+below when management must stay independent of Ethernet/cellular connectivity.
+
+## USB update-and-verify procedure
+
+Use **Devices → Find USB gateways** to locate EC100s on independent USB /30
+management networks. This only reads local interface/route state and gateway
+information; it never changes workstation networking. Workstation DHCP must
+already be configured. Select the **USB IPv4 address**, not its LAN/Tailscale entry.
+
+On **Procedures**, **Require independent USB · update, reboot and verify** adds these
+requirements to the same archive review and typed, one-use confirmation:
+
+- A running USB interface with a non-overlapping /30 and a direct, gateway-free
+  route to this address. SSH binds both the source address and the USB interface.
+- A known SSH host key for the USB IP and an authorized key. USB does not bypass
+  authentication. Hosts that cannot bind to the interface fail closed.
+- Review captures the authenticated serial and Linux boot ID. Before uploading,
+  the USB path and reviewed identity are checked again.
+- After the single accepted upload, bounded read-only SSH probes wait about three
+  minutes for a **different boot ID**, the same serial, the reviewed firmware
+  version, validated firmware with its startup watchdog callback cleared,
+  available device status and ready networking without a pending trial
+  or recovery. Version alone is insufficient, including same-version rebuilds.
+
+An accepted upload with incomplete verification is reported as **verification incomplete**, not
+as a verified update. Inspect power, USB, boot and SSH access; never automatically
+repeat the upload. A changed USB path/address also requires fresh review rather
+than silently following another device. Verification does not prove Internet
+connectivity or every peripheral's health. It sends no setup/network commands.
+
+## Other physical device procedures
+
+The device's **Procedures** tab also provides:
+
+- **Setup / restore:** a checklist linking to the gateway's own Internet, remote
+  access and settings pages. Save/confirm/restore network trials there; no remote
+  configuration replay or automatic credential backup is performed.
+- **Diagnostics:** a timestamped JSON snapshot read over verified SSH on LAN,
+  Tailscale or USB, limited
+  to identity, boot, firmware validation and network/cellular readiness. It
+  excludes settings, raw logs, credentials and SIM identifiers. Review the device
+  serial/management address before sharing. The report is displayed, not uploaded.
+- **Reboot and verify:** a read-only review over LAN/Tailscale SSH or explicitly
+  selected independent USB, with a ten-minute TTL and one-use,
+  typed-address confirmation. Once the observation is armed, short-press/release
+  once to arm the physical button, then hold 5–10 seconds and release while RUN
+  blinks slowly. Never hold 30 seconds. The workbench sends no reboot command;
+  it observes up to three minutes for a different boot with unchanged serial and
+  firmware, validated firmware and healthy networking over the reviewed connection.
+  LAN/Tailscale access may not return; that is incomplete verification, not success.
+  Stop/timeout never authorizes repeating the action.
+- **Factory reset / recovery:** deliberate physical-button guidance, not remote
+  erasure. Hold/release semantics and consequences are in [LEDs and button](indicators.md).
+  Data reset deletes settings, SSH keys and Tailscale identity, so management
+  access and authenticated verification may disappear. Keep serial recovery.
+  It preserves the bootloader/firmware slots and is not secure erasure. A failed
+  quiesce/unmount can leave services stopped; inspect rather than retrying blindly.
+
+The physical button remains the owner of standalone reboot/reset recovery and
+its device-side interlock. The workbench does not bypass it with raw runtime
+reboots or unowned SSH-spawned reset workers. Firmware upload is the separately
+reviewed A/B update protocol described above. Full MASKROM provisioning below
+replaces storage layout as well as data/firmware.
 
 ### SSH access
 

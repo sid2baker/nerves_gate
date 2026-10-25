@@ -55,14 +55,19 @@ defmodule Scenarios.Device do
   def fixture_capabilities(%{fixture: {:qemu, %{owner: owner} = handle}}) when is_pid(owner),
     do: Scenarios.Qemu.capabilities(handle)
 
+  def fixture_capabilities(%{management: :verified_usb, manual_ethernet: true}),
+    do: [:ssh_management, :usb_management, :manual_ethernet]
+
+  def fixture_capabilities(%{management: :verified_usb}), do: [:ssh_management, :usb_management]
+  def fixture_capabilities(%{management: :verified_ssh}), do: [:ssh_management]
   def fixture_capabilities(_), do: []
 
   def control(device, operation, args \\ []) do
-    if operation in fixture_capabilities(device) do
-      {:qemu, handle} = device.fixture
+    with {:qemu, handle} <- Map.get(device, :fixture),
+         true <- operation in fixture_capabilities(device) do
       Scenarios.Qemu.control(handle, operation, args)
     else
-      {:error, :unsupported_fixture_control}
+      _ -> {:error, :unsupported_fixture_control}
     end
   end
 

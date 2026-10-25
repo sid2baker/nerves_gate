@@ -284,6 +284,152 @@ defmodule Workbench.OperationsTest do
     {ref, %{idle | task: %{ref: ref}, view: view}}
   end
 
+  test "physical readiness rows remain structured and failed checks never count as success" do
+    {:ok, idle} = Workbench.Operations.init(nil)
+
+    for status <- [:passed, :failed, :skipped] do
+      ref = make_ref()
+      rows = [%{id: "hardware_readiness", status: status, detail: "Observed readiness"}]
+      result = %{profile: "backup", rows: rows}
+
+      running = %{
+        idle
+        | task: %{ref: ref},
+          view: %{idle.view | kind: "hardware_test", status: :running}
+      }
+
+      assert {:noreply, done} =
+               Workbench.Operations.handle_info({ref, {:hardware_checks, result}}, running)
+
+      assert done.view.checks == result
+      assert done.view.status == if(status == :passed, do: :succeeded, else: :failed)
+      assert done.view.result =~ "not changed or exercised"
+    end
+  end
+
+  test "only a matching device's read-only assisted observation can be cooperatively cancelled" do
+    {:ok, idle} = Workbench.Operations.init(nil)
+
+    for kind <- ["hardware_failover", "reboot_verify", "firmware_update", "factory_provision"] do
+      running = %{
+        idle
+        | task: %{pid: self(), ref: make_ref()},
+          view:
+            Map.merge(idle.view, %{
+              kind: kind,
+              status: :running,
+              context: %{subject: "usb-device"}
+            })
+      }
+
+      assert {:reply, {:error, _}, ^running} =
+               Workbench.Operations.handle_call({:cancel_observation, "other"}, nil, running)
+
+      if kind in ["hardware_failover", "reboot_verify"] do
+        assert {:reply, :ok, pending} =
+                 Workbench.Operations.handle_call(
+                   {:cancel_observation, "usb-device"},
+                   nil,
+                   running
+                 )
+
+        assert pending.task == running.task
+        assert pending.view.status == :running
+        assert_receive :cancel_hardware_observation
+      else
+        assert {:reply, {:error, _}, ^running} =
+                 Workbench.Operations.handle_call(
+                   {:cancel_observation, "usb-device"},
+                   nil,
+                   running
+                 )
+
+        refute_receive :cancel_hardware_observation
+      end
+    end
+  end
+
+  test "reboot reviews cannot authorize firmware or factory writes and expire without device effects" do
+    {:ok, idle} = Workbench.Operations.init(nil)
+
+    plan = %{
+      public: %{kind: :reboot, token: "reboot", address: "usb-device"},
+      expires: System.monotonic_time(:millisecond) + 60_000
+    }
+
+    state = %{
+      idle
+      | review: plan,
+        view: %{idle.view | kind: "reboot_review", review: plan.public}
+    }
+
+    assert {:reply, {:error, _}, ^state} =
+             Workbench.Operations.handle_call(
+               {:confirm_firmware, "reboot", "usb-device"},
+               nil,
+               state
+             )
+
+    assert {:reply, {:error, _}, ^state} =
+             Workbench.Operations.handle_call(
+               {:confirm_factory, "reboot", "erase", "true"},
+               nil,
+               state
+             )
+
+    assert {:reply, {:error, _}, ^state} =
+             Workbench.Operations.handle_call(
+               {:confirm_reboot, "wrong", "usb-device"},
+               nil,
+               state
+             )
+
+    assert {:reply, {:error, _}, ^idle} =
+             Workbench.Operations.handle_call(
+               {:confirm_reboot, "reboot", "usb-device"},
+               nil,
+               idle
+             )
+
+    assert {:noreply, expired} =
+             Workbench.Operations.handle_info({:expire_review, "reboot"}, state)
+
+    assert expired.review == nil
+    assert expired.view.result =~ "Reboot observation review expired"
+  end
+
+  test "diagnostics and assisted test results remain structured and honestly labelled" do
+    {:ok, idle} = Workbench.Operations.init(nil)
+    ref = make_ref()
+
+    running = %{
+      idle
+      | task: %{ref: ref},
+        view: %{idle.view | kind: "hardware_diagnostics", status: :running}
+    }
+
+    report = %{device: %{"target" => "ec100"}}
+
+    assert {:noreply, done} =
+             Workbench.Operations.handle_info({ref, {:diagnostics, report}}, running)
+
+    assert done.view.diagnostic_report == report
+    assert done.view.status == :succeeded
+    running = %{running | view: %{idle.view | kind: "hardware_failover", status: :running}}
+
+    result = %{
+      profile: "assisted",
+      rows: [%{id: "hardware_backup", status: :failed, detail: "Restore Ethernet"}]
+    }
+
+    assert {:noreply, done} =
+             Workbench.Operations.handle_info({ref, {:hardware_checks, result}}, running)
+
+    assert done.view.status == :failed
+    assert done.view.result =~ "Restore all Ethernet cables"
+    refute done.view.result =~ "not changed or exercised"
+  end
+
   test "unknown workbench operations never start a worker" do
     {:ok, idle} = Workbench.Operations.init(nil)
 

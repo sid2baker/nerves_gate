@@ -1,6 +1,31 @@
 defmodule Workbench.FirmwareUpdate do
   @moduledoc "Explicit SSH firmware review/update; never provisions disks or bypasses host-key checks."
   @ttl 600_000
+  @hardware ~S"""
+  s = NervesGate.status()
+  info = NervesGate.System.info()
+  selected = cond do
+    s.connections.internet.selected == nil -> nil
+    s.connections.internet.selected == get_in(s, [:network, :observed, :cellular, :name]) -> "cellular"
+    true -> "ethernet"
+  end
+  Base.encode64(Jason.encode!(%{
+    target: info.target, version: info.firmware, serial: Nerves.Runtime.serial_number(),
+    product: Nerves.Runtime.KV.get_active("nerves_fw_product"),
+    boot_id: File.read!("/proc/sys/kernel/random/boot_id") |> String.trim(),
+    firmware_validated: Nerves.Runtime.firmware_validation_status() == :validated and :heart.get_callback() == :none,
+    available: s.device.available,
+    ready: s.network.desired != nil and NervesGate.Network.ready?(s.network.observed, s.network.desired),
+    pending: s.network.pending != nil, recovering: s.network.recovering,
+    internet: Map.take(s.connections.internet, [:mode, :ethernet, :cellular, :health])
+      |> Map.put(:selected, selected)
+      |> Map.put(:ethernet_link, case Enum.filter(s.connections.ports, &(&1.role in ["internet", "shared"])) do
+        [] -> nil
+        ports -> Enum.any?(ports, &(&1.link == true))
+      end),
+    cellular: Map.take(s.cellular, [:supported, :present, :enabled, :sim, :registration])
+  }))
+  """
   @identity ~S|info = NervesGate.System.info(); Base.encode64(Jason.encode!(%{target: info.target, version: info.firmware, platform: Nerves.Runtime.KV.get_active("nerves_fw_platform"), architecture: Nerves.Runtime.KV.get_active("nerves_fw_architecture"), product: Nerves.Runtime.KV.get_active("nerves_fw_product"), serial: Nerves.Runtime.serial_number()}))|
 
   @doc false
@@ -19,9 +44,81 @@ defmodule Workbench.FirmwareUpdate do
     device
   end
 
+  @doc false
+  def hardware_command, do: @hardware
+
+  def read_hardware!(target, timeout \\ 5_000)
+
+  def read_hardware!(address, timeout) when is_binary(address) do
+    {:ok, host} = valid_host!(address)
+
+    with_connection(host, 22, &read_json!(&1, @hardware, timeout), nil, timeout)
+    |> hardware_snapshot!()
+  end
+
+  def read_hardware!(peer, timeout) when is_map(peer) do
+    :ok = Workbench.FactoryConnection.verify_usb!(peer)
+    data = with_connection(peer.address, 22, &read_json!(&1, @hardware, timeout), peer, timeout)
+    :ok = Workbench.FactoryConnection.verify_usb!(peer)
+    hardware_snapshot!(data)
+  end
+
+  @doc false
+  def hardware_snapshot!(data) do
+    unless data["target"] == "ec100" and data["product"] == "nerves_gate" and
+             is_binary(data["version"]) and
+             is_binary(data["serial"]) and data["serial"] != "" and
+             is_binary(data["boot_id"]) and Regex.match?(~r/\A[0-9a-f-]{36}\z/, data["boot_id"]),
+           do:
+             raise("SSH endpoint did not return a compatible EC100 identity and boot observation")
+
+    data
+    |> Map.take([
+      "target",
+      "version",
+      "product",
+      "serial",
+      "boot_id",
+      "available",
+      "firmware_validated",
+      "ready",
+      "pending",
+      "recovering"
+    ])
+    |> Map.put(
+      "internet",
+      Map.take(data["internet"] || %{}, [
+        "mode",
+        "selected",
+        "ethernet",
+        "cellular",
+        "health",
+        "ethernet_link"
+      ])
+    )
+    |> Map.put(
+      "cellular",
+      Map.take(data["cellular"] || %{}, ["supported", "present", "enabled", "sim", "registration"])
+    )
+  end
+
   def review!(params, report \\ fn _ -> :ok end) do
     {:ok, host} = valid_host!(params["address"])
     port = port!(params["port"] || 22)
+
+    unless params["verify_usb"] in [nil, "false", "true", "ssh"],
+      do:
+        raise(
+          ArgumentError,
+          "Choose SSH reconnect verification, independent USB verification or manual verification"
+        )
+
+    usb = if params["verify_usb"] == "true", do: Workbench.FactoryConnection.usb_peer!(host)
+    verify_ssh = params["verify_usb"] == "ssh"
+
+    if (usb || verify_ssh) && port != 22,
+      do: raise(ArgumentError, "Reconnect verification requires verified SSH on port 22")
+
     original = Path.expand(params["firmware"] || "")
 
     unless Path.extname(original) == ".fw" and File.regular?(original),
@@ -46,8 +143,12 @@ defmodule Workbench.FirmwareUpdate do
       report.("Checking the firmware archive")
       image = image!(snapshot)
       report.("Verifying the device over authenticated SSH (read-only)")
-      device = with_connection(host, port, &identity!/1)
+      device = with_connection(host, port, &identity!/1, usb)
       compatible!(image, device)
+      before_update = if usb || verify_ssh, do: read_hardware!(usb || host)
+
+      if before_update && before_update["serial"] != device["serial"],
+        do: raise("Device identity changed during review")
 
       public = %{
         token: Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false),
@@ -59,7 +160,10 @@ defmodule Workbench.FirmwareUpdate do
         current_version: device["version"],
         version: image["meta-version"],
         serial: device["serial"],
-        sha256: hash!(snapshot)
+        sha256: hash!(snapshot),
+        verify_usb: not is_nil(usb),
+        verify_ssh: verify_ssh,
+        management: if(usb, do: usb.interface)
       }
 
       %{
@@ -67,6 +171,8 @@ defmodule Workbench.FirmwareUpdate do
         snapshot: snapshot,
         dir: dir,
         device: device,
+        usb: usb,
+        before_update: before_update,
         expires: System.monotonic_time(:millisecond) + @ttl
       }
     catch
@@ -99,17 +205,44 @@ defmodule Workbench.FirmwareUpdate do
       if hash!(plan.snapshot) != plan.public.sha256,
         do: raise("Reviewed firmware changed; review again")
 
-      with_connection(plan.public.address, plan.public.port, fn connection ->
-        # DNS or device state may have changed since review. Check again before
-        # opening the fwup subsystem, which admits a device-side state change.
-        if identity!(connection) != plan.device,
-          do: raise("Device identity/version changed; no firmware sent. Review again")
+      usb = plan[:usb]
+      if usb, do: Workbench.FactoryConnection.verify_usb!(usb)
 
-        report.("Uploading reviewed firmware; do not disconnect power")
-        upload!(connection, plan.snapshot, report)
-      end)
+      with_connection(
+        plan.public.address,
+        plan.public.port,
+        fn connection ->
+          # DNS or device state may have changed since review. Check again before
+          # opening the fwup subsystem, which admits a device-side state change.
+          if identity!(connection) != plan.device,
+            do: raise("Device identity/version changed; no firmware sent. Review again")
 
-      "Firmware accepted; the device will reboot. Reconnect and verify its running version."
+          if plan[:before_update] do
+            current = read_json!(connection, @hardware, 5_000) |> hardware_snapshot!()
+
+            unless same_reviewed_boot?(plan.before_update, current),
+              do:
+                raise("Device rebooted or changed since review; no firmware sent. Review again.")
+
+            if usb, do: Workbench.FactoryConnection.verify_usb!(usb)
+          end
+
+          report.("Uploading reviewed firmware; do not disconnect power")
+          upload!(connection, plan.snapshot, report)
+        end,
+        usb
+      )
+
+      if plan[:before_update] do
+        report.(
+          "Firmware accepted. Waiting for a new boot, reviewed version and healthy state over #{if usb, do: "the same USB management path", else: "verified SSH"}. No upload will be retried."
+        )
+
+        verify_update(plan, report)
+      else
+        {:ok,
+         "Firmware accepted; the device will reboot. Reconnect and verify its running version."}
+      end
     after
       cleanup(plan)
     end
@@ -180,8 +313,8 @@ defmodule Workbench.FirmwareUpdate do
   def port!(port) when is_integer(port) and port in 1..65_535, do: port
   def port!(_), do: raise(ArgumentError, "SSH port must be between 1 and 65535")
 
-  def ssh_options(host) do
-    [
+  def ssh_options(host, usb \\ nil) do
+    options = [
       key_cb:
         {Workbench.SSHHostKeys,
          [host: to_charlist(host), agent: not is_nil(System.get_env("SSH_AUTH_SOCK"))]},
@@ -192,6 +325,10 @@ defmodule Workbench.FirmwareUpdate do
       save_accepted_host: false,
       connect_timeout: 10_000
     ]
+
+    if usb,
+      do: Keyword.merge(options, ip: usb.local, bind_to_device: usb.interface),
+      else: options
   end
 
   defp valid_host!(address) do
@@ -201,10 +338,13 @@ defmodule Workbench.FirmwareUpdate do
     end
   end
 
-  defp with_connection(host, port, run) do
+  defp with_connection(host, port, run, usb \\ nil, timeout \\ 15_000) do
     {:ok, _} = Application.ensure_all_started(:ssh)
 
-    case :ssh.connect(to_charlist(host), port, ssh_options(host), 15_000) do
+    if usb, do: Workbench.FactoryConnection.verify_usb!(usb)
+    options = Keyword.put(ssh_options(host, usb), :connect_timeout, timeout)
+
+    case :ssh.connect(to_charlist(host), port, options, timeout) do
       {:ok, connection} ->
         try do
           run.(connection)
@@ -230,6 +370,9 @@ defmodule Workbench.FirmwareUpdate do
         :nxdomain ->
           "Device hostname could not be resolved. Check DNS/Tailscale connectivity."
 
+        denied when denied in [:eacces, :eperm] ->
+          "SSH transport permission denied. USB procedures require host permission to bind the management interface."
+
         ~c"Service not available" ->
           "SSH server rejected authentication or the requested service. Verify the requested hostname in known_hosts and check that the agent offers an authorized key."
 
@@ -250,6 +393,67 @@ defmodule Workbench.FirmwareUpdate do
   rescue
     _ ->
       raise "SSH endpoint did not return a compatible Nerves Gate identity. No firmware was sent."
+  end
+
+  defp read_json!(connection, command, timeout) do
+    {:ok, channel} = :ssh_connection.session_channel(connection, timeout)
+    :success = :ssh_connection.exec(connection, channel, to_charlist(command), timeout)
+
+    receive_result!(connection, channel, deadline(timeout), "", fn _ -> :ok end)
+    |> String.trim()
+    |> String.trim("\"")
+    |> Base.decode64!()
+    |> JSON.decode!()
+  rescue
+    _ ->
+      raise "SSH status read did not complete. Check management connectivity, the verified host key and authorized SSH key."
+  end
+
+  @doc false
+  def same_reviewed_boot?(reviewed, current) do
+    keys = ["target", "product", "version", "serial", "boot_id"]
+    is_binary(reviewed["boot_id"]) and Map.take(reviewed, keys) == Map.take(current, keys)
+  end
+
+  @doc false
+  def verified_update?(before_update, observed, version) do
+    observed["target"] == "ec100" and observed["product"] == "nerves_gate" and
+      observed["version"] == version and
+      observed["serial"] == before_update["serial"] and is_binary(before_update["boot_id"]) and
+      is_binary(observed["boot_id"]) and observed["boot_id"] != before_update["boot_id"] and
+      observed["available"] == true and observed["firmware_validated"] == true and
+      observed["ready"] == true and
+      observed["pending"] == false and observed["recovering"] == false
+  end
+
+  defp verify_update(plan, report),
+    do: poll_update(plan, report, deadline(180_000))
+
+  defp poll_update(plan, report, until) do
+    if System.monotonic_time(:millisecond) >= until do
+      {:error,
+       "Firmware was accepted, but reconnect verification did not complete: no matching new boot with the reviewed version and healthy network state. Management access may be unavailable. Inspect the device; do not repeat the update automatically."}
+    else
+      verified =
+        try do
+          observed = read_hardware!(plan[:usb] || plan.public.address, 2_000)
+          verified_update?(plan.before_update, observed, plan.public.version)
+        rescue
+          _ -> false
+        end
+
+      if verified do
+        report.(
+          "Verified a new boot, unchanged device identity, reviewed firmware and healthy state over authenticated SSH."
+        )
+
+        {:ok,
+         "Update verified over #{if plan[:usb], do: "USB", else: "SSH"}: new boot, reviewed firmware version and healthy state. No networking configuration was changed."}
+      else
+        Process.sleep(1_000)
+        poll_update(plan, report, until)
+      end
+    end
   end
 
   defp upload!(connection, path, report) do

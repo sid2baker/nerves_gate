@@ -181,6 +181,216 @@ defmodule WorkbenchWeb.WorkbenchPageTest do
     end
   end
 
+  test "hardware tests and device procedures are separate, explicit physical workflows" do
+    {:ok, device} = Workbench.LANDiscovery.manual("172.31.211.1")
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "tests")
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.find(document, "#hardware-test select[name=profile] option") |> length() == 3
+    assert Floki.text(document) =~ "does not prove cable-loss takeover"
+
+    assert Floki.find(document, "#review-firmware, #confirm-firmware, [phx-click=lifecycle]") ==
+             []
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "firmware")
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.attribute(document, "select[name=verify_usb] option:first-child", "value") == [
+             "ssh"
+           ]
+
+    assert Floki.find(document, "#review-reboot select[name=management] option[value=ssh]") != []
+    assert Floki.find(document, "#review-reboot select[name=management] option[value=usb]") != []
+
+    assert Floki.text(document) =~ "Verification failure does not upload again"
+    assert Floki.find(document, "#hardware-test") == []
+  end
+
+  test "assisted failover requires cellular consent and exposes cancellation only for its running observer" do
+    {:ok, device} = Workbench.LANDiscovery.manual("172.31.211.1")
+
+    operation =
+      Map.merge(operation(), %{
+        kind: "hardware_failover",
+        status: :running,
+        context: %{subject: device.address}
+      })
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "tests", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.find(
+             document,
+             "#hardware-failover-test input[name=consent][type=checkbox][required]"
+           ) != []
+
+    assert Floki.find(document, "#hardware-failover-test button[disabled]") != []
+    assert Floki.find(document, "#hardware-failover button[phx-click=cancel_observation]") != []
+    assert Floki.text(document) =~ "no automatic cable restoration"
+    operation = %{operation | kind: "firmware_update"}
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "tests", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.find(document, "button[phx-click=cancel_observation]") == []
+  end
+
+  test "procedures keep reboot observation reviews apart from firmware writes and reset is guidance only" do
+    {:ok, device} = Workbench.LANDiscovery.manual("172.31.211.1")
+
+    review = %{
+      kind: :reboot,
+      address: device.address,
+      version: "new",
+      serial: "device-42",
+      management: "usb0",
+      token: "reboot-review"
+    }
+
+    operation = %{operation() | review: review}
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "firmware", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.find(document, "#confirm-reboot input[name=address][required]") != []
+
+    assert Floki.find(document, "#confirm-reboot input[name=review_id][value=reboot-review]") !=
+             []
+
+    assert Floki.find(document, "#confirm-firmware") == []
+    assert Floki.find(document, "#device-reset button, #device-reset form") == []
+    assert Floki.find(document, "#physical-device a[href='/provision']") == []
+    assert Floki.text(document) =~ "no remote reboot command"
+    assert Floki.find(document, "#device-setup a[href='http://172.31.211.1:4000/network']") != []
+    other = %{device | address: "other"}
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: other, tab: "firmware", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.find(document, "#confirm-reboot") == []
+  end
+
+  test "diagnostics display the sanitized report beside their device's procedures" do
+    {:ok, device} = Workbench.LANDiscovery.manual("172.31.211.1")
+
+    operation =
+      Map.merge(operation(), %{
+        kind: "hardware_diagnostics",
+        status: :succeeded,
+        context: %{subject: device.address},
+        diagnostic_report: %{device: %{"target" => "ec100"}}
+      })
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "firmware", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.text(Floki.find(document, "#device-diagnostics #hardware-diagnostic-report")) =~
+             "ec100"
+
+    assert WorkbenchWeb.Components.operation_path(operation) ==
+             Workbench.Devices.physical_path(device.address) <> "?tab=firmware"
+  end
+
+  test "remote update verification is explicitly reviewed without claiming independent USB" do
+    review = %{
+      address: "device.example.ts.net",
+      port: 22,
+      target: "ec100",
+      current_version: "old",
+      version: "new",
+      serial: "device-42",
+      firmware: "/image.fw",
+      sha256: "sha",
+      token: "review",
+      verify_usb: false,
+      verify_ssh: true
+    }
+
+    document =
+      render_component(&WorkbenchWeb.Components.firmware_confirmation/1, review: review)
+      |> Floki.parse_document!()
+
+    assert Floki.text(document) =~ "SSH update-and-verify procedure"
+    assert Floki.text(document) =~ "Update, reboot and verify over SSH"
+    refute Floki.text(document) =~ "USB update-and-verify procedure"
+    assert Floki.find(document, "#confirm-firmware input[name=address][required]") != []
+  end
+
+  test "physical readiness results retain profile, target and failure details" do
+    {:ok, device} = Workbench.LANDiscovery.manual("172.31.211.1")
+
+    operation =
+      Map.merge(operation(), %{
+        kind: "hardware_test",
+        status: :failed,
+        context: %{subject: device.address},
+        checks: %{
+          profile: "backup",
+          observed: %{
+            "mode" => "backup",
+            "selected" => "ethernet",
+            "ethernet" => "internet",
+            "cellular" => "internet",
+            "health" => "online"
+          },
+          rows: [
+            %{
+              id: "hardware_readiness",
+              status: :failed,
+              detail: "Backup cellular Internet is not ready"
+            }
+          ]
+        }
+      })
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "tests", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.text(document) =~ "Read-only readiness profile: backup"
+
+    assert Floki.text(Floki.find(document, "#hardware-observed-network")) =~
+             "Observed profile: backup"
+
+    assert Floki.text(Floki.find(document, "#hardware-tests #hardware-check-results")) =~
+             "Backup cellular Internet is not ready"
+
+    assert WorkbenchWeb.Components.operation_path(operation) ==
+             Workbench.Devices.physical_path(device.address) <> "?tab=tests"
+  end
+
   test "physical review stays on its selected device and typed confirmation never leaks to another device" do
     {:ok, device} = Workbench.LANDiscovery.manual("ec100.example.ts.net")
 

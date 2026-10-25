@@ -98,7 +98,8 @@ defmodule Workbench.FactoryConnection do
     end
   end
 
-  defp probe(path, version, timeout) do
+  @doc false
+  def probe(path, version, timeout) do
     with {:ok, addresses} <- :net.getifaddrs(:inet),
          [peer] <- peers(addresses, path),
          true <- direct_route?(peer),
@@ -111,7 +112,8 @@ defmodule Workbench.FactoryConnection do
       {:ok,
        Map.merge(peer, info)
        |> Map.drop([:local, :peer])
-       |> Map.put(:read_at, DateTime.utc_now() |> DateTime.to_iso8601())}
+       |> Map.put(:read_at, DateTime.utc_now() |> DateTime.to_iso8601())
+       |> Map.put(:usb_path, path)}
     else
       {:error, :firmware_mismatch} -> {:error, :firmware_mismatch}
       _ -> {:error, :usb_not_ready}
@@ -158,7 +160,8 @@ defmodule Workbench.FactoryConnection do
     end)
   end
 
-  defp direct_route?(%{interface: interface, local: local, peer: peer}) do
+  @doc false
+  def direct_route?(%{interface: interface, local: local, peer: peer}) do
     with {:ok, index} <- :net.if_name2index(to_charlist(interface)) do
       body =
         <<2, 32, 32, 0, 0, 0, 0, 0, 0::native-32>> <>
@@ -178,6 +181,46 @@ defmodule Workbench.FactoryConnection do
     end
   end
 
+  @doc "Locate current, independent USB management peers without changing host networking."
+  def usb_peers do
+    with {:ok, addresses} <- :net.getifaddrs(:inet) do
+      for path <- Enum.uniq(usb_paths()),
+          peer <- peers(addresses, path),
+          direct_route?(peer),
+          do: Map.put(peer, :usb_path, path)
+    else
+      _ -> []
+    end
+  end
+
+  @doc false
+  def usb_paths(root \\ "/sys/class/net") do
+    for interface <- Path.wildcard(Path.join(root, "*")),
+        {:ok, device} <- [File.read_link(Path.join(interface, "device"))],
+        [_, path] <- [
+          Regex.run(~r/\A([0-9]+-[0-9]+(?:\.[0-9]+)*):[0-9]+\.[0-9]+\z/, Path.basename(device))
+        ],
+        do: path
+  end
+
+  def usb_peer!(address) do
+    case Enum.filter(usb_peers(), &(&1.address == address)) do
+      [peer] ->
+        peer
+
+      _ ->
+        raise ArgumentError,
+              "Select the gateway's directly connected USB IPv4 address. USB must have an independent /30 route; LAN or Tailscale access is not sufficient."
+    end
+  end
+
+  def verify_usb!(peer) do
+    unless usb_peer!(peer.address) == peer,
+      do: raise("USB management path changed. Stop and review the device again.")
+
+    :ok
+  end
+
   # Read the existing device page, not a new unauthenticated command API or an
   # SSH session with automatically accepted host keys. Discard all other HTML,
   # including session tokens, key listings and private LiveView state.
@@ -194,8 +237,9 @@ defmodule Workbench.FactoryConnection do
             do: {label, value}
 
       case values do
-        %{"Firmware" => ^expected_version, "Target" => "ec100", "Runtime" => runtime} ->
-          {:ok, %{version: expected_version, target: "ec100", runtime: runtime}}
+        %{"Firmware" => version, "Target" => "ec100", "Runtime" => runtime}
+        when is_nil(expected_version) or version == expected_version ->
+          {:ok, %{version: version, target: "ec100", runtime: runtime}}
 
         %{"Firmware" => _, "Target" => _} ->
           {:error, :firmware_mismatch}

@@ -25,6 +25,8 @@ defmodule Scenarios do
     Scenarios.Cases.FirmwareUpgrade,
     Scenarios.Cases.Freeze,
     Scenarios.Cases.FrontendAssets,
+    Scenarios.Cases.HardwareReadiness,
+    Scenarios.Cases.HardwareBackup,
     Scenarios.Cases.Hotplug,
     Scenarios.Cases.Internet,
     Scenarios.Cases.InvalidConfiguration,
@@ -75,7 +77,18 @@ defmodule Scenarios do
     unless Enum.sort(Map.keys(requires)) == [:device, :fixture] and
              is_list(requires.device) and is_list(requires.fixture) and
              Enum.all?(requires.device, &(&1 in [:ethernet, :cellular, :can, :rs485])) and
-             Enum.all?(requires.fixture, &(&1 in [:qemu, :ethernet_link, :reboot, :power_cycle])),
+             Enum.all?(
+               requires.fixture,
+               &(&1 in [
+                   :qemu,
+                   :ethernet_link,
+                   :reboot,
+                   :power_cycle,
+                   :ssh_management,
+                   :usb_management,
+                   :manual_ethernet
+                 ])
+             ),
            do: raise(ArgumentError, "Invalid requirements for #{inspect(module)}")
 
     %{
@@ -107,9 +120,13 @@ defmodule Scenarios do
       {:skip, reason} -> %{status: :skipped, detail: reason}
     end
   rescue
+    error in ExUnit.AssertionError ->
+      %{status: :failed, detail: Exception.message(error) |> String.trim()}
+
     # Assertions and RPC errors are failures, not unsupported hardware. Exits
     # propagate to the owner: a control call may have an unknown outcome.
-    error -> %{status: :failed, detail: Exception.format(:error, error, __STACKTRACE__)}
+    error ->
+      %{status: :failed, detail: Exception.format(:error, error, __STACKTRACE__)}
   end
 
   @doc "Pure requirement matching, also used by bench owners before preparation."

@@ -29,6 +29,9 @@ defmodule WorkbenchWeb.DevicesLive do
 
   def handle_event("discover", _, socket), do: command(socket, Workbench.LANDiscovery.refresh())
 
+  def handle_event("find_usb", _, socket),
+    do: command(socket, Workbench.Operations.start("find_usb"))
+
   def handle_event("retry_info", %{"address" => address}, socket),
     do: command(socket, Workbench.Operations.start("device_info", address))
 
@@ -71,6 +74,7 @@ defmodule WorkbenchWeb.DevicesLive do
       >
         <:actions>
           <.button phx-click="discover" disabled={@discovery.status == :searching}>Refresh discovery</.button>
+          <.button phx-click="find_usb" variant="secondary" disabled={@operation.status == :running}>Find USB gateways</.button>
           <.link
             navigate="/develop/firmware#simulator-lifecycle"
             class="ui-button ui-button--secondary"
@@ -78,6 +82,7 @@ defmodule WorkbenchWeb.DevicesLive do
         </:actions>
       </.page_header>
       <.notice :if={@discovery.error} tone="warning">{@discovery.error}</.notice>
+      <.operation :if={@operation.kind == "find_usb"} operation={@operation} />
       <div class="dev-list-toolbar">
         <nav class="dev-filters" aria-label="Device type">
           <.link

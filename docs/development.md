@@ -108,7 +108,27 @@ Targets have `:node`, optional diagnostics `:dir` and optional
 `fixture: {:qemu, owned_handle}`. The caller must already own/reserve the
 authorized disposable target and manage cleanup. There is no configurable fixture
 module, automatic discovery, physical attachment or grant of control from a node
-name. The only supplied control fixture is owned QEMU.
+name. The only supplied **control** fixture is owned QEMU. Physical read-only
+readiness uses `:ssh_management`: the workbench reads a narrow public snapshot
+over verified SSH on LAN, Tailscale or USB and invokes `hardware_readiness`.
+This capability provides no fixture controls or arbitrary RPC authority. Its
+Ethernet/4G/backup profiles verify current configuration and observations, not
+failover transitions. Snapshot topology readiness uses `Network.ready?/2` with
+observations and saved settings; `status.network.ready` is only readiness to
+confirm an active trial, not steady-state health. The opt-in `hardware_backup` case requires independent
+`:usb_management` plus `:manual_ethernet`: after explicit operator consent, the
+workbench verifies the independent USB /30 route, binds SSH to its source/interface,
+and provides a USB-bound snapshot reader; the human unplugs/restores
+Ethernet when prompted. The case verifies physical link transitions, cellular
+takeover and Ethernet preference on return, with two-minute phase deadlines.
+It never changes settings or controls a physical switch. A cancelled/failed test
+still requires the operator to restore cables. The shared management markers
+provide no device/fixture command authority.
+
+Add physical checks deliberately at this admission boundary; do not send the
+whole QEMU catalogue to a discovered board. No physical procedures or hardware
+tests are run by root tests/CI. Host tests cover pure phase/identity/confirmation
+policies and rendered safeguards, not a second hardware-mock backend.
 
 Requirements are checked **before** preparation. Unsupported resources skip;
 missing/unobserved declared hardware fails. A board without CAN skips a CAN case,
