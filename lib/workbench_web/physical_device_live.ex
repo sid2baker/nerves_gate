@@ -128,6 +128,7 @@ defmodule WorkbenchWeb.PhysicalDeviceLive do
           <.setting_row label="Address source">
             {case @device.source do
               :manual -> "Manually added"
+              :tailnet -> "Tailnet name · unverified gateway candidate"
               :usb -> "Reviewed USB port after factory provisioning"
               _ -> "LAN mDNS"
             end}
@@ -150,12 +151,26 @@ defmodule WorkbenchWeb.PhysicalDeviceLive do
           <.setting_row label="SSH">
             Port 22 · verified host key and public-key authentication
           </.setting_row>
-          <.button phx-click="read_info" disabled={@operation.status == :running}>Read device information</.button>
+          <p :if={@device[:info_read] && @device.info_read.status == :reading} role="status">
+            Reading information over verified SSH…
+          </p>
+          <.notice
+            :if={@device[:info_read] && @device.info_read.status == :failed}
+            tone="warning"
+            id="device-info-failed"
+          >
+            {@device.info_read.message}
+          </.notice>
+          <.button phx-click="read_info" disabled={@operation.status == :running}>
+            {if @device[:info_read] && @device.info_read.status == :failed,
+              do: "Retry information read",
+              else: "Read device information"}
+          </.button>
           <p class="ui-help">
-            A manual entry initially contains only its address. Read device information uses authenticated
-            SSH on port 22 to fetch the running target, version and serial. It sends no firmware and does not
-            reboot. The host key must already be verified and your SSH key authorized.
-            LAN mDNS generally does not cross Tailscale; advertisements are not authenticated identity.
+            New candidates automatically get one authenticated SSH information attempt on port 22
+            to fetch the running target, version and serial. Failed attempts are not retried on refresh;
+            use Retry after fixing access. Reading sends no firmware and does not reboot. The host key must already be verified and your SSH key authorized.
+            LAN advertisements and tailnet names are not authenticated gateway identity. Gateway HTTPS access and SSH information reads are separate connections.
           </p>
         </.panel>
         <.panel :if={@tab == "firmware"} title="Firmware update" icon="settings" id="firmware-update">
@@ -166,7 +181,7 @@ defmodule WorkbenchWeb.PhysicalDeviceLive do
             otherwise standard ~/.ssh key files are used. Password prompts are not available.
             Only compatible EC100 images and devices are accepted by the backend.
           </p>
-          <.link navigate="/firmware" class="ui-text-link">Build a firmware image</.link>
+          <.link navigate="/develop/firmware" class="ui-text-link">Build a firmware image</.link>
           <form id="review-firmware" phx-submit="review_firmware" class="ui-stack">
             <label class="ui-stack">Firmware image<select
               name="firmware"
@@ -192,7 +207,13 @@ defmodule WorkbenchWeb.PhysicalDeviceLive do
             review={@operation.review}
           />
         </.panel>
-        <.operation operation={@operation} />
+        <.operation
+          :if={
+            hd(String.split(operation_path(@operation), "?")) ==
+              Workbench.Devices.physical_path(@device.address)
+          }
+          operation={@operation}
+        />
       </div>
     </main>
     """

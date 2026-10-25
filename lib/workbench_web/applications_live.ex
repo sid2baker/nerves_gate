@@ -24,7 +24,13 @@ defmodule WorkbenchWeb.ApplicationsLive do
         do: Workbench.Applications.create(path),
         else: Workbench.Applications.open(path)
 
-    command(socket, result)
+    case result do
+      {:ok, app} ->
+        {:noreply, push_navigate(socket, to: "/develop/applications/#{id(app.path)}")}
+
+      error ->
+        command(socket, error)
+    end
   end
 
   def handle_event("operation", params, socket) do
@@ -63,12 +69,13 @@ defmodule WorkbenchWeb.ApplicationsLive do
   def render(assigns) do
     ~H"""
     <main class="ui-main ui-stack bench" id="applications-page">
-      <.back_link :if={@app_id} navigate="/apps">Applications</.back_link>
+      <.back_link :if={@app_id} navigate="/develop/applications">Applications</.back_link>
       <.page_header
-        eyebrow="Developer workbench"
+        eyebrow="Develop · Applications"
         title={if @app, do: @app.name, else: "Applications"}
         description={if @app, do: @app.path, else: "Ordinary SDK projects in their own directories."}
       />
+      <.develop_navigation section={:apps} />
       <.notice :if={@app_id && !@app} tone="warning">
         Application is not open in this session.
       </.notice>
@@ -103,13 +110,13 @@ defmodule WorkbenchWeb.ApplicationsLive do
         </p>
         <div :for={app <- @applications} class="ui-setting-row">
           <div>
-            <.link navigate={"/apps/#{id(app.path)}"} class="ui-text-link">{app.name}</.link><p class="ui-help">
+            <.link navigate={"/develop/applications/#{id(app.path)}"} class="ui-text-link">{app.name}</.link><p class="ui-help">
               {app.path}
             </p>
           </div>
         </div>
       </.panel>
-      <.panel :if={@app} title="Application actions" icon="check" id="application-actions">
+      <.panel :if={@app} title="Test, package and run" icon="check" id="application-actions">
         <div class="ui-actions">
           <.button
             :for={kind <- ["test", "package"]}
@@ -128,13 +135,32 @@ defmodule WorkbenchWeb.ApplicationsLive do
           <.button
             type="submit"
             disabled={@operation.status == :running || @bench.lifecycle.status != :ready}
-          >Install on simulator</.button>
+          >Install and run on simulator</.button>
         </form>
         <p class="ui-help">
           Installation uses owned, running QEMU devices and simulator reservations. Physical app installation remains an explicit SSH workflow.
         </p>
       </.panel>
-      <.operation operation={@operation} />
+      <.panel
+        :if={@app && operation_path(@operation) == "/develop/applications/#{id(@app.path)}"}
+        title="Result and output"
+        icon="clock"
+      >
+        <.operation operation={@operation} />
+      </.panel>
+      <.panel :if={@app} title="Choose where to run" icon="network">
+        <p>
+          <.link navigate="/develop/firmware#simulator-lifecycle" class="ui-text-link">Set up QEMU</.link>
+          to install and run the application above, then <.link
+            navigate="/develop/firmware#lab-devices"
+            class="ui-text-link"
+          >test or debug the device</.link>.
+        </p>
+        <p>
+          For physical hardware, package above and follow the explicit SSH installation steps in <code>docs/app-development.md</code>. The workbench does not install applications on physical gateways.
+        </p>
+        <.link navigate="/devices?kind=physical" class="ui-text-link">Find a physical gateway</.link>
+      </.panel>
     </main>
     """
   end

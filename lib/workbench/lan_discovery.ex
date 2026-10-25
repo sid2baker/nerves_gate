@@ -1,5 +1,5 @@
 defmodule Workbench.LANDiscovery do
-  @moduledoc "Bounded, read-only local mDNS discovery. Advertisements are not authentication."
+  @moduledoc "Bounded, read-only LAN and tailnet discovery. Candidates are not authentication."
   use GenServer
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -8,13 +8,22 @@ defmodule Workbench.LANDiscovery do
   def add(address), do: GenServer.call(__MODULE__, {:add, address})
   def record_usb(info), do: GenServer.call(__MODULE__, {:usb, info})
 
+  def record_read(address, status, message \\ nil),
+    do: GenServer.call(__MODULE__, {:read, address, status, message})
+
   def record_identity(address, identity),
     do: GenServer.call(__MODULE__, {:identity, address, identity})
 
   def init(_),
     do:
       {:ok,
-       %{task: nil, manual: %{}, identities: %{}, view: %{status: :idle, devices: [], error: nil}}}
+       %{
+         task: nil,
+         manual: %{},
+         identities: %{},
+         reads: %{},
+         view: %{status: :idle, devices: [], error: nil}
+       }}
 
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
 
@@ -24,7 +33,9 @@ defmodule Workbench.LANDiscovery do
   def handle_call(:refresh, _, state) do
     task =
       Task.Supervisor.async_nolink(Workbench.Tasks, fn ->
-        NervesDiscovery.discover(timeout: 3_000, method: :generic) |> devices()
+        {tailnet, warning} = discover_tailnet()
+        lan = NervesDiscovery.discover(timeout: 3_000, method: :generic) |> devices()
+        {lan ++ tailnet, warning}
       end)
 
     {:reply, :ok, %{state | task: task, view: %{state.view | status: :searching, error: nil}}}
@@ -34,7 +45,13 @@ defmodule Workbench.LANDiscovery do
     case manual(address) do
       {:ok, device} ->
         manual = Map.put(state.manual, device.address, device)
-        devices = merge(state.view.devices, manual) |> enrich(Map.get(state, :identities, %{}))
+
+        devices =
+          merge(state.view.devices, manual)
+          |> enrich(Map.get(state, :identities, %{}))
+          |> Enum.map(&put_read(&1, Map.get(state, :reads, %{})))
+
+        GenServer.cast(Workbench.Operations, :read_discovered)
         {:reply, :ok, %{state | manual: manual, view: %{state.view | devices: devices}}}
 
       error ->
@@ -58,10 +75,27 @@ defmodule Workbench.LANDiscovery do
     manual = Map.put(state.manual, device.address, device)
     # A fresh factory boot invalidates an older SSH observation at this address.
     identities = Map.delete(state.identities, device.address)
-    devices = merge(state.view.devices, manual) |> enrich(identities)
+    reads = Map.delete(Map.get(state, :reads, %{}), device.address)
+
+    devices =
+      merge(state.view.devices, manual) |> enrich(identities) |> Enum.map(&put_read(&1, reads))
 
     {:reply, :ok,
-     %{state | manual: manual, identities: identities, view: %{state.view | devices: devices}}}
+     Map.merge(state, %{
+       manual: manual,
+       identities: identities,
+       reads: reads,
+       view: %{state.view | devices: devices}
+     })}
+  end
+
+  def handle_call({:read, address, status, message}, _, state)
+      when status in [:reading, :succeeded, :failed] do
+    reads = Map.put(Map.get(state, :reads, %{}), address, %{status: status, message: message})
+    devices = Enum.map(state.view.devices, &put_read(&1, reads))
+
+    {:reply, :ok,
+     state |> Map.put(:reads, reads) |> Map.put(:view, %{state.view | devices: devices})}
   end
 
   def handle_call({:identity, address, identity}, _, state) do
@@ -74,22 +108,28 @@ defmodule Workbench.LANDiscovery do
 
       observed = %{values: public, read_at: DateTime.utc_now() |> DateTime.to_iso8601()}
       identities = Map.put(Map.get(state, :identities, %{}), address, observed)
-      view = %{state.view | devices: enrich(state.view.devices, identities)}
-      {:reply, :ok, Map.merge(state, %{identities: identities, view: view})}
+      reads = Map.put(Map.get(state, :reads, %{}), address, %{status: :succeeded, message: nil})
+      devices = enrich(state.view.devices, identities) |> Enum.map(&put_read(&1, reads))
+      view = %{state.view | devices: devices}
+      {:reply, :ok, Map.merge(state, %{identities: identities, reads: reads, view: view})}
     else
       {:reply, {:error, "Add the device address first"}, state}
     end
   end
 
-  def handle_info({ref, devices}, %{task: %{ref: ref}} = state) do
+  def handle_info({ref, {devices, warning}}, %{task: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
 
     view = %{
       status: :ready,
-      devices: merge(devices, state.manual) |> enrich(Map.get(state, :identities, %{})),
-      error: nil
+      devices:
+        merge(devices, state.manual)
+        |> enrich(Map.get(state, :identities, %{}))
+        |> Enum.map(&put_read(&1, Map.get(state, :reads, %{}))),
+      error: warning
     }
 
+    GenServer.cast(Workbench.Operations, :read_discovered)
     {:noreply, %{state | task: nil, view: view}}
   end
 
@@ -126,7 +166,7 @@ defmodule Workbench.LANDiscovery do
   end
 
   def manual(address) do
-    with {:ok, host} <- host(address) do
+    with {:ok, host, url} <- endpoint(address) do
       {:ok,
        %{
          name: "Manual address",
@@ -134,10 +174,72 @@ defmodule Workbench.LANDiscovery do
          version: nil,
          target: nil,
          source: :manual,
-         url: "http://#{host}:4000/"
+         explicit_url: String.contains?(address, "://"),
+         url: url
        }}
     end
   end
+
+  # Root URLs only: never retain credentials, login paths or query tokens.
+  defp endpoint(address) when is_binary(address) do
+    address = String.trim(address)
+
+    if String.contains?(address, "://") do
+      with {:ok, uri} <- URI.new(address),
+           true <- uri.scheme in ["http", "https"],
+           true <- is_nil(uri.userinfo) and is_nil(uri.query) and is_nil(uri.fragment),
+           true <- uri.path in [nil, "", "/"],
+           true <- is_integer(uri.port) and uri.port in 1..65535,
+           {:ok, host} <- host(uri.host) do
+        {:ok, host, URI.to_string(%{uri | host: host, path: "/"})}
+      else
+        _ -> {:error, "Supply a hostname, IPv4 address or root HTTP(S) URL without credentials"}
+      end
+    else
+      with {:ok, host} <- host(address), do: {:ok, host, "http://#{host}:4000/"}
+    end
+  end
+
+  defp endpoint(_), do: invalid_host()
+
+  defp discover_tailnet do
+    case Req.get("http://local-tailscaled.sock/localapi/v0/status",
+           unix_socket: "/var/run/tailscale/tailscaled.sock",
+           headers: [{"host", "local-tailscaled.sock"}],
+           retry: false,
+           connect_options: [timeout: 1_000],
+           receive_timeout: 2_000
+         ) do
+      {:ok, %{status: 200, body: %{"BackendState" => "Running"} = status}} ->
+        {tailnet_devices(status), nil}
+
+      _ ->
+        {[],
+         "Tailnet discovery unavailable. Add a gateway URL manually; LAN discovery remains available."}
+    end
+  end
+
+  # Names are hints only. Do not expose the peer catalogue or private daemon state.
+  def tailnet_devices(%{"Peer" => peers}) when is_map(peers) do
+    for peer <- Map.values(peers),
+        peer["Online"] == true,
+        {:ok, host} <- [host(peer["DNSName"])],
+        label = hd(String.split(host, ".")),
+        Regex.match?(~r/\Anerves-gate(?:-[a-z0-9-]+)?\z/, label) do
+      %{
+        name: label,
+        address: host,
+        version: nil,
+        target: nil,
+        source: :tailnet,
+        url: "https://#{host}/"
+      }
+    end
+    |> Enum.uniq_by(& &1.address)
+    |> Enum.sort_by(& &1.address)
+  end
+
+  def tailnet_devices(_), do: []
 
   def host(address) when is_binary(address) do
     address = address |> String.trim() |> String.downcase() |> String.trim_trailing(".")
@@ -172,6 +274,13 @@ defmodule Workbench.LANDiscovery do
   defp text(_), do: nil
   defp gateway_url(ip), do: "http://#{:inet.ntoa(ip)}:4000/"
 
+  defp put_read(device, reads) do
+    case reads[device.address] do
+      nil -> device
+      read -> Map.put(device, :info_read, read)
+    end
+  end
+
   defp enrich(devices, identities) do
     Enum.map(devices, fn device ->
       case identities[device.address] do
@@ -192,6 +301,7 @@ defmodule Workbench.LANDiscovery do
       Enum.map(devices, fn device ->
         case manual[device.address] do
           %{source: :usb} = usb -> usb
+          %{source: :manual, explicit_url: true, url: url} -> Map.put(device, :url, url)
           _ -> device
         end
       end)

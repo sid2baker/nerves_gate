@@ -12,10 +12,13 @@ defmodule Workbench.Devices do
           version: device.version,
           status:
             cond do
+              get_in(device, [:info_read, :status]) == :reading -> "Reading information…"
+              get_in(device, [:info_read, :status]) == :failed -> "SSH information unavailable"
               device[:identity] -> "SSH identity read"
               device[:usb_info] -> "USB information read"
               true -> "Unverified"
             end,
+          info_read: device[:info_read],
           source: device.source,
           url: device.url,
           path: physical_path(device.address)
@@ -52,6 +55,9 @@ defmodule Workbench.Devices do
         end)
     end)
   end
+
+  def needs_info?(device),
+    do: is_nil(device[:identity]) and is_nil(device[:usb_info]) and is_nil(device[:info_read])
 
   def read_info!(address) do
     identity = Workbench.FirmwareUpdate.read_device!(address)

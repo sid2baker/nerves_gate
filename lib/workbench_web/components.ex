@@ -3,6 +3,17 @@ defmodule WorkbenchWeb.Components do
   use Phoenix.Component
   import NervesGateWeb.CoreComponents
 
+  attr(:section, :atom, required: true)
+
+  def develop_navigation(assigns) do
+    ~H"""
+    <nav class="dev-filters" aria-label="Development workspace">
+      <.link navigate="/develop/applications" aria-current={if @section == :apps, do: "page"}>Develop an application</.link>
+      <.link navigate="/develop/firmware" aria-current={if @section == :firmware, do: "page"}>Build and test firmware</.link>
+    </nav>
+    """
+  end
+
   attr(:kind, :atom, required: true, values: [:physical, :simulated])
 
   def device_kind(assigns) do
@@ -26,6 +37,10 @@ defmodule WorkbenchWeb.Components do
     ~H"""
     <div id={@id} class="ui-stack">
       <p role="status">{operation_label(@operation.kind)} · {@operation.status}</p>
+      <p :if={@operation[:context]} class="ui-help">
+        {@operation.context[:subject] || @operation.context[:address]}
+        <span :if={@operation.context[:device]}> · Simulated device: {@operation.context.device}</span>
+      </p>
       <div :if={@operation.status == :running} class="ui-progress"></div>
       <.notice :if={@operation.result && @operation.status == :failed} tone="warning" role="alert">
         {@operation.result}
@@ -105,19 +120,31 @@ defmodule WorkbenchWeb.Components do
     """
   end
 
-  def operation_path(%{kind: kind}) when kind in ["factory_review", "factory_provision"],
-    do: "/factory"
+  def operation_path(%{kind: kind}) when kind in ["factory_review", "factory_provision"] do
+    "/provision"
+  end
 
   def operation_path(%{review: %{address: address}}),
     do: Workbench.Devices.physical_path(address) <> "?tab=firmware"
 
-  def operation_path(%{kind: kind}) when kind in ["test", "package", "install"], do: "/apps"
+  def operation_path(%{kind: kind, context: %{subject: path}})
+      when kind in ["test", "package", "install"] and is_binary(path),
+      do: "/develop/applications/" <> Base.url_encode64(path, padding: false)
+
+  def operation_path(%{context: %{address: address}}) when is_binary(address),
+    do: Workbench.Devices.physical_path(address) <> "?tab=firmware"
+
+  def operation_path(%{kind: "device_info", context: %{subject: address}}),
+    do: Workbench.Devices.physical_path(address)
+
+  def operation_path(%{kind: kind}) when kind in ["test", "package", "install"],
+    do: "/develop/applications"
 
   def operation_path(%{kind: kind})
       when kind in ["firmware_review", "firmware_update", "device_info"],
       do: "/devices"
 
-  def operation_path(_), do: "/firmware"
+  def operation_path(_), do: "/develop/firmware"
 
   def operation_label(nil), do: "No operation"
   def operation_label("device_info"), do: "Read device information"

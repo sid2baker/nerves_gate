@@ -15,7 +15,7 @@ defmodule WorkbenchWeb.Layouts do
           <.link
             :for={{section, path, label, icon} <- navigation()}
             navigate={path}
-            aria-current={if @live_action == section, do: "page"}
+            aria-current={if current_section(@live_action) == section, do: "page"}
           ><.icon name={icon} />{label}</.link>
         </nav>
       </aside>
@@ -33,10 +33,6 @@ defmodule WorkbenchWeb.Layouts do
           </.link>
           <.theme_toggle />
         </header>
-        <details :if={@operation.kind} class="dev-operation-details">
-          <summary>Operation output</summary>
-          <.operation operation={@operation} id="global-operation-output" />
-        </details>
         <div id="main-content" tabindex="-1">
           <div class="dev-notices ui-stack">
             <div class="ui-disconnected">
@@ -54,14 +50,17 @@ defmodule WorkbenchWeb.Layouts do
     """
   end
 
+  defp current_section(action) when action in [:apps, :firmware, :scenarios, :manual, :simulator],
+    do: :develop
+
+  defp current_section(action), do: action
+
   defp navigation do
     [
-      {:overview, "/", "Overview", "overview"},
+      {:overview, "/", "Home", "overview"},
+      {:develop, "/develop", "Develop", "equipment"},
       {:devices, "/devices", "Devices", "network"},
-      {:apps, "/apps", "Applications", "equipment"},
-      {:firmware, "/firmware", "Firmware", "port"},
-      {:factory, "/factory", "Factory provisioning", "usb"},
-      {:simulator, "/simulator", "Simulator", "settings"}
+      {:factory, "/provision", "Provision", "usb"}
     ]
   end
 end

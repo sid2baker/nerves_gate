@@ -1,5 +1,5 @@
 defmodule WorkbenchWeb.DeviceLive do
-  @moduledoc "One simulated device: its live projection, faults, manual controls and scenarios."
+  @moduledoc "Owned-device observation and firmware scenario/manual workspaces."
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
   alias NervesGate.Projection
@@ -31,10 +31,11 @@ defmodule WorkbenchWeb.DeviceLive do
     end
   end
 
-  def handle_params(params, _, socket),
-    do:
-      {:noreply,
-       assign(socket, :tab, if(params["tab"] == "tests", do: "tests", else: "overview"))}
+  def handle_params(%{"tab" => "tests"}, _, %{assigns: %{live_action: :devices}} = socket),
+    do: {:noreply, push_navigate(socket, to: "/develop/firmware/scenarios/#{socket.assigns.id}")}
+
+  def handle_params(_, _, socket),
+    do: {:noreply, assign(socket, :tab, socket.assigns.live_action)}
 
   def handle_event("mode", %{"mode" => mode}, socket),
     do: command(socket, Runner.mode(socket.assigns.id, mode))
@@ -58,7 +59,9 @@ defmodule WorkbenchWeb.DeviceLive do
     # Adding/removing devices can change the sorted serial/address assignment.
     # Remount rather than leaving this page subscribed to a different device.
     if previous != socket.assigns.config,
-      do: {:noreply, push_navigate(socket, to: "/devices/#{socket.assigns.id}")},
+      do:
+        {:noreply,
+         push_navigate(socket, to: workspace_path(socket.assigns.tab, socket.assigns.id))},
       else: {:noreply, socket}
   end
 
@@ -89,9 +92,17 @@ defmodule WorkbenchWeb.DeviceLive do
   def render(assigns) do
     ~H"""
     <main class="ui-main ui-stack bench" id="device-tests">
-      <.back_link navigate="/devices">Devices</.back_link>
+      <.back_link navigate={if @tab == :devices, do: "/devices", else: "/develop/firmware"}>
+        {if @tab == :devices, do: "Devices", else: "Build and test firmware"}
+      </.back_link>
       <.page_header
-        eyebrow="Development · owned QEMU only"
+        eyebrow={
+          case @tab do
+            :scenarios -> "Develop · Firmware · Scenarios · owned QEMU only"
+            :manual -> "Develop · Firmware · Manual debugging · owned QEMU only"
+            _ -> "Devices · owned QEMU only"
+          end
+        }
         title={@id}
         description={if @config, do: "#{@config.node} · #{@config.address}", else: "Unknown device"}
       >
@@ -111,17 +122,23 @@ defmodule WorkbenchWeb.DeviceLive do
 
       <.notice :if={@config && !@device} id="device-not-running" title="Not running">
         <p>{@bench.lifecycle.phase}</p>
-        <.link navigate="/simulator" class="ui-text-link">Open simulator configuration</.link>
+        <.link navigate="/develop/firmware#simulator-lifecycle" class="ui-text-link">Set up QEMU in the firmware workspace</.link>
       </.notice>
       <nav :if={@config} class="dev-filters" aria-label="Device sections">
         <.link
-          :for={{tab, label} <- [{"overview", "Overview"}, {"tests", "Tests & controls"}]}
-          patch={"/devices/#{@id}?tab=#{tab}"}
+          :for={
+            {tab, label} <- [
+              {:devices, "Device status"},
+              {:scenarios, "Scenarios"},
+              {:manual, "Manual debugging"}
+            ]
+          }
+          navigate={workspace_path(tab, @id)}
           aria-current={if @tab == tab, do: "page"}
         >{label}</.link>
       </nav>
       <.panel
-        :if={@device && @tab == "overview"}
+        :if={@device}
         title="Observed device"
         icon="network"
         id="device-summary"
@@ -167,9 +184,10 @@ defmodule WorkbenchWeb.DeviceLive do
         </ul>
       </section>
 
-      <div :if={@device && @tab == "tests"} class="bench-toolbar">
+      <div :if={@device && @tab in [:scenarios, :manual]} class="bench-toolbar">
         <div class="ui-actions" role="group" aria-label="Device control mode">
           <.button
+            :if={manual?(@device)}
             id="mode-scenarios"
             variant="secondary"
             phx-click="mode"
@@ -177,8 +195,9 @@ defmodule WorkbenchWeb.DeviceLive do
             aria-pressed={to_string(!manual?(@device))}
             loading={@device.manual_action == "release"}
             disabled={busy?(@device)}
-          >Scenarios</.button>
+          >Release manual control</.button>
           <.button
+            :if={@tab == :manual}
             id="mode-manual"
             variant="secondary"
             phx-click="mode"
@@ -186,14 +205,20 @@ defmodule WorkbenchWeb.DeviceLive do
             aria-pressed={to_string(manual?(@device))}
             loading={@device.manual_action == "acquire"}
             disabled={busy?(@device) || manual?(@device)}
-          >Manual</.button>
+          >Acquire manual control</.button>
         </div>
         <p class="ui-help" id="control-owner">{owner_label(@device)}</p>
       </div>
 
-      <div :if={@config && @tab == "tests"} class="ui-stack">
+      <.notice :if={@device && @tab == :manual && !manual?(@device)}>
+        Acquire manual control to inject reversible faults. This reserves the device and blocks scenarios.
+      </.notice>
+      <.notice :if={@device && @tab == :scenarios && manual?(@device)}>
+        Manual control owns this device. Release it above to clear faults and run scenarios.
+      </.notice>
+      <div :if={@config && @tab in [:scenarios, :manual]} class="ui-stack">
         <.panel
-          :if={manual?(@device)}
+          :if={@tab == :manual && manual?(@device)}
           title="Manual controls"
           description="Reversible faults only; management networking is never faulted"
           icon="settings"
@@ -232,8 +257,17 @@ defmodule WorkbenchWeb.DeviceLive do
           </p>
         </.panel>
 
+        <.panel :if={@tab == :manual} title="Console and diagnostics" icon="info" id="manual-console">
+          <p>After acquiring idle manual control, run this in a terminal on the workbench host:</p>
+          <pre class="ui-bus-data">mix app.console --device {@id}</pre>
+          <p class="ui-help">
+            The command prints the owned device's SSH IEx command. Console access shares the manual
+            reservation; release control when finished. Boot and QEMU logs are under <code>_build/simulator/</code>. No console command runs from this page.
+          </p>
+        </.panel>
+
         <.panel
-          :if={!manual?(@device)}
+          :if={@tab == :scenarios && !manual?(@device)}
           title="Scenarios"
           icon="check"
           id="scenarios"
@@ -303,10 +337,7 @@ defmodule WorkbenchWeb.DeviceLive do
                   {@results[scenario.id].detail}
                 </span>
               </div>
-              <details :if={failure(@results[scenario.id])}>
-                <summary>Failure details</summary>
-                <pre class="ui-bus-data">{failure(@results[scenario.id])}</pre>
-              </details>
+              <pre :if={failure(@results[scenario.id])} class="ui-bus-data" role="alert">{failure(@results[scenario.id])}</pre>
             </li>
           </ul>
         </.panel>
@@ -314,6 +345,9 @@ defmodule WorkbenchWeb.DeviceLive do
     </main>
     """
   end
+
+  defp workspace_path(:devices, id), do: "/devices/#{id}"
+  defp workspace_path(section, id), do: "/develop/firmware/#{section}/#{id}"
 
   defp config(bench, id), do: Enum.find(bench.lifecycle.devices, &(Atom.to_string(&1.id) == id))
 

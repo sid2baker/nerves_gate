@@ -29,6 +29,9 @@ defmodule WorkbenchWeb.DevicesLive do
 
   def handle_event("discover", _, socket), do: command(socket, Workbench.LANDiscovery.refresh())
 
+  def handle_event("retry_info", %{"address" => address}, socket),
+    do: command(socket, Workbench.Operations.start("device_info", address))
+
   def handle_event("add_address", %{"address" => address}, socket),
     do: command(socket, Workbench.LANDiscovery.add(address))
 
@@ -68,7 +71,10 @@ defmodule WorkbenchWeb.DevicesLive do
       >
         <:actions>
           <.button phx-click="discover" disabled={@discovery.status == :searching}>Refresh discovery</.button>
-          <.link navigate="/simulator" class="ui-button ui-button--secondary">Configure simulator</.link>
+          <.link
+            navigate="/develop/firmware#simulator-lifecycle"
+            class="ui-button ui-button--secondary"
+          >Set up QEMU</.link>
         </:actions>
       </.page_header>
       <.notice :if={@discovery.error} tone="warning">{@discovery.error}</.notice>
@@ -116,14 +122,25 @@ defmodule WorkbenchWeb.DevicesLive do
                 </p>
               </td>
               <td><.device_kind kind={device.kind} /></td>
-              <td>{device.status}</td><td>{device.target || "Unknown"}</td><td>
+              <td>
+                {device.status}
+                <div :if={device[:info_read] && device.info_read.status == :failed}>
+                  <p class="ui-help">{device.info_read.message}</p>
+                  <.button
+                    variant="quiet"
+                    phx-click="retry_info"
+                    phx-value-address={device.address}
+                    disabled={@operation.status == :running}
+                  >Retry information read</.button>
+                </div>
+              </td><td>{device.target || "Unknown"}</td><td>
                 {device.version || "Unknown"}
               </td>
             </tr>
           </tbody>
         </table>
         <p :if={@filtered == []} class="dev-empty">
-          No devices match. Add an address, refresh LAN discovery, or configure a simulated device.
+          No devices match. Add a gateway URL, refresh LAN and tailnet discovery, or set up QEMU.
         </p>
       </div>
       <.panel title="Add a physical gateway" icon="network" id="network-devices">
@@ -131,14 +148,14 @@ defmodule WorkbenchWeb.DevicesLive do
           <input
             type="text"
             name="address"
-            aria-label="Device hostname or IPv4 address"
-            placeholder="ec100.example.ts.net or 192.168.1.42"
+            aria-label="Gateway URL, hostname or IPv4 address"
+            placeholder="https://nerves-gate.example.ts.net"
             required
           />
           <.button type="submit" variant="secondary">Add address</.button>
         </form>
         <p class="ui-help">
-          Adding an address does not connect to it. LAN discovery uses mDNS, not subnet scans or VPN configuration. Advertisements are unverified, not proof of connectivity or identity.
+          Discovery reads LAN mDNS and online tailnet peers named nerves-gate (or nerves-gate-*). Candidates are unverified, not proof of gateway identity or HTTPS availability. Other names can be added manually. Use a root HTTPS URL for Tailscale Serve; bare hosts default to HTTP port 4000. No subnet scans or VPN changes. Each new candidate gets one read-only SSH information attempt with verified host keys and public-key authentication. Failed reads require an explicit Retry.
         </p>
       </.panel>
     </main>

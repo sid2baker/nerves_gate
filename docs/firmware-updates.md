@@ -48,7 +48,7 @@ supported. Use a directly reachable address on port 22.
 
 ## Initial USB factory provisioning
 
-**Firmware → Factory provisioning** (`/factory`) replaces the EC100 bootloader,
+**Provision** (`/provision`) replaces the EC100 bootloader,
 partition layout, firmware and data. Use it for initial installation or deliberate
 re-provisioning; otherwise use the SSH update, which also works over USB networking.
 

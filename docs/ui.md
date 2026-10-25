@@ -90,24 +90,49 @@ not restricted to USB. QEMU reports EC100 peripherals as unavailable. The UI has
 
 | Page | Route | Purpose |
 | --- | --- | --- |
-| Overview | `/` | Summaries, shortcuts and the current operation |
+| Home | `/` | Resume applications/runs, current operation and actionable bench problems |
 | Devices | `/devices` | Physical gateways and owned QEMU devices, with filters |
 | Physical device | `/devices/physical/:address` | Verified-SSH information read, gateway link and firmware update |
-| Simulated device | `/devices/:id` | Observations, gateway link, faults, tests and Manual control |
-| Applications | `/apps`, `/apps/:id` | Create/open SDK projects; test, package and install on the simulator |
-| Firmware | `/firmware` | EC100/QEMU builds; building never installs |
-| Factory provisioning | `/factory` | Initial EC100 installation over USB MASKROM |
-| Simulator | `/simulator` | Start/Stop/Reset, virtual wiring, scenario runs and action log |
+| Simulated device | `/devices/:id` | Read-only observations, gateway link and diagnostic fault/wiring state |
+| Develop → Applications | `/develop`, `/develop/applications`, `/develop/applications/:id` | Create/open SDK projects; test, package, install and run on owned QEMU |
+| Develop → Firmware | `/develop/firmware` | Build, owned QEMU Start/Stop/Reset and wiring, test/debug device selection, results and action log in one workspace |
+| Firmware → Scenarios | `/develop/firmware/scenarios/:id` | Confirm runs and inspect device results; return to the firmware workspace |
+| Firmware → Manual debugging | `/develop/firmware/manual/:id` | Explicitly acquire manual control, inject reversible faults, inspect console instructions and release control |
+| Provision | `/provision` | Guided initial EC100 USB MASKROM preparation, destructive review and verification |
+
+The main navigation has four destinations: **Home · Develop · Devices · Provision**.
+Develop switches between application and firmware workspaces locally. Firmware keeps
+build/run/test/results together; no separate test-lab navigation is required. Older
+`/test-lab/*` links remain accepted.
 
 The **Simulated · QEMU** badge comes only from the simulator's own inventory, never
-from names or advertisements. Physical entries are unverified until **Read device
-information** queries the gateway over authenticated SSH. Rendering a page never
-probes devices, starts devices, builds firmware or sends updates; the Devices page
-only starts a bounded mDNS browse. Physical devices never get QEMU controls. The simulated-device page explicitly
+from names or advertisements. Discovery and manual additions queue one bounded,
+read-only SSH information attempt per new address. These reads share operation
+admission with builds and physical updates, and wait while work or a destructive
+review is active. Host-key verification and public-key authentication remain
+mandatory; there are no password prompts or automatic host-key acceptance. The
+directory and device workspace show progress, identity or the failure reason with
+**Retry information read**. Refreshing discovery/pages does not retry failed reads
+or re-read known identities during the workbench process lifetime. Explicit retries
+and information refreshes remain available. Successful USB observations already
+provide information and are not automatically queried over SSH.
+
+Opening a page never starts devices, builds firmware or sends updates. The Devices
+page starts bounded LAN mDNS and local Tailscale-daemon discovery. Tailnet candidates
+are online peers named `nerves-gate` or `nerves-gate-*`; names are hints, not gateway
+identity. The local daemon is read through its Unix socket without changing VPN
+configuration. If unavailable, the directory still supports LAN and manual entries.
+Manual entries accept a hostname/IPv4 address (HTTP port 4000) or a root HTTP(S) URL
+with an optional port. Credentials, paths, query strings and fragments are rejected.
+An explicit URL survives discovery refreshes; other gateway names can be added
+manually. Tailnet candidates use HTTPS MagicDNS links, whose availability depends
+on the gateway's Serve configuration. Physical devices never get QEMU controls. The simulated-device page explicitly
 subscribes to that owned guest's remote **read-only** projection; it is not a
 remote gateway-command proxy.
 
 Operations belong to the backend: navigating away does not cancel them, and their
-status and output stay visible on every page. UI and CLI call the same operations,
+status links back to their owning workspace from every page. Output stays alongside
+that workspace's actions, not in a global expander. Physical application installation
+remains a manual SSH workflow. UI and CLI call the same operations,
 and backend admission is authoritative. See [firmware updates](firmware-updates.md)
 and [development](development.md).

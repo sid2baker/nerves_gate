@@ -44,10 +44,10 @@ defmodule Workbench.DiscoveryTest do
         }
       ])
 
-    assert {:noreply, ready} = Workbench.LANDiscovery.handle_info({ref, devices}, state)
+    assert {:noreply, ready} = Workbench.LANDiscovery.handle_info({ref, {devices, nil}}, state)
     assert ready.task == nil
     assert [%{source: :mdns, target: "ec100"}] = ready.view.devices
-    assert {:noreply, missing} = Workbench.LANDiscovery.handle_info({ref, []}, state)
+    assert {:noreply, missing} = Workbench.LANDiscovery.handle_info({ref, {[], nil}}, state)
     assert [%{source: :manual}] = missing.view.devices
   end
 
@@ -85,7 +85,7 @@ defmodule Workbench.DiscoveryTest do
     ref = make_ref()
 
     assert {:noreply, ready} =
-             Workbench.LANDiscovery.handle_info({ref, []}, %{state | task: %{ref: ref}})
+             Workbench.LANDiscovery.handle_info({ref, {[], nil}}, %{state | task: %{ref: ref}})
 
     assert [^device] = ready.view.devices
 
@@ -131,12 +131,124 @@ defmodule Workbench.DiscoveryTest do
     mdns = [%{device | source: :mdns, version: "old"} |> Map.delete(:usb_info)]
 
     assert {:noreply, refreshed} =
-             Workbench.LANDiscovery.handle_info({ref, mdns}, %{state | task: %{ref: ref}})
+             Workbench.LANDiscovery.handle_info({ref, {mdns, nil}}, %{state | task: %{ref: ref}})
 
     assert [^device] = refreshed.view.devices
   end
 
-  test "manual addresses are unverified data, never URLs or control commands" do
+  test "information attempts are sticky across disappearance, refresh and manual re-add" do
+    {:ok, state} = Workbench.LANDiscovery.init(nil)
+    address = "nerves-gate.example.ts.net"
+    {:reply, :ok, state} = Workbench.LANDiscovery.handle_call({:add, address}, nil, state)
+    assert [device] = state.view.devices
+    assert Workbench.Devices.needs_info?(device)
+
+    {:reply, :ok, state} =
+      Workbench.LANDiscovery.handle_call({:read, address, :reading, nil}, nil, state)
+
+    assert [device] = state.view.devices
+    refute Workbench.Devices.needs_info?(device)
+
+    {:reply, :ok, state} =
+      Workbench.LANDiscovery.handle_call(
+        {:read, address, :failed, "SSH connection refused"},
+        nil,
+        state
+      )
+
+    ref = make_ref()
+
+    {:noreply, state} =
+      Workbench.LANDiscovery.handle_info({ref, {[], nil}}, %{state | task: %{ref: ref}})
+
+    {:reply, :ok, state} = Workbench.LANDiscovery.handle_call({:add, address}, nil, state)
+    assert [device] = state.view.devices
+    assert device.info_read.status == :failed
+    refute Workbench.Devices.needs_info?(device)
+
+    {:reply, :ok, state} =
+      Workbench.LANDiscovery.handle_call(
+        {:identity, address, %{"target" => "ec100", "version" => "new"}},
+        nil,
+        state
+      )
+
+    assert [device] = state.view.devices
+    assert device.info_read.status == :succeeded
+    assert device.target == "ec100"
+    refute Workbench.Devices.needs_info?(device)
+  end
+
+  test "tailnet discovery only projects online gateway names and public endpoints" do
+    peer = %{
+      "DNSName" => "nerves-gate.tail40465.ts.net.",
+      "Online" => true,
+      "PrivateKey" => "secret"
+    }
+
+    status = %{
+      "Peer" => %{
+        "a" => peer,
+        "b" => %{peer | "DNSName" => "laptop.example.ts.net"},
+        "c" => %{peer | "Online" => false}
+      }
+    }
+
+    assert [device] = Workbench.LANDiscovery.tailnet_devices(status)
+    assert device.address == "nerves-gate.tail40465.ts.net"
+    assert device.url == "https://nerves-gate.tail40465.ts.net/"
+    assert device.source == :tailnet
+    refute inspect(device) =~ "secret"
+    assert Workbench.LANDiscovery.tailnet_devices(%{}) == []
+  end
+
+  test "a bare manual hostname gains the discovered HTTPS endpoint" do
+    {:ok, state} = Workbench.LANDiscovery.init(nil)
+    address = "nerves-gate.example.ts.net"
+    {:reply, :ok, state} = Workbench.LANDiscovery.handle_call({:add, address}, nil, state)
+
+    [candidate] =
+      Workbench.LANDiscovery.tailnet_devices(%{
+        "Peer" => %{"a" => %{"DNSName" => address, "Online" => true}}
+      })
+
+    ref = make_ref()
+
+    assert {:noreply, ready} =
+             Workbench.LANDiscovery.handle_info({ref, {[candidate], nil}}, %{
+               state
+               | task: %{ref: ref}
+             })
+
+    assert [%{url: "https://nerves-gate.example.ts.net/", source: :tailnet}] = ready.view.devices
+  end
+
+  test "explicit HTTPS endpoints survive discovery while gaining advertised metadata" do
+    {:ok, state} = Workbench.LANDiscovery.init(nil)
+    url = "https://nerves-gate.example.ts.net/"
+    {:reply, :ok, state} = Workbench.LANDiscovery.handle_call({:add, url}, nil, state)
+    [device] = state.view.devices
+
+    advertised = %{
+      device
+      | source: :mdns,
+        target: "ec100",
+        url: "http://nerves-gate.example.ts.net:4000/"
+    }
+
+    ref = make_ref()
+
+    assert {:noreply, ready} =
+             Workbench.LANDiscovery.handle_info({ref, {[advertised], "Tailnet unavailable"}}, %{
+               state
+               | task: %{ref: ref}
+             })
+
+    assert [%{url: ^url, target: "ec100"}] = ready.view.devices
+    assert ready.view.error == "Tailnet unavailable"
+  end
+
+  test "manual addresses and root URLs are unverified and never retain secrets" do
     assert {:ok, %{address: "192.168.1.42", source: :manual}} =
              Workbench.LANDiscovery.manual(" 192.168.1.42 ")
 
@@ -146,10 +258,20 @@ defmodule Workbench.DiscoveryTest do
     end
 
     assert {:ok, "ec100.example.ts.net"} = Workbench.LANDiscovery.host(" EC100.example.ts.net. ")
+    assert {:error, _} = Workbench.LANDiscovery.host("https://device.example/")
+
+    for url <- ["https://nerves-gate.tail40465.ts.net/", "http://192.168.1.42:4001/"] do
+      assert {:ok, %{url: ^url}} = Workbench.LANDiscovery.manual(url)
+    end
 
     for address <- [
           nil,
-          "http://192.168.1.42/",
+          "https://user:secret@device.example/",
+          "https://device.example/login/secret",
+          "https://device.example/?token=secret",
+          "https://device.example/#secret",
+          "https://device.example:0/",
+          "https://device.example:65536/",
           "127.0.0.1",
           "224.0.0.251",
           "0.0.0.0",

@@ -1,5 +1,5 @@
 defmodule Workbench.OperationsTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   test "busy and stopping admission rejects operations, lifecycle and session shutdown" do
     {:ok, idle} = Workbench.Operations.init(nil)
@@ -183,6 +183,105 @@ defmodule Workbench.OperationsTest do
 
     assert done.view.status == :succeeded
     assert done.view.connection == connection
+  end
+
+  test "background reads cannot interrupt active work, stopping or a destructive review" do
+    {:ok, idle} = Workbench.Operations.init(nil)
+
+    for state <- [
+          %{idle | task: %{ref: make_ref()}},
+          %{idle | stopping: true},
+          %{idle | review: %{public: %{token: "review"}}}
+        ] do
+      assert {:noreply, ^state} = Workbench.Operations.handle_cast(:read_discovered, state)
+    end
+  end
+
+  test "information failures are recorded per device and never retried by another discovery notification" do
+    {ref, running} = information_read_state()
+
+    assert {:noreply, done} =
+             Workbench.Operations.handle_info(
+               {ref, {:error, "Verify the host key and authorize your key."}},
+               running
+             )
+
+    assert done.view.status == :failed
+    assert_receive {:"$gen_cast", :read_discovered}
+    assert [device] = Workbench.LANDiscovery.snapshot().devices
+    assert device.info_read.status == :failed
+    assert device.info_read.message =~ "host key"
+    refute Workbench.Devices.needs_info?(device)
+    assert {:noreply, ^done} = Workbench.Operations.handle_cast(:read_discovered, done)
+  end
+
+  test "information worker exits leave a safe per-device failure and permit the next candidate" do
+    {ref, running} = information_read_state()
+
+    assert {:noreply, done} =
+             Workbench.Operations.handle_info(
+               {:DOWN, ref, :process, self(), {:unexpected, "secret"}},
+               running
+             )
+
+    assert [device] = Workbench.LANDiscovery.snapshot().devices
+    assert device.info_read.status == :failed
+    refute device.info_read.message =~ "secret"
+    assert done.task == nil
+    assert_receive {:"$gen_cast", :read_discovered}
+  end
+
+  test "background information reads preserve the preceding operation result and recovery guidance" do
+    for result <- [:ok, :error, :exit] do
+      {ref, running} = information_read_state()
+
+      previous = %{
+        running.view
+        | kind: "firmware_update",
+          status: :failed,
+          result: "Inspect the device before retrying",
+          recovery: %{backup: "/backups/retained"}
+      }
+
+      running = Map.put(running, :background_previous_view, previous)
+
+      event =
+        if result == :exit,
+          do: {:DOWN, ref, :process, self(), :killed},
+          else: {ref, {result, "Information result"}}
+
+      assert {:noreply, done} = Workbench.Operations.handle_info(event, running)
+      assert done.view == previous
+      assert done.task == nil
+      refute Map.has_key?(done, :background_previous_view)
+      assert [device] = Workbench.LANDiscovery.snapshot().devices
+      assert device.info_read.status == if(result == :ok, do: :succeeded, else: :failed)
+    end
+  end
+
+  # Stage host read-model state only. These tests start no worker or SSH connection.
+  defp information_read_state do
+    original = :sys.get_state(Workbench.LANDiscovery)
+    on_exit(fn -> :sys.replace_state(Workbench.LANDiscovery, fn _ -> original end) end)
+    address = "gateway.example.ts.net"
+    {:ok, discovery} = Workbench.LANDiscovery.init(nil)
+    {:reply, :ok, discovery} = Workbench.LANDiscovery.handle_call({:add, address}, nil, discovery)
+
+    {:reply, :ok, discovery} =
+      Workbench.LANDiscovery.handle_call({:read, address, :reading, nil}, nil, discovery)
+
+    :sys.replace_state(Workbench.LANDiscovery, fn _ -> discovery end)
+    {:ok, idle} = Workbench.Operations.init(nil)
+    ref = make_ref()
+
+    view =
+      Map.merge(idle.view, %{
+        kind: "device_info",
+        status: :running,
+        context: %{subject: address, device: nil}
+      })
+
+    {ref, %{idle | task: %{ref: ref}, view: view}}
   end
 
   test "unknown workbench operations never start a worker" do

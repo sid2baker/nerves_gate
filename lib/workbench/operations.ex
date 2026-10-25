@@ -39,11 +39,17 @@ defmodule Workbench.Operations do
   end
 
   def handle_call({:review_firmware, params}, _, state) do
-    start_task(state, "firmware_review", fn report ->
-      plan = Workbench.FirmwareUpdate.review!(params, report)
-      Workbench.LANDiscovery.record_identity(plan.public.address, plan.device)
-      {:review, plan}
-    end)
+    start_task(
+      state,
+      "firmware_review",
+      fn report ->
+        plan = Workbench.FirmwareUpdate.review!(params, report)
+        Workbench.LANDiscovery.record_identity(plan.public.address, plan.device)
+        {:review, plan}
+      end,
+      nil,
+      %{address: params["address"]}
+    )
   end
 
   def handle_call({:review_factory, params}, _, state) do
@@ -92,34 +98,101 @@ defmodule Workbench.Operations do
       :ok = Workbench.FirmwareUpdate.confirmation!(state.review, id, address)
       plan = state.review
       # Consume the review exactly once. The worker owns its snapshot from here.
-      start_task(%{state | review: nil}, "firmware_update", fn report ->
-        {:ok, Workbench.FirmwareUpdate.update!(plan, report)}
-      end)
+      start_task(
+        %{state | review: nil},
+        "firmware_update",
+        fn report ->
+          {:ok, Workbench.FirmwareUpdate.update!(plan, report)}
+        end,
+        nil,
+        %{address: plan.public.address}
+      )
     rescue
       error in ArgumentError -> {:reply, {:error, Exception.message(error)}, state}
     end
   end
 
+  def handle_call({:start, "device_info", address, _}, _, state),
+    do: start_device_info(state, address)
+
   def handle_call({:start, kind, app, device}, _, state) do
     with :ok <- admitted(kind, app) do
-      start_task(state, kind, fn report ->
-        result =
-          case kind do
-            "firmware" -> Workbench.Builds.firmware!(app || "x86_64", report)
-            "device_info" -> Workbench.Devices.read_info!(app)
-            "test" -> Workbench.Applications.test!(app, report)
-            "package" -> Workbench.Applications.package!(app, report)
-            "install" -> Workbench.Applications.install!(app, device, report)
-          end
+      start_task(
+        state,
+        kind,
+        fn report ->
+          result =
+            case kind do
+              "firmware" -> Workbench.Builds.firmware!(app || "x86_64", report)
+              "test" -> Workbench.Applications.test!(app, report)
+              "package" -> Workbench.Applications.package!(app, report)
+              "install" -> Workbench.Applications.install!(app, device, report)
+            end
 
-        {:ok, inspect(result)}
-      end)
+          {:ok, inspect(result)}
+        end,
+        nil,
+        %{subject: app, device: device}
+      )
     else
       {:error, _} = error -> {:reply, error, state}
     end
   end
 
-  defp start_task(state, kind, run, recovery \\ nil) do
+  # Discovery only requests reads; this owner still serializes them with builds and updates.
+  # Never let a background observation consume an awaiting destructive review.
+  def handle_cast(:read_discovered, %{task: nil, review: nil, stopping: false} = state) do
+    case Enum.find(Workbench.LANDiscovery.snapshot().devices, &Workbench.Devices.needs_info?/1) do
+      nil ->
+        {:noreply, state}
+
+      device ->
+        case start_device_info(state, device.address) do
+          {:reply, :ok, started} ->
+            {:noreply, Map.put(started, :background_previous_view, state.view)}
+
+          {:reply, {:error, _}, state} ->
+            {:noreply, state}
+        end
+    end
+  end
+
+  def handle_cast(:read_discovered, state), do: {:noreply, state}
+
+  defp start_device_info(state, address) do
+    with :ok <- admitted("device_info", address) do
+      :ok = Workbench.LANDiscovery.record_read(address, :reading)
+
+      start_task(
+        state,
+        "device_info",
+        fn _ ->
+          {:ok, Workbench.Devices.read_info!(address)}
+        end,
+        nil,
+        %{subject: address, device: nil}
+      )
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  defp finish_info_read(state, view) do
+    if state.view.kind == "device_info" do
+      :ok =
+        Workbench.LANDiscovery.record_read(
+          state.view.context.subject,
+          view.status,
+          if(view.status == :failed, do: view.result)
+        )
+    end
+
+    GenServer.cast(self(), :read_discovered)
+    {previous, state} = Map.pop(state, :background_previous_view)
+    %{state | task: nil, view: previous || view}
+  end
+
+  defp start_task(state, kind, run, recovery \\ nil, context \\ nil) do
     state = drop_review(state)
     owner = self()
 
@@ -132,7 +205,7 @@ defmodule Workbench.Operations do
         end
       end)
 
-    view = Map.put(view(:running, kind), :recovery, recovery)
+    view = view(:running, kind) |> Map.put(:recovery, recovery) |> Map.put(:context, context)
     {:reply, :ok, %{state | task: task, view: view}}
   end
 
@@ -216,7 +289,7 @@ defmodule Workbench.Operations do
         connection: connection
       })
 
-    {:noreply, %{state | task: nil, view: view}}
+    {:noreply, finish_info_read(state, view)}
   end
 
   def handle_info({ref, {status, message}}, %{task: %{ref: ref}} = state) do
@@ -235,7 +308,7 @@ defmodule Workbench.Operations do
         %{state.view | status: if(status == :ok, do: :succeeded, else: :failed), result: message}
       end
 
-    {:noreply, %{state | task: nil, view: view}}
+    {:noreply, finish_info_read(state, view)}
   end
 
   def handle_info({:DOWN, ref, :process, _, reason}, %{task: %{ref: ref}} = state) do
@@ -258,7 +331,7 @@ defmodule Workbench.Operations do
         }
       end
 
-    {:noreply, %{state | task: nil, view: view}}
+    {:noreply, finish_info_read(state, view)}
   end
 
   def handle_info({:expire_review, id}, %{review: %{public: %{token: id}}} = state) do
@@ -267,6 +340,7 @@ defmodule Workbench.Operations do
         do: "Factory review expired; re-enter MASKROM before reviewing again",
         else: "Firmware review expired"
 
+    GenServer.cast(self(), :read_discovered)
     {:noreply, %{drop_review(state) | view: %{view(:idle, nil) | result: message}}}
   end
 

@@ -29,9 +29,9 @@ defmodule WorkbenchWeb.FactoryLive do
 
     ~H"""
     <main class="ui-main ui-stack bench" id="factory-page">
-      <.back_link navigate="/firmware">Firmware</.back_link>
+      <.back_link navigate="/devices?kind=physical">Existing gateways and routine updates</.back_link>
       <.page_header
-        eyebrow="Physical EC100 · initial installation"
+        eyebrow="Provision · Physical EC100 · initial USB installation"
         title="Factory provisioning"
         description="Replace factory firmware over USB MASKROM. This is not a routine SSH update."
       />
@@ -49,7 +49,13 @@ defmodule WorkbenchWeb.FactoryLive do
           identify the board. Do not unplug, replace it, or connect another Rockchip device during review/install.
         </p>
       </.notice>
-      <.panel title="Prepare and review" icon="port">
+      <ol class="dev-workflow-steps" aria-label="Provisioning stages">
+        <li>1 · Prepare image and identify board</li>
+        <li>2 · Review and authorize erasure</li>
+        <li>3 · Verify writes and reconnect</li>
+      </ol>
+      <.panel title="1 · Prepare and review" icon="port">
+        <.link navigate="/develop/firmware" class="ui-text-link">Build an EC100 image</.link>
         <p>
           Build EC100 firmware first. Review verifies the image and boot artifacts, loads a temporary
           USB transport into RAM, reads eMMC capacity and checks artifact/backup disk space. Review writes nothing to eMMC.
@@ -96,7 +102,12 @@ defmodule WorkbenchWeb.FactoryLive do
           </div>
         </form>
       </.panel>
-      <.panel :if={@review} title="Review destructive installation" icon="shield" id="factory-review">
+      <.panel
+        :if={@review}
+        title="2 · Review destructive installation"
+        icon="shield"
+        id="factory-review"
+      >
         <.setting_row label="USB location">
           {@review.location} · not a unique board identity
         </.setting_row>
@@ -149,7 +160,11 @@ defmodule WorkbenchWeb.FactoryLive do
           </.button>
         </form>
       </.panel>
-      <.panel title="Operation output" icon="clock">
+      <.panel
+        :if={@operation.kind in ["factory_review", "factory_provision"]}
+        title="3 · Progress, verification and connection"
+        icon="clock"
+      >
         <.operation operation={@operation} />
         <p :if={@operation.kind == "factory_review" and @operation.status == :failed} class="ui-help">
           This failed review's temporary files have been removed. Fix the reported cause, inspect the device and start a new review; do not copy a temporary loader command from an old run.
