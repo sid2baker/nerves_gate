@@ -116,6 +116,7 @@ defmodule Scenarios.Cases.ProjectionStream do
     for path <- [
           "/",
           "/network",
+          "/network/details",
           "/equipment/lan/1",
           "/equipment/lan/2",
           "/remote",
@@ -133,13 +134,18 @@ defmodule Scenarios.Cases.ProjectionStream do
       if path == "/network" do
         page = Floki.parse_document!(response.body)
 
-        assert [_] =
-                 Floki.find(
-                   page,
-                   "#main-content > #network-connections ~ #internet-editor #network-form"
-                 )
+        assert [_] = Floki.find(page, "#main-content > #internet-editor")
 
-        assert [] = Floki.find(page, "details #network-connections")
+        if Floki.find(page, "#network-form") == [] do
+          assert [_] = Floki.find(page, "#internet-change-setup")
+          assert [_] = Floki.find(page, "a[href='/network/details']")
+          assert Floki.find(page, "#internet-uplink-summary h2") |> Floki.text() == "Internet"
+        else
+          assert [_] =
+                   Floki.find(page, "#network-form input[name='network[internet_mode]'][checked]")
+
+          assert Floki.text(Floki.find(page, "#network-form")) =~ "Internet source"
+        end
 
         assert [] =
                  Floki.find(
@@ -152,8 +158,17 @@ defmodule Scenarios.Cases.ProjectionStream do
                    page,
                    "[name='network[equipment_port]'], [name='network[equipment_ip]']"
                  )
+      end
 
-        assert Floki.find(page, "#network-connections h2") |> Floki.text() == "Your connections"
+      if path == "/network/details" do
+        page = Floki.parse_document!(response.body)
+        assert [_] = Floki.find(page, "#internet-settings-editor #network-form")
+
+        assert [] =
+                 Floki.find(
+                   page,
+                   "#internet-settings-editor details, #internet-settings-editor summary"
+                 )
       end
 
       if path == "/equipment/lan/2" do

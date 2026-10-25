@@ -8,7 +8,15 @@ config :nerves_gate,
   services: []
 
 config :phoenix, :json_library, Jason
-config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret", "public_key"]
+
+config :phoenix, :filter_parameters, [
+  "password",
+  "username",
+  "auth_key",
+  "pin",
+  "secret",
+  "public_key"
+]
 
 config :nerves_gate_workbench, WorkbenchWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,

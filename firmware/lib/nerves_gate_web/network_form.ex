@@ -10,6 +10,7 @@ defmodule NervesGateWeb.NetworkForm do
     %{
       "internet_mode" => internet["mode"],
       "cellular_apn" => internet["apn"] || "",
+      "cellular_profile" => profile(internet),
       "internet_port" => if(fresh, do: "auto", else: Config.role_port(network, "internet") || "")
     }
     |> put_address("internet", Config.role_address(network, "internet"))
@@ -125,6 +126,7 @@ defmodule NervesGateWeb.NetworkForm do
 
   def defaults_for_change(params, previous, editor, observed)
       when editor in [:internet, :ports] do
+    params = if editor == :internet, do: carrier_change(params, previous), else: params
     prefix = if editor == :internet, do: "internet", else: "shared"
 
     if previous["#{prefix}_method"] != "static" and params["#{prefix}_method"] == "static",
@@ -156,10 +158,39 @@ defmodule NervesGateWeb.NetworkForm do
       "apn" => String.trim(params["cellular_apn"] || "")
     }
 
+    internet =
+      case params["cellular_profile"] do
+        "provider:" <> id -> Map.put(internet, "provider", id)
+        _ -> internet
+      end
+
     network =
       if internet["mode"] == "ethernet", do: network, else: Map.put(network, "internet", internet)
 
     Config.validate_network(network)
+  end
+
+  defp profile(%{"provider" => id}), do: "provider:" <> id
+  defp profile(%{"apn" => apn}) when apn not in [nil, ""], do: "custom"
+  defp profile(_), do: "auto"
+
+  defp carrier_change(params, previous) do
+    case {params["cellular_profile"], previous["cellular_profile"]} do
+      {same, same} ->
+        params
+
+      {"auto", _} ->
+        Map.put(params, "cellular_apn", "")
+
+      {"provider:" <> id, _} ->
+        case NervesGate.Cellular.Providers.option(id) do
+          nil -> params
+          option -> Map.put(params, "cellular_apn", option["apn"])
+        end
+
+      _ ->
+        params
+    end
   end
 
   defp same_port?(internet, equipment), do: internet != nil and internet == equipment

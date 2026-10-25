@@ -24,7 +24,15 @@ config :nerves_gate,
   distribution_cookie: if(config_env() == :dev, do: :mycookie)
 
 config :phoenix, :json_library, Jason
-config :phoenix, :filter_parameters, ["password", "auth_key", "pin", "secret", "public_key"]
+
+config :phoenix, :filter_parameters, [
+  "password",
+  "username",
+  "auth_key",
+  "pin",
+  "secret",
+  "public_key"
+]
 
 config :nerves_gate, NervesGateWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,

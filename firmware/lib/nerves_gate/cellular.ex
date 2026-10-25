@@ -12,7 +12,14 @@ defmodule NervesGate.Cellular do
   alias NervesGate.{Config, Error, Network}
 
   def refresh, do: submit(:refresh, [])
-  def unlock(pin), do: submit(:unlock, [pin])
+  def reconnect, do: submit(:reconnect, [])
+
+  def unlock(pin, options \\ []) do
+    if Keyword.get(options, :track, false),
+      do: Error.protect(fn -> GenServer.call(Network, {:cellular, :unlock, [pin], :tracked}) end),
+      else: submit(:unlock, [pin])
+  end
+
   def change_pin(current, new), do: submit(:change_pin, [current, new])
   def set_pin_lock(enabled, pin), do: submit(:set_pin_lock, [enabled, pin])
   def save_pin(pin), do: submit(:save_pin, [pin])
@@ -40,8 +47,12 @@ defmodule NervesGate.Cellular do
       registration: :unknown,
       operator: nil,
       signal_dbm: nil,
+      access_technology: nil,
+      provider: nil,
+      provider_options: [],
       refreshed_at: nil,
       operation: nil,
+      result: nil,
       error: nil
     }
   end
@@ -60,6 +71,7 @@ defmodule NervesGate.Cellular do
         :authentication,
         :authentication_apn,
         :operation,
+        :result,
         :error
       ])
 
@@ -81,7 +93,7 @@ defmodule NervesGate.Cellular do
     enabled = supported and Config.cellular?(network)
     present = get_in(observed, [:cellular, :present])
     cached = Map.get(status, :cellular) || empty()
-    data = if enabled and present, do: cached, else: reset(cached)
+    data = if present, do: cached, else: reset(cached)
     Map.merge(data, %{supported: supported, enabled: enabled, present: present})
   end
 
@@ -109,7 +121,11 @@ defmodule NervesGate.Cellular do
          }}
 
       status.trial != nil ->
-        {:error, %{code: "trial_in_progress", message: "Another client already started a trial."}}
+        {:error,
+         %{
+           code: "trial_in_progress",
+           message: "Keep or restore the network trial before changing cellular setup."
+         }}
 
       status.phase != :idle ->
         {:error,
@@ -118,15 +134,8 @@ defmodule NervesGate.Cellular do
       operation in [:forget_pin, :forget_authentication] ->
         :ok
 
-      not cellular.enabled ->
-        {:error,
-         %{
-           code: "cellular_disabled",
-           message: "Enable and save a cellular Internet source before modem operations."
-         }}
-
       cellular.present == true ->
-        :ok
+        operation_available(cellular, operation)
 
       true ->
         {:error,
@@ -138,23 +147,52 @@ defmodule NervesGate.Cellular do
     end
   end
 
+  defp operation_available(%{enabled: false}, :reconnect),
+    do:
+      {:error,
+       %{
+         code: "cellular_disabled",
+         message:
+           "Choose a 4G Internet source before reconnecting mobile data. SIM setup is available without it."
+       }}
+
+  defp operation_available(%{sim: :pin_required}, :unlock), do: :ok
+
+  defp operation_available(_, :unlock),
+    do:
+      {:error,
+       %{
+         code: "cellular_sim_changed",
+         message: "The SIM is not asking for its PIN. Refresh before acting; no PIN was sent."
+       }}
+
+  defp operation_available(%{sim: sim}, operation)
+       when operation in [:save_pin, :change_pin, :set_pin_lock, :reconnect] and sim != :ready,
+       do:
+         {:error,
+          %{
+            code: "cellular_sim_not_ready",
+            message: "The SIM must be unlocked and ready before this operation."
+          }}
+
+  defp operation_available(%{pin_lock: lock}, :save_pin), do: pin_saving_available(lock)
+  defp operation_available(_, _), do: :ok
+
   @doc false
-  def sim_available(status, sim) do
-    with :ok <- available(status) do
-      if view(status).sim == sim,
-        do: :ok,
-        else:
-          {:error,
-           %{
-             code: "cellular_sim_changed",
-             message:
-               "The SIM is no longer asking for its PIN, or its state is unknown. Refresh before acting."
-           }}
-    end
-  end
+  def pin_saving_available(:enabled), do: :ok
+
+  def pin_saving_available(_),
+    do:
+      {:error,
+       %{
+         code: "cellular_pin_not_required",
+         message:
+           "PIN protection is disabled or unknown. No PIN was sent. Enable protection explicitly if required; a ready SIM does not need unlocking."
+       }}
 
   @doc false
   def parameters(:refresh, []), do: :ok
+  def parameters(:reconnect, []), do: :ok
   def parameters(:forget_pin, []), do: :ok
   def parameters(:forget_authentication, []), do: :ok
 
@@ -206,10 +244,13 @@ defmodule NervesGate.Cellular do
       available(status) != :ok ->
         nil
 
+      waiting_for_controller?(data) ->
+        nil
+
       is_pid(controller) and controller != previous_controller ->
         {controller, :initialize, &SIM.initialize/0}
 
-      data.sim == :pin_required and data.auto_unlock == :ready ->
+      automatic_unlock?(status) ->
         {previous_controller, :auto_unlock, &SIM.auto_unlock/0}
 
       due ->
@@ -220,8 +261,22 @@ defmodule NervesGate.Cellular do
     end
   end
 
+  defp waiting_for_controller?(%{
+         error: %{code: "cellular_controller_starting"},
+         refreshed_at: time
+       })
+       when is_integer(time),
+       do: System.system_time(:millisecond) - time < 5_000
+
+  defp waiting_for_controller?(_), do: false
+
+  defp automatic_unlock?(%{cellular: %{sim: :pin_required, auto_unlock: :ready}} = status),
+    do: view(status).enabled
+
+  defp automatic_unlock?(_), do: false
+
   @doc false
-  def complete(result) do
+  def complete(result, previous, id \\ nil) do
     data =
       case result do
         {:ok, data} ->
@@ -241,7 +296,43 @@ defmodule NervesGate.Cellular do
           }
       end
 
-    %{data | operation: nil, refreshed_at: System.system_time(:millisecond)}
+    # Private storage does not alter the modem. Keep its observations (and the
+    # unrelated credential metadata) rather than briefly reporting an unknown SIM.
+    data =
+      case previous.operation do
+        operation when operation in [:save_authentication, :forget_authentication] ->
+          Map.merge(previous, Map.take(data, [:authentication, :authentication_apn, :error]))
+
+        :forget_pin ->
+          Map.merge(previous, Map.take(data, [:pin_saved, :auto_unlock, :error]))
+
+        _ ->
+          data
+      end
+
+    %{
+      data
+      | result: command_result(previous, data, id),
+        operation: nil,
+        refreshed_at: System.system_time(:millisecond)
+    }
+  end
+
+  defp command_result(%{operation: :refresh, result: result}, _, _), do: result
+  defp command_result(%{operation: :initialize, result: result}, %{error: nil}, _), do: result
+
+  defp command_result(
+         %{operation: :initialize, result: result},
+         %{
+           error: %{code: "cellular_controller_starting"}
+         },
+         _
+       ),
+       do: result
+
+  defp command_result(previous, data, id) do
+    result = %{operation: previous.operation, error: data.error}
+    if id == nil, do: result, else: Map.put(result, :id, id)
   end
 
   # Filter before handlers, including RingLogger; dependency crash reports may
@@ -252,6 +343,9 @@ defmodule NervesGate.Cellular do
   catch
     _, _ -> :stop
   end
+
+  defp redact({:cellular, operation, _, :tracked}),
+    do: {:cellular, operation, :redacted, :tracked}
 
   defp redact({:cellular, operation, _}), do: {:cellular, operation, :redacted}
 
@@ -264,6 +358,7 @@ defmodule NervesGate.Cellular do
       Regex.match?(~r/AT\+(?:CPIN|CPWD|CLCK)=/, value) -> "[REDACTED SIM COMMAND]"
       Regex.match?(~r/AT\+(?:QICSGP|CGAUTH)=/, value) -> "[REDACTED CELLULAR COMMAND]"
       Regex.match?(~r/\+QCCID:\s*[0-9]/, value) -> "[REDACTED SIM ID]"
+      Regex.match?(~r/(?<![0-9])[0-9]{14,15}(?![0-9])/, value) -> "[REDACTED SIM ID]"
       true -> value
     end
   end

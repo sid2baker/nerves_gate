@@ -8,27 +8,25 @@ defmodule NervesGateWeb.NetworkLive do
 
   def render(assigns) do
     ~H"""
-    <.back_link navigate="/">Overview</.back_link>
+    <.back_link navigate={if @live_action == :details, do: "/network", else: "/"}>{if @live_action ==
+                                                                                        :details,
+                                                                                      do: "Internet",
+                                                                                      else: "Overview"}</.back_link>
     <.page_header
-      title="Internet"
-      description="Choose your Internet source. USB stays independent for recovery."
-    />
-    <.live_component
-      module={NervesGateWeb.ConnectionPanel}
-      id="network-connections"
-      projection={@projection}
+      title={if @live_action == :details, do: "Connection settings", else: "Internet"}
+      description={
+        if @live_action == :details,
+          do: "Carrier, addressing and diagnostics.",
+          else: "Choose a connection. SIM setup is automatic where supported."
+      }
     />
     <.live_component
       module={NervesGateWeb.NetworkEditor}
-      id="internet-editor"
+      id={if @live_action == :details, do: "internet-settings-editor", else: "internet-editor"}
       editor={:internet}
+      settings={@live_action == :details}
       projection={@projection}
       access={@access}
-    />
-    <.live_component
-      module={NervesGateWeb.CellularPanel}
-      id="cellular-panel"
-      projection={@projection}
     />
     """
   end

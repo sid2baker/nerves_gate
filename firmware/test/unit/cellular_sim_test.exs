@@ -111,6 +111,20 @@ defmodule NervesGate.Cellular.SIMTest do
     assert SIM.metadata(nil, table).pin_saved == false
   end
 
+  @tag :capture_log
+  test "a failed durable save never leaves automatic unlock armed in memory", context do
+    File.rm_rf!(context.dir)
+    File.write!(context.dir, "not a directory")
+    assert {:error, %{code: "cellular_pin_storage"}} = SIM.save(@pin, @identity, context.table)
+    assert SIM.metadata(@identity, context.table) == %{pin_saved: nil, auto_unlock: :blocked}
+
+    assert {:error, %{code: "cellular_auto_unlock_blocked"}} =
+             SIM.consume(@identity, context.table)
+
+    assert {:error, %{code: "cellular_pin_storage"}} = SIM.forget(context.table)
+    assert SIM.metadata(@identity, context.table) == %{pin_saved: nil, auto_unlock: :blocked}
+  end
+
   defp restart(%{table: table, start: start}) do
     :ok = stop_supervised(table)
     start.()

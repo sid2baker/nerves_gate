@@ -85,22 +85,30 @@ defmodule NervesGate.Status do
       "network.confirm" => action("Keep settings", ["trial_id"], confirm),
       "network.cancel" => action("Restore saved settings", ["trial_id"], trial),
       "cellular.refresh" => action("Refresh cellular status", [], Cellular.available(status)),
-      "cellular.unlock" =>
-        action("Unlock SIM", ["pin"], Cellular.sim_available(status, :pin_required)),
+      "cellular.reconnect" => action("Reconnect 4G", [], Cellular.available(status, :reconnect)),
+      "cellular.save_authentication" =>
+        action(
+          "Save APN credentials",
+          ["apn", "username", "password"],
+          Cellular.available(status, :save_authentication)
+        ),
+      "cellular.forget_authentication" =>
+        action("Forget APN credentials", [], Cellular.available(status, :forget_authentication)),
+      "cellular.unlock" => action("Unlock SIM", ["pin"], Cellular.available(status, :unlock)),
       "cellular.change_pin" =>
         action(
           "Change SIM PIN",
           ["current_pin", "new_pin"],
-          Cellular.sim_available(status, :ready)
+          Cellular.available(status, :change_pin)
         ),
       "cellular.set_pin_lock" =>
         action(
           "Set SIM PIN protection",
           ["enabled", "pin"],
-          Cellular.sim_available(status, :ready)
+          Cellular.available(status, :set_pin_lock)
         ),
       "cellular.save_pin" =>
-        action("Verify and save SIM PIN", ["pin"], Cellular.sim_available(status, :ready)),
+        action("Verify and save SIM PIN", ["pin"], Cellular.available(status, :save_pin)),
       "cellular.forget_pin" =>
         action("Forget saved PIN", [], Cellular.available(status, :forget_pin)),
       "remote.connect" =>

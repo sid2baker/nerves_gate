@@ -71,7 +71,23 @@ defmodule NervesGate.Cellular.ProfileTest do
     refute Map.has_key?(raw.source_config.vintage_net_ecm, :username)
   end
 
-  test "Ethernet-only disables the modem without changing the recovery interface" do
+  test "EC100 keeps one SIM controller without IP, DHCP, routes or a data session" do
+    profile = put_in(@profile, [:config, :vintage_net_ecm, :modem], NervesGate.Cellular.Modem)
+    put_profile(profile)
+    network = Map.put(@network, "internet", %{"mode" => "ethernet"})
+    assert {:ok, [{"wwan0", config}]} = NervesGate.Cellular.Profile.configurations(network)
+    assert config.ipv4 == %{method: :disabled}
+    assert config.vintage_net_ecm.setup_only
+    assert NervesGate.Cellular.Modem.connection_mode(config) == :setup_only
+    raw = VintageNetECM.to_raw_config("wwan0", config, [])
+    assert [_] = Enum.filter(raw.child_specs, &match?({VintageNetECM.ATController, _}, &1))
+    assert raw.source_config.ipv4.method == :disabled
+    assert {:ok, [{"wwan0", data}]} = NervesGate.Cellular.Profile.configurations(@network)
+    assert NervesGate.Cellular.Modem.connection_mode(data) == {:data, "internet.example"}
+    assert NervesGate.Cellular.Modem.connection_mode(@profile.config) == :unsupported
+  end
+
+  test "generic profiles still disable the modem without changing the recovery interface" do
     network = Map.put(@network, "internet", %{"mode" => "ethernet"})
 
     assert NervesGate.Cellular.Profile.configurations(network) ==

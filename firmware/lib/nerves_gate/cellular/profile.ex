@@ -29,6 +29,20 @@ defmodule NervesGate.Cellular.Profile do
       {nil, false} ->
         {:ok, []}
 
+      {%{
+         interface: name,
+         config:
+           %{type: VintageNetECM, vintage_net_ecm: %{modem: NervesGate.Cellular.Modem}} = config
+       }, false} ->
+        options =
+          Map.merge(config.vintage_net_ecm, %{setup_only: true, service_providers: [%{apn: ""}]})
+
+        {:ok,
+         [
+           {name,
+            config |> Map.put(:vintage_net_ecm, options) |> Map.put(:ipv4, %{method: :disabled})}
+         ]}
+
       {%{interface: name}, false} ->
         {:ok, [{name, %{type: VintageNet.Technology.Null}}]}
 
@@ -39,6 +53,11 @@ defmodule NervesGate.Cellular.Profile do
           Map.put(config[key], :service_providers, [
             %{apn: Config.internet(network)["apn"]}
           ])
+
+        options =
+          if Config.internet(network)["provider"],
+            do: Map.put(options, :carrier_profile, Config.internet(network)["provider"]),
+            else: options
 
         {:ok, [{name, Map.put(config, key, options)}]}
     end

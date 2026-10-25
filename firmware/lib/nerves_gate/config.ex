@@ -24,8 +24,11 @@ defmodule NervesGate.Config do
        when map_size(internet) == 1, do: :ok
 
   defp validate_internet(%{"internet" => %{"mode" => mode, "apn" => apn} = internet} = network)
-       when mode in ["cellular", "backup"] and map_size(internet) == 2 do
+       when mode in ["cellular", "backup"] and map_size(internet) in [2, 3] do
     cond do
+      not valid_internet_fields?(internet) ->
+        {:error, "Choose a valid carrier profile or Automatic."}
+
       not valid_apn?(apn) ->
         {:error,
          "Leave APN blank for the network default, or enter the operator's APN (up to 100 letters, digits, dots or hyphens)."}
@@ -33,14 +36,8 @@ defmodule NervesGate.Config do
       network["mode"] == "unconfigured" ->
         {:error, "Choose your Ethernet port arrangement before enabling cellular."}
 
-      mode == "cellular" and ethernet_uplink?(network) ->
-        {:error, "4G-only mode needs separate ports without an Ethernet Internet assignment."}
-
-      mode == "backup" and not ethernet_uplink?(network) ->
-        {:error, "Choose an Ethernet Internet port for 4G backup."}
-
       true ->
-        :ok
+        validate_cellular_uplink(network, mode)
     end
   end
 
@@ -48,6 +45,26 @@ defmodule NervesGate.Config do
     do: {:error, "Choose Ethernet, 4G, or Ethernet with 4G backup."}
 
   defp validate_internet(_), do: :ok
+
+  defp validate_cellular_uplink(network, mode) do
+    case {mode, ethernet_uplink?(network)} do
+      {"cellular", true} ->
+        {:error, "4G-only mode needs separate ports without an Ethernet Internet assignment."}
+
+      {"backup", false} ->
+        {:error, "Choose an Ethernet Internet port for 4G backup."}
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp valid_internet_fields?(internet) do
+    Enum.all?(Map.keys(internet), &(&1 in ["mode", "apn", "provider"])) and
+      (not Map.has_key?(internet, "provider") or valid_provider?(internet["provider"]))
+  end
+
+  defp valid_provider?(id), do: is_binary(id) and Regex.match?(~r/\A[a-f0-9]{64}\z/, id)
 
   defp valid_apn?(""), do: true
 

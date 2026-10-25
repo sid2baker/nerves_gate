@@ -6,59 +6,123 @@ defmodule NervesGate.Cellular.Modem do
   """
   @behaviour VintageNetECM.Modem
 
-  alias NervesGate.Cellular.{Authentication, Profile}
+  alias NervesGate.Cellular.{Authentication, Profile, Providers, SIM}
   alias VintageNetECM.AT
   alias VintageNetECM.Modem.Quectel
 
   @doc false
   def initialize(name, level) do
-    with {:ok, commands} <- hotplug_commands(command(name, "AT+QSIMDET?"), level) do
-      configure_hotplug(name, commands)
+    case detection_status(name) do
+      {:error, reason} when reason in [:timeout, :not_running, :tty_not_open, :starting] ->
+        {:error,
+         %{
+           code: "cellular_controller_starting",
+           message: "Waiting for the modem to start. No SIM setting or PIN was sent."
+         }}
+
+      response ->
+        with {:ok, commands} <- hotplug_commands(response, level),
+             do: configure_hotplug(name, commands)
     end
+  end
+
+  defp detection_status(name) do
+    command(name, "AT+QSIMDET?")
+  catch
+    :exit, _ -> {:error, :starting}
   end
 
   @impl true
   def activate_data_call(uart, context_id) do
-    with {:ok, lines} <- AT.command(uart, "AT+QIACT?", timeout: 2_000),
-         :ok <- prepare_context(uart, context_id, packet_active?(lines, context_id)),
+    config = current_configuration()
+
+    case connection_mode(config) do
+      :setup_only ->
+        :ok
+
+      {:data, apn} ->
+        connect(uart, context_id, apn, get_in(config, [:vintage_net_ecm, :carrier_profile]))
+
+      :unsupported ->
+        {:error, :unqualified_cellular_configuration}
+    end
+  end
+
+  defp connect(uart, context_id, apn, provider_id) do
+    with :ready <- SIM.sim_state(AT.command(uart, "AT+CPIN?", timeout: 2_000)),
+         {:ok, lines} <- AT.command(uart, "AT+QIACT?", timeout: 2_000),
+         :ok <- release_context(uart, context_id, packet_active?(lines, context_id)),
+         :ok <- configure_authentication(uart, context_id, apn, provider_id),
+         {:ok, _} <- AT.command(uart, "AT+QIACT=#{context_id}", timeout: 15_000),
          {:ok, _} <- AT.command(uart, "AT+QNETDEVCTL=1,#{context_id}", timeout: 8_000) do
       :ok
+    else
+      state when is_atom(state) -> {:error, :sim_not_ready}
+      error -> error
     end
   end
 
-  defp prepare_context(_, _, true), do: :ok
+  defp release_context(_, _, false), do: :ok
 
-  defp prepare_context(uart, context_id, false) do
-    with :ok <- configure_authentication(uart, context_id),
-         {:ok, _} <- AT.command(uart, "AT+QIACT=#{context_id}", timeout: 15_000) do
-      :ok
-    end
+  defp release_context(uart, context_id, true) do
+    # A live context can retain a previous APN/password. Never assume it matches
+    # this connection attempt, and never deactivate the separate IMS context.
+    with {:ok, _} <- AT.command(uart, "AT+QNETDEVCTL=0,#{context_id}", timeout: 5_000),
+         {:ok, _} <- AT.command(uart, "AT+QIDEACT=#{context_id}", timeout: 8_000),
+         do: :ok
   end
 
-  defp configure_authentication(uart, context_id) do
-    with {:ok, record} <- Authentication.load(),
+  defp configure_authentication(uart, context_id, requested_apn, provider_id) do
+    with {:ok, private} <- Authentication.load(),
+         %{error: nil} = settings <-
+           Providers.read(&AT.command(uart, &1, timeout: 2_000), requested_apn, provider_id),
+         record = authentication(private, settings),
+         {:ok, _} <-
+           AT.command(uart, ~s(AT+CGDCONT=#{context_id},"IP","#{settings.apn}"), timeout: 5_000),
          response = AT.command(uart, "AT+CGDCONT?", timeout: 2_000),
-         {:ok, command} <- Authentication.command(record, response, context_id),
+         {:ok, command} <- Authentication.command(record, response, context_id, settings.apn),
          {:ok, _} <- AT.command(uart, command, timeout: 5_000) do
       :ok
     else
-      _ ->
-        {:error,
-         %{
-           code: "cellular_authentication_failed",
-           message:
-             "The modem's data context or authentication could not be configured. No data-call activation was attempted."
-         }}
+      _ -> authentication_error()
     end
   catch
-    # Exceptions and dependency errors may include the credential-bearing command.
-    _, _ ->
-      {:error,
-       %{
-         code: "cellular_authentication_failed",
-         message:
-           "The modem's data context or authentication could not be configured. No data-call activation was attempted."
-       }}
+    # Dependency errors can contain the credential-bearing AT command.
+    _, _ -> authentication_error()
+  end
+
+  defp authentication(%{apn: apn} = private, %{apn: apn}), do: private
+  defp authentication(_, settings), do: settings.credentials
+
+  defp authentication_error do
+    {:error,
+     %{
+       code: "cellular_authentication_failed",
+       message:
+         "The modem's data context or authentication could not be configured. No data-call activation was attempted."
+     }}
+  end
+
+  @doc false
+  def connection_mode(%{
+        type: VintageNetECM,
+        vintage_net_ecm: %{modem: __MODULE__, setup_only: true}
+      }),
+      do: :setup_only
+
+  def connection_mode(%{
+        type: VintageNetECM,
+        vintage_net_ecm: %{modem: __MODULE__, service_providers: [%{apn: apn} | _]}
+      })
+      when is_binary(apn), do: {:data, apn}
+
+  def connection_mode(_), do: :unsupported
+
+  defp current_configuration do
+    case Profile.get() do
+      %{interface: name} -> VintageNet.get_configuration(name)
+      _ -> nil
+    end
   end
 
   @impl true
@@ -72,9 +136,20 @@ defmodule NervesGate.Cellular.Modem do
 
   @impl true
   def data_call_active?(uart) do
-    case AT.command(uart, "AT+QNETDEVCTL?", timeout: 2_000) do
-      {:ok, lines} -> parse_data_call_active(lines)
-      _ -> false
+    case connection_mode(current_configuration()) do
+      # The controller has no bearer to maintain in SIM-setup mode. This is an
+      # internal scheduling answer, never an Internet-connectivity observation.
+      :setup_only ->
+        true
+
+      {:data, _} ->
+        case AT.command(uart, "AT+QNETDEVCTL?", timeout: 2_000) do
+          {:ok, lines} -> parse_data_call_active(lines)
+          _ -> false
+        end
+
+      :unsupported ->
+        false
     end
   end
 

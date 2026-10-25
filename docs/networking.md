@@ -45,6 +45,24 @@ data. There is no cold standby, data budget, load balancing or failback timer.
 Internet loss alarms only when every permitted uplink is known unavailable; using
 backup and an unavailable modem raise separate warnings.
 
+Choose LAN, 4G or LAN with 4G backup. LAN defaults to DHCP; 4G uses automatic carrier
+settings. If the SIM asks for a PIN, **Unlock and connect** sends it once and
+remembers it only after verification. The current LAN source stays unchanged
+until that exact unlock request succeeds. Only that explicit Connect intent can
+continue into the network trial; a refresh, reconnect or unrelated client's PIN
+operation cannot apply a draft. Leaving the flow cancels continuation, not an
+already-accepted SIM operation. Internet access is not required to confirm or
+finish setup; existing trial/rollback protection remains.
+
+Configured gateways show a compact live summary with **Change setup** and a
+**Connection settings** link to `/network/details`. There are no expanders. The
+settings page shows carrier/plan selection, manual addressing and diagnostics as
+ordinary fields. Only **Other / private APN** shows manual APN/PAP inputs. SIM
+observations refresh automatically up to every 30 seconds without overwriting
+drafts. Configured/carrier-profile APNs are not proof of Internet; the summary uses
+interface-bound connectivity observations. Backup preference follows configured
+priority and connectivity, not measured traffic.
+
 ### Cellular modem
 
 EC100 firmware supports the built-in Quectel EG800AK-GL. The system powers it and
@@ -78,32 +96,62 @@ migrated or erased. Deployments with incompatible saved settings need a separate
 authorized reprovision/reset procedure. A build alone is not permission to erase
 network settings, app data or credentials.
 
-When cellular is enabled, SIM detection is checked once per ECM controller
-lifetime through that controller's existing AT port. EC100 uses active-high
+The qualified EC100 driver keeps its existing AT controller available for SIM
+setup even while the Internet source is LAN. This control-only configuration has
+IPv4 disabled and activates no packet data connection. It never creates a second
+UART owner or changes LAN/USB addressing. SIM unlock, observation and credential
+storage are available before enabling cellular data; automatic PIN unlock and
+reconnection require an enabled cellular source.
+
+SIM detection is checked once per ECM controller lifetime through that
+controller's existing AT port. EC100 uses active-high
 hot-plug detection (`AT+QSIMDET=1,1`). If the setting differs, setup changes it and
 reinitializes the modem's SIM/radio function once; an already-correct setting
-causes no reset. A failed/uncertain setup is reported, not repeatedly reset on
-status refresh. No PIN is sent by this setup.
+causes no reset. If the initial read cannot yet reach the starting controller,
+it is retried after a five-second backoff. Once any setup write was attempted,
+failed/uncertain setup is reported rather than replayed on refresh. No PIN is sent
+by this setup.
 
 QEMU has no modem (`cellular: nil`). 4G choices stay disabled until a modem is
 actually detected, and the backend rejects enabling cellular or changing its APN
 without one; other edits keep existing cellular settings. Inbound cellular traffic
 is [filtered](#local-recovery-and-http-exposure) before networking starts.
 
-Cellular uses the network's default APN (an empty APN) unless you set
-**Advanced cellular settings → APN override**. Not every operator provides a
-default; business and IoT SIMs often need a specific APN. APN changes use the
-normal trial and rollback.
+### Automatic carrier setup
+
+Like a phone, firmware carries an offline carrier database: the public-domain
+GNOME `mobile-broadband-provider-info` Internet profiles. After unlocking, the
+modem domain reads the SIM's home network, service-provider name and MNC length.
+Raw IMSI/SIM files never enter status or logs. Exact SIM-brand matches distinguish
+virtual operators sharing a network. Automatic selection requires unambiguous,
+supported settings; otherwise it tries the network default without inventing
+credentials. This is not a guarantee for every SIM, roaming plan or private APN.
+
+If automatic setup does not connect, **Connection settings → Carrier / plan**
+offers compatible carrier names. Presets include public default PAP credentials;
+the UI never asks users to look these up or exposes them. A stable public profile
+ID is saved with an explicit choice because brands can share an APN but require
+different authentication. The driver rechecks that choice against the inserted
+SIM. Only an unlisted/private plan needs an APN from its carrier. Choosing a
+carrier or changing the APN uses normal trial/rollback; private credentials remain
+separate. CHAP-only presets and IPv6 are not supported.
+
+The bundled data records its upstream commit and license in `priv/cellular/`.
+Update it explicitly with `mix run --no-start scripts/update_cellular_providers.exs
+<upstream-commit>` at the repository root, then rebuild firmware. Runtime setup
+needs no Internet lookup or carrier service.
 
 #### PAP authentication
 
-EC100 supports optional PAP credentials through the administrative API (not yet
-through the web editor):
+For a private/unlisted plan, **Connection settings → Other / private APN**
+provides private PAP credential storage. Ordinary carrier presets already supply
+public defaults. These are carrier Internet credentials, not the SIM PIN. The
+same private storage is available through the administrative API:
 
 ```elixir
 :ok = NervesGate.Cellular.save_authentication("operator.apn", username, password)
-# Observe status.cellular.operation and .error for storage completion.
-# Change APN using a normal network trial; verify cellular Internet before saving.
+# Observe status.cellular.operation and .result for storage completion.
+# Change APN using a normal network trial; verify cellular Internet separately.
 :ok = NervesGate.Cellular.forget_authentication()
 ```
 
@@ -111,18 +159,24 @@ Saving accepts one explicit APN, a 1–64 character username and a 0–64 charac
 password. Credentials must be printable ASCII without quotes or backslashes.
 Saving and forgetting share Network's admission/worker, but are private storage
 operations, not connectivity trials; network rollback does not undo them. They
-do not interrupt an active data session. Saving needs cellular enabled and a
-present modem; forgetting also works while disabled or absent.
+do not interrupt an active data session. Saving needs the qualified, present
+modem but not an enabled data source; forgetting also works while absent.
 
-The EC100 modem driver runs over VintageNetECM's existing UART. For an inactive
-packet context it reads the actual APN, including a trial APN, and applies
-`AT+QICSGP` (IPv4, PAP authentication mode 1) only on an exact credential-APN
-match. Other APNs, or no saved credentials, explicitly clear modem authentication
-(mode 0). It then activates the packet context with `AT+QIACT` before connecting
-the USB network adapter with `AT+QNETDEVCTL=1,<context>`. An already-active packet
-context is reused without rewriting credentials or reactivating it. Adapter
-status uses the fourth `QNETDEVCTL` response field (PDN state), not the first
-field (requested connection mode).
+Save credentials for the exact carrier APN, then use **Connection settings** to apply
+that APN. If the APN is already applied, use **Reconnect 4G** (API:
+`NervesGate.Cellular.reconnect/0`). Reconnection is explicit, interrupts cellular
+traffic and may disconnect remote management. It reconfigures only the qualified
+cellular interface without persisting a different network configuration or
+changing PIN protection. Saving credentials never triggers it automatically.
+
+The EC100 modem driver checks SIM READY before starting a data call. It releases
+only its own previous packet context, selects the carrier/APN, writes `CGDCONT`
+and checks the reported APN before sending `QICSGP` (IPv4, PAP mode 1). An exactly
+APN-matched private record overrides the public default; otherwise the selected
+carrier's public defaults apply. No credentials means explicitly cleared modem
+authentication (mode 0), never stale credentials from a previous connection. It
+then uses `QIACT` and `QNETDEVCTL=1,<context>`. Adapter status uses the fourth
+response field (PDN state), not the first field (requested connection mode).
 
 Unknown contexts, invalid records or rejected/uncertain setup stop that
 activation; credentials are not silently retried without authentication. Normal
@@ -153,31 +207,46 @@ to `wwan0` prove these checks did not use Ethernet. Registration or a saved PAP
 record alone is not proof of Internet access.
 
 Modem identity, AT/ECM commands, SIM recognition after active-high detection setup,
-LTE registration and IPv4 data connectivity are verified on hardware. Live SIM
-removal/reinsertion and Ethernet/cellular failover still need qualification.
+LTE registration and IPv4/PAP data connectivity are qualified on hardware.
+Control-only startup, automatic carrier identification and the integrated
+PIN-before-connect UI still need hardware qualification, as do live SIM swapping
+and Ethernet/cellular failover.
 
 ### SIM commissioning and saved PIN
 
-Once cellular is enabled, the Internet page shows SIM state, PIN protection,
-remaining attempts, registration, operator and signal. Unknown is not proof of a
-missing SIM, and Refresh is read-only. Enter the PIN there to unlock and remember
-it; USB is not required. SIM controls work over Ethernet, VPN or USB, and through
+SIM setup is available before cellular data is enabled. Normal setup asks only
+for the PIN when needed; Connection settings shows attempts, protection,
+registration, operator and signal. Unknown is not proof of a missing SIM, and
+Refresh is read-only. USB is not required. SIM controls work over Ethernet, VPN or USB, and through
 the administrative [Elixir API](action-api.md). Use HTTPS when connecting remotely.
 The UI has no sign-in: anyone with access to it can submit SIM commands, so keep
 management access restricted to trusted users. All SIM commands share Network's
 single worker, and VintageNetECM remains the only AT-port user.
 
-- **Unlock and save PIN** sends one 4–8 digit PIN. After success and a fresh
+- **Unlock and connect** sends one 4–8 digit PIN. After success and a fresh
   READY/identity check, the PIN is saved bound to a hash of the SIM's ICCID.
-- **Verify and save PIN** checks the PIN of an already-ready SIM by reapplying its
-  current protection setting once. **A wrong PIN consumes an attempt.**
-- **Advanced** changes the PIN or turns protection on or off, once. Success saves
-  the verified PIN; disabling protection forgets it. After an unknown PIN-change
-  outcome, never try both codes blindly.
+- A ready SIM with PIN protection disabled needs no unlock PIN. It does not offer
+  PIN verification/storage. Protection changes require the administrative API.
+- **Remember PIN** on Connection settings is available only for a ready, PIN-protected SIM. It
+  verifies the current PIN with one `CPWD` command that retains the same value;
+  it never treats reapplying an unchanged protection setting as verification.
+  **A wrong PIN consumes an attempt.**
+- The administrative API changes the PIN or turns protection on or off, once. Unchanged or
+  unknown protection settings are rejected before sending a PIN. A protection
+  change must be freshly confirmed before remembering/forgetting the PIN. After
+  an unknown PIN-change outcome, never try both codes blindly.
 - **Forget saved PIN** deletes the record without touching the SIM.
 
 PUK, PIN2, SMS and USSD are unsupported; recover a blocked SIM with the carrier or
 a phone. SIM operations are not network trials and rollback does not undo them.
+
+`cellular.operation` reports current work; `cellular.result` retains the last
+command's operation and error (nil on success). Automatic observation refreshes
+never erase that result. A PIN failure clears potentially stale SIM/attempt
+observations until they are read again. The UI distinguishes working, completed
+and failed commands, clears credential forms after submission, and never recovers
+those forms on reconnect. A storage failure reports unknown saved state and blocks
+PIN use or PAP activation instead of claiming an in-memory change is durable.
 
 After a restart, the saved PIN is sent automatically only when the SIM asks for it
 and its fresh identity matches. The record is blocked *before* that single attempt

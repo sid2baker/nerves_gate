@@ -38,8 +38,9 @@ hostname/trial IDs are plain strings. Failures return
 | `Network.confirm(trial_id)` | `:ok` after saving interface settings |
 | `Network.cancel(trial_id)` | `:ok` after restoration |
 | `Cellular.refresh()` | `:ok`; read-only SIM/modem refresh accepted |
-| `Cellular.unlock(pin)` | `:ok`; one unlock and private SIM-bound PIN save accepted |
-| `Cellular.save_pin(pin)` | `:ok`; one PIN verification and private save accepted |
+| `Cellular.unlock(pin, opts \\ [])` | `:ok`; one unlock and private SIM-bound PIN save accepted; `track: true` returns `{:ok, id}` |
+| `Cellular.save_pin(pin)` | `:ok`; one PIN verification and private save accepted (ready, PIN-protected SIM only) |
+| `Cellular.reconnect()` | `:ok`; explicit cellular reconnection accepted; may disconnect remote access |
 | `Cellular.forget_pin()` | `:ok`; private PIN deletion accepted, SIM protection unchanged |
 | `Cellular.change_pin(current, new)` | `:ok`; one SIM PIN change accepted |
 | `Cellular.set_pin_lock(enabled, pin)` | `:ok`; one SIM protection change accepted |
@@ -65,9 +66,10 @@ hostname/trial IDs are plain strings. Failures return
 | `NervesGate.status()` | Current administrative map, read directly from domains |
 | `NervesGate.subscribe()` | `:ok`; subscriptions belong to the caller |
 
-Only `Network.propose/2`, `Remote.connect/2` and `Remote.configure/2` have command
-options: Network accepts `:expected` and trusted `:access`; Remote connect accepts
-`:expected` and transient `:auth_key`; configure accepts `:expected`. There are no
+Network accepts `:expected` and trusted `:access`; Remote connect accepts
+`:expected` and transient `:auth_key`; configure accepts `:expected`.
+`Cellular.unlock/2` accepts `track: true` to return a server-issued completion ID
+without changing the default `:ok` contract. There are no
 server-swapping options or alternate instance arguments.
 
 `Remote.connect(hostname, auth_key: key)` uses an auth key instead of browser
@@ -77,21 +79,34 @@ Do not log it or put it in configuration.
 ## Cellular
 
 Network settings add `"internet" => %{"mode" => "cellular", "apn" => ""}` without
-an Ethernet Internet role, or `"mode" => "backup"` with one. Empty APN requests the
-network default. Shape validation is pure; enabling cellular or changing its APN
+an Ethernet Internet role, or `"mode" => "backup"` with one. Empty APN requests
+automatic offline carrier defaults, falling back to the network default when
+ambiguous. Explicit UI carrier choices also save an optional public `"provider"`
+ID, rechecked against the SIM by the driver; credentials never enter settings.
+Shape validation is pure; enabling cellular or changing its APN
 also requires a [detected modem](networking.md#cellular-modem).
 
 SIM commands acknowledge **acceptance**, not completion. Observe
-`status.cellular.operation` and `.error`. PINs are 4–8 ASCII digits. Saving the PIN
-of a ready SIM reapplies its current protection setting once: **a wrong PIN
-consumes an attempt**. One-attempt auto-unlock, SIM binding, storage and uncertainty
+`status.cellular.operation` and `.result` (`operation` and `error`, nil on success).
+For a tracked unlock, wait for the exact matching `.result.id`; another client's
+operation or a readiness observation is not its completion. SIM commands and
+private credential storage are available with the qualified modem even while LAN
+is the selected Internet source. Only data reconnection and automatic PIN unlock
+require cellular enabled.
+Observation refreshes retain the last command result; `.error` describes the latest
+observation/operation failure. PINs are 4–8 ASCII digits. Saving requires enabled
+PIN protection and verifies the PIN with one `CPWD` command retaining its value:
+**a wrong PIN consumes an attempt**. A ready, unprotected SIM needs no unlock PIN. One-attempt auto-unlock, SIM binding, storage and uncertainty
 rules are in [SIM commissioning](networking.md#sim-commissioning-and-saved-pin).
 Never log PIN arguments.
 
 PAP commands store credentials separately from network settings. Observe cellular
-operation/error for storage completion; acceptance proves neither carrier
+operation/result for storage completion; acceptance proves neither carrier
 authentication nor Internet. APN-matched credentials apply before the next fresh
-packet-context activation. Existing sessions are not interrupted. These operations
+packet-context activation. Existing sessions are not interrupted. Apply a different
+APN through a normal network trial, or explicitly call `Cellular.reconnect()` to
+use new credentials with the already-applied APN. Reconnect changes no saved
+settings or SIM protection and is never triggered by credential storage. These operations
 share Network's single worker, but trial rollback does not undo private credential
 writes. Status includes only `authentication` and `authentication_apn`, never
 username/password. See [PAP](networking.md#pap-authentication).

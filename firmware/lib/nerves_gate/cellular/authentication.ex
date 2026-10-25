@@ -53,8 +53,14 @@ defmodule NervesGate.Cellular.Authentication do
 
   defp flush(table) do
     case PropertyTable.flush_to_disk(table) do
-      :ok -> :ok
-      _ -> @storage_error
+      :ok ->
+        :ok
+
+      _ ->
+        # An in-memory write is not a durable save. Block activation rather than
+        # silently using uncommitted credentials or clearing authentication.
+        PropertyTable.put(table, @key, :storage_failed)
+        @storage_error
     end
   end
 
@@ -72,6 +78,15 @@ defmodule NervesGate.Cellular.Authentication do
       _ -> %{authentication: :unknown, authentication_apn: nil}
     end
   end
+
+  @doc false
+  def command(record, {:ok, lines} = response, context_id, expected_apn) do
+    if context_apn(lines, context_id) == expected_apn,
+      do: command(record, response, context_id),
+      else: @setup_error
+  end
+
+  def command(_, _, _, _), do: @setup_error
 
   @doc false
   def command(record, {:ok, lines}, context_id) when context_id in 1..8 do

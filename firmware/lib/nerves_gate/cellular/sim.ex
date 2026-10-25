@@ -10,7 +10,7 @@ defmodule NervesGate.Cellular.SIM do
   """
 
   alias NervesGate.Cellular
-  alias NervesGate.Cellular.{Authentication, Modem, Profile}
+  alias NervesGate.Cellular.{Authentication, Modem, Profile, Providers}
 
   @table NervesGate.Settings
 
@@ -77,6 +77,7 @@ defmodule NervesGate.Cellular.SIM do
   def metadata(identity \\ nil, table \\ @table) do
     case PropertyTable.get(table, @key) do
       nil -> %{pin_saved: false, auto_unlock: :off}
+      %{storage_failed: true} -> %{pin_saved: nil, auto_unlock: :blocked}
       record -> %{pin_saved: true, auto_unlock: state(record, identity)}
     end
   end
@@ -98,8 +99,12 @@ defmodule NervesGate.Cellular.SIM do
 
   defp flush(table) do
     case PropertyTable.flush_to_disk(table) do
-      :ok -> :ok
-      _ -> @error
+      :ok ->
+        :ok
+
+      _ ->
+        PropertyTable.put(table, @key, %{armed: false, storage_failed: true})
+        @error
     end
   end
 
@@ -115,6 +120,9 @@ defmodule NervesGate.Cellular.SIM do
          :ok <- Modem.initialize(name, level) do
       read_result(name)
     else
+      {:error, %{code: "cellular_controller_starting"}} = error ->
+        error
+
       _ ->
         {:error,
          %{
@@ -165,8 +173,9 @@ defmodule NervesGate.Cellular.SIM do
          identity when is_binary(identity) <- identity(name),
          {:ok, pin} <- consume(identity),
          :ok <- unlock_and_save(name, pin, identity),
+         {:ok, data} <- read_result(name),
          :ok <- resume(name) do
-      read_result(name)
+      {:ok, data}
     else
       {:error, _} = error ->
         error
@@ -190,6 +199,20 @@ defmodule NervesGate.Cellular.SIM do
   end
 
   defp execute(name, :refresh, []), do: read_result(name)
+
+  defp execute(name, :reconnect, []) do
+    with {:ok, %{sim: :ready} = data} <- read_result(name),
+         :ok <- resume(name) do
+      {:ok, Cellular.reset(data)}
+    else
+      {:error, _} = error ->
+        error
+
+      _ ->
+        {:error,
+         %{code: "cellular_sim_not_ready", message: "Unlock the SIM before reconnecting 4G."}}
+    end
+  end
 
   defp execute(_, operation, params)
        when operation in [:save_authentication, :forget_authentication] do
@@ -218,8 +241,9 @@ defmodule NervesGate.Cellular.SIM do
     with :pin_required <- sim_state(Modem.command(name, "AT+CPIN?")),
          :ok <- block(),
          :ok <- unlock_and_save(name, pin, nil),
+         {:ok, data} <- read_result(name),
          :ok <- resume(name) do
-      read_result(name)
+      {:ok, data}
     else
       {:error, _} = error ->
         error
@@ -241,6 +265,7 @@ defmodule NervesGate.Cellular.SIM do
          :ok <- block(),
          :ok <- write(name, cmd),
          {:ok, ^identity} <- verify_ready(name, identity),
+         :ok <- verify_protection(name, operation, params),
          :ok <- remember(operation, params, pin, identity) do
       read_result(name)
     else
@@ -301,26 +326,44 @@ defmodule NervesGate.Cellular.SIM do
   defp security_command(_, :change_pin, [current, new]),
     do: {:ok, ~s(AT+CPWD="SC","#{current}","#{new}"), new}
 
-  defp security_command(_, :set_pin_lock, [enabled, pin]),
-    do: {:ok, ~s(AT+CLCK="SC",#{if enabled, do: 1, else: 0},"#{pin}"), pin}
+  defp security_command(name, :set_pin_lock, [enabled, pin]),
+    do: protection_command(pin_lock(Modem.command(name, ~s"AT+CLCK=\"SC\",2")), enabled, pin)
 
   defp security_command(name, :save_pin, [pin]) do
-    case pin_lock(Modem.command(name, ~s"AT+CLCK=\"SC\",2")) do
-      :enabled ->
-        security_command(name, :set_pin_lock, [true, pin])
-
-      :disabled ->
-        security_command(name, :set_pin_lock, [false, pin])
-
-      _ ->
-        {:error,
-         %{
-           code: "cellular_outcome_unknown",
-           message:
-             "The cellular result is uncertain. Refresh SIM state before acting. PIN changes cannot be verified by reading; never blindly replay a PIN command."
-         }}
+    with :ok <- Cellular.pin_saving_available(pin_lock(Modem.command(name, ~s"AT+CLCK=\"SC\",2"))) do
+      # CPWD verifies the existing PIN even though its value is unchanged.
+      # Reapplying CLCK's current setting is not proof that the PIN was checked.
+      security_command(name, :change_pin, [pin, pin])
     end
   end
+
+  @doc false
+  def protection_command(:disabled, true, pin), do: {:ok, ~s(AT+CLCK="SC",1,"#{pin}"), pin}
+  def protection_command(:enabled, false, pin), do: {:ok, ~s(AT+CLCK="SC",0,"#{pin}"), pin}
+
+  def protection_command(_, _, _),
+    do:
+      {:error,
+       %{
+         code: "cellular_pin_protection_unchanged",
+         message:
+           "PIN protection is already set or unknown. No PIN was sent. Refresh; use Verify and save PIN only when protection is enabled."
+       }}
+
+  defp verify_protection(name, :set_pin_lock, [enabled, _]) do
+    if pin_lock(Modem.command(name, ~s"AT+CLCK=\"SC\",2")) ==
+         if(enabled, do: :enabled, else: :disabled),
+       do: :ok,
+       else:
+         {:error,
+          %{
+            code: "cellular_outcome_unknown",
+            message:
+              "PIN protection could not be confirmed after the command. Do not resend the PIN; refresh and inspect protection first."
+          }}
+  end
+
+  defp verify_protection(_, _, _), do: :ok
 
   defp write(name, cmd) do
     case Modem.command(name, cmd, 10_000) do
@@ -351,17 +394,21 @@ defmodule NervesGate.Cellular.SIM do
   defp resume(name) do
     config = VintageNet.get_configuration(name)
 
-    with %{type: VintageNetECM} <- config,
-         :ok <- VintageNet.configure(name, %{type: VintageNet.Technology.Null}, persist: false),
-         :ok <- VintageNet.configure(name, config, persist: false) do
-      :ok
-    else
-      _ ->
+    case Modem.connection_mode(config) do
+      :setup_only ->
+        :ok
+
+      {:data, _} ->
+        with :ok <-
+               VintageNet.configure(name, %{type: VintageNet.Technology.Null}, persist: false),
+             do: VintageNet.configure(name, config, persist: false)
+
+      :unsupported ->
         {:error,
          %{
            code: "cellular_resume_failed",
            message:
-             "The PIN was accepted, but cellular configuration could not restart. Read status and reapply network settings; do not resend the PIN."
+             "Cellular configuration could not restart. If a PIN was accepted, do not resend it."
          }}
     end
   end
@@ -423,14 +470,47 @@ defmodule NervesGate.Cellular.SIM do
         | pin_lock: lock,
           pin_attempts_remaining: attempts(Modem.command(name, "AT+QPINC?")),
           operator: if(registered, do: mobile(name, "operator")),
-          signal_dbm: if(registered, do: mobile(name, "signal_dbm"))
+          signal_dbm: if(registered, do: mobile(name, "signal_dbm")),
+          access_technology: if(registered, do: mobile(name, "access_technology"))
       }
     else
       data
     end
+    |> provider_settings(name)
   end
 
-  defp mobile(name, key), do: VintageNet.get(["interface", name, "mobile", key])
+  defp provider_settings(%{sim: :ready} = data, name) do
+    config = VintageNet.get_configuration(name)
+
+    apn =
+      case Modem.connection_mode(config) do
+        {:data, apn} -> apn
+        _ -> ""
+      end
+
+    settings =
+      Providers.read(
+        &Modem.command(name, &1),
+        apn,
+        get_in(config, [:vintage_net_ecm, :carrier_profile])
+      )
+
+    %{
+      data
+      | provider: settings.provider,
+        provider_options: settings.options,
+        error: settings.error
+    }
+  end
+
+  defp provider_settings(data, _), do: data
+
+  defp mobile(name, key) do
+    case VintageNet.get(["interface", name, "mobile", key]) do
+      value when is_binary(value) -> if String.trim(value) == "", do: nil, else: value
+      value -> value
+    end
+  end
 
   def sim_state({:ok, lines}) do
     Enum.find_value(lines, :unknown, fn line ->

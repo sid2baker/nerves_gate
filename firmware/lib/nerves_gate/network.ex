@@ -162,6 +162,13 @@ defmodule NervesGate.Network do
     end
   end
 
+  def handle_call({:cellular, :unlock, params, :tracked}, from, state) do
+    case handle_call({:cellular, :unlock, params}, from, state) do
+      {:reply, :ok, state} -> {:reply, {:ok, state.worker.cellular_id}, state}
+      reply -> reply
+    end
+  end
+
   def handle_call({:cellular, operation, params}, _, state) do
     state = refresh(state)
 
@@ -354,7 +361,13 @@ defmodule NervesGate.Network do
 
   defp start_cellular(state, operation, params) do
     state = %{state | cellular: %{state.cellular | operation: operation, error: nil}}
-    work(state, :cellular, nil, fn -> Cellular.perform(operation, params) end)
+    state = work(state, :cellular, nil, fn -> Cellular.perform(operation, params) end)
+
+    %{
+      state
+      | worker:
+          Map.put(state.worker, :cellular_id, System.unique_integer([:positive, :monotonic]))
+    }
   end
 
   defp refresh_cellular_if_due(state) do
@@ -387,8 +400,18 @@ defmodule NervesGate.Network do
     %{state | worker: %{task: task, timer: timer, operation: operation, from: from}}
   end
 
-  defp complete(state, %{operation: :cellular}, result),
-    do: %{state | cellular: Cellular.complete(result)}
+  defp complete(state, %{operation: :cellular} = worker, result) do
+    cellular = Cellular.complete(result, state.cellular, Map.get(worker, :cellular_id))
+    # Retry only the startup read that could not reach the controller. Once any
+    # SIM/radio write was attempted, initialization is never automatically replayed.
+    controller =
+      case {state.cellular.operation, cellular.error} do
+        {:initialize, %{code: "cellular_controller_starting"}} -> nil
+        _ -> state.cellular_controller
+      end
+
+    %{state | cellular: cellular, cellular_controller: controller}
+  end
 
   defp complete(state, %{operation: :sharing, from: from}, result) do
     reply(
@@ -414,7 +437,7 @@ defmodule NervesGate.Network do
   end
 
   defp complete(state, %{operation: :apply}, :ok) do
-    state = refresh(%{state | cellular: Cellular.cached()})
+    state = refresh(%{state | cellular: %{Cellular.cached() | result: state.cellular.result}})
 
     cond do
       expired?(state) -> expire(state, nil)

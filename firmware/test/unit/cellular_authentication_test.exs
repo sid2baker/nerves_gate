@@ -13,7 +13,7 @@ defmodule NervesGate.Cellular.AuthenticationTest do
     on_exit(fn -> File.rm_rf!(dir) end)
     start = fn -> start_supervised!({PropertyTable, name: table, persist_data_path: dir}) end
     start.()
-    %{table: table, start: start}
+    %{table: table, dir: dir, start: start}
   end
 
   test "PAP uses the verified context's APN and Quectel authentication mode 1" do
@@ -187,6 +187,30 @@ defmodule NervesGate.Cellular.AuthenticationTest do
     refute filtered =~ @credentials.username
     refute filtered =~ @credentials.password
     assert filtered =~ "REDACTED CELLULAR COMMAND"
+  end
+
+  @tag :capture_log
+  test "failed saves and deletes cannot masquerade as usable or absent credentials", context do
+    File.rm_rf!(context.dir)
+    File.write!(context.dir, "not a directory")
+
+    assert {:error, %{code: "cellular_authentication_storage"}} =
+             Authentication.save(
+               @credentials.apn,
+               @credentials.username,
+               @credentials.password,
+               context.table
+             )
+
+    assert {:error, %{code: "cellular_authentication_storage"}} =
+             Authentication.load(context.table)
+
+    assert Authentication.metadata(context.table).authentication == :unknown
+
+    assert {:error, %{code: "cellular_authentication_storage"}} =
+             Authentication.forget(context.table)
+
+    assert Authentication.metadata(context.table).authentication == :unknown
   end
 
   defp restart(%{table: table, start: start}) do
