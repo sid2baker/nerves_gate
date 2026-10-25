@@ -9,10 +9,7 @@ defmodule NervesGate.SSH do
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   def status do
-    case Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
-      {:error, _} -> unavailable()
-      status -> status
-    end
+    NervesGate.Error.read(fn -> GenServer.call(__MODULE__, :status) end, &unavailable/0)
   end
 
   def add_key(key), do: Error.protect(fn -> GenServer.call(__MODULE__, {:add, key}) end)

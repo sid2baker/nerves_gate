@@ -34,10 +34,7 @@ defmodule NervesGate.Equipment do
   @doc "Read scoped entries, last scan, operation and errors. Does not initiate a scan."
 
   def status do
-    case Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
-      {:error, _} -> unavailable()
-      status -> status
-    end
+    NervesGate.Error.read(fn -> GenServer.call(__MODULE__, :status) end, &unavailable/0)
   end
 
   @doc "Subscribe the caller to inventory-change hints; read status to obtain current entries."

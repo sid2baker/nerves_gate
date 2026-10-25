@@ -32,25 +32,22 @@ defmodule NervesGate.Cellular.Authentication do
 
   @doc false
   def save(apn, username, password, table \\ @table) do
-    if valid?(apn, username, password),
-      do: put(table, %{apn: apn, username: username, password: password}),
-      else:
-        {:error,
-         %{
-           code: "invalid_parameters",
-           message:
-             "PAP needs an explicit APN, a 1–64 character username and a 0–64 character password. Use printable ASCII without quotes or backslashes."
-         }}
+    if valid?(apn, username, password) do
+      PropertyTable.put(table, @key, %{apn: apn, username: username, password: password})
+      flush(table)
+    else
+      {:error,
+       %{
+         code: "invalid_parameters",
+         message:
+           "PAP needs an explicit APN, a 1–64 character username and a 0–64 character password. Use printable ASCII without quotes or backslashes."
+       }}
+    end
   end
 
   @doc false
   def forget(table \\ @table) do
     PropertyTable.delete(table, @key)
-    flush(table)
-  end
-
-  defp put(table, record) do
-    PropertyTable.put(table, @key, record)
     flush(table)
   end
 

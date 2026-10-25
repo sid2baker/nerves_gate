@@ -12,10 +12,7 @@ defmodule NervesGate.Storage do
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
   def commissioning do
-    case Error.protect(fn -> GenServer.call(__MODULE__, :commissioning) end) do
-      {:error, _} -> unavailable()
-      status -> status
-    end
+    NervesGate.Error.read(fn -> GenServer.call(__MODULE__, :commissioning) end, &unavailable/0)
   end
 
   def observe, do: Error.protect(fn -> Observations.subscribe_runtime(__MODULE__) end)

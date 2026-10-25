@@ -35,9 +35,6 @@ defmodule NervesGate.Remote do
   alias NervesGate.{Alarms, Observations}
   alias NervesGate.Remote.{Policy, Sharing}
 
-  # NervesTime is device-only; host observations report unsynchronized time.
-  @compile {:no_warn_undefined, NervesTime}
-
   @doc false
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -65,10 +62,7 @@ defmodule NervesGate.Remote do
   @doc "Read daemon observations and the current operation/error. Never returns an enrollment URL."
 
   def status do
-    case NervesGate.Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
-      {:error, _} -> unavailable()
-      status -> status
-    end
+    NervesGate.Error.read(fn -> GenServer.call(__MODULE__, :status) end, &unavailable/0)
   end
 
   @doc "Read the validated HTTPS enrollment URL, or nil. Do not log or broadcast it."

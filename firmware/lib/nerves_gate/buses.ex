@@ -103,10 +103,7 @@ defmodule NervesGate.Buses do
   @doc "Read ports, operation, result and error. An accepted operation finishes when operation is nil."
 
   def status do
-    case Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
-      {:error, _} -> unavailable()
-      status -> status
-    end
+    NervesGate.Error.read(fn -> GenServer.call(__MODULE__, :status) end, &unavailable/0)
   end
 
   @doc false

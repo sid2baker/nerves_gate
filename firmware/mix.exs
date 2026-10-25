@@ -31,6 +31,7 @@ defmodule NervesGate.MixProject do
           :mix,
           :nerves,
           :nerves_runtime,
+          :nerves_time,
           :muontrap,
           :one_dhcpd,
           :ssh,
@@ -127,7 +128,7 @@ defmodule NervesGate.MixProject do
       {:ring_logger, "~> 0.11", targets: @targets},
       {:nerves_ssh, "~> 1.3", targets: @targets},
       {:mdns_lite, "~> 0.9.3", targets: @targets},
-      {:nerves_time, "~> 0.4", targets: @targets},
+      {:nerves_time, "~> 0.4", runtime: Mix.target() != :host},
       # Teardown fix pending upstream release: https://github.com/nerves-networking/vintage_net/issues/597
       {:vintage_net, "~> 0.13",
        github: "jannikbecher/vintage_net",

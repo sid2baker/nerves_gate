@@ -21,6 +21,29 @@ defmodule NervesGate.ErrorTest do
     assert Process.alive?(owner)
   end
 
+  test "read-only failures use the unavailable view without retrying" do
+    unavailable = fn -> %{available: false} end
+
+    assert Error.read(fn -> %{available: true} end, fn -> flunk("unexpected fallback") end) ==
+             %{available: true}
+
+    assert Error.read(
+             fn -> GenServer.call(NervesGateMissingCallOwner, :status) end,
+             unavailable
+           ) == %{available: false}
+
+    owner = start_supervised!(CallOwner)
+
+    assert Error.read(fn -> GenServer.call(owner, :accepted, 1) end, unavailable) ==
+             %{available: false}
+
+    assert Process.alive?(owner)
+
+    assert_raise ArgumentError, fn ->
+      Error.read(fn -> raise ArgumentError end, unavailable)
+    end
+  end
+
   test "the boundary does not hide programming errors, throws or unrelated exits" do
     assert_raise ArgumentError, fn -> Error.protect(fn -> raise ArgumentError end) end
     assert catch_throw(Error.protect(fn -> throw(:application_bug) end)) == :application_bug

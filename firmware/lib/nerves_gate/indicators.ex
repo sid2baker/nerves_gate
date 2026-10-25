@@ -28,10 +28,7 @@ defmodule NervesGate.Indicators do
   @doc "Read current LED patterns, button availability and the last recovery outcome."
 
   def status do
-    case Error.protect(fn -> GenServer.call(__MODULE__, :status) end) do
-      {:error, _} -> unavailable()
-      status -> status
-    end
+    NervesGate.Error.read(fn -> GenServer.call(__MODULE__, :status) end, &unavailable/0)
   end
 
   @doc "Subscribe to change hints; reread status after each notification."

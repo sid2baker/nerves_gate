@@ -10,6 +10,14 @@ defmodule NervesGate.Error do
 
   def safe(_), do: new("execution_failed", "The operation failed. Check device diagnostics.")
 
+  @doc "Read-only queries fall back to their domain's unavailable view on a failed call."
+  def read(fun, unavailable) do
+    case protect(fun) do
+      {:error, _} -> unavailable.()
+      result -> result
+    end
+  end
+
   @doc "Contain GenServer call exits without catching application exceptions or retrying work."
   def protect(fun) do
     fun.()
