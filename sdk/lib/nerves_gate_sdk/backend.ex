@@ -11,6 +11,10 @@ defmodule NervesGateSDK.Backend do
   @type operation ::
           :system_info
           | :network_interfaces
+          | :network_claim_local
+          | :network_local_status
+          | :network_advertise_local
+          | :network_release_local
           | :events_subscribe
           | :events_unsubscribe
           | :storage_status

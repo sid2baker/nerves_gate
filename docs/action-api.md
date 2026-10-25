@@ -27,6 +27,12 @@ settings = %{
 status = NervesGate.status()
 ```
 
+Application-owned local addressing and subnet advertisement use the separate typed
+`NervesGateSDK.Network` lease API; see the [starter app](../apps/tailnet_subrouter/README.md).
+It requires explicit operator enablement (`%{"role" => "application", "address" => nil}`
+on an independent port), preserves Internet/USB and blocks platform reconfiguration
+until owned resources are released or safely recovered.
+
 The names below are under `NervesGate`. Configuration uses validated string keys;
 hostname/trial IDs are plain strings. Failures return
 `{:error, %{code: code, message: message}}`, never raw library/driver errors.
@@ -37,6 +43,7 @@ hostname/trial IDs are plain strings. Failures return
 | `Network.propose(settings, opts \\ [])` | `{:ok, trial_id}` after temporary application |
 | `Network.confirm(trial_id)` | `:ok` after saving interface settings |
 | `Network.cancel(trial_id)` | `:ok` after restoration |
+| `Network.recover_local()` | `:ok` after explicit orphaned local claim cleanup; never advertises or disconnects management |
 | `Cellular.refresh()` | `:ok`; read-only SIM/modem refresh accepted |
 | `Cellular.unlock(pin, opts \\ [])` | `:ok`; one unlock and private SIM-bound PIN save accepted; `track: true` returns `{:ok, id}` |
 | `Cellular.save_pin(pin)` | `:ok`; one PIN verification and private save accepted (ready, PIN-protected SIM only) |

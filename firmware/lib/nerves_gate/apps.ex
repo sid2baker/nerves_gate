@@ -16,6 +16,11 @@ defmodule NervesGate.Apps do
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   def install(path), do: GenServer.call(__MODULE__, {:install, path}, @timeout)
+
+  @doc "Install a new, stopped application from reviewed bytes and storage identity. Never upgrades or starts an existing app."
+  def install_new(path, expected),
+    do: GenServer.call(__MODULE__, {:install_new, path, expected}, @timeout)
+
   def list, do: GenServer.call(__MODULE__, :list)
   def start(app), do: GenServer.call(__MODULE__, {:start, app}, @timeout)
   def stop(app), do: GenServer.call(__MODULE__, {:stop, app}, @timeout)
@@ -75,6 +80,30 @@ defmodule NervesGate.Apps do
     {reply, state} = install_package(path, state)
     {:reply, reply, state}
   end
+
+  def handle_call(
+        {:install_new, path,
+         %{app: app, version: version, sha256: sha256, card_id: _} = expected},
+        _,
+        state
+      )
+      when is_binary(path) and is_binary(app) and is_binary(version) and is_binary(sha256) do
+    with {:ok, %{size: size, type: :regular}} when size <= 128 * 1024 * 1024 <- File.stat(path),
+         {:ok, bytes} <- File.read(path),
+         true <- Base.encode16(:crypto.hash(:sha256, bytes), case: :lower) == expected.sha256,
+         {:ok, package} <- Package.read_binary(bytes),
+         true <- to_string(package.app) == expected.app and package.version == expected.version,
+         false <- Map.has_key?(state.entries, expected.app),
+         %{ready: true, card_id: card_id} when card_id == expected.card_id <-
+           Storage.commissioning() do
+      {reply, next} = install_loaded(package, state)
+      {:reply, reply, next}
+    else
+      _ -> {:reply, {:error, :review_changed}, state}
+    end
+  end
+
+  def handle_call({:install_new, _, _}, _, state), do: {:reply, {:error, :invalid_review}, state}
 
   def handle_call({:upgrade, path}, _, state) do
     with {:ok, package} <- Package.read(path),
@@ -184,8 +213,15 @@ defmodule NervesGate.Apps do
   end
 
   defp install_package(path, state) do
+    with {:ok, _} <- Storage.apps_dir(), {:ok, package} <- Package.read(path) do
+      install_loaded(package, state)
+    else
+      error -> {error, state}
+    end
+  end
+
+  defp install_loaded(package, state) do
     with {:ok, root} <- Storage.apps_dir(),
-         {:ok, package} <- Package.read(path),
          app = to_string(package.app),
          :ok <- validate(package, app, state),
          {:ok, directory} <- Storage.directory(root, app),

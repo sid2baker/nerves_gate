@@ -2,21 +2,34 @@
 
 ## Port roles
 
-LAN 1 is `eth0`; LAN 2 is `eth1`, even when Equipment hides the Internet port. On
+LAN 1 is `eth0`; LAN 2 is `eth1`. Hardware shows both, including the Internet uplink. On
 a fresh gateway both try DHCP. A single verified Internet port is suggested first,
 otherwise a single linked, addressed port; ambiguous connections require a choice.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change when a cable disappears or moves. Use
-**Overview → Internet** for the uplink and **Equipment → LAN 1 / LAN 2** for
-equipment addressing. Each editor preserves the other's settings, and a port used
-for Internet cannot be reassigned from Equipment. Nothing bridges networks, enables
-cellular backup or assigns an equipment address automatically.
+**Overview → Internet** for the uplink and **Hardware → LAN 1 / LAN 2** to enable
+or disable application access on independent, non-Internet ports. Enabling assigns
+no IPv4 address and starts no DHCP client, DNS, default route, bridge or advertisement.
+Disabling holds the independent link down. Existing local addresses are removed only
+by an explicitly saved change; existing joined arrangements require deliberate
+administrator API changes, never automatic migration. Internet cannot take an
+enabled application port until application access is disabled.
 
-- **Separate ports:** at most one Internet port (DHCP or static IPv4) and optionally
-  one equipment port (static IPv4, no default route or DNS). Unassigned ports are
-  disabled after saving.
-- **Shared network** (Advanced): both ports join `br0` with DHCP or static
+Applications request local addressing with `NervesGateSDK.Network.claim_local/3`.
+The actual caller owns one isolated link; a claim never changes Internet/USB or
+persists its IP configuration. The first implementation admits one claim per gateway.
+Use the optional [Tailnet subnet-router app](../apps/tailnet_subrouter/README.md)
+for explicit configuration and route advertisement. Unresolved claims block network
+changes until safe cleanup; no app is enabled by visiting Hardware.
+
+The administrative network API still supports saved configurations below; Hardware
+has no local addressing or topology editor:
+
+- **Independent ports:** at most one Internet port (DHCP or static IPv4), operator-enabled
+  application ports without addresses, or one legacy equipment port (static IPv4,
+  no default route or DNS). Unassigned ports are held down after saving.
+- **One joined network** (administrator API): both ports join `br0` with DHCP or static
   addressing and an optional same-subnet router. Use it only for one trusted
   network. STP is enabled, so a newly joined port may take about 30 seconds to
   forward. One missing port does not block the other.
@@ -35,8 +48,12 @@ never part of these changes.
 ## Internet source and cellular
 
 **Overview → Internet** offers Ethernet, 4G, or Ethernet with 4G backup; settings
-without a source are Ethernet-only. 4G-only needs separate ports; a joined bridge
-can use Ethernet or Ethernet with backup. Equipment and USB never bridge to the modem.
+without a source are Ethernet-only. 4G-only can use independent ports or one joined
+local Ethernet network. A joined local network requires a static gateway address,
+no Ethernet router and no Ethernet DNS servers, so it cannot create a competing
+Internet route. Ethernet or Ethernet with backup can also use a joined network.
+Local Ethernet and USB never bridge to the modem. Independent mode currently
+supports one local network, not two independently addressed local networks.
 
 VintageNet owns connectivity checks, route metrics, DNS and failover: working
 Ethernet beats working cellular, which beats Ethernet that only reaches its LAN.
@@ -268,10 +285,11 @@ owner and one configuration. All pages show the same active trial and timer. Sav
 checks the draft's original configuration inside Network; stale drafts are rejected
 and must be reloaded.
 
-**Settings → LAN ports** selects Separate or Joined and the joined network's
-address. Joining replaces both port assignments; separating leaves both ports
-unassigned. The Internet source and APN must stay valid for the arrangement
-(4G-only cannot use joined ports; 4G backup needs an Ethernet uplink).
+The administrative `Network.propose/2` API can select independent networks or one
+joined network and its gateway address. Hardware only edits application enablement. Joining replaces both port assignments;
+separating leaves both ports unassigned. The Internet source and APN must stay
+valid for the arrangement: 4G-only joined Ethernet needs static local addressing
+without a router/DNS, and 4G backup needs an Ethernet uplink.
 
 VintageNet stores interface settings; the trial exists only in memory. Unreadable
 saved settings fail closed. See the [public API](action-api.md) for the format.
@@ -367,7 +385,14 @@ headers are not trusted. HTTPS adds no sign-in; restrict tailnet access.
 
 ### Equipment sharing
 
-**Share equipment network** advertises the confirmed dedicated equipment IPv4
+For application-owned access, use the optional Tailnet subnet-router app and its
+process-owned SDK lease. It journals ownership before advertisement, refuses a
+pre-existing advertisement and withdraws only its own route before removing the
+local address. Owner loss schedules cleanup; failed/uncertain cleanup retains the
+journal and blocks reuse. No write is replayed automatically. Approval remains
+unknown until verified externally; advertised does not mean approved or reachable.
+
+The existing administrative `NervesGate.Equipment.share/0` API advertises the confirmed dedicated equipment IPv4
 subnet, for example `192.168.50.0/24`; reach equipment at its normal addresses.
 It requires the confirmed address, link and topology; shared LAN and USB are not
 eligible. Approve the route in Tailscale and restrict it in tailnet policy. Linux
@@ -425,7 +450,7 @@ explicitly with `Node.connect(:"nerves_gate@100.64.0.2")`.
 Run Livebook on another computer as an **Attached node** with the shown name and
 cookie, using the same Elixir minor and a compatible OTP (Elixir 1.20 / OTP 29).
 Attached runtimes cannot install dependencies, so add libraries to firmware.
-Permanent equipment sessions belong in the gateway's supervision tree, not a notebook.
+Permanent equipment sessions belong in their owning application's supervision tree, not a notebook.
 
 ## Observations
 

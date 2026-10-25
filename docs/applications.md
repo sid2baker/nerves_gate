@@ -16,7 +16,7 @@ For ordinary SDK app projects and packaging, see [App development](app-developme
 
 ### Commissioning
 
-Open **Application storage** from Overview or Settings (`/storage`). No card is
+Open **Application storage** from Settings (`/settings/storage`). Overview links to setup when storage needs attention. No card is
 required to commission networking or administer the gateway.
 
 - **No card:** continue without apps; insert a card and return here later.

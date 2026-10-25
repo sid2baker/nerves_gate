@@ -34,6 +34,8 @@ defmodule NervesGate.Network.Policy do
      %{code: "operation_in_progress", message: "Wait for the current operation to finish."}}
   end
 
+  def available(%{local: local}) when not is_nil(local), do: NervesGate.Network.Local.idle(local)
+
   def available(_) do
     :ok
   end
@@ -141,6 +143,11 @@ defmodule NervesGate.Network.Policy do
   defp port_ready?(nil, setting), do: is_nil(setting)
   defp port_ready?(%{present: false}, setting), do: is_nil(setting)
   defp port_ready?(port, nil), do: configured_port?(port) and port.method == "disabled"
+
+  defp port_ready?(port, %{"role" => "application", "address" => nil}),
+    do:
+      configured_port?(port) and port.method in ["disabled", "static"] and
+        Map.get(port, :gateway) == nil and Map.get(port, :nameservers, []) == []
 
   defp port_ready?(port, %{"address" => address}) do
     configured_port?(port) and port.method == address["ip_method"] and

@@ -25,6 +25,9 @@ defmodule NervesGateWeb.NetworkForm do
     |> put_address("shared", address)
   end
 
+  def from_settings(network, {:application, name}),
+    do: %{"enabled" => to_string(get_in(Config.ports(network), [name, "role"]) == "application")}
+
   def from_settings(network, {:equipment, name}) do
     port = Config.ports(network)[name]
     enabled = port != nil and port["role"] == "equipment"
@@ -37,18 +40,35 @@ defmodule NervesGateWeb.NetworkForm do
     }
   end
 
+  def equipment_reason(network, {:application, name}) do
+    cond do
+      network == nil or network["mode"] == "unconfigured" ->
+        "Finish Internet setup before assigning hardware to applications."
+
+      network["mode"] == "shared" ->
+        "This port belongs to a joined network. An administrator must separate it before application access can be enabled."
+
+      Config.role_port(network, "internet") == name ->
+        "Internet uplinks are managed under Internet, not by applications."
+
+      true ->
+        nil
+    end
+  end
+
   def equipment_reason(_, editor) when editor in [:internet, :ports], do: nil
 
   def equipment_reason(%{"mode" => "shared"}, {:equipment, _}),
-    do: "LAN ports are joined. Separate them in Settings to configure this port."
+    do:
+      "LAN ports are joined. Their addressing and topology are administrator-managed through the Network API."
 
   def equipment_reason(network, {:equipment, name}) do
     cond do
       Config.role_port(network, "internet") == name ->
-        "This port is used for Internet. Change its assignment under Internet before using it for equipment."
+        "This port is used for Internet. Change its assignment under Internet before using it for a local network."
 
       Config.role_port(network, "equipment") not in [nil, name] ->
-        "Another LAN port is already assigned to equipment. Remove that assignment on its LAN page first."
+        "An independent local network is already assigned to another LAN port. Joined networks require deliberate administrator configuration through the Network API."
 
       true ->
         nil
@@ -72,15 +92,25 @@ defmodule NervesGateWeb.NetworkForm do
         {:error,
          "More than one network is connected. Choose an Internet port, or choose Not now."}
 
+      internet && get_in(Config.ports(base), [internet, "role"]) == "application" ->
+        {:error,
+         "Disable application access on this port under Hardware before assigning it to Internet."}
+
       same_port?(internet, equipment) ->
         {:error,
-         "This LAN port is assigned to equipment. Choose another Internet port, or remove its assignment under Equipment first."}
+         "This LAN port is assigned to equipment. Choose another Internet port, or remove its local network assignment under Hardware first."}
 
       internet not in [nil, "eth0", "eth1"] or equipment not in [nil, "eth0", "eth1"] ->
         {:error, "Choose LAN 1, LAN 2, or Not now."}
 
       true ->
         network = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
+
+        network =
+          Enum.reduce(Config.ports(base), network, fn {name, port}, acc ->
+            if port && port["role"] == "application", do: Map.put(acc, name, port), else: acc
+          end)
+
         network = assign_port(network, internet, "internet", address(params, "internet"))
 
         network =
@@ -100,6 +130,18 @@ defmodule NervesGateWeb.NetworkForm do
       end
 
     network |> Map.merge(Map.take(base, ["internet"])) |> Config.validate_network()
+  end
+
+  def to_network(%{"enabled" => enabled}, _ports, base, {:application, name})
+      when enabled in ["true", "false"] and name in ["eth0", "eth1"] and is_map(base) do
+    case equipment_reason(base, {:application, name}) do
+      nil ->
+        port = if enabled == "true", do: %{"role" => "application", "address" => nil}
+        base |> Map.put(name, port) |> Config.validate_network()
+
+      reason ->
+        {:error, reason}
+    end
   end
 
   def to_network(%{"enabled" => enabled} = params, _ports, base, {:equipment, name})
@@ -133,6 +175,8 @@ defmodule NervesGateWeb.NetworkForm do
       do: static_defaults(params, prefix, observed),
       else: params
   end
+
+  def defaults_for_change(params, _previous, {:application, _}, _observed), do: params
 
   def defaults_for_change(params, previous, {:equipment, name}, observed) do
     if previous["enabled"] != "true" and params["enabled"] == "true" do

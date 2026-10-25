@@ -33,7 +33,7 @@ defmodule NervesGateWeb.Layouts do
       <div class="ui-header-end">
         <nav aria-label="Main navigation" class="ui-navigation">
           <.link navigate="/" aria-current={if @section == :overview, do: "page"}>Overview</.link>
-          <.link navigate="/equipment" aria-current={if @section == :equipment, do: "page"}>Equipment</.link>
+          <.link navigate="/hardware" aria-current={if @section == :hardware, do: "page"}>Hardware</.link>
           <.link
             navigate="/settings"
             aria-current={if @section == :settings, do: "page"}
@@ -59,7 +59,7 @@ defmodule NervesGateWeb.Layouts do
         Unconfirmed network changes restore automatically on the device.
       </.notice>
       <.notice
-        :if={@projection.network.pending && @live_action not in [:network, :lan, :settings]}
+        :if={@projection.network.pending && @live_action not in [:network, :lan]}
         tone="warning"
         icon="clock"
         id="pending-network-notice"
@@ -72,7 +72,7 @@ defmodule NervesGateWeb.Layouts do
     """
   end
 
-  defp section(action) when action in [:equipment, :lan, :rs485, :can], do: :equipment
-  defp section(:settings), do: :settings
+  defp section(action) when action in [:hardware, :lan, :rs485, :can], do: :hardware
+  defp section(action) when action in [:settings, :storage], do: :settings
   defp section(_), do: :overview
 end

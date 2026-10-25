@@ -9,7 +9,7 @@ defmodule Scenarios.Cases.ProjectionStream do
     NetworkForm,
     Observations,
     SettingsLive,
-    TailscaleLive
+    RemoteLive
   }
 
   alias Phoenix.LiveView.{Lifecycle, Socket}
@@ -117,10 +117,12 @@ defmodule Scenarios.Cases.ProjectionStream do
           "/",
           "/network",
           "/network/details",
-          "/equipment/lan/1",
-          "/equipment/lan/2",
+          "/hardware",
+          "/hardware/lan/1",
+          "/hardware/lan/2",
           "/remote",
           "/settings",
+          "/settings/storage",
           "/distribution"
         ] do
       response = Req.get!(device, url: path)
@@ -171,10 +173,15 @@ defmodule Scenarios.Cases.ProjectionStream do
                  )
       end
 
-      if path == "/equipment/lan/2" do
+      if path == "/hardware/lan/2" do
         page = Floki.parse_document!(response.body)
-        assert [_] = Floki.find(page, "#equipment-network-form")
-        assert [] = Floki.find(page, "[name='network[internet_port]']")
+        assert [_] = Floki.find(page, "#application-port-eth1")
+
+        assert [] =
+                 Floki.find(
+                   page,
+                   "#equipment-network-form, [name='network[internet_port]'], [name='network[equipment_ip]']"
+                 )
       end
 
       if path == "/remote" do
@@ -183,13 +190,21 @@ defmodule Scenarios.Cases.ProjectionStream do
         assert [_] = Floki.find(page, "#gateway-remote-access #tailscale-details")
         assert [] = Floki.find(page, "details#tailscale-details, #tailscale-login-popup")
         assert [_] = Floki.find(page, "#remote-method option[value='auth_key']")
+        assert [_] = Floki.find(page, "#erlang-distribution")
+        assert [] = Floki.find(page, "#distribution-cookie")
+      end
+
+      if path == "/hardware" do
+        page = Floki.parse_document!(response.body)
+        assert [_] = Floki.find(page, "#hardware-lan-1")
+        assert [_] = Floki.find(page, "#hardware-lan-2")
+        assert [] = Floki.find(page, "details#ethernet-arrangement, #lan-ports-form")
       end
 
       if path == "/settings" do
         page = Floki.parse_document!(response.body)
-        assert [_] = Floki.find(page, "#lan-ports-form")
-        assert [_, _] = Floki.find(page, "#lan-ports-form [name='network[mode]']")
-        assert [] = Floki.find(page, "#lan-ports-form [name='network[internet_port]']")
+        assert [] = Floki.find(page, "#lan-ports-form")
+        assert [_] = Floki.find(page, "a[href='/settings/storage']")
         assert response.body =~ "x86_64"
         assert response.body =~ "SSH access"
         assert response.body =~ "ssh-key-form"
@@ -233,7 +248,7 @@ defmodule Scenarios.Cases.ProjectionStream do
     refresh =
       case editor do
         editor when editor in [:network, :lan, :ports] -> &NetworkEditor.refresh_observations/2
-        :remote -> &TailscaleLive.refresh_observations/2
+        :remote -> &RemoteLive.refresh_observations/2
         :settings -> &Phoenix.Component.assign(&1, :projection, &2)
       end
 
@@ -254,7 +269,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
   defp assert_pending_reply(socket, :remote) do
     socket = Phoenix.Component.assign(socket, pending_name: "unsaved-gateway")
-    updated = TailscaleLive.refresh_observations(socket, socket.assigns.projection)
+    updated = RemoteLive.refresh_observations(socket, socket.assigns.projection)
     assert updated.assigns.pending_name == "unsaved-gateway"
     assert updated.assigns.dirty
   end

@@ -174,9 +174,10 @@ defmodule NervesGate.Remote do
     end
   end
 
-  defp sharing_allowed(:sharing_enable, params, remote) do
+  defp sharing_allowed(operation, params, remote)
+       when operation in [:sharing_enable, :sharing_claim] do
     with :ok <- Sharing.known(remote),
-         {:ok, _} <- Sharing.change(:sharing_enable, params, remote.advertised_routes) do
+         {:ok, _} <- Sharing.change(operation, params, remote.advertised_routes) do
       :ok
     end
   end
@@ -295,6 +296,10 @@ defmodule NervesGate.Remote do
 
   defp finish_sharing(state, result) do
     case result do
+      {:error, %{code: "route_in_use"}} = rejected ->
+        GenServer.reply(state.waiting, rejected)
+        state
+
       {:ok, routes} when is_list(routes) ->
         GenServer.reply(state.waiting, {:ok, routes})
         uncertain = List.delete(state.sharing.uncertain, state.route)

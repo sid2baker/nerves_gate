@@ -241,6 +241,7 @@ defmodule NervesGate.Status do
   defp network(nil) do
     %{
       available: false,
+      local: nil,
       desired: nil,
       pending: nil,
       observed: nil,
@@ -258,6 +259,7 @@ defmodule NervesGate.Status do
   defp network(status) do
     %{
       available: true,
+      local: Map.get(status, :local),
       desired: status.config && status.config["network"],
       pending: status.trial,
       observed: status.observed,

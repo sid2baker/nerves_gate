@@ -21,7 +21,7 @@ defmodule NervesGate.Network do
   """
   use GenServer
   alias NervesGate.{Alarms, Cellular, Config, Observations, Remote}
-  alias NervesGate.Network.{Access, Policy}
+  alias NervesGate.Network.{Access, Local, Policy}
   alias NervesGate.Remote.Sharing
 
   @doc false
@@ -66,6 +66,22 @@ defmodule NervesGate.Network do
     end
   end
 
+  @doc "Claim one enabled, isolated Ethernet interface for the actual calling process. Addressing is transient."
+  def claim_local(interface, address, prefix),
+    do: call({:claim_local, interface, address, prefix}, 70_000)
+
+  @doc "Advertise only this caller's local claim. No route is advertised by claiming alone."
+  def advertise_local(ref), do: call({:advertise_local, ref}, 70_000)
+
+  @doc "Withdraw the owned route before removing the claim's temporary address."
+  def release_local(ref), do: call({:release_local, ref}, 70_000)
+
+  @doc "Private caller-owned lease observation. Never put its handle in public projections."
+  def local_status, do: call(:local_status)
+
+  @doc "Explicitly retry cleanup of an orphaned claim after inspecting an incomplete outcome. Never re-advertises."
+  def recover_local, do: call(:recover_local, 70_000)
+
   @doc "Subscribe the calling process before reading status."
   def observe, do: NervesGate.Error.protect(fn -> Observations.subscribe_runtime(__MODULE__) end)
 
@@ -101,7 +117,8 @@ defmodule NervesGate.Network do
     ])
 
     effect_ms = Keyword.get(opts, :effect_ms, 10_000)
-    {config, error} = load(effect_ms)
+    local = Local.load()
+    {config, error} = load(effect_ms, local)
 
     state = %{
       name: __MODULE__,
@@ -120,7 +137,8 @@ defmodule NervesGate.Network do
       trial_ms: Keyword.get(opts, :trial_ms, 60_000),
       poll_ms: Keyword.get(opts, :poll_ms, 1000),
       effect_ms: effect_ms,
-      observation_timer: nil
+      observation_timer: nil,
+      local: local
     }
 
     Observations.subscribe(sources(state))
@@ -137,6 +155,96 @@ defmodule NervesGate.Network do
   def handle_call(:observations, _, state) do
     {:reply, sources(state), state}
   end
+
+  def handle_call({:claim_local, interface, address, prefix}, {pid, _} = from, state) do
+    state = refresh(state)
+
+    with :ok <- Local.idle(state.local),
+         {:ok, scope} <- Local.candidate(public(state), interface, address, prefix) do
+      ref = make_ref()
+      local = %{Local.lease(scope, pid, :configuring) | ref: ref, monitor: Process.monitor(pid)}
+
+      {:noreply,
+       local_work(%{state | local: local}, :claim, from, fn -> Local.reserve(scope) end)
+       |> publish()}
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({operation, ref}, {pid, _} = from, state)
+      when operation in [:advertise_local, :release_local] do
+    state = refresh(state)
+
+    with :ok <- Local.owned(state.local, pid, ref),
+         :ok <- Policy.available(Map.put(public(state), :local, nil)),
+         :ok <- local_action_allowed(operation, state) do
+      scope = state.local.scope
+
+      {action, fun} =
+        if operation == :advertise_local,
+          do: {:advertise, fn -> Local.advertise(scope) end},
+          else: {:release, fn -> Local.cleanup(scope) end}
+
+      {:noreply, local_work(state, action, from, fun) |> publish()}
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call(:local_status, {pid, _}, state) do
+    state = refresh(state)
+    local = state.local
+
+    result =
+      if local && local.owner == pid do
+        remote = Remote.status()
+        scope = local.scope
+
+        {:ok,
+         %NervesGateSDK.Network.Local{
+           ref: local.ref,
+           interface: scope.interface,
+           address: scope.address,
+           prefix: scope.prefix,
+           subnet: scope.cidr,
+           phase: local.phase,
+           ready?: Local.ready?(scope, public(state)),
+           advertised?:
+             if(is_list(remote.advertised_routes),
+               do: scope.cidr in remote.advertised_routes,
+               else: nil
+             ),
+           approval: :unknown,
+           error: local.error && local.error.code
+         }}
+      else
+        {:ok, nil}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call(:recover_local, from, %{local: %{owner: nil, scope: scope}} = state)
+      when not is_nil(scope) do
+    if state.worker == nil and state.trial == nil,
+      do:
+        {:noreply, local_work(state, :release, from, fn -> Local.cleanup(scope) end) |> publish()},
+      else:
+        {:reply,
+         {:error,
+          NervesGate.Error.new("operation_in_progress", "Wait for the current network operation.")},
+         state}
+  end
+
+  def handle_call(:recover_local, _, state),
+    do:
+      {:reply,
+       {:error,
+        NervesGate.Error.new(
+          "local_cleanup_required",
+          "No recoverable orphaned claim is available. Inspect its owner and persistent journal."
+        )}, state}
 
   def handle_call(:scan, from, state) do
     state = refresh(state)
@@ -324,6 +432,12 @@ defmodule NervesGate.Network do
   def handle_info({:expire, id}, %{trial: %{id: id}} = state),
     do: {:noreply, expire(state, nil) |> publish()}
 
+  def handle_info({:DOWN, ref, :process, _, _}, %{local: %{monitor: ref} = local} = state)
+      when is_reference(ref) do
+    local = %{local | owner: nil, monitor: nil, phase: :cleanup_pending}
+    {:noreply, %{state | local: local} |> publish()}
+  end
+
   def handle_info(:poll, state) do
     Observations.subscribe(sources(state))
     Process.send_after(self(), :poll, state.poll_ms)
@@ -353,7 +467,7 @@ defmodule NervesGate.Network do
       cond do
         expired?(state) -> expire(state, nil)
         state.recovering and state.worker == nil -> restore(state, state.error, nil, :ok)
-        true -> state |> auto_save() |> reconcile_sharing()
+        true -> state |> auto_save() |> reconcile_sharing() |> reconcile_local()
       end
 
     state |> refresh_cellular_if_due() |> publish()
@@ -391,6 +505,7 @@ defmodule NervesGate.Network do
 
     timeout =
       case operation do
+        :local -> 65_000
         :sharing -> 65_000
         :cellular -> 45_000
         _ -> state.effect_ms
@@ -398,6 +513,82 @@ defmodule NervesGate.Network do
 
     timer = Process.send_after(self(), {:work_timeout, task.ref}, timeout)
     %{state | worker: %{task: task, timer: timer, operation: operation, from: from}}
+  end
+
+  defp local_action_allowed(:release_local, _), do: :ok
+
+  defp local_action_allowed(
+         :advertise_local,
+         %{local: %{phase: :configured, scope: scope}} = state
+       ) do
+    if Local.ready?(scope, public(state)),
+      do: :ok,
+      else:
+        {:error,
+         NervesGate.Error.new(
+           "local_not_ready",
+           "The claimed address, independent topology and physical link must be ready before advertising."
+         )}
+  end
+
+  defp local_action_allowed(_, _),
+    do:
+      {:error,
+       NervesGate.Error.new(
+         "local_outcome_unknown",
+         "Inspect the claim and release it before attempting another advertisement."
+       )}
+
+  defp reconcile_local(
+         %{
+           local: %{phase: :cleanup_pending, scope: scope},
+           worker: nil,
+           trial: nil,
+           recovering: false
+         } = state
+       ) do
+    if Local.cleanup_ready?(),
+      do: local_work(state, :release, nil, fn -> Local.cleanup(scope) end),
+      else: state
+  end
+
+  defp reconcile_local(state), do: state
+
+  defp local_work(state, action, from, fun) do
+    state =
+      %{state | local: %{state.local | phase: action, error: nil}} |> work(:local, from, fun)
+
+    %{state | worker: Map.put(state.worker, :local_action, action)}
+  end
+
+  defp complete(state, %{operation: :local, local_action: action, from: from}, result) do
+    success = result == :ok or match?({:ok, routes} when is_list(routes), result)
+
+    cond do
+      success and action == :release ->
+        if state.local.monitor, do: Process.demonitor(state.local.monitor, [:flush])
+        reply(from, :ok)
+        %{state | local: nil}
+
+      success ->
+        phase =
+          if state.local.owner == nil,
+            do: :cleanup_pending,
+            else: if(action == :claim, do: :configured, else: :advertised)
+
+        reply(from, if(action == :claim, do: {:ok, state.local.ref}, else: :ok))
+        %{state | local: %{state.local | phase: phase}}
+
+      true ->
+        error =
+          NervesGate.Error.new(
+            "local_outcome_unknown",
+            "Local access did not complete safely. Inspect its status; release or explicitly recover it before trying again."
+          )
+
+        reply(from, {:error, error})
+        %{state | local: %{state.local | phase: :blocked, error: error}}
+    end
   end
 
   defp complete(state, %{operation: :cellular} = worker, result) do
@@ -491,7 +682,7 @@ defmodule NervesGate.Network do
   end
 
   defp interrupt(%{worker: %{operation: operation} = worker} = state, reason)
-       when operation in [:sharing, :scan, :cellular] do
+       when operation in [:sharing, :scan, :cellular, :local] do
     {state, _} = stop_work(state)
     complete(state, worker, {:error, reason})
   end
@@ -571,7 +762,8 @@ defmodule NervesGate.Network do
       error: error(state.error),
       recovering: state.recovering,
       ready: ready?(state),
-      phase: phase(state)
+      phase: phase(state),
+      local: Local.public(state.local)
     }
   end
 
@@ -627,9 +819,12 @@ defmodule NervesGate.Network do
   defp cellular_fault(connection) when connection in [:lan, :disconnected], do: true
   defp cellular_fault(_), do: nil
 
-  defp load(timeout) do
+  defp load(timeout, local) do
     case bounded(fn -> NervesGate.Network.Vintage.load() end, timeout) do
-      {:ok, config} -> {config, restore_loaded(config, timeout)}
+      # Do not flush a surviving claimed address on a Network restart before
+      # its advertised route has been withdrawn. Boot-time VintageNet restore
+      # is independent; the journal still blocks all new access until cleanup.
+      {:ok, config} -> {config, if(local == nil, do: restore_loaded(config, timeout))}
       {:error, reason} -> {nil, {:load, reason}}
     end
   end

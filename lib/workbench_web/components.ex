@@ -193,6 +193,10 @@ defmodule WorkbenchWeb.Components do
     "/provision"
   end
 
+  def operation_path(%{kind: kind, context: %{subject: path}})
+      when kind in ["app_install_review", "app_install"] and is_binary(path),
+      do: "/develop/applications/" <> Base.url_encode64(path, padding: false)
+
   def operation_path(%{review: %{address: address}}),
     do: Workbench.Devices.physical_path(address) <> "?tab=firmware"
 
@@ -233,6 +237,8 @@ defmodule WorkbenchWeb.Components do
   def operation_label("hardware_diagnostics"), do: "Diagnostic snapshot"
   def operation_label("reboot_review"), do: "Reboot observation review"
   def operation_label("reboot_verify"), do: "Observe physical-button reboot"
+  def operation_label("app_install_review"), do: "Review physical app installation"
+  def operation_label("app_install"), do: "Install stopped application over SSH"
   def operation_label("firmware_review"), do: "Firmware review"
   def operation_label("firmware_update"), do: "Firmware update"
   def operation_label("factory_review"), do: "Factory review"

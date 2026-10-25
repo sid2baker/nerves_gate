@@ -29,6 +29,20 @@ replaced silently. App builds run in separate Mix processes, never in the
 workbench VM. Inside the app, `mix test` and `MIX_ENV=prod mix nerves_gate.package`
 work as usual.
 
+## Optional starter apps
+
+`apps/tailnet_subrouter` is an ordinary SDK project shipped as source, not a default
+service. Open it using **Applications → Open starter app source**, or run
+`mix app.test apps/tailnet_subrouter` and `mix app.package apps/tailnet_subrouter`.
+Installation/startup are explicit and the app starts disabled. Configure and enable
+through its named API; see its [README](../apps/tailnet_subrouter/README.md) for
+operator preparation, tailnet approval limitations and incomplete-cleanup recovery.
+
+The SDK local-network API is new in this checkout and not a published SDK release.
+The starter app checks that capability on startup; older firmware is rejected.
+Equipment protocols, addressing requirements and polling belong to apps. The gateway
+still enforces shared-resource admission and protects Internet/USB management.
+
 ## Run an app on QEMU
 
 Start simulated devices on the Simulator page. On each device, open
@@ -58,14 +72,38 @@ installs anything; firmware updates follow [their own flow](firmware-updates.md)
 
 ## Install on a physical gateway
 
-This is an explicit SSH procedure with your own authorized key:
+In `mix dev`, open the application (or **Open starter app source**) and use
+**Install on physical device**:
 
-1. Commission an SD card in the gateway's Application storage settings.
-2. Package the app and copy the `.ez` to a temporary file on the gateway.
-3. In SSH IEx, run `NervesGate.Apps.install(path)` and
-   `NervesGate.Apps.start(:your_app)`, or `NervesGate.Apps.upgrade(path)` for a
-   new version.
-4. Delete the temporary file and check app status and logs.
+1. Discover/add the physical gateway on Devices and commission an SD card under
+   its **Settings → Application storage**. Firmware must support `Apps.install_new/2`.
+2. Select the gateway and choose **Review package and device**. The workbench builds
+   an immutable private package snapshot, verifies known-host/public-key SSH, reads
+   identity/boot/storage and checks SDK/platform requirements. Nothing is uploaded.
+3. Inspect application/version, device address/serial, firmware, size and SHA-256.
+   Type the exact reviewed hostname/address and confirm. The review expires after
+   ten minutes and is consumed once.
+4. The workbench rechecks identity, boot, storage and compatibility, uploads once
+   with SFTP, verifies the package hash on-device, and installs **stopped and disabled**.
+   An existing application is rejected: no replacement, upgrade or restart is implied.
+
+Authentication uses the same strict SSH policy as firmware review: authorized keys,
+`SSH_AUTH_SOCK` when present and known_hosts. Unknown/changed hosts, passwords and
+interactive trust prompts are not accepted. DNS/Tailscale names and LAN/USB IPv4 work;
+independent USB is not required. USB does not bypass host-key authentication.
+
+Installation does not start the app, change firmware, configure hardware or advertise
+routes. Start deliberately in the device's trusted SSH IEx console with
+`NervesGate.Apps.start(:your_app)`, then configure/enable its use case separately.
+If an upload or result is interrupted, inspect installed application/storage state
+before a fresh review. Writes are never automatically replayed. Private local
+snapshots are cleaned on completion, replacement or expiry; an interrupted transport
+can leave a private temporary package on the device, never automatically loaded.
+
+For manual installation or a separately authorized upgrade, copy the packaged `.ez`
+to a temporary device file, call `NervesGate.Apps.install(path)` or
+`NervesGate.Apps.upgrade(path)` in SSH IEx, and remove the file afterward. These are
+administrative APIs, not an alternative automatic fallback for a failed review.
 
 Never reuse the simulator's development cookie in production. Native dependencies
 must be built for the device architecture. See [application runtime](applications.md).

@@ -1,4 +1,4 @@
-defmodule NervesGateWeb.TailscaleLive do
+defmodule NervesGateWeb.RemoteLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
   alias NervesGateWeb.RemoteStatus
@@ -21,7 +21,8 @@ defmodule NervesGateWeb.TailscaleLive do
        login_requested: false,
        login_url: nil,
        login_open: false,
-       disconnecting: false
+       disconnecting: false,
+       cookie: nil
      )}
   end
 
@@ -71,6 +72,19 @@ defmodule NervesGateWeb.TailscaleLive do
     end
   end
 
+  def handle_event("show-cookie", _, socket) do
+    projection = socket.assigns.projection
+
+    if projection.device.available and projection.system.node != :nonode@nohost do
+      {:ok, cookie} = NervesGate.Distribution.cookie()
+      {:noreply, assign(socket, :cookie, cookie)}
+    else
+      {:noreply, assign(socket, :cookie, nil)}
+    end
+  end
+
+  def handle_event("hide-cookie", _, socket), do: {:noreply, assign(socket, :cookie, nil)}
+
   def handle_event(_, _, socket), do: {:noreply, socket}
 
   defp submit(socket, state, params) do
@@ -102,10 +116,20 @@ defmodule NervesGateWeb.TailscaleLive do
 
   @doc false
   def refresh_observations(socket, %{device: %{available: false}} = projection),
-    do: socket |> assign(projection: projection, request: nil, pending_name: nil) |> clear_login()
+    do:
+      socket
+      |> assign(projection: projection, request: nil, pending_name: nil, cookie: nil)
+      |> clear_login()
 
   def refresh_observations(socket, projection) do
     previous = socket.assigns.projection.remote
+
+    socket =
+      if socket.assigns.projection.system.node != projection.system.node or
+           projection.system.node == :nonode@nohost,
+         do: assign(socket, :cookie, nil),
+         else: socket
+
     socket = assign(socket, projection: projection)
     remote = projection.remote
 
@@ -251,12 +275,16 @@ defmodule NervesGateWeb.TailscaleLive do
 
     ~H"""
     <.back_link navigate="/">Overview</.back_link>
-    <.page_header title="Remote access" description="Connect this gateway to your private network." />
-    <RemoteStatus.connection remote={@remote} title="Connection" />
+    <.page_header title="Remote access" description="Private networking and advanced runtime access." />
+    <nav class="ui-actions" aria-label="Remote access sections">
+      <a href="#tailscale-settings" class="ui-text-link">Private network</a>
+      <a href="#erlang-distribution" class="ui-text-link">Developer runtime</a>
+    </nav>
+    <RemoteStatus.connection remote={@remote} title="Tailscale private network" />
     <.notice :if={@remote.simulated}>
       Development preview. Your computer’s VPN is never changed.
     </.notice>
-    <.panel title="Connection settings" id="tailscale-settings">
+    <.panel title="Private network settings" id="tailscale-settings">
       <.notice
         :if={@remote.state != "online" and @projection.actions["remote.connect"].reason != nil}
         id="tailscale-connect-unavailable"
@@ -361,6 +389,12 @@ defmodule NervesGateWeb.TailscaleLive do
         >Open Tailscale admin console<.icon name="external" /></a>
       </p>
     </.panel>
+    <NervesGateWeb.DistributionPanel.connection
+      node={@projection.system.node}
+      cookie={@cookie}
+      elixir={@projection.system.elixir}
+      otp={@projection.system.otp}
+    />
     <div
       :if={@login_open and @login_url}
       id="tailscale-login-popup"

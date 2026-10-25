@@ -53,6 +53,48 @@ defmodule NervesGate.PolicyTest do
     assert {:ok, _} = Labels.put(labels, "1", "replacement")
   end
 
+  test "4G Internet can leave both Ethernet ports on one local network without an uplink" do
+    address = %{
+      "ip_method" => "static",
+      "static_ip" => "192.168.10.2",
+      "subnet_mask" => "255.255.255.0",
+      "gateway" => nil
+    }
+
+    network = %{
+      "mode" => "shared",
+      "equipment" => address,
+      "internet" => %{"mode" => "cellular", "apn" => ""}
+    }
+
+    assert {:ok, validated} = Config.validate_network(network)
+    configs = NervesGate.Network.Vintage.configurations(validated)
+    {"br0", bridge} = List.keyfind(configs, "br0", 0)
+    assert bridge.vintage_net_bridge.interfaces == ["eth0", "eth1"]
+    assert bridge.ipv4.method == :static
+    refute Map.has_key?(bridge.ipv4, :gateway)
+    refute Map.has_key?(bridge.ipv4, :name_servers)
+
+    for invalid <- [
+          Config.address_defaults(),
+          Map.put(address, "gateway", "192.168.10.1"),
+          Map.put(address, "nameservers", ["192.168.10.1"])
+        ] do
+      assert {:error, message} = Config.validate_network(%{network | "equipment" => invalid})
+      assert message =~ "4G-only Internet"
+    end
+
+    uplink = %{"role" => "internet", "address" => Config.address_defaults()}
+
+    assert {:error, _} =
+             Config.validate_network(%{
+               "mode" => "ports",
+               "eth0" => uplink,
+               "eth1" => nil,
+               "internet" => network["internet"]
+             })
+  end
+
   test "network input validation rejects unknown keys and invalid roles" do
     assert Config.validate_address(%{"ip_method" => "dhcp"}) == {:ok, Config.address_defaults()}
     assert {:error, _} = Config.validate_address(%{"ip_method" => "dhcp", "command" => "run"})

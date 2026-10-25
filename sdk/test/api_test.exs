@@ -22,6 +22,14 @@ defmodule NervesGateSDK.APITest do
   test "every application capability dispatches through Backend" do
     assert {:ok, {:system_info, []}} = NervesGateSDK.System.info()
     assert {:ok, {:network_interfaces, []}} = Network.interfaces()
+
+    assert {:ok, {:network_claim_local, ["eth1", "192.168.50.2", 24]}} =
+             Network.claim_local("eth1", "192.168.50.2", 24)
+
+    assert {:ok, {:network_local_status, []}} = Network.local_status()
+    local = make_ref()
+    assert {:ok, {:network_advertise_local, [^local]}} = Network.advertise_local(local)
+    assert {:ok, {:network_release_local, [^local]}} = Network.release_local(local)
     assert {:ok, {:events_subscribe, [:network]}} = Events.subscribe(:network)
     assert {:ok, {:events_unsubscribe, [:network]}} = Events.unsubscribe(:network)
     assert {:ok, {:storage_status, []}} = Storage.status()
@@ -41,6 +49,10 @@ defmodule NervesGateSDK.APITest do
 
   test "invalid application input never reaches the backend" do
     assert {:error, :invalid_topic} = Events.subscribe(:credentials)
+    assert {:error, :invalid_local_network} = Network.claim_local("usb0", "192.168.50.2", 24)
+    assert {:error, :invalid_local_network} = Network.claim_local("eth1", "192.168.50.2", 32)
+    assert {:error, :invalid_claim} = Network.advertise_local(:anything)
+    assert {:error, :invalid_claim} = Network.release_local(:anything)
     assert {:error, :invalid_application} = Storage.data_dir(:"../platform")
     assert {:error, :invalid_application} = Storage.data_dir("example")
     assert {:error, :invalid_frame} = CAN.send("can0", %CAN.Frame{id: 2048, data: <<>>})

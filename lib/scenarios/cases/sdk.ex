@@ -23,6 +23,18 @@ defmodule Scenarios.Cases.Sdk do
 
     assert {:ok, interfaces} = Device.rpc(device, Network, :interfaces)
     assert Enum.all?(interfaces, &is_struct(&1, Network.Interface))
+
+    assert Enum.all?(
+             interfaces,
+             &(is_boolean(&1.application_enabled?) and is_boolean(&1.claimed?))
+           )
+
+    assert {:ok, nil} = Device.rpc(device, Network, :local_status)
+
+    assert {:error, :invalid_local_network} =
+             Device.rpc(device, Network, :claim_local, ["usb0", "192.168.50.2", 24])
+
+    assert {:error, "not_owner"} = Device.rpc(device, Network, :release_local, [make_ref()])
     assert {:ok, %Storage.Status{}} = Device.rpc(device, Storage, :status)
     assert {:ok, equipment} = Device.rpc(device, Equipment, :list)
     assert Enum.all?(equipment, &is_struct(&1, Equipment.Device))

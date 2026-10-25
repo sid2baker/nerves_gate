@@ -72,7 +72,13 @@ defmodule NervesGate.Network.LAN do
       raw
       | type: __MODULE__,
         source_config: normalize(config),
-        up_cmds: commands ++ raw.up_cmds,
+        up_cmds:
+          commands ++
+            raw.up_cmds ++
+            if(config[:nerves_gate_disabled],
+              do: [{:run, "ip", ["link", "set", ifname, "down"]}],
+              else: []
+            ),
         down_cmds: [{:fun, VintageNet.RouteManager, :clear_route, [ifname]} | raw.down_cmds]
     }
   end

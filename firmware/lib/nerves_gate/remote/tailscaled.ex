@@ -70,7 +70,7 @@ defmodule NervesGate.Remote.Tailscaled do
   end
 
   def execute(operation, params)
-      when operation in [:sharing_enable, :sharing_disable, :sharing_sync] do
+      when operation in [:sharing_enable, :sharing_disable, :sharing_sync, :sharing_claim] do
     # Refresh is a serialized Controller read, not a write replay. Earlier
     # accepted changes finish first, even if their original caller was killed.
     # Only the route list is ever patched here.
@@ -78,10 +78,14 @@ defmodule NervesGate.Remote.Tailscaled do
          config when is_map(config) <- Tailscaled.get_configuration(),
          {:ok, routes} <-
            NervesGate.Remote.Sharing.change(operation, params, config.advertise_routes),
+         :ok <- prepare_route_ownership(operation, params),
          :ok <- write_routes(operation, routes),
          %{advertise_routes: ^routes} <- Tailscaled.get_configuration() do
       {:ok, routes}
     else
+      {:error, %{code: "route_in_use"}} = rejected ->
+        rejected
+
       _ ->
         {:error,
          %{
@@ -91,6 +95,11 @@ defmodule NervesGate.Remote.Tailscaled do
          }}
     end
   end
+
+  defp prepare_route_ownership(:sharing_claim, %{scope: scope}),
+    do: NervesGate.Network.Local.mark_advertising(scope)
+
+  defp prepare_route_ownership(_, _), do: :ok
 
   defp write_routes(:sharing_sync, _), do: :ok
   defp write_routes(_, routes), do: Tailscaled.update_configuration(%{advertise_routes: routes})

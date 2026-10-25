@@ -1,7 +1,7 @@
 defmodule NervesGateWeb.ProjectionTest do
   use ExUnit.Case, async: false
   alias NervesGate.{Projection, ProjectionServer}
-  alias NervesGateWeb.{DistributionLive, NetworkEditor, NetworkForm, TailscaleLive}
+  alias NervesGateWeb.{NetworkEditor, NetworkForm, RemoteLive}
   alias Phoenix.LiveView.{Lifecycle, Socket}
 
   setup do
@@ -26,7 +26,7 @@ defmodule NervesGateWeb.ProjectionTest do
     socket = Phoenix.Component.assign(remote_socket(), projection: projection.status)
 
     {:noreply, socket} =
-      TailscaleLive.handle_event("change", %{"remote" => %{"hostname" => "my-gateway"}}, socket)
+      RemoteLive.handle_event("change", %{"remote" => %{"hostname" => "my-gateway"}}, socket)
 
     refute projection.status.actions["remote.connect"].enabled
     page = remote_page(socket)
@@ -38,7 +38,7 @@ defmodule NervesGateWeb.ProjectionTest do
     synchronized =
       Projection.apply(projection, {:replace, :remote, %{remote | time_synchronized: true}})
 
-    socket = TailscaleLive.refresh_observations(socket, synchronized.status)
+    socket = RemoteLive.refresh_observations(socket, synchronized.status)
     assert socket.assigns.projection.actions["remote.connect"].enabled
     assert socket.assigns.form.params["hostname"] == "my-gateway"
     assert socket.assigns.dirty
@@ -53,7 +53,7 @@ defmodule NervesGateWeb.ProjectionTest do
         {:replace, :remote, %{remote | state: "online", auth_state: "authenticated"}}
       )
 
-    socket = TailscaleLive.refresh_observations(socket, online.status)
+    socket = RemoteLive.refresh_observations(socket, online.status)
     refute socket.assigns.projection.remote.time_synchronized
     assert socket.assigns.projection.actions["remote.configure"].enabled
     assert socket.assigns.projection.actions["remote.disconnect"].enabled
@@ -68,7 +68,7 @@ defmodule NervesGateWeb.ProjectionTest do
   test "ambiguous observed uplinks are online without a suggested port",
     do: assert_discovery_observations(projection())
 
-  test "private cookie is cached across ordinary projection updates",
+  test "runtime credentials require explicit reveal, stay view-local and clear on loss",
     do: assert_distribution_cookie_cached()
 
   defp projection do
@@ -168,7 +168,7 @@ defmodule NervesGateWeb.ProjectionTest do
     socket = Phoenix.Component.assign(socket, request: nil)
 
     {:noreply, keyed} =
-      TailscaleLive.handle_event("method", %{"remote" => %{"method" => "auth_key"}}, socket)
+      RemoteLive.handle_event("method", %{"remote" => %{"method" => "auth_key"}}, socket)
 
     page = remote_page(keyed)
     assert [_] = Floki.find(page, "input[type='password'][name='remote[auth_key]'][value='']")
@@ -181,7 +181,7 @@ defmodule NervesGateWeb.ProjectionTest do
     secret = "tskey-auth-ui-test-only"
 
     {:noreply, rejected} =
-      TailscaleLive.handle_event(
+      RemoteLive.handle_event(
         "save",
         %{"remote" => %{"hostname" => "gateway", "auth_key" => secret}},
         stale
@@ -199,12 +199,12 @@ defmodule NervesGateWeb.ProjectionTest do
       | remote: %{projection.remote | operation: "connect", auth_state: "stopped"}
     }
 
-    starting = TailscaleLive.refresh_observations(waiting, starting)
+    starting = RemoteLive.refresh_observations(waiting, starting)
     assert starting.assigns.login_requested
     assert starting.assigns.request == :connect
 
     failed = put_in(projection.remote.auth_state, "error")
-    failed = TailscaleLive.refresh_observations(waiting, failed)
+    failed = RemoteLive.refresh_observations(waiting, failed)
     assert failed.assigns.request == nil
     refute failed.assigns.login_requested
     assert Phoenix.Flash.get(failed.assigns.flash, :error)
@@ -233,10 +233,10 @@ defmodule NervesGateWeb.ProjectionTest do
         }
     }
 
-    saving = TailscaleLive.refresh_observations(saving, configuring)
+    saving = RemoteLive.refresh_observations(saving, configuring)
     assert saving.assigns.request == :configure
     saved = put_in(configuring.remote.operation, nil)
-    saved = TailscaleLive.refresh_observations(saving, saved)
+    saved = RemoteLive.refresh_observations(saving, saved)
     assert saved.assigns.request == nil
     assert Phoenix.Flash.get(saved.assigns.flash, :info) == "Device name saved."
   end
@@ -404,12 +404,28 @@ defmodule NervesGateWeb.ProjectionTest do
   defp assert_distribution_cookie_cached do
     Task.async(fn ->
       socket = %Socket{transport_pid: self(), private: %{lifecycle: %Lifecycle{}}}
-      {:ok, socket} = DistributionLive.mount(%{}, %{}, socket)
-      refute is_nil(socket.assigns.cookie)
-      network = socket.assigns.projection_state.inputs.network
+      {:ok, socket} = RemoteLive.mount(%{}, %{}, socket)
+      assert is_nil(socket.assigns.cookie)
+      system = %{socket.assigns.projection_state.inputs.system | node: :"gateway@192.0.2.1"}
+      projection = Projection.apply(socket.assigns.projection_state, {:replace, :system, system})
 
-      # An ordinary domain update must keep the view's cached cookie, not read it again.
-      socket = Phoenix.Component.assign(socket, :cookie, :cached)
+      socket =
+        Phoenix.Component.assign(socket,
+          projection_state: projection,
+          projection: projection.status
+        )
+
+      assert [] = Floki.find(remote_page(socket), "#distribution-cookie")
+      {:noreply, revealed} = RemoteLive.handle_event("show-cookie", %{}, socket)
+      refute is_nil(revealed.assigns.cookie)
+      assert [_] = Floki.find(remote_page(revealed), "#distribution-cookie")
+      refute Map.has_key?(revealed.assigns.projection, :cookie)
+      {:noreply, hidden} = RemoteLive.handle_event("hide-cookie", %{}, revealed)
+      assert hidden.assigns.cookie == nil
+
+      # An ordinary domain update preserves only this view's explicit reveal.
+      network = socket.assigns.projection_state.inputs.network
+      socket = Phoenix.Component.assign(revealed, :cookie, :cached)
 
       {:halt, socket} =
         Lifecycle.handle_info(
@@ -418,6 +434,19 @@ defmodule NervesGateWeb.ProjectionTest do
         )
 
       assert socket.assigns.cookie == :cached
+
+      assert RemoteLive.refresh_observations(
+               socket,
+               Map.put(socket.assigns.projection, :system, %{
+                 socket.assigns.projection.system
+                 | node: :nonode@nohost
+               })
+             ).assigns.cookie == nil
+
+      lost = RemoteLive.refresh_observations(socket, Projection.disconnected().status)
+      assert lost.assigns.cookie == nil
+      {:noreply, still_lost} = RemoteLive.handle_event("show-cookie", %{}, lost)
+      assert still_lost.assigns.cookie == nil
     end)
     |> Task.await()
   end
@@ -427,13 +456,13 @@ defmodule NervesGateWeb.ProjectionTest do
       %Socket{private: %{lifecycle: %Lifecycle{}, live_temp: %{}}}
       |> Phoenix.LiveView.clear_flash()
 
-    {:ok, socket} = TailscaleLive.mount(%{}, %{}, socket)
+    {:ok, socket} = RemoteLive.mount(%{}, %{}, socket)
     socket
   end
 
   defp remote_page(socket) do
     socket.assigns
-    |> TailscaleLive.render()
+    |> RemoteLive.render()
     |> Phoenix.HTML.Safe.to_iodata()
     |> IO.iodata_to_binary()
     |> Floki.parse_document!()

@@ -146,6 +146,7 @@ defmodule NervesGate.Buses do
   def handle_call({:configure, name, params}, _, state) do
     with {:ok, params} <- Policy.configure(name, params),
          :ok <- unclaimed(state, name),
+         :ok <- unsubscribed(state, name),
          {:ok, port} <- Policy.port(public(state), name) do
       configure_port(port, params, state)
     else
@@ -581,11 +582,28 @@ defmodule NervesGate.Buses do
     %{state | ports: ports, enabled: enabled}
   end
 
+  defp unsubscribed(state, name) do
+    if MapSet.size(Map.get(state.subscribers, name, MapSet.new())) == 0,
+      do: :ok,
+      else:
+        {:error,
+         Error.new(
+           "port_in_use",
+           "Applications are receiving from this CAN interface. Release subscriptions before changing its configuration."
+         )}
+  end
+
   defp public(state),
     do: %{
       available: state.adapter != nil,
       simulated: match?({NervesGate.Buses.Host, _}, state.adapter),
-      ports: state.ports,
+      ports:
+        Enum.map(state.ports, fn port ->
+          Map.merge(port, %{
+            claimed: Enum.any?(state.claims, fn {_, claim} -> claim.name == port.name end),
+            subscribers: MapSet.size(Map.get(state.subscribers, port.name, MapSet.new()))
+          })
+        end),
       operation: state.operation,
       result: state.result,
       error: state.error

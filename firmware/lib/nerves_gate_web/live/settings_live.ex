@@ -3,7 +3,6 @@ defmodule NervesGateWeb.SettingsLive do
   import NervesGateWeb.CoreComponents
 
   on_mount({NervesGateWeb.Observations, :status})
-  on_mount({NervesGateWeb.Access, :network})
 
   def mount(_, _, socket),
     do: {:ok, assign(socket, :key_form, to_form(%{"public_key" => ""}, as: :ssh))}
@@ -56,13 +55,13 @@ defmodule NervesGateWeb.SettingsLive do
   def render(assigns) do
     ~H"""
     <.page_header title="Settings" description={@projection.remote.hostname || "Nerves Gate"} />
-    <.live_component
-      module={NervesGateWeb.NetworkEditor}
-      id="lan-ports-editor"
-      editor={:ports}
-      projection={@projection}
-      access={@access}
-    />
+    <p class="ui-help">
+      Device-wide security, storage and maintenance. Configure shared interfaces under <.link
+        navigate="/hardware"
+        class="ui-text-link"
+      >Hardware</.link>;
+      connected equipment and protocols belong to applications.
+    </p>
     <.panel id="ssh-settings" title="SSH access" icon="lock">
       <p class="ui-help">
         Over USB IPv4, sign in as <code>root</code> with password <code>nerves_gate</code>; no key is
@@ -130,7 +129,7 @@ defmodule NervesGateWeb.SettingsLive do
     </.panel>
     <.panel title="Application storage" icon="equipment" id="storage-settings">
       <p>{NervesGateWeb.StorageLive.label(@projection.storage)}</p>
-      <.link navigate="/storage" class="ui-text-link">Set up or manage the SD card →</.link>
+      <.link navigate="/settings/storage" class="ui-text-link">Set up or manage the SD card →</.link>
     </.panel>
     <.panel title="Device information" icon="info">
       <.setting_row label="Firmware">{@projection.system.firmware}</.setting_row>

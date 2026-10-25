@@ -1,6 +1,6 @@
 # CAN and RS485 diagnostics
 
-**Equipment → RS485 1 / 2** (`ttyS3`/`ttyS4`) and **CAN 1 / 2** (`can0`/`can1`)
+**Hardware → RS485 1 / 2** (`ttyS3`/`ttyS4`) and **CAN 1 / 2** (`can0`/`can1`)
 configure one bus each and run explicit, bounded diagnostics. Visiting a page sends
 no traffic. One bus operation runs at a time, independently of LAN trials, USB and
 VPN. Buses require EC100: QEMU reports them unsupported, and workstation UIs never
@@ -15,7 +15,8 @@ termination or health.
 Enable with the peer's bitrate: 10000, 20000, 50000, 100000, 125000, 250000, 500000
 or 1000000 bit/s. Configuration takes the interface down, sets the bitrate and
 **listen-only** mode, then brings it up; disable takes it down. This can interrupt
-other local users, and a failed change can leave the interface down or partially
+privileged local users; active SDK receive subscriptions block configuration.
+A failed change can leave the interface down or partially
 configured, so review observations before retrying. Kernel state is neither
 persisted nor replayed at boot, and a service restart does not disable CAN.
 
@@ -30,7 +31,9 @@ processes can still change the interface.
 Only `/dev/ttyS3` and `/dev/ttyS4` are used; UART0 stays the boot console. Presence
 means a character device exists, not that a peer is wired or the port is free.
 Enabling only permits explicit operations; it opens nothing and resets to disabled
-when the service restarts.
+when the service restarts. Applications claim the UART exclusively through the SDK;
+a claim excludes administrative configuration and diagnostics. Hardware shows the
+claim state without exposing the owning PID or claim handle.
 
 The only profile is **9600 baud, 8N1, no flow control**, which the BSP qualified with
 automatic transceiver direction. No GPIO, DE/RTS polarity or RS485 ioctl mode is
@@ -40,7 +43,12 @@ termios without restoring another application's settings.
 Passive capture transmits nothing and returns at most **4096 raw bytes or five
 seconds** as hex.
 
-### Modbus RTU
+### Administrative Modbus RTU diagnostic API
+
+The standard Hardware UI offers passive capture, not protocol/register setup.
+Applications own equipment configuration, register maps and polling. The existing
+`NervesGate.Buses.modbus_read/2` administrative diagnostic API remains bounded and
+explicit; it is not an application equipment registry.
 
 The operator must authorize **each** request and ensure there is no other master.
 A 50 ms quiet-bus check rejects observed traffic before sending, but it is not

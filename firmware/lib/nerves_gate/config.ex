@@ -13,7 +13,7 @@ defmodule NervesGate.Config do
 
   def validate_network(network) when is_map(network) do
     with {:ok, ethernet} <- validate_ethernet(Map.delete(network, "internet")),
-         :ok <- validate_internet(network) do
+         :ok <- validate_internet(Map.merge(ethernet, Map.take(network, ["internet"]))) do
       {:ok, Map.merge(ethernet, Map.take(network, ["internet"]))}
     end
   end
@@ -46,10 +46,19 @@ defmodule NervesGate.Config do
 
   defp validate_internet(_), do: :ok
 
+  defp validate_cellular_uplink(%{"mode" => "shared", "equipment" => address}, "cellular") do
+    if address["ip_method"] == "static" and address["gateway"] == nil and
+         Map.get(address, "nameservers", []) == [],
+       do: :ok,
+       else:
+         {:error,
+          "With 4G-only Internet, a joined local network needs a manual address without an Ethernet router or DNS servers."}
+  end
+
   defp validate_cellular_uplink(network, mode) do
     case {mode, ethernet_uplink?(network)} do
       {"cellular", true} ->
-        {:error, "4G-only mode needs separate ports without an Ethernet Internet assignment."}
+        {:error, "4G-only mode cannot have an Ethernet Internet assignment."}
 
       {"backup", false} ->
         {:error, "Choose an Ethernet Internet port for 4G backup."}
@@ -93,7 +102,9 @@ defmodule NervesGate.Config do
        when map_size(network) == 3 do
     with {:ok, left} <- validate_port(left),
          {:ok, right} <- validate_port(right),
-         true <- is_nil(left) or is_nil(right) or left["role"] != right["role"] do
+         true <-
+           is_nil(left) or is_nil(right) or left["role"] != right["role"] or
+             left["role"] == "application" do
       {:ok, %{network | "eth0" => left, "eth1" => right}}
     else
       _ ->
@@ -108,6 +119,10 @@ defmodule NervesGate.Config do
   end
 
   defp validate_port(nil), do: {:ok, nil}
+
+  defp validate_port(%{"role" => "application", "address" => nil} = port)
+       when map_size(port) == 2,
+       do: {:ok, port}
 
   defp validate_port(%{"role" => role, "address" => address} = port)
        when map_size(port) == 2 and role in ["internet", "equipment"] do

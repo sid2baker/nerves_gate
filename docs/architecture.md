@@ -132,6 +132,27 @@ disks. Stop preserves them; Reset erases them and invalidates the prepared build
 Fresh-disk scenarios use the runner's explicitly owned disposable-state lifecycle.
 See [development](development.md#workbench-and-simulator).
 
+## Platform and application boundary
+
+Nerves Gate is a managed edge application host with industrial hardware access.
+The standard UI exposes Hardware, not an equipment registry: gateway interfaces,
+health, availability, shared configuration and access ownership. Applications own
+equipment identities, Modbus/S7 endpoints, register maps, polling and control.
+Shared libraries do not imply device-owned protocol sessions or a universal driver
+framework. Hardware enables independent links without IP configuration; optional
+applications request isolated addressing using caller-owned SDK leases. Network
+journals route ownership before writes and withdraws owned advertisements before
+removing temporary addresses. Unknown cleanup blocks reuse, including after owner
+or Network restart. No enable intent is restored automatically. The optional
+`apps/tailnet_subrouter` project demonstrates this boundary and starts disabled.
+Network owns addresses/routes/bridges; Buses arbitrates caller-owned
+serial claims and shared CAN receive subscriptions. Hardware use observations
+contain flags/counts, not private process or claim handles.
+
+Overview keeps Internet and Remote access together as operational entry points.
+Remote access groups Tailscale enrollment and advanced Erlang distribution without
+combining their credentials. Application storage administration belongs to Settings.
+
 ## Board configuration
 
 Each device target declares wiring in `:nerves_gate, :board`:

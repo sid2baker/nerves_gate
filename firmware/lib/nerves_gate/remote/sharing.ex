@@ -70,6 +70,19 @@ defmodule NervesGate.Remote.Sharing do
 
   def change(:sharing_sync, _, routes) when is_list(routes), do: {:ok, routes}
 
+  def change(:sharing_claim, %{route: route, scope: %{cidr: route}} = params, routes)
+      when is_binary(route) and is_list(routes) do
+    if route in routes,
+      do:
+        {:error,
+         %{
+           code: "route_in_use",
+           message:
+             "This subnet is already advertised. Existing advertisements cannot be adopted by an application."
+         }},
+      else: change(:sharing_enable, params, routes)
+  end
+
   def change(:sharing_enable, %{route: route, scope: %{cidr: route}}, routes)
       when is_binary(route) and is_list(routes),
       do: {:ok, Enum.sort(Enum.uniq(routes ++ [route]))}

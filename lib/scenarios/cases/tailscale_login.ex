@@ -91,7 +91,7 @@ defmodule Scenarios.Cases.TailscaleLogin do
     Scenarios.Device.await(vm, "Tailscale disconnect completed", &is_nil(&1.remote.operation))
   end
 
-  alias NervesGateWeb.TailscaleLive
+  alias NervesGateWeb.RemoteLive
   alias Phoenix.LiveView.{Socket, Lifecycle}
 
   defp assert_remote_sign_in(vm) do
@@ -104,7 +104,7 @@ defmodule Scenarios.Cases.TailscaleLogin do
       %Socket{private: %{lifecycle: %Lifecycle{}, live_temp: %{}}}
       |> Phoenix.LiveView.clear_flash()
 
-    {:ok, observer} = Scenarios.Device.rpc(vm, TailscaleLive, :mount, [%{}, %{}, raw])
+    {:ok, observer} = Scenarios.Device.rpc(vm, RemoteLive, :mount, [%{}, %{}, raw])
 
     observer =
       Phoenix.Component.assign(observer,
@@ -123,7 +123,7 @@ defmodule Scenarios.Cases.TailscaleLogin do
       )
 
     disconnected =
-      Scenarios.Device.rpc(vm, TailscaleLive, :refresh_observations, [
+      Scenarios.Device.rpc(vm, RemoteLive, :refresh_observations, [
         requester,
         NervesGate.Projection.disconnected().status
       ])
@@ -132,7 +132,7 @@ defmodule Scenarios.Cases.TailscaleLogin do
     assert private
 
     ready =
-      Scenarios.Device.rpc(vm, TailscaleLive, :refresh_observations, [requester, projection])
+      Scenarios.Device.rpc(vm, RemoteLive, :refresh_observations, [requester, projection])
 
     url = ready.assigns.login_url
 
@@ -153,19 +153,19 @@ defmodule Scenarios.Cases.TailscaleLogin do
     assert safe
 
     {:noreply, closed} =
-      Scenarios.Device.rpc(vm, TailscaleLive, :handle_event, ["close-login", %{}, ready])
+      Scenarios.Device.rpc(vm, RemoteLive, :handle_event, ["close-login", %{}, ready])
 
     # Another changed observation rechecks the same URL without reopening the popup.
     changed = put_in(projection.remote.version, "changed-observation")
-    closed = Scenarios.Device.rpc(vm, TailscaleLive, :refresh_observations, [closed, changed])
+    closed = Scenarios.Device.rpc(vm, RemoteLive, :refresh_observations, [closed, changed])
     refute closed.assigns.login_open
 
     {:noreply, reopened} =
-      Scenarios.Device.rpc(vm, TailscaleLive, :handle_event, ["show-login", %{}, closed])
+      Scenarios.Device.rpc(vm, RemoteLive, :handle_event, ["show-login", %{}, closed])
 
     assert reopened.assigns.login_open
 
-    observer = Scenarios.Device.rpc(vm, TailscaleLive, :refresh_observations, [observer, changed])
+    observer = Scenarios.Device.rpc(vm, RemoteLive, :refresh_observations, [observer, changed])
     assert observer.assigns.login_url == nil
     refute observer.assigns.login_open
 
@@ -174,7 +174,7 @@ defmodule Scenarios.Cases.TailscaleLogin do
       | remote: %{projection.remote | state: "online", auth_state: "authenticated"}
     }
 
-    connected = Scenarios.Device.rpc(vm, TailscaleLive, :refresh_observations, [reopened, online])
+    connected = Scenarios.Device.rpc(vm, RemoteLive, :refresh_observations, [reopened, online])
     assert connected.assigns.login_url == nil
     refute connected.assigns.login_open
     assert Phoenix.Flash.get(connected.assigns.flash, :info) == "Connected to Tailscale."
@@ -182,7 +182,7 @@ defmodule Scenarios.Cases.TailscaleLogin do
 
   defp remote_page(socket) do
     socket.assigns
-    |> TailscaleLive.render()
+    |> RemoteLive.render()
     |> Phoenix.HTML.Safe.to_iodata()
     |> IO.iodata_to_binary()
     |> Floki.parse_document!()

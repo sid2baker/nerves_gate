@@ -28,10 +28,27 @@ defmodule NervesGate.SDKBackend do
   def call(operation, arguments) when operation in @bus_operations,
     do: available(fn -> Buses.sdk(operation, arguments) end)
 
+  # These calls must also originate from the actual application process, never
+  # this observation server or a Task acting as a caller proxy.
+  def call(:network_claim_local, [interface, address, prefix]),
+    do: available(fn -> local_result(Network.claim_local(interface, address, prefix)) end)
+
+  def call(:network_local_status, []),
+    do: available(fn -> local_result(Network.local_status()) end)
+
+  def call(:network_advertise_local, [ref]),
+    do: available(fn -> local_result(Network.advertise_local(ref)) end)
+
+  def call(:network_release_local, [ref]),
+    do: available(fn -> local_result(Network.release_local(ref)) end)
+
   def call(:storage_data_dir, [app]), do: Storage.data_dir(app)
 
   def call(operation, arguments),
     do: available(fn -> GenServer.call(__MODULE__, {operation, arguments}) end)
+
+  defp local_result({:error, %{code: code}}), do: {:error, code}
+  defp local_result(result), do: result
 
   @impl GenServer
   def init(_) do
@@ -121,9 +138,21 @@ defmodule NervesGate.SDKBackend do
   defp query(:network, _) do
     available(fn ->
       case Network.status() do
-        %{observed: observed} when is_map(observed) ->
+        %{observed: observed} = status when is_map(observed) ->
+          local = Map.get(status, :local)
+
           interfaces =
-            Enum.map(observed.ports, &interface(&1, :ethernet)) ++
+            Enum.map(observed.ports, fn port ->
+              %{
+                interface(port, :ethernet)
+                | application_enabled?:
+                    get_in(NervesGate.Config.ports(status.config && status.config["network"]), [
+                      port.name,
+                      "role"
+                    ]) == "application",
+                  claimed?: local != nil and local.interface == port.name
+              }
+            end) ++
               [
                 interface(observed.bridge, :other),
                 interface(observed.usb, :usb),

@@ -143,12 +143,40 @@ defmodule Scenarios.Cases.Apps do
     try do
       app = Workbench.Applications.scaffold!(Path.join(dir, "generated_fixture"), local_sdk: true)
       package = Workbench.Applications.package!(app.path)
+      bytes = File.read!(package)
+      remote = "/tmp/reviewed-generated-app.ez"
+      storage = Scenarios.Device.rpc(vm, NervesGate.Storage, :commissioning)
+
+      expected = %{
+        app: "generated_fixture",
+        version: "1.0.0",
+        sha256: Base.encode16(:crypto.hash(:sha256, bytes), case: :lower),
+        card_id: storage.card_id
+      }
+
+      assert :ok = Scenarios.Device.rpc(vm, File, :write, [remote, bytes])
+
+      assert {:error, :review_changed} =
+               apps(vm, :install_new, [remote, %{expected | card_id: "changed-card"}])
+
+      assert {:ok, _} = apps(vm, :install_new, [remote, expected])
+      assert {:ok, stopped} = apps(vm, :list, [])
+
+      assert Enum.any?(
+               stopped,
+               &(&1.app == "generated_fixture" and &1.enabled == false and &1.running? == false)
+             )
+
+      assert {:error, :review_changed} = apps(vm, :install_new, [remote, expected])
+      assert :ok = apps(vm, :uninstall, [:generated_fixture])
+      assert :ok = Scenarios.Device.rpc(vm, File, :rm, [remote])
       assert {:ok, _} = Scenarios.Apps.install(vm, package)
       assert {:ok, entries} = apps(vm, :list, [])
       assert Enum.any?(entries, &(&1.app == "generated_fixture" and &1.running?))
       assert :ok = apps(vm, :uninstall, [:generated_fixture])
     after
       apps(vm, :uninstall, [:generated_fixture])
+      Scenarios.Device.rpc(vm, File, :rm, ["/tmp/reviewed-generated-app.ez"])
       File.rm_rf!(dir)
     end
   end

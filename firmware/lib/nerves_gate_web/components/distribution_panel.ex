@@ -10,7 +10,7 @@ defmodule NervesGateWeb.DistributionPanel do
 
   def connection(assigns) do
     ~H"""
-    <.panel title="Erlang distribution" icon="network" id="erlang-distribution">
+    <.panel title="Developer runtime · Erlang distribution" icon="network" id="erlang-distribution">
       <%= if @node == :nonode@nohost do %>
         <p id="distribution-disabled" class="ui-help">
           Not running. Firmware starts distribution automatically when Tailscale is online
@@ -20,9 +20,14 @@ defmodule NervesGateWeb.DistributionPanel do
         <.setting_row label="Node name">
           <code id="distribution-node">{@node}</code>
         </.setting_row>
-        <.setting_row label="Cookie">
+        <p class="ui-help">
+          Advanced developer access, separate from Tailscale enrollment. Credentials are hidden until explicitly requested.
+        </p>
+        <.setting_row :if={@cookie} label="Cookie">
           <code id="distribution-cookie">{@cookie}</code>
         </.setting_row>
+        <.button :if={!@cookie} phx-click="show-cookie" variant="secondary">Reveal runtime credentials</.button>
+        <.button :if={@cookie} phx-click="hide-cookie" variant="secondary">Hide runtime credentials</.button>
         <.notice tone="warning">
           Anyone with this cookie and network access can execute code on the gateway.
           This page uses the existing trusted-network access model; it has no sign-in protection.
@@ -40,7 +45,7 @@ defmodule NervesGateWeb.DistributionPanel do
         <p class="ui-help">
           Livebook must run the same Elixir minor version and a compatible OTP version.
           Add dependencies to firmware, not with Mix.install/2. Keep permanent equipment connections
-          supervised by the gateway application.
+          supervised by their owning application.
         </p>
       <% end %>
       <.setting_row label="Runtime">Elixir {@elixir} · OTP {@otp}</.setting_row>

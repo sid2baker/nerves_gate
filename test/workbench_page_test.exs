@@ -85,6 +85,23 @@ defmodule WorkbenchWeb.WorkbenchPageTest do
 
     assert Floki.find(document, "#create-application input[name='application[path]']") != []
     assert Floki.find(document, "#open-application input[name='application[path]']") != []
+
+    assert Floki.attribute(
+             document,
+             "#starter-tailnet-subrouter input[name='application[path]']",
+             "value"
+           ) == [Path.join(Workbench.root(), "apps/tailnet_subrouter")]
+
+    assert Floki.find(document, "#starter-tailnet-subrouter form[phx-submit=open_application]") !=
+             []
+
+    assert Floki.text(Floki.find(document, "#starter-tailnet-subrouter")) =~ "Starts disabled"
+
+    assert Floki.find(
+             document,
+             "#starter-tailnet-subrouter [phx-submit=operation], #starter-tailnet-subrouter [phx-click=operation]"
+           ) == []
+
     assert Floki.find(document, "button[phx-value-kind=test]") == []
     [path] = Floki.attribute(document, "#applications a", "href")
     assert path == "/develop/applications/" <> Base.url_encode64(app.path, padding: false)
@@ -100,6 +117,79 @@ defmodule WorkbenchWeb.WorkbenchPageTest do
     assert Floki.find(document, "#application-actions button[phx-value-kind=package]") != []
     assert Floki.find(document, "#install-application select[name=device]") != []
     assert Floki.find(document, "#create-application") == []
+  end
+
+  test "physical application install reviews belong to their project and never imply start or upgrade" do
+    app = %{path: "/projects/demo", name: "demo"}
+
+    review = %{
+      kind: :app_install,
+      project: app.path,
+      app: "demo",
+      version: "1.0.0",
+      address: "gateway.example",
+      serial: "board-42",
+      target: "ec100",
+      firmware: "test",
+      sdk_requirement: "~> 0.1.0",
+      bytes: 1024,
+      sha256: "reviewed-hash",
+      token: "one-use"
+    }
+
+    operation =
+      Map.merge(operation(), %{
+        kind: "app_install_review",
+        status: :awaiting_confirmation,
+        review: review,
+        context: %{subject: app.path, address: review.address}
+      })
+
+    values =
+      assigns(
+        applications: [app],
+        app_id: "demo",
+        app: app,
+        physical_devices: [%{address: review.address}],
+        operation: operation
+      )
+
+    document =
+      render_component(&WorkbenchWeb.ApplicationsLive.render/1, values) |> Floki.parse_document!()
+
+    assert Floki.attribute(
+             document,
+             "#review-physical-install select[name=address] option",
+             "value"
+           ) == [review.address]
+
+    assert Floki.find(document, "#confirm-physical-install input[name=address][required]") != []
+
+    assert Floki.find(document, "#confirm-physical-install input[name=review_id][value=one-use]") !=
+             []
+
+    assert Floki.text(Floki.find(document, "#physical-install-review")) =~ "stopped, disabled"
+
+    assert WorkbenchWeb.Components.operation_path(operation) ==
+             "/develop/applications/" <> Base.url_encode64(app.path, padding: false)
+
+    other = %{app | path: "/projects/other"}
+
+    document =
+      render_component(&WorkbenchWeb.ApplicationsLive.render/1, Keyword.put(values, :app, other))
+      |> Floki.parse_document!()
+
+    assert Floki.find(document, "#confirm-physical-install") == []
+    {:ok, device} = Workbench.LANDiscovery.manual(review.address)
+
+    document =
+      render_component(
+        &WorkbenchWeb.PhysicalDeviceLive.render/1,
+        assigns(device: device, tab: "firmware", operation: operation)
+      )
+      |> Floki.parse_document!()
+
+    assert Floki.find(document, "#confirm-firmware, #confirm-physical-install") == []
   end
 
   test "unified directory shows simulated and unverified physical devices with safe separate links" do

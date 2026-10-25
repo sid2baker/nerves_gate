@@ -42,7 +42,7 @@ defmodule NervesGateWeb.StorageLive do
     assigns = assign(assigns, :storage, assigns.projection.storage)
 
     ~H"""
-    <.back_link navigate="/">Overview</.back_link>
+    <.back_link navigate="/settings">Settings</.back_link>
     <.page_header
       eyebrow="Commissioning · optional"
       title="Application storage"

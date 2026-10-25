@@ -23,8 +23,27 @@ not firmware status maps. Commands return `:ok`, `{:ok, value}` or `{:error, rea
 A timeout means an unknown outcome, not cancellation or permission to retry.
 
 The runtime selects the backend with `config :nerves_gate_sdk, backend: Module`.
-Applications should not select a device backend themselves. SDK APIs do not configure networks, manage
-Tailscale, SSH, apps or firmware, expose cookies, or reboot/reset the device.
+Applications should not select a device backend themselves. SDK APIs do not manage
+Internet/USB, Tailscale enrollment or credentials, SSH, apps or firmware, expose
+cookies, or reboot/reset the device.
+
+## Isolated local-network access (unreleased source API)
+
+An operator must explicitly enable a non-Internet Ethernet port for applications.
+`Network.claim_local(interface, address, prefix)` gives the actual caller exclusive
+access to one temporary static local interface, without DHCP, DNS or a default route.
+`Network.local_status/0` reads only that caller's private lease, including its handle
+when a claim reply was lost. `Network.advertise_local/1` explicitly advertises the
+claim's ready subnet through the platform's enrolled tailnet, refusing an already
+advertised route. It does not enroll/disconnect Tailscale or prove route approval.
+
+`Network.release_local/1` withdraws the claim-owned advertisement before removing
+its address. Owner death schedules cleanup; unresolved cleanup and corrupt ownership
+journals block reuse, including after platform restart. Never blindly retry an
+uncertain write. Lease references are private and must not enter logs/projections.
+The first implementation supports one independent Ethernet claim per gateway.
+See `apps/tailnet_subrouter` in the source repository for an optional, disabled-on-start
+example. This API has not been published in a new SDK release.
 
 Applications on a device are trusted same-BEAM OTP applications, not sandboxed.
 

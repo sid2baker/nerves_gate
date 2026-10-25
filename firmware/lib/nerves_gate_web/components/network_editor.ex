@@ -371,22 +371,42 @@ defmodule NervesGateWeb.NetworkEditor do
                   settings={@settings}
                   cellular_available={@cellular_available}
                 />
+              <% {:application, _} -> %>
+                <.panel title="Application access" icon="port">
+                  <.choice_group field={@form[:enabled]} label="Ethernet interface">
+                    <:option
+                      value="true"
+                      title="Enabled"
+                      description="Allow an application to claim this link and request its local IP configuration."
+                    />
+                    <:option
+                      value="false"
+                      title="Disabled"
+                      description="Keep this link down and unavailable to applications."
+                    />
+                  </.choice_group>
+                  <p class="ui-help">
+                    Enabling does not assign an IP address, run DHCP, join ports or advertise a route. Existing local addressing on this port is removed when these changes are saved. Applications own their equipment configuration.
+                  </p>
+                </.panel>
               <% :ports -> %>
-                <.panel title="LAN ports" icon="port">
-                  <.choice_group field={@form[:mode]} label="Port arrangement">
+                <.panel title="Ethernet arrangement" icon="port">
+                  <.choice_group field={@form[:mode]} label="Network topology">
                     <:option
                       value="ports"
-                      title="Separate"
-                      description="Use each port independently."
+                      title="Independent networks"
+                      description="Keep the Internet uplink and local network isolated."
                     />
                     <:option
                       value="shared"
-                      title="Joined"
-                      description="Use both ports as one network."
+                      title="One joined network"
+                      description="Use both ports like a switch on the same trusted network."
                     />
                   </.choice_group>
                   <.notice :if={@form.params["mode"] == "shared"} tone="warning">
                     Only join ports on the same trusted network. Separate port assignments are replaced.
+                    With 4G-only Internet, use a manual local address with no Ethernet router or DNS servers.
+                    Joining does not provide Internet sharing or a DHCP server.
                   </.notice>
                   <.address_fields
                     :if={@form.params["mode"] == "shared"}
@@ -573,7 +593,7 @@ defmodule NervesGateWeb.NetworkEditor do
           :if={@form.params["internet_mode"] != "cellular" and @base["mode"] == "shared"}
           class="ui-help"
         >
-          LAN ports are joined. Their addressing is configured in Settings.
+          LAN ports are joined. Their addressing and topology are administrator-managed through the Network API.
         </p>
         <p
           :if={@form.params["internet_mode"] in ["cellular", "backup"] and !@settings}
@@ -667,27 +687,29 @@ defmodule NervesGateWeb.NetworkEditor do
 
   defp equipment_form(assigns) do
     ~H"""
-    <.panel title="Equipment network" icon="equipment">
+    <.panel title="Local network" icon="network">
       <.choice_group field={@form[:enabled]} label="Use this LAN port">
         <:option
           value="true"
-          title="Equipment"
-          description="Assign an address on your equipment’s network."
+          title="Local network"
+          description="Assign a gateway address for application network access."
         />
         <:option value="false" title="Not configured" description="Leave this port unused." />
       </.choice_group>
       <div :if={@form.params["enabled"] == "true"} class="ui-field-grid">
         <.field
           field={@form[:equipment_ip]}
-          label="Gateway address on the equipment network"
-          help="Use an unused address in your equipment’s subnet."
+          label="Gateway address on the local network"
+          help="Use an unused address in the intended subnet. Applications configure their equipment separately."
           placeholder="192.168.10.2"
           required
           autocomplete="off"
         />
         <.field field={@form[:equipment_mask]} label="Subnet mask" required autocomplete="off" />
       </div>
-      <p class="ui-help">Equipment keeps its own addresses; Internet settings are preserved.</p>
+      <p class="ui-help">
+        This configures only the gateway interface, not connected devices or protocols. Internet settings are preserved.
+      </p>
     </.panel>
     """
   end
@@ -721,6 +743,7 @@ defmodule NervesGateWeb.NetworkEditor do
 
   defp form_id(:internet), do: "network-form"
   defp form_id(:ports), do: "lan-ports-form"
+  defp form_id({:application, _}), do: "application-port-form"
   defp form_id(_), do: "equipment-network-form"
   defp submit_label(:internet, 1, _, %{"internet_mode" => "cellular"}), do: "Connect"
   defp submit_label(:internet, 1, _, _), do: "Continue"

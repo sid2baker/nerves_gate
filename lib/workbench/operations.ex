@@ -12,6 +12,12 @@ defmodule Workbench.Operations do
   def stop_session(id), do: GenServer.call(__MODULE__, {:stop_session, id})
   def review_firmware(params), do: GenServer.call(__MODULE__, {:review_firmware, params})
 
+  def review_app_install(project, address),
+    do: GenServer.call(__MODULE__, {:review_app_install, project, address})
+
+  def confirm_app_install(id, address, project),
+    do: GenServer.call(__MODULE__, {:confirm_app_install, id, address, project})
+
   def confirm_firmware(id, address),
     do: GenServer.call(__MODULE__, {:confirm_firmware, id, address})
 
@@ -69,6 +75,48 @@ defmodule Workbench.Operations do
     state = if result == :ok, do: drop_review(state), else: state
     {:reply, result, %{state | stopping: result == :ok}}
   end
+
+  def handle_call({:review_app_install, project, address}, _, state) do
+    with :ok <- admitted("install", project), :ok <- admitted("device_info", address) do
+      start_task(
+        state,
+        "app_install_review",
+        fn report ->
+          {:review, Workbench.PhysicalAppInstall.review!(project, address, report)}
+        end,
+        nil,
+        %{subject: project, address: address}
+      )
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call(
+        {:confirm_app_install, id, address, project},
+        _,
+        %{review: %{public: %{kind: :app_install, project: project}}} = state
+      ) do
+    try do
+      :ok = Workbench.PhysicalAppInstall.confirmation!(state.review, id, address)
+      plan = state.review
+
+      start_task(
+        %{state | review: nil},
+        "app_install",
+        fn report ->
+          Workbench.PhysicalAppInstall.install!(plan, report)
+        end,
+        nil,
+        %{subject: project, address: plan.public.address}
+      )
+    rescue
+      error in ArgumentError -> {:reply, {:error, Exception.message(error)}, state}
+    end
+  end
+
+  def handle_call({:confirm_app_install, _, _, _}, _, state),
+    do: {:reply, {:error, "Review this application's physical install first"}, state}
 
   def handle_call({:review_firmware, params}, _, state) do
     start_task(
@@ -166,6 +214,14 @@ defmodule Workbench.Operations do
 
   def handle_call({:confirm_firmware, _, _}, _, %{review: %{public: %{kind: :reboot}}} = state),
     do: {:reply, {:error, "This is a reboot observation review, not a firmware update"}, state}
+
+  def handle_call(
+        {:confirm_firmware, _, _},
+        _,
+        %{review: %{public: %{kind: :app_install}}} = state
+      ),
+      do:
+        {:reply, {:error, "This is an application install review, not a firmware update"}, state}
 
   def handle_call({:confirm_firmware, _, _}, _, %{review: nil} = state),
     do: {:reply, {:error, "Review the firmware and device first"}, state}
@@ -359,6 +415,9 @@ defmodule Workbench.Operations do
                  :factory ->
                    "Factory review complete. Transport loaded into RAM only; no eMMC writes."
 
+                 :app_install ->
+                   "Application install reviewed. No package uploaded or device changes made. Confirmation installs a new stopped app only."
+
                  :reboot ->
                    "Reboot observation reviewed. Do not press the button until observation is armed. No reboot command was sent."
 
@@ -477,6 +536,7 @@ defmodule Workbench.Operations do
       case Map.get(state.review.public, :kind) do
         :factory -> "Factory review expired; re-enter MASKROM before reviewing again"
         :reboot -> "Reboot observation review expired. Review again before pressing the button."
+        :app_install -> "Application install review expired; review the package and device again"
         _ -> "Firmware review expired"
       end
 
@@ -490,6 +550,7 @@ defmodule Workbench.Operations do
     case state.review do
       %{public: %{kind: :factory}} = plan -> Workbench.FactoryProvisioning.cleanup(plan)
       %{public: %{kind: :reboot}} -> :ok
+      %{public: %{kind: :app_install}} = plan -> Workbench.PhysicalAppInstall.cleanup(plan)
       plan -> Workbench.FirmwareUpdate.cleanup(plan)
     end
 

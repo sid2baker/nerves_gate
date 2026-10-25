@@ -455,7 +455,7 @@ defmodule WorkbenchWeb.PhysicalDeviceLive do
           <.button phx-click="refresh_images" variant="secondary">Refresh firmware list</.button>
           <.firmware_confirmation
             :if={
-              @operation.review && @operation.review[:kind] not in [:reboot, :factory] &&
+              @operation.review && @operation.review[:kind] not in [:reboot, :factory, :app_install] &&
                 Map.get(@operation.review, :address) == @device.address
             }
             review={@operation.review}

@@ -9,6 +9,39 @@ defmodule NervesGate.SDKOwnershipTest do
     %{buses: buses}
   end
 
+  test "configuration rejects active CAN subscribers before any hardware effect" do
+    state = %{claims: %{}, subscribers: %{"can0" => MapSet.new([self()])}}
+
+    assert {:reply, {:error, %{code: "port_in_use"}}, ^state} =
+             Buses.handle_call(
+               {:configure, "can0", %{"enabled" => "true", "bitrate" => "125000"}},
+               {self(), make_ref()},
+               state
+             )
+  end
+
+  test "public hardware usage contains only ownership flags and subscription counts" do
+    state = %{
+      adapter: nil,
+      ports: [%{name: "ttyS3"}, %{name: "can0"}],
+      claims: %{make_ref() => %{name: "ttyS3", pid: self(), uart: self()}},
+      subscribers: %{"can0" => MapSet.new([self()])},
+      operation: nil,
+      result: nil,
+      error: nil
+    }
+
+    assert {:reply, status, ^state} = Buses.handle_call(:status, nil, state)
+
+    assert status.ports == [
+             %{name: "ttyS3", claimed: true, subscribers: 0},
+             %{name: "can0", claimed: false, subscribers: 1}
+           ]
+
+    refute inspect(status) =~ "#PID"
+    refute inspect(status) =~ "#Reference"
+  end
+
   test "SDK bus subscriptions and claims reach the owner from the actual caller", %{buses: buses} do
     caller = self()
 

@@ -15,8 +15,7 @@ defmodule NervesGateWeb.DashboardLive do
     assigns =
       assign(assigns,
         settings: settings,
-        remote: assigns.projection.remote,
-        distribution_node: assigns.projection.system.node
+        remote: assigns.projection.remote
       )
 
     ~H"""
@@ -26,7 +25,7 @@ defmodule NervesGateWeb.DashboardLive do
     </p>
     <.notice :if={@projection.storage.available && @projection.storage.choice == :pending}>
       Application storage is not set up yet.
-      <.link navigate="/storage" class="ui-text-link">Set up an SD card or continue without apps →</.link>
+      <.link navigate="/settings/storage" class="ui-text-link">Set up an SD card or continue without apps →</.link>
     </.notice>
     <section class="ui-connections" aria-label="Gateway connections">
       <.navigation_card
@@ -43,33 +42,11 @@ defmodule NervesGateWeb.DashboardLive do
         title="Remote access"
         icon="shield"
         href="/remote"
-        id="connection-tailscale"
+        id="connection-remote"
         status={RemoteStatus.label(@remote)}
         tone={if @remote.available && @remote.state == "online", do: "good", else: "neutral"}
       >
-        {@remote.ipv4 || "Tailscale"}
-      </.navigation_card>
-      <.navigation_card
-        title="Erlang distribution"
-        icon="network"
-        href="/distribution"
-        id="connection-distribution"
-        status={if @distribution_node == :nonode@nohost, do: "Not running", else: "Running"}
-        tone={if @distribution_node == :nonode@nohost, do: "neutral", else: "good"}
-      >
-        {if @distribution_node == :nonode@nohost,
-          do: "Connect an Erlang or Elixir node",
-          else: Atom.to_string(@distribution_node)}
-      </.navigation_card>
-      <.navigation_card
-        title="Application storage"
-        icon="equipment"
-        href="/storage"
-        id="connection-storage"
-        status={NervesGateWeb.StorageLive.label(@projection.storage)}
-        tone={if @projection.storage.ready, do: "good", else: "neutral"}
-      >
-        SD card setup · applications and their data
+        {@remote.ipv4 || "Private network"} · developer runtime access
       </.navigation_card>
     </section>
     """
