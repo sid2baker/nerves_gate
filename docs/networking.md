@@ -239,6 +239,13 @@ cleared after each submission, never saved or shown in status, and filtered from
 request logs. Key login waits for authentication or machine approval within the
 operation deadline.
 
+Connect requires `NervesTime.sync_status().synchronized?` to be true so TLS
+certificate validation uses synchronized system time. While waiting, the page
+shows “Waiting for system time synchronization.” and disables Connect. Once time
+is synchronized, submit Connect explicitly; rejected requests are not replayed.
+Losing time synchronization does not disconnect an existing session or block
+renaming and disconnecting.
+
 The same page renames and disconnects. Disconnect uses `Tailscaled.down/0`, keeping
 enrollment and preferences; reconnect uses `up/0`, or login when enrollment is
 needed. Disconnecting can cut off a browser using the VPN; USB and LAN remain.

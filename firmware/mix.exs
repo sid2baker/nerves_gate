@@ -128,7 +128,12 @@ defmodule NervesGate.MixProject do
       {:nerves_ssh, "~> 1.3", targets: @targets},
       {:mdns_lite, "~> 0.9.3", targets: @targets},
       {:nerves_time, "~> 0.4", targets: @targets},
-      {:vintage_net, "~> 0.13", runtime: Mix.target() != :host},
+      # Teardown fix pending upstream release: https://github.com/nerves-networking/vintage_net/issues/597
+      {:vintage_net, "~> 0.13",
+       github: "jannikbecher/vintage_net",
+       ref: "5cd3e5fc5876f17367c47f84073ce39933c3efe6",
+       override: true,
+       runtime: Mix.target() != :host},
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_ecm, "~> 0.2.1", runtime: Mix.target() != :host},

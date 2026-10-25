@@ -14,6 +14,54 @@ defmodule NervesGateWeb.ProjectionTest do
 
   test "remote drafts, busy state and private auth keys stay view-local", do: assert_remote_ui()
 
+  test "time synchronization enables commissioning without submitting the draft" do
+    remote = %{
+      NervesGate.Remote.unavailable()
+      | available: true,
+        state: "offline",
+        auth_state: "needs_login"
+    }
+
+    projection = Projection.apply(projection(), {:replace, :remote, remote})
+    socket = Phoenix.Component.assign(remote_socket(), projection: projection.status)
+
+    {:noreply, socket} =
+      TailscaleLive.handle_event("change", %{"remote" => %{"hostname" => "my-gateway"}}, socket)
+
+    refute projection.status.actions["remote.connect"].enabled
+    page = remote_page(socket)
+    assert [_] = Floki.find(page, "#tailscale-save[disabled]")
+
+    assert Floki.text(Floki.find(page, "#tailscale-connect-unavailable")) =~
+             "Waiting for system time synchronization."
+
+    synchronized =
+      Projection.apply(projection, {:replace, :remote, %{remote | time_synchronized: true}})
+
+    socket = TailscaleLive.refresh_observations(socket, synchronized.status)
+    assert socket.assigns.projection.actions["remote.connect"].enabled
+    assert socket.assigns.form.params["hostname"] == "my-gateway"
+    assert socket.assigns.dirty
+    assert socket.assigns.request == nil
+    refute socket.assigns.login_requested
+    assert [] = Floki.find(remote_page(socket), "#tailscale-save[disabled]")
+    assert [] = Floki.find(remote_page(socket), "#tailscale-connect-unavailable")
+
+    online =
+      Projection.apply(
+        synchronized,
+        {:replace, :remote, %{remote | state: "online", auth_state: "authenticated"}}
+      )
+
+    socket = TailscaleLive.refresh_observations(socket, online.status)
+    refute socket.assigns.projection.remote.time_synchronized
+    assert socket.assigns.projection.actions["remote.configure"].enabled
+    assert socket.assigns.projection.actions["remote.disconnect"].enabled
+    assert socket.assigns.request == nil
+    assert [] = Floki.find(remote_page(socket), "#tailscale-save[disabled]")
+    assert [] = Floki.find(remote_page(socket), "#tailscale-connect-unavailable")
+  end
+
   test "network forms preserve unrelated roles and editor drafts",
     do: assert_network_forms(projection().status)
 

@@ -257,6 +257,12 @@ defmodule NervesGateWeb.TailscaleLive do
       Development preview. Your computer’s VPN is never changed.
     </.notice>
     <.panel title="Connection settings" id="tailscale-settings">
+      <.notice
+        :if={@remote.state != "online" and @projection.actions["remote.connect"].reason != nil}
+        id="tailscale-connect-unavailable"
+      >
+        {@projection.actions["remote.connect"].reason.message}
+      </.notice>
       <.form for={@form} id="tailscale-form" phx-submit="save" class="ui-stack">
         <.field
           field={@form[:hostname]}

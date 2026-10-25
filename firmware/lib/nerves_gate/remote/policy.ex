@@ -17,6 +17,7 @@ defmodule NervesGate.Remote.Policy do
       operation: nil,
       error: nil,
       verified: false,
+      time_synchronized: false,
       permitted_routes: nil,
       sharing: %{ready: false, uncertain: []}
     }
@@ -58,12 +59,19 @@ defmodule NervesGate.Remote.Policy do
 
   def validate(_, _), do: {:error, Error.new("invalid_parameters", "Invalid Tailscale command.")}
 
-  def available(%{operation: operation}) when not is_nil(operation),
+  def available(remote, operation \\ nil)
+
+  def available(%{operation: operation}, _) when not is_nil(operation),
     do: {:error, Error.new("remote_busy", "A Tailscale change is still running.")}
 
-  def available(%{available: true}), do: :ok
+  def available(%{available: true, time_synchronized: true}, :connect), do: :ok
 
-  def available(_),
+  def available(%{available: true}, :connect),
+    do: {:error, Error.new("time_unsynchronized", "Waiting for system time synchronization.")}
+
+  def available(%{available: true}, _), do: :ok
+
+  def available(_, _),
     do:
       {:error,
        Error.new("remote_unavailable", "Tailscale is starting or unavailable. Try again shortly.")}

@@ -22,6 +22,12 @@ defmodule Workbench.MixProject do
       deps: [
         {:nerves_gate_sdk, path: "sdk"},
         {:nerves_gate, path: "firmware", runtime: false},
+        # Teardown fix pending upstream release: https://github.com/nerves-networking/vintage_net/issues/597
+        {:vintage_net, "~> 0.13",
+         github: "jannikbecher/vintage_net",
+         ref: "5cd3e5fc5876f17367c47f84073ce39933c3efe6",
+         override: true,
+         runtime: false},
         {:phoenix, "~> 1.8"},
         {:phoenix_live_view, "~> 1.2.13"},
         {:bandit, "~> 1.12"},

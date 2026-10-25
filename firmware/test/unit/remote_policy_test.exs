@@ -4,6 +4,31 @@ defmodule NervesGate.RemotePolicyTest do
   test "auth keys are validated, transient and sanitized", do: assert_auth_keys()
   test "HTTPS Serve waits for an enrolled and usable identity", do: assert_serve_policy()
 
+  test "only connect requires synchronized system time" do
+    remote = %{Policy.unavailable() | available: true}
+
+    assert {:error,
+            %{
+              code: "time_unsynchronized",
+              message: "Waiting for system time synchronization."
+            }} = Policy.available(remote, :connect)
+
+    assert :ok = Policy.available(%{remote | time_synchronized: true}, :connect)
+
+    for operation <- [:configure, :disconnect] do
+      assert :ok = Policy.available(remote, operation)
+    end
+
+    assert {:error, %{code: "time_unsynchronized"}} =
+             Policy.available(Map.delete(remote, :time_synchronized), :connect)
+
+    assert {:error, %{code: "remote_unavailable"}} =
+             Policy.available(Policy.unavailable(), :connect)
+
+    assert {:error, %{code: "remote_busy"}} =
+             Policy.available(%{remote | operation: "connect"}, :connect)
+  end
+
   defp assert_auth_keys do
     assert {:ok, %{hostname: "gateway", auth_key: "test-key"}} =
              Policy.validate(:connect, %{"hostname" => "GATEWAY", "auth_key" => "test-key"})

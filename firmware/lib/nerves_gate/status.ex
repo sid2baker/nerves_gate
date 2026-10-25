@@ -103,7 +103,8 @@ defmodule NervesGate.Status do
         action("Verify and save SIM PIN", ["pin"], Cellular.sim_available(status, :ready)),
       "cellular.forget_pin" =>
         action("Forget saved PIN", [], Cellular.available(status, :forget_pin)),
-      "remote.connect" => action("Connect Tailscale", ["hostname"], remote_ready),
+      "remote.connect" =>
+        action("Connect Tailscale", ["hostname"], Remote.Policy.available(remote, :connect)),
       "remote.configure" => action("Save device name", ["hostname"], remote_ready),
       "remote.disconnect" => action("Disconnect Tailscale", [], remote_ready),
       "remote.login_url" => action("Continue Tailscale login", [], remote_ready),

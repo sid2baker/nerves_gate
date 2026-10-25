@@ -8,7 +8,9 @@ defmodule NervesGate.Remote do
   or `{:error, reason}`. Only one daemon operation runs at a time. Acceptance
   does not mean completion: read `status/0` for `:operation` and `:error`.
   Editors pass `expected:`, the hostname their draft started from; a changed
-  hostname is rejected as stale before any daemon write.
+  hostname is rejected as stale before any daemon write. `connect/2` also requires
+  synchronized system time. Synchronization only enables a new request; it never
+  replays a rejected command or disconnects an existing session.
 
   ## Queries and notifications
 
@@ -32,6 +34,9 @@ defmodule NervesGate.Remote do
   use GenServer
   alias NervesGate.{Alarms, Observations}
   alias NervesGate.Remote.{Policy, Sharing}
+
+  # NervesTime is device-only; host observations report unsynchronized time.
+  @compile {:no_warn_undefined, NervesTime}
 
   @doc false
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -139,7 +144,7 @@ defmodule NervesGate.Remote do
   def handle_call({:command, operation, params, expected}, _, state) do
     observed = snapshot(state)
 
-    with :ok <- Policy.available(observed),
+    with :ok <- Policy.available(observed, operation),
          :ok <- Policy.expected(observed, expected),
          {:ok, params} <- Policy.validate(operation, params) do
       state =
@@ -320,7 +325,17 @@ defmodule NervesGate.Remote do
   defp snapshot(state) do
     NervesGate.Remote.Tailscaled.snapshot()
     |> Policy.sanitize()
-    |> Map.merge(%{operation: state.operation, error: state.error, sharing: state.sharing})
+    |> Map.merge(%{
+      operation: state.operation,
+      error: state.error,
+      sharing: state.sharing,
+      time_synchronized: time_synchronized?()
+    })
+  end
+
+  defp time_synchronized? do
+    Process.whereis(NervesTime.Ntpd) != nil and
+      match?(%{synchronized?: true}, NervesGate.Error.protect(&NervesTime.sync_status/0))
   end
 
   defp publish(state) do
