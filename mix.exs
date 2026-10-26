@@ -137,6 +137,47 @@ defmodule Workbench.MixProject do
 
   # Host-only native orchestration. Nerves device builds and user apps run
   # in supervised OS processes instead; their compiler state must be isolated.
+  defp project_modules(app) do
+    path = Path.join([Mix.Project.app_path(), "ebin", "#{app}.app"])
+
+    case :file.consult(String.to_charlist(path)) do
+      {:ok, [{:application, ^app, spec}]} -> spec[:modules] || []
+      _ -> []
+    end
+  end
+
+  defp restore_modules(modules, before) do
+    Enum.each(modules, fn module ->
+      previous = Map.get(before, module)
+
+      case :code.is_loaded(module) do
+        {:file, ^previous} ->
+          :ok
+
+        false ->
+          :ok
+
+        {:file, _} ->
+          unless :code.soft_purge(module) and :code.delete(module) and :code.soft_purge(module),
+            do: Mix.raise("Host checks left executing subsystem code: #{inspect(module)}")
+
+          restore_module(module, previous)
+      end
+    end)
+  end
+
+  defp restore_module(module, path) when is_list(path) do
+    absolute =
+      path |> to_string() |> Path.expand() |> Path.rootname(".beam") |> String.to_charlist()
+
+    case :code.load_abs(absolute) do
+      {:module, ^module} -> :ok
+      _ -> Mix.raise("Could not restore root module #{inspect(module)} after host checks")
+    end
+  end
+
+  defp restore_module(_, _), do: :ok
+
   defp run(project, [task | args], options \\ []) do
     target = options[:target] || :host
 
@@ -154,6 +195,15 @@ defmodule Workbench.MixProject do
     compiler_options = Code.compiler_options()
     gateway_env = Application.get_all_env(:nerves_gate)
 
+    loaded_modules =
+      Map.new(:code.all_loaded(), fn {module, path} ->
+        {module,
+         if(is_list(path),
+           do: path |> to_string() |> Path.expand() |> String.to_charlist(),
+           else: path
+         )}
+      end)
+
     try do
       # Root code-reload config must not leak into standalone subsystem builds
       # which intentionally do not include the workstation's optional tools.
@@ -165,9 +215,14 @@ defmodule Workbench.MixProject do
       Mix.target(target)
 
       Mix.Project.in_project(Map.fetch!(apps, project), Path.join(__DIR__, project), fn _ ->
-        Mix.Task.clear()
-        Mix.Task.run("loadconfig")
-        Mix.Task.run(task, args)
+        try do
+          Mix.Task.clear()
+          Mix.Task.run("loadconfig")
+          Mix.Task.run(task, args)
+        after
+          if not running?, do: Application.stop(app)
+          restore_modules(project_modules(app), loaded_modules)
+        end
       end)
     after
       # Host tests may start the subsystem's application. Do not leave its

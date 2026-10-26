@@ -1,5 +1,7 @@
 defmodule Workbench.FirmwareCommandTest do
-  use ExUnit.Case, async: true
+  # These tests measure real subprocess deadlines; do not race VM startup with
+  # other host build/packaging tests. The command deadlines remain unchanged.
+  use ExUnit.Case, async: false
   alias Workbench.FirmwareCommand
 
   test "short commands can exit immediately without an output-acknowledgement EPIPE" do
