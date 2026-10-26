@@ -5,7 +5,8 @@ defmodule Scenarios.Cases.QemuSdk do
 
   def spec,
     do: %{
-      name: "QEMU SDK rejects bus access when hardware is absent",
+      name: "Managed QEMU SDK fences ownership and reports absent bus hardware",
+      fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
 
@@ -17,12 +18,46 @@ defmodule Scenarios.Cases.QemuSdk do
     # must not be replaced by firmware-side mocks or accept SDK traffic.
     assert {:ok, []} = Scenarios.Device.rpc(vm, CAN, :interfaces)
     frame = %CAN.Frame{id: 123, data: <<1, 2, 3>>}
-    assert {:error, :bus_unsupported} = Scenarios.Device.rpc(vm, CAN, :send, ["can0", frame])
-    assert {:error, :bus_unsupported} = Scenarios.Device.rpc(vm, CAN, :subscribe, ["can0"])
+
+    assert {:error, :application_not_running} =
+             Scenarios.Device.rpc(vm, CAN, :send, ["can0", frame])
+
     assert {:ok, ports} = Scenarios.Device.rpc(vm, RS485, :ports)
     assert Enum.all?(ports, &match?(%RS485.Port{available?: false}, &1))
-    assert {:error, :bus_unsupported} = Scenarios.Device.rpc(vm, RS485, :claim, ["rs485_1"])
+
+    Scenarios.ManagedApp.with_app(vm, fn client ->
+      assert {:error, :bus_unsupported} =
+               Scenarios.ManagedApp.call(vm, client, CAN, :send, ["can0", frame])
+
+      assert {:error, :bus_unsupported} =
+               Scenarios.ManagedApp.call(vm, client, CAN, :subscribe, ["can0"])
+
+      assert {:error, :bus_unsupported} =
+               Scenarios.ManagedApp.call(vm, client, RS485, :claim, ["rs485_1"])
+
+      subscriber_lifecycle(vm)
+    end)
+
     assert_can_codec(vm)
+  end
+
+  defp subscriber_lifecycle(vm) do
+    alias Scenarios.{Device, ManagedApp}
+    client = ManagedApp.client(vm)
+    assert :ok = ManagedApp.call(vm, client, NervesGateSDK.Events, :subscribe, [:network])
+    assert :ok = ManagedApp.call(vm, client, NervesGateSDK.Events, :subscribe, [:storage])
+    assert :ok = ManagedApp.call(vm, client, NervesGateSDK.Events, :unsubscribe, [:storage])
+
+    assert Map.has_key?(
+             Device.rpc(vm, :sys, :get_state, [NervesGate.SDKBackend]).monitors,
+             client
+           )
+
+    assert :ok = ManagedApp.stop_client(vm, client)
+
+    Device.await(vm, "dead managed subscriber is removed", fn _ ->
+      not Map.has_key?(Device.rpc(vm, :sys, :get_state, [NervesGate.SDKBackend]).monitors, client)
+    end)
   end
 
   defp assert_can_codec(vm) do

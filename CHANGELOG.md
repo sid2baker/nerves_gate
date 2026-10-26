@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Application metadata is current-only schema 1 with immutable artifact SHA/name/module catalogs. Old records are blocked without migration or reset, while gateway management remains available. Stateful SDK resource access now requires managed activation membership; raw IEx/RPC callers use administrative domain APIs.
+
 - Removed the equipment observation domain and SDK compatibility API; status schema is now 9. Device maintenance requires the current compiled APIs with no old-firmware identity fallback. SSH key initialization no longer imports an old NervesSSH key store: provision current configured keys explicitly before deployment.
 
 - Hardware exposes gateway resources, not equipment identities or protocol editors. Equipment label/scan/share commands and legacy `equipment`/joined network configuration are removed. Saved legacy settings are rejected with migration guidance, never rewritten or erased automatically; existing devices need separately authorized migration. Applications own equipment configuration and local addressing through process-owned SDK leases.
@@ -19,6 +21,8 @@
 - The simulator is part of the root project: `NervesGateSim` modules are now `Simulator` in `lib/simulator/`, and bench configurations moved from `sim/priv/qemu/` to `priv/simulator/`. Gateway discovery belongs to the workbench.
 
 ### Added
+
+- Verified retained archives and exact extracted content/modes for every activation, with no same-version replacement. Explicit verified module preload, bounded lifecycle workers, generation-fenced SDK resources and one checked cleanup/rollback path preserve actual-PID ownership and fail closed on uncertain effects.
 
 - Hardware shows Internet and application interfaces, claim/subscriber usage and explicit passive diagnostics. Remote access groups Tailscale with explicitly revealed developer runtime credentials; application storage lives under Settings. Replaced equipment/distribution/storage URLs are removed, not retained as aliases.
 - Application-enabled isolated Ethernet can be claimed with transient addressing and explicitly advertised through the existing tailnet. Journaled route ownership, owner-exit cleanup and blocked unknown outcomes prevent unowned route adoption or premature address removal.

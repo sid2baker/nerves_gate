@@ -1,5 +1,5 @@
 defmodule NervesGate.SDKBackend do
-  @moduledoc "Device implementation of the read-only SDK views and process-owned bus operations."
+  @moduledoc "Typed SDK views and managed-generation resources, always owned by the actual calling PID."
   use GenServer
   @behaviour NervesGateSDK.Backend
 
@@ -41,7 +41,15 @@ defmodule NervesGate.SDKBackend do
   def call(:network_release_local, [ref]),
     do: available(fn -> local_result(Network.release_local(ref)) end)
 
-  def call(:storage_data_dir, [app]), do: Storage.data_dir(app)
+  def call(:storage_data_dir, [app]) do
+    with {:ok, owner} <- NervesGate.Apps.Owner.resolve(self()),
+         true <- to_string(app) == owner.app do
+      Storage.data_dir(app)
+    else
+      false -> {:error, :not_owner}
+      error -> error
+    end
+  end
 
   def call(operation, arguments),
     do: available(fn -> GenServer.call(__MODULE__, {operation, arguments}) end)
@@ -60,14 +68,52 @@ defmodule NervesGate.SDKBackend do
 
     send(self(), :bind)
     send(self(), :poll)
-    {:ok, %{identity: identity, subscribers: %{}, monitors: %{}, values: %{}, refreshing?: false}}
+
+    {:ok,
+     %{
+       identity: identity,
+       subscribers: %{},
+       owners: %{},
+       monitors: %{},
+       values: %{},
+       refreshing?: false
+     }}
   end
 
   @impl GenServer
   def handle_call({:events_subscribe, [topic]}, {pid, _}, state) when topic in @topics do
-    monitors = Map.put_new_lazy(state.monitors, pid, fn -> Process.monitor(pid) end)
-    subscribers = Map.update(state.subscribers, topic, MapSet.new([pid]), &MapSet.put(&1, pid))
-    {:reply, :ok, %{state | monitors: monitors, subscribers: subscribers}}
+    case NervesGate.Apps.Owner.resolve(pid) do
+      {:ok, owner} ->
+        state =
+          if state.owners[pid] && state.owners[pid] != owner,
+            do: remove_owner(state, pid),
+            else: state
+
+        monitors = Map.put_new_lazy(state.monitors, pid, fn -> Process.monitor(pid) end)
+
+        subscribers =
+          Map.update(state.subscribers, topic, MapSet.new([pid]), &MapSet.put(&1, pid))
+
+        {:reply, :ok,
+         %{
+           state
+           | monitors: monitors,
+             subscribers: subscribers,
+             owners: Map.put(state.owners, pid, owner)
+         }}
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:drain_generation, tag}, _, state) do
+    next =
+      Enum.reduce(state.owners, state, fn {pid, owner}, state ->
+        if NervesGate.Apps.Loader.stale?(owner, tag), do: remove_owner(state, pid), else: state
+      end)
+
+    {:reply, :ok, next}
   end
 
   def handle_call({:events_unsubscribe, [topic]}, {pid, _}, state) when topic in @topics do
@@ -114,7 +160,13 @@ defmodule NervesGate.SDKBackend do
       subscribers =
         Map.new(state.subscribers, fn {topic, pids} -> {topic, MapSet.delete(pids, pid)} end)
 
-      {:noreply, %{state | subscribers: subscribers, monitors: Map.delete(state.monitors, pid)}}
+      {:noreply,
+       %{
+         state
+         | subscribers: subscribers,
+           monitors: Map.delete(state.monitors, pid),
+           owners: Map.delete(state.owners, pid)
+       }}
     else
       {:noreply, state}
     end
@@ -206,6 +258,7 @@ defmodule NervesGate.SDKBackend do
   defp notify(state, topic, value) do
     if Map.get(state.values, topic) != value do
       for pid <- Map.get(state.subscribers, topic, MapSet.new()),
+          NervesGate.Apps.Owner.matches?(pid, state.owners[pid]),
           do: send(pid, %Event{topic: topic, value: value})
     end
 
@@ -217,8 +270,20 @@ defmodule NervesGate.SDKBackend do
       state
     else
       if ref = state.monitors[pid], do: Process.demonitor(ref, [:flush])
-      %{state | monitors: Map.delete(state.monitors, pid)}
+      %{state | monitors: Map.delete(state.monitors, pid), owners: Map.delete(state.owners, pid)}
     end
+  end
+
+  defp remove_owner(state, pid) do
+    if ref = state.monitors[pid], do: Process.demonitor(ref, [:flush])
+
+    %{
+      state
+      | owners: Map.delete(state.owners, pid),
+        monitors: Map.delete(state.monitors, pid),
+        subscribers:
+          Map.new(state.subscribers, fn {topic, pids} -> {topic, MapSet.delete(pids, pid)} end)
+    }
   end
 
   defp available(fun) do

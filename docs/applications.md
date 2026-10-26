@@ -8,10 +8,11 @@ For ordinary SDK app projects and packaging, see [App development](app-developme
 
 ## Storage
 
-- `/data/nerves_gate/apps.term` contains only each application's enabled flag,
-  active version and previous version.
-- `/mnt/apps/apps/<app>/<version>/` contains the extracted OTP application
-  directories from its `.ez` archive.
+- `/data/nerves_gate/apps.term` is schema 1: enabled intent, active/previous
+  selection, committed generation sequence and an immutable artifact catalog with
+  SHA-256 and reserved application/module names for every installed version.
+- `/mnt/apps/apps/<app>/<version>/package.ez` retains the checked archive;
+  `content/` beneath that directory contains its extracted OTP applications.
 - `/mnt/apps/data/<app>/` contains application-owned data.
 
 ### Commissioning
@@ -89,8 +90,13 @@ Firmware selects `NervesGate.SDKBackend`. It translates network,
 identity and storage observations into SDK structs; it does not expose status
 maps, distribution settings or administrative commands. Subscribe before querying.
 Events describe changes (system uptime and storage are polled once a second).
-Subscriptions, serial claims and network leases belong to the calling process, not its OTP app;
-subscribe/claim again after that process or the backend restarts.
+Stateful SDK calls require a running/starting managed application activation.
+Subscriptions, bus I/O and local network leases are fenced by that activation's
+private generation, but still belong to the actual calling PID and reference—not
+merely an app name. Startup callbacks can acquire resources. Read-only queries
+remain available outside managed apps; raw IEx/RPC maintenance uses domain APIs.
+Subscribe/claim again after the owner, backend or activation restarts. Never pass
+resource calls through a platform Task as a substitute owner.
 
 `NervesGate.Buses` owns both diagnostics and SDK hardware access. `rs485_1` and
 `rs485_2` map internally to EC100's qualified automatic-direction 9600 8N1 ports.
@@ -136,21 +142,52 @@ of any prior installation before extracting the checked bytes. Compiled
 no application lifecycle intent or executable source is shipped by the workbench.
 Unknown results are never automatically retried. See [physical installation](app-development.md#install-on-a-physical-gateway).
 
-Install registers a disabled application without starting it. The active and
-previous versions are never overwritten; another copy of a version (from a failed
-upgrade, or left on the card after `/data` was reset) is replaced. Start adds code
-paths, loads OTP specs and starts the application tree. Stop unloads its private
-applications/modules and removes their paths. Uninstall preserves application
-data. `list/0` returns installed version names, persisted selection, current running
-state and the last lifecycle error; it does not expose credentials.
+Install registers a disabled application without starting it. An identical
+registered archive is idempotent; different bytes for that app/version are rejected.
+No installed version, unregistered directory or previous artifact is overwritten
+or adopted. Bump the version for a changed development package. App/module names
+remain reserved even if an installed artifact is stopped or unreadable.
 
-Upgrade validates first, cold-stops the old version, starts the new one and runs
-the health-check MFA with a five-second deadline. Only `:ok` commits the new active
-selection. Failure unloads the new code and restarts the previously running
-version. Explicit rollback performs the same check on the previous version. Health
-checks should inspect application readiness without waiting for Internet access.
-An application's OTP startup and shutdown callbacks must themselves be bounded;
-trusted code can otherwise block application-controller operations.
+`Artifact` separates immutable identity from runtime activation. Every start
+verifies the retained archive SHA, exact extracted file set/content/modes and BEAM
+identities, then loads verified specs and module bytes before OTP startup. Extra
+files, symlinks, tampering and loaded-code conflicts fail closed. Artifact files
+are read-only; application data is separate and writable. These permissions are
+not a security boundary against trusted same-BEAM code.
+
+`Apps` owns one admission slot, protected generation bindings and synced metadata.
+A linked loader worker performs bounded effects while list/admission remain
+responsive. The lifecycle budget is 180 seconds; the public command waits up to
+190 seconds. A caller timeout is not cancellation. Read state before retrying.
+
+Upgrade prepares the candidate before stopping working code, then quiesces the
+old generation, stops/drains it, activates and starts the candidate, and runs its
+health-check MFA with a five-second deadline. Only `:ok` permits an atomic
+selection commit. A commit failure is not success. One checked unload path handles
+normal stop, partial activation and rollback: stop private apps in dependency
+order, drain SDK resources, unload owned specs/code and remove acquired paths.
+Platform dependencies are never stopped or purged.
+
+Every activation attempt, including rollback/restoration, gets a fresh generation.
+The previous artifact is reverified before rollback; a previously stopped app stays
+stopped. Network cleanup withdraws owned routes before removing addresses. Failed
+cleanup, busy old code or uncertain effects leave a blocked state instead of
+force-purging unrelated processes or activating conflicting code. Explicit stop
+persists disabled intent first. App-manager restart invalidates its epoch and
+reconciles owned runtime/resources before restoring enabled selections.
+
+`list/0` returns versions, selection, SHA, committed sequence, phase/running state
+and errors, not private epoch tokens, handles, PIDs or paths. Unsupported/corrupt
+metadata returns `{:error, :invalid_app_metadata}` and blocks app/storage changes
+without taking gateway management down. There is no legacy reader, digest backfill
+or automatic migration. Existing installations need a separately authorized
+external upgrade/reinstall procedure; never reset saved state just to pass checks.
+
+Preloading executes `@on_load`/NIF initialization, so it is not effect-free.
+Health checks should inspect the application's own APIs, not acquire resources
+through their platform-supervised Task. Startup/shutdown callbacks must be bounded.
+Arbitrary user-code side effects and externally supervised/group-leader-changing
+tasks cannot be contained or rolled back by this trusted-runtime lifecycle.
 
 A new package may remain installed after an unsuccessful upgrade, but it is not
 selected on reboot. Application data is not rolled back: apps must use a compatible

@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Stateful subscriptions, bus I/O and network leases require a managed activation. The firmware derives generation scope from the actual caller, rejects stale scope, and drains resources before reactivation. Read-only SDK queries remain available outside apps. Resource calls are not maintenance RPCs; no proxy Task becomes owner.
+
 - Removed `Equipment.list/0`, its device struct and the `:equipment` event topic. Applications own equipment identities, discovery and protocols; use `Network.interfaces/0` for platform link observations.
 
 ### Added

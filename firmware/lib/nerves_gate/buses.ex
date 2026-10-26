@@ -127,6 +127,7 @@ defmodule NervesGate.Buses do
       error: nil,
       timeout: Keyword.get(opts, :timeout, 6_500),
       claims: %{},
+      owners: %{},
       subscribers: %{},
       monitors: %{},
       sockets: %{}
@@ -141,7 +142,16 @@ defmodule NervesGate.Buses do
   def handle_call(:observations, _, state), do: {:reply, sources(state), state}
 
   def handle_call({:sdk, operation, arguments}, {pid, _}, state),
-    do: sdk_call(operation, arguments, pid, state)
+    do: sdk_request(operation, arguments, pid, state)
+
+  def handle_call({:drain_generation, tag}, _, state) do
+    next = drain_owners(state, tag)
+
+    pending =
+      Enum.any?(next.owners, fn {_, owner} -> NervesGate.Apps.Loader.stale?(owner, tag) end)
+
+    {:reply, if(pending, do: {:error, :generation_cleanup_pending}, else: :ok), next}
+  end
 
   def handle_call({:configure, name, params}, _, state) do
     with {:ok, params} <- Policy.configure(name, params),
@@ -211,7 +221,7 @@ defmodule NervesGate.Buses do
   def handle_info(:poll, state) do
     Process.send_after(self(), :poll, 5_000)
     state = if state.worker, do: state, else: refresh(state)
-    {:noreply, state |> reconnect_can() |> publish()}
+    {:noreply, state |> drain_owners(:inactive) |> reconnect_can() |> publish()}
   end
 
   def handle_info({:DOWN, ref, :process, pid, _}, state) do
@@ -222,8 +232,12 @@ defmodule NervesGate.Buses do
 
   def handle_info({:circuits_uart, uart, data}, state) when is_binary(data) do
     case Enum.find(state.claims, fn {_, owner} -> owner.uart == uart end) do
-      {_claim, owner} -> send(owner.pid, %Event{topic: {:rs485, owner.port}, value: data})
-      nil -> :ok
+      {_claim, owner} ->
+        if NervesGate.Apps.Owner.matches?(owner.pid, state.owners[owner.pid]),
+          do: send(owner.pid, %Event{topic: {:rs485, owner.port}, value: data})
+
+      nil ->
+        :ok
     end
 
     {:noreply, state}
@@ -253,6 +267,39 @@ defmodule NervesGate.Buses do
     for {_, socket} <- state.sockets, do: :socket.close(socket)
     for {_, claim} <- state.claims, do: stop_uart(claim.uart)
     :ok
+  end
+
+  defp sdk_request(operation, arguments, pid, state)
+       when operation in [:can_interfaces, :rs485_ports],
+       do: sdk_call(operation, arguments, pid, state)
+
+  defp sdk_request(operation, arguments, pid, state) do
+    mode = if operation in [:rs485_release, :can_unsubscribe], do: :release, else: :active
+
+    case NervesGate.Apps.Owner.resolve(pid, mode) do
+      {:ok, owner} -> owned_sdk(operation, arguments, pid, owner, state)
+      error -> {:reply, error, state}
+    end
+  end
+
+  defp owned_sdk(operation, arguments, pid, owner, state) do
+    state =
+      if state.owners[pid] && state.owners[pid] != owner, do: owner_down(state, pid), else: state
+
+    if state.owners[pid] && state.owners[pid] != owner do
+      {:reply, {:error, :generation_cleanup_pending}, state}
+    else
+      {:reply, reply, next} =
+        sdk_call(operation, arguments, pid, %{state | owners: Map.put(state.owners, pid, owner)})
+
+      {:reply, reply, unmonitor_unused(next, pid)}
+    end
+  end
+
+  defp drain_owners(state, tag) do
+    Enum.reduce(state.owners, state, fn {pid, owner}, state ->
+      if NervesGate.Apps.Loader.stale?(owner, tag), do: owner_down(state, pid), else: state
+    end)
   end
 
   defp sdk_call(:can_interfaces, [], _, state) do
@@ -356,8 +403,18 @@ defmodule NervesGate.Buses do
 
   defp sdk_call(:rs485_release, [claim], pid, state) do
     case state.claims[claim] do
-      %{pid: ^pid} -> {:reply, :ok, release(state, claim)}
-      _ -> {:reply, {:error, :not_owner}, state}
+      %{pid: ^pid} ->
+        next = release(state, claim)
+
+        reply =
+          if Map.has_key?(next.claims, claim),
+            do: {:error, :generation_cleanup_pending},
+            else: :ok
+
+        {:reply, reply, next}
+
+      _ ->
+        {:reply, {:error, :not_owner}, state}
     end
   end
 
@@ -397,14 +454,17 @@ defmodule NervesGate.Buses do
       state
     else
       if ref = state.monitors[pid], do: Process.demonitor(ref, [:flush])
-      %{state | monitors: Map.delete(state.monitors, pid)}
+      %{state | monitors: Map.delete(state.monitors, pid), owners: Map.delete(state.owners, pid)}
     end
   end
 
   defp release(state, ref) do
     {claim, claims} = Map.pop!(state.claims, ref)
-    stop_uart(claim.uart)
-    %{state | claims: claims} |> unmonitor_unused(claim.pid)
+
+    case stop_uart(claim.uart) do
+      :ok -> %{state | claims: claims} |> unmonitor_unused(claim.pid)
+      _ -> state
+    end
   end
 
   defp release_uart(state, uart) do
@@ -415,9 +475,13 @@ defmodule NervesGate.Buses do
   end
 
   defp stop_uart(uart) do
-    Circuits.UART.stop(uart)
-  catch
-    :exit, _ -> :ok
+    try do
+      Circuits.UART.stop(uart)
+    catch
+      :exit, _ -> :ok
+    end
+
+    if Process.alive?(uart), do: {:error, :uart_cleanup_pending}, else: :ok
   end
 
   defp open_can(state, id) do
@@ -441,6 +505,7 @@ defmodule NervesGate.Buses do
       | subscribers: subscribers,
         monitors: Map.delete(state.monitors, pid)
     })
+    |> unmonitor_unused(pid)
   end
 
   defp receive_can(state, socket) do
@@ -454,6 +519,7 @@ defmodule NervesGate.Buses do
     frame = CAN.decode_frame(packet)
 
     for pid <- Map.get(state.subscribers, id, MapSet.new()),
+        NervesGate.Apps.Owner.matches?(pid, state.owners[pid]),
         frame,
         do: send(pid, %Event{topic: {:can, id}, value: frame})
 

@@ -159,10 +159,17 @@ defmodule NervesGate.Network do
   def handle_call({:claim_local, interface, address, prefix}, {pid, _} = from, state) do
     state = refresh(state)
 
-    with :ok <- Local.idle(state.local),
+    with {:ok, generation} <- NervesGate.Apps.Owner.resolve(pid),
+         :ok <- Local.idle(state.local),
          {:ok, scope} <- Local.candidate(public(state), interface, address, prefix) do
       ref = make_ref()
-      local = %{Local.lease(scope, pid, :configuring) | ref: ref, monitor: Process.monitor(pid)}
+
+      local = %{
+        Local.lease(scope, pid, :configuring)
+        | ref: ref,
+          monitor: Process.monitor(pid),
+          generation: generation
+      }
 
       {:noreply,
        local_work(%{state | local: local}, :claim, from, fn -> Local.reserve(scope) end)
@@ -176,7 +183,11 @@ defmodule NervesGate.Network do
       when operation in [:advertise_local, :release_local] do
     state = refresh(state)
 
-    with :ok <- Local.owned(state.local, pid, ref),
+    mode = if operation == :release_local, do: :release, else: :active
+
+    with {:ok, generation} <- NervesGate.Apps.Owner.resolve(pid, mode),
+         :ok <- Local.owned(state.local, pid, ref),
+         :ok <- generation_owned(state.local, generation),
          :ok <- Policy.available(Map.put(public(state), :local, nil)),
          :ok <- Local.action_allowed(operation, state.local, public(state)) do
       scope = state.local.scope
@@ -194,7 +205,35 @@ defmodule NervesGate.Network do
 
   def handle_call({:local_status, remote}, {pid, _}, state) do
     state = refresh(state)
-    {:reply, {:ok, Local.observation(state.local, pid, public(state), remote)}, state}
+
+    case NervesGate.Apps.Owner.resolve(pid) do
+      {:ok, generation} ->
+        local = if state.local && state.local.generation == generation, do: state.local, else: nil
+        {:reply, {:ok, Local.observation(local, pid, public(state), remote)}, state}
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:drain_generation, _}, _, %{local: nil} = state), do: {:reply, :ok, state}
+
+  def handle_call({:drain_generation, tag}, from, state) do
+    if NervesGate.Apps.Loader.stale?(state.local.generation, tag) do
+      state = orphan_generation(state)
+
+      if state.worker == nil and state.trial == nil and state.local.scope != nil and
+           state.local.phase != :blocked do
+        next =
+          local_work(state, :release, from, fn -> Local.cleanup_if_ready(state.local.scope) end)
+
+        {:noreply, %{next | worker: Map.put(next.worker, :drain?, true)}}
+      else
+        {:reply, {:error, :generation_cleanup_pending}, state}
+      end
+    else
+      {:reply, :ok, state}
+    end
   end
 
   def handle_call(:recover_local, from, %{local: %{owner: nil, scope: scope}} = state)
@@ -382,8 +421,7 @@ defmodule NervesGate.Network do
 
   def handle_info({:DOWN, ref, :process, _, _}, %{local: %{monitor: ref} = local} = state)
       when is_reference(ref) do
-    local = %{local | owner: nil, monitor: nil, phase: :cleanup_pending}
-    {:noreply, %{state | local: local} |> publish()}
+    {:noreply, orphan_generation(%{state | local: local}) |> publish()}
   end
 
   def handle_info(:poll, state) do
@@ -409,7 +447,7 @@ defmodule NervesGate.Network do
   defp observe_later(state), do: state
 
   defp reconcile(state) do
-    state = refresh(state)
+    state = refresh(state) |> fence_generation()
 
     state =
       cond do
@@ -419,6 +457,23 @@ defmodule NervesGate.Network do
       end
 
     state |> refresh_cellular_if_due() |> publish()
+  end
+
+  defp generation_owned(%{generation: generation}, generation), do: :ok
+  defp generation_owned(_, _), do: {:error, :application_not_running}
+
+  defp fence_generation(%{local: %{generation: generation}} = state)
+       when not is_nil(generation) do
+    if NervesGate.Apps.Owner.valid?(generation, :release),
+      do: state,
+      else: orphan_generation(state)
+  end
+
+  defp fence_generation(state), do: state
+
+  defp orphan_generation(state) do
+    if state.local.monitor, do: Process.demonitor(state.local.monitor, [:flush])
+    %{state | local: Local.orphan(state.local)}
   end
 
   defp start_cellular(state, operation, params) do
@@ -483,8 +538,14 @@ defmodule NervesGate.Network do
     %{state | worker: Map.put(state.worker, :local_action, action)}
   end
 
-  defp complete(state, %{operation: :local, local_action: action, from: from}, result) do
+  defp complete(state, %{operation: :local, local_action: action, from: from} = worker, result) do
+    state = fence_generation(state)
     {local, response} = Local.complete(state.local, action, result)
+
+    response =
+      if Map.get(worker, :drain?) and local != nil,
+        do: {:error, :generation_cleanup_pending},
+        else: response
 
     if local == nil and state.local.monitor do
       Process.demonitor(state.local.monitor, [:flush])
@@ -778,6 +839,13 @@ defmodule NervesGate.Network do
       code: "recovery_in_progress",
       message: "Wait for saved settings to be restored before trying again."
     }
+
+  defp error(:application_not_running),
+    do:
+      NervesGate.Error.new(
+        "application_not_running",
+        "Stateful SDK access requires a managed activation."
+      )
 
   defp error({:load, _}),
     do: %{

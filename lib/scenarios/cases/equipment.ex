@@ -7,6 +7,7 @@ defmodule Scenarios.Cases.Equipment do
   def spec,
     do: %{
       :name => "equipment cable failure leaves Internet and management available",
+      fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
 
@@ -57,21 +58,16 @@ defmodule Scenarios.Cases.Equipment do
   defp assert_application_link(vm, previous) do
     enabled = Map.put(previous, "eth1", %{"role" => "application", "address" => nil})
     save(vm, enabled)
-    parent = self()
-    server = {NervesGate.Network, vm.node}
-    # The long-lived caller itself owns the claim on the real device domain.
-    owner =
-      spawn_link(fn ->
-        result = GenServer.call(server, {:claim_local, "eth1", "10.44.0.2", 24}, 70_000)
-        send(parent, {:local_claim, self(), result})
 
-        receive do
-          :stop -> :ok
-        end
-      end)
+    Scenarios.ManagedApp.with_app(vm, fn other ->
+      owner = Scenarios.ManagedApp.client(vm)
 
-    try do
-      assert_receive {:local_claim, ^owner, {:ok, ref}}, 75_000
+      assert {:ok, ref} =
+               Scenarios.ManagedApp.call(vm, owner, NervesGateSDK.Network, :claim_local, [
+                 "eth1",
+                 "10.44.0.2",
+                 24
+               ])
 
       Scenarios.Device.await(
         vm,
@@ -82,23 +78,24 @@ defmodule Scenarios.Cases.Equipment do
         end
       )
 
-      assert {:error, %{code: "not_owner"}} = GenServer.call(server, {:release_local, ref})
+      assert {:error, "not_owner"} =
+               Scenarios.ManagedApp.call(vm, other, NervesGateSDK.Network, :release_local, [ref])
 
       assert {:error, %{code: "local_in_use"}} =
                Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [previous])
-    after
-      send(owner, :stop)
-    end
 
-    Scenarios.Device.await(
-      vm,
-      "owner death cleans local address while preserving Internet",
-      fn status ->
-        internet?(status) && status.network.local == nil &&
-          Enum.any?(status.connections.ports, &(&1.name == "eth1" && &1.addresses == []))
-      end,
-      75_000
-    )
+      assert :ok = Scenarios.ManagedApp.stop_client(vm, owner)
+
+      Scenarios.Device.await(
+        vm,
+        "owner death cleans local address while preserving Internet",
+        fn status ->
+          internet?(status) && status.network.local == nil &&
+            Enum.any?(status.connections.ports, &(&1.name == "eth1" && &1.addresses == []))
+        end,
+        75_000
+      )
+    end)
 
     save(vm, previous)
   end

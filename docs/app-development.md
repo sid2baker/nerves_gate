@@ -58,8 +58,11 @@ mix app.console --device gateway_a   # prints an SSH IEx command during Manual c
 ```
 
 Installs, scenarios and Manual control share device reservations. In the console,
-`RingLogger.attach()` follows logs. A same-version reinstall keeps app data; a new
-version uses the device's health-checked upgrade. Packages never bundle the SDK.
+`RingLogger.attach()` follows logs. Registered versions are immutable: bump the
+version for changed bytes; installation never silently uninstalls/replaces the same
+version. A new version uses verified cold upgrade and health-checked rollback.
+Packages never bundle the SDK. Stateful SDK calls must originate in the managed
+application's own processes, not directly from IEx/RPC.
 
 ## Find physical gateways
 

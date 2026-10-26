@@ -280,7 +280,7 @@ defmodule Scenarios.Runner do
       {pid, worker} ->
         cancel_timer(worker)
 
-        timeout = if scenario == "install", do: 120_000, else: 900_000
+        timeout = if scenario == "install", do: 600_000, else: 900_000
 
         timer =
           if result.status == :running,

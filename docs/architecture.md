@@ -267,15 +267,21 @@ observations/events, process-owned bus I/O and narrowly scoped local-network lea
 not administrative maps, arbitrary network configuration, SSH, firmware or recovery
 commands. Equipment identities, labels, scans and industrial protocols belong to
 apps. There is no platform equipment domain or SDK compatibility API.
-Buses receives SDK calls from the actual caller;
-owner death releases claims/subscriptions. No Task becomes owner on its behalf.
+Buses and Network receive SDK calls from the actual caller. Stateful calls require
+managed activation membership, resolved through OTP and Apps-owned protected ETS,
+not a caller-supplied app name or synchronous Apps call. PID/ref ownership remains;
+private generations fence revoked activations and in-flight work. No Task becomes
+owner on a caller's behalf. Read-only SDK queries remain available outside apps.
 
 Host packaging/device installation share SDK `.ez` validation. Private OTP
 dependencies can be bundled, platform dependencies cannot. New and obsolete
 platform app/module names remain reserved. Packaging is not cross-compilation,
 a dependency solver or hot-code upgrade. Installation does not start an app.
-Upgrades stop/start cold, run bounded health checks and restore the prior selection
-on failure. Ordinary app callbacks still execute in the shared runtime. See
+`Apps.Artifact` verifies immutable archive/content identity. `Apps.Loader` owns
+verified module loading and one checked unload path; Apps owns admission,
+generation bindings and synced selection while linked workers perform effects.
+Upgrades stop/start cold, run bounded health checks and restore the verified prior
+artifact with a fresh generation on failure. Uncertain cleanup blocks reactivation. Ordinary app callbacks still execute in the shared runtime. See
 [applications](applications.md).
 
 ## Persistence and recovery
@@ -287,7 +293,7 @@ on failure. Ordinary app callbacks still execute in the shared runtime. See
 | Settings PropertyTable | Small private settings, including SIM-bound PIN and APN-bound PAP |
 | SSH | Authorized public keys |
 | Network.Local: `/data/nerves_gate/local_network.json` | Temporary link/route ownership and incomplete cleanup; never enable intent |
-| Apps: `/data/nerves_gate/apps.term` | Selected/previous versions and enabled state |
+| Apps: `/data/nerves_gate/apps.term` | Schema 1 artifact SHA/name/module catalog, selection, enabled intent and committed sequence |
 | Application SD: `/mnt/apps` | App archives and app data |
 
 Both targets require writable ext4 data before data users start. Unreadable saved

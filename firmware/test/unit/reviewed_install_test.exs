@@ -1,6 +1,7 @@
 defmodule NervesGate.ReviewedInstallTest do
   use ExUnit.Case, async: false
   alias NervesGate.Apps
+  alias NervesGate.Apps.Artifact
 
   setup_all do
     [{module, beam}] =
@@ -56,7 +57,7 @@ defmodule NervesGate.ReviewedInstallTest do
          modules: [module],
          applications: [:kernel, :stdlib, :elixir, :nerves_gate_sdk],
          mod: {module, []},
-         env: [nerves_gate_sdk_requirement: "~> 0.1.0"]
+         env: [nerves_gate_sdk_requirement: "~> 0.2.0-dev"]
        ]}
 
     files = [
@@ -67,7 +68,7 @@ defmodule NervesGate.ReviewedInstallTest do
 
     path = Path.join(dir, "fixture.ez")
     {:ok, _} = :zip.create(to_charlist(path), files)
-    assert {:ok, _} = NervesGateSDK.Package.read(path)
+    assert {:ok, package, _bytes, sha} = Artifact.read(path)
 
     expected = %{
       app: "reviewed_fixture",
@@ -76,7 +77,7 @@ defmodule NervesGate.ReviewedInstallTest do
       card_id: "reviewed-card"
     }
 
-    idle = %{entries: %{}, running: %{}}
+    idle = %{}
     # No Storage process or device backend exists in this test. Admission must
     # reject these requests before consulting or changing hardware/storage.
     for altered <- [
@@ -84,16 +85,11 @@ defmodule NervesGate.ReviewedInstallTest do
           %{expected | app: "other"},
           %{expected | version: "2.0.0"}
         ] do
-      assert {:reply, {:error, :review_changed}, ^idle} =
-               Apps.handle_call({:install_new, path, altered}, nil, idle)
+      assert {:error, :review_changed} = Artifact.review(package, sha, altered, idle)
     end
 
-    installed = %{idle | entries: %{expected.app => %{enabled: true, active_version: "0.9.0"}}}
-
-    assert {:reply, {:error, :review_changed}, ^installed} =
-             Apps.handle_call({:install_new, path, expected}, nil, installed)
-
-    assert {:reply, {:error, :invalid_review}, ^idle} =
-             Apps.handle_call({:install_new, path, %{}}, nil, idle)
+    installed = %{expected.app => %{enabled: true}}
+    assert {:error, :review_changed} = Artifact.review(package, sha, expected, installed)
+    assert {:error, :invalid_review} = Artifact.review(package, sha, %{}, idle)
   end
 end

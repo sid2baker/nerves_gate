@@ -126,7 +126,7 @@ defmodule Workbench.PhysicalAppInstall do
           Workbench.DeviceSSH.read!(
             connection,
             install_command(plan, remote_path),
-            45_000
+            200_000
           )
 
         case result["outcome"] do

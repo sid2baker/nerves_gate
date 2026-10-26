@@ -26,6 +26,16 @@ defmodule NervesGate.Network.LocalTest do
     %{path: path}
   end
 
+  test "revoked generations retain blocked cleanup instead of replaying uncertain writes" do
+    local = Local.lease(%{interface: "eth1"}, self(), :blocked)
+    orphan = Local.orphan(local)
+    assert orphan.owner == nil
+    assert orphan.monitor == nil
+    assert orphan.phase == :blocked
+    assert Local.orphan(orphan) == orphan
+    assert Local.orphan(%{local | phase: :configured}).phase == :cleanup_pending
+  end
+
   defp status do
     interface = fn name, addresses ->
       %{
@@ -173,6 +183,21 @@ defmodule NervesGate.Network.LocalTest do
     assert {:error, _} = Local.mark_advertising(scope)
     File.write!(path, "invalid")
     assert %{phase: :blocked, error: %{code: "local_journal_invalid"}} = Local.load()
+  end
+
+  test "unavailable route owner blocks cleanup and retains its ownership journal", %{path: path} do
+    assert Process.whereis(NervesGate.Remote) == nil
+    {:ok, scope} = Local.candidate(status(), "eth1", "192.168.50.2", 24)
+    File.mkdir_p!(Path.dirname(path))
+
+    File.write!(
+      path,
+      Jason.encode!(%{interface: "eth1", address: "192.168.50.2", prefix: 24, route_owned: true})
+    )
+
+    assert {:error, %{code: "local_cleanup_required"}} = Local.cleanup(scope)
+    assert {:ok, %{route_owned: true, scope: ^scope}} = Local.read()
+    refute Local.cleanup_ready?()
   end
 
   test "route claim refuses existing advertisements; cleanup preserves unrelated routes" do

@@ -1,31 +1,34 @@
 defmodule NervesGate.Apps do
-  @moduledoc """
-  Administrative lifecycle for trusted OTP applications on SD.
-
-  Code lives under `/mnt/apps/apps/<app>/<version>` and application data under
-  `/mnt/apps/data/<app>`. Only enabled/active/previous selection is persisted in
-  `/data/nerves_gate/apps.term`. Install does not start an application. Upgrades
-  are cold stop/start with a health check and rollback; this is not a sandbox or
-  an OTP hot-code upgrade service. Uninstall preserves application data.
-  """
+  @moduledoc "Serialized cold lifecycle for immutable SD artifacts and generation-fenced, trusted OTP applications. Not a sandbox."
   use GenServer
+  alias NervesGate.Apps.{Artifact, Loader, Metadata, Owner}
   alias NervesGate.Storage
   alias NervesGateSDK.Package
-
-  @timeout 30_000
+  @timeout 190_000
+  @budget 180_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  def install(path), do: GenServer.call(__MODULE__, {:install, path}, @timeout)
+  def install(path), do: command({:install, path})
+  def install_new(path, expected), do: command({:install_new, path, expected})
+  def list, do: GenServer.call(__MODULE__, :list)
+  def start(app), do: command({:start, app})
+  def stop(app), do: command({:stop, app})
+  def restart(app), do: command({:restart, app})
+  def upgrade(path), do: command({:upgrade, path})
+  def rollback(app), do: command({:rollback, app})
+  def uninstall(app), do: command({:uninstall, app})
+  defp command(request), do: GenServer.call(__MODULE__, request, @timeout)
 
-  @doc "Install a new, stopped application from reviewed bytes and storage identity. Never upgrades or starts an existing app."
-  def install_new(path, expected),
-    do: GenServer.call(__MODULE__, {:install_new, path, expected}, @timeout)
-
-  @doc "Read-only review of package compatibility and installation prerequisites."
+  @doc "Read-only current device prerequisites for a reviewed new-app install."
   def install_review(%{"app" => app, "platform" => platform}) do
     storage = Storage.commissioning()
     {:ok, apps} = list()
     info = NervesGate.System.maintenance_info()
+
+    installed =
+      Map.new(Application.loaded_applications(), fn {name, _, version} ->
+        {to_string(name), to_string(version)}
+      end)
 
     %{
       product: info.product,
@@ -37,29 +40,23 @@ defmodule NervesGate.Apps do
       sdk_version: to_string(Application.spec(:nerves_gate_sdk, :vsn)),
       storage_ready: storage.ready,
       card_id: storage.card_id,
-      installed: Enum.any?(apps, &(to_string(&1.app) == app)),
-      platform_compatible: platform_compatible?(platform)
+      installed: Enum.any?(apps, &(&1.app == app)),
+      platform_compatible:
+        Enum.all?(platform, fn [name, version] -> installed[name] == version end)
     }
   end
 
-  defp platform_compatible?(requirements) do
-    installed =
-      Map.new(Application.loaded_applications(), fn {app, _, version} ->
-        {to_string(app), to_string(version)}
-      end)
-
-    Enum.all?(requirements, fn [app, version] -> installed[app] == version end)
-  end
-
-  @doc "Execute one reviewed install and verify stopped state; remove only the owned staging file/directory."
+  @doc "Execute one reviewed install; never retry an uncertain outcome."
   def install_reviewed(path, expected) do
     %{outcome: reviewed_outcome(install_new(path, expected), expected)}
-  rescue
-    _ in [ArgumentError, KeyError, MatchError, RuntimeError] -> %{outcome: "unknown"}
   catch
     _, _ -> %{outcome: "unknown"}
   after
-    cleanup_staging(path)
+    if is_binary(path) and
+         Regex.match?(~r|\A/tmp/nerves-gate-app-[a-f0-9]{32}/application\.ez\z|, path) do
+      File.rm(path)
+      File.rmdir(Path.dirname(path))
+    end
   end
 
   defp reviewed_outcome({:ok, _}, expected) do
@@ -67,524 +64,683 @@ defmodule NervesGate.Apps do
 
     if Enum.any?(
          apps,
-         &(&1.app == expected.app and &1.active_version == expected.version and not &1.enabled and
-             not &1.running?)
+         &(&1.app == expected.app and &1.active_version == expected.version and
+             &1.sha256 == expected.sha256 and not &1.enabled and not &1.running?)
        ), do: "installed_stopped", else: "unknown"
   end
 
   defp reviewed_outcome({:error, _}, _), do: "rejected"
   defp reviewed_outcome(_, _), do: "unknown"
 
-  defp cleanup_staging(path) do
-    if Regex.match?(~r|\A/tmp/nerves-gate-app-[a-f0-9]{32}/application\.ez\z|, path) do
-      File.rm(path)
-      File.rmdir(Path.dirname(path))
-    end
-  end
-
-  def list, do: GenServer.call(__MODULE__, :list)
-  def start(app), do: GenServer.call(__MODULE__, {:start, app}, @timeout)
-  def stop(app), do: GenServer.call(__MODULE__, {:stop, app}, @timeout)
-  def restart(app), do: GenServer.call(__MODULE__, {:restart, app}, @timeout)
-  def upgrade(path), do: GenServer.call(__MODULE__, {:upgrade, path}, @timeout)
-  def rollback(app), do: GenServer.call(__MODULE__, {:rollback, app}, @timeout)
-  def uninstall(app), do: GenServer.call(__MODULE__, {:uninstall, app}, @timeout)
-
   @impl true
   def init(_) do
     Process.flag(:trap_exit, true)
+    Owner.init()
     file = Application.get_env(:nerves_gate, :apps_metadata, "/data/nerves_gate/apps.term")
 
-    with {:ok, entries} <- read_metadata(file) do
-      state = %{file: file, entries: entries, running: %{}, errors: %{}, available?: false}
-      {:ok, state, {:continue, :restore}}
-    end
-  end
-
-  @impl true
-  def handle_continue(:restore, state) do
-    Process.send_after(self(), :storage, 1_000)
-    {:noreply, restore(state)}
-  end
-
-  @impl true
-  def handle_call(:list, _, state) do
-    apps =
-      for {app, entry} <- state.entries do
-        Map.merge(entry, %{
-          app: app,
-          running?: Map.has_key?(state.running, app),
-          versions: versions(app),
-          error: state.errors[app]
-        })
+    {entries, blocked} =
+      case Metadata.read(file) do
+        {:ok, entries} -> {entries, nil}
+        {:error, reason} -> {%{}, reason}
       end
 
-    {:reply, {:ok, Enum.sort_by(apps, & &1.app)}, state}
+    state = %{
+      file: file,
+      entries: entries,
+      running: %{},
+      errors: %{},
+      job: nil,
+      blocked: blocked,
+      blocked_app: nil,
+      epoch: make_ref(),
+      sequence: Enum.reduce(entries, 0, fn {_, entry}, n -> max(n, entry.generation) end),
+      restored?: false,
+      available?: false,
+      storage_identity: nil
+    }
+
+    send(self(), :storage)
+    {:ok, state}
   end
 
+  @impl true
+  def handle_call(:list, _, %{blocked: :invalid_app_metadata} = state),
+    do: {:reply, {:error, :invalid_app_metadata}, state}
+
+  def handle_call(:list, _, state) do
+    entries =
+      for {app, entry} <- state.entries do
+        %{
+          app: app,
+          enabled: entry.enabled,
+          active_version: entry.active_version,
+          previous_version: entry.previous_version,
+          sha256: entry.artifacts[entry.active_version].sha256,
+          versions: Enum.sort(Map.keys(entry.artifacts)),
+          generation: entry.generation,
+          running?: match?(%{phase: :running}, state.running[app]),
+          operation: state.running[app] && state.running[app].phase,
+          error: state.errors[app] || state.blocked
+        }
+      end
+
+    {:reply, {:ok, Enum.sort_by(entries, & &1.app)}, state}
+  end
+
+  def handle_call({:worker, op, request}, {pid, _}, %{job: %{op: op, task: %{pid: pid}}} = state),
+    do: worker_call(request, state)
+
+  def handle_call({:worker, _, _}, _, state), do: {:reply, {:error, :stale_operation}, state}
+
   def handle_call({:storage_setup, action, card_id, confirmation}, _, state) do
-    if action in [:format, :skip] and
-         (map_size(state.entries) != 0 or map_size(state.running) != 0) do
+    if state.blocked != nil or state.job != nil or map_size(state.entries) != 0 or
+         map_size(state.running) != 0 do
       {:reply,
        {:error,
         %{
           code: "applications_installed",
           message:
-            "Uninstall applications before skipping or formatting their storage. Uninstalling preserves data; formatting erases it."
+            "Application ownership is present or unresolved. Do not format or skip storage."
         }}, state}
     else
       {:reply, Storage.admit(action, card_id, confirmation), state}
     end
   end
 
-  def handle_call({:install, path}, _, state) do
-    {reply, state} = install_package(path, state)
-    {:reply, reply, state}
-  end
+  def handle_call(_, _, %{job: job} = state) when not is_nil(job),
+    do: {:reply, {:error, :operation_in_progress}, state}
 
-  def handle_call(
-        {:install_new, path,
-         %{app: app, version: version, sha256: sha256, card_id: _} = expected},
-        _,
-        state
-      )
-      when is_binary(path) and is_binary(app) and is_binary(version) and is_binary(sha256) do
-    with {:ok, %{size: size, type: :regular}} when size <= 128 * 1024 * 1024 <- File.stat(path),
-         {:ok, bytes} <- File.read(path),
-         true <- Base.encode16(:crypto.hash(:sha256, bytes), case: :lower) == expected.sha256,
-         {:ok, package} <- Package.read_binary(bytes),
-         true <- to_string(package.app) == expected.app and package.version == expected.version,
-         false <- Map.has_key?(state.entries, expected.app),
-         %{ready: true, card_id: card_id} when card_id == expected.card_id <-
-           Storage.commissioning() do
-      {reply, next} = install_loaded(package, state)
-      {:reply, reply, next}
-    else
-      _ -> {:reply, {:error, :review_changed}, state}
+  def handle_call(request, from, state) do
+    cond do
+      state.blocked && not recovery?(request, state.blocked_app) ->
+        {:reply, {:error, :applications_blocked}, state}
+
+      not (state.restored? and state.available?) and not match?({:stop, _}, request) ->
+        {:reply, {:error, :applications_not_ready}, state}
+
+      true ->
+        {:noreply, begin_work(request, from, state)}
     end
   end
 
-  def handle_call({:install_new, _, _}, _, state), do: {:reply, {:error, :invalid_review}, state}
+  defp recovery?({:stop, app}, blocked) when is_binary(app) or is_atom(app),
+    do: to_string(app) == blocked
 
-  def handle_call({:upgrade, path}, _, state) do
-    with {:ok, package} <- Package.read(path),
-         true <- Map.has_key?(state.entries, to_string(package.app)),
-         {{:ok, _}, installed} <- install_package(path, state) do
-      {reply, next} = switch(to_string(package.app), package.version, installed)
-      {:reply, reply, next}
-    else
-      false -> {:reply, {:error, :not_installed}, state}
-      {{:error, reason}, next} -> {:reply, {:error, reason}, next}
+  defp recovery?(_, _), do: false
+
+  defp worker_call({:storage_identity, identity}, state),
+    do: {:reply, :ok, %{state | job: Map.put(state.job, :storage_identity, identity)}}
+
+  defp worker_call({:bind, artifact}, %{blocked: nil} = state) do
+    sequence = state.sequence + 1
+    owner = Owner.bind(artifact, {state.epoch, sequence})
+    activation = %{artifact: artifact, owner: owner, started: [], phase: :prepared}
+    app = to_string(artifact.app)
+
+    {:reply, {:ok, activation},
+     %{
+       state
+       | sequence: sequence,
+         running: Map.put(state.running, app, activation),
+         job: Map.put(state.job, :app, app)
+     }}
+  end
+
+  defp worker_call({:bind, _}, state), do: {:reply, {:error, :applications_blocked}, state}
+
+  defp worker_call({:checkpoint, _, _}, %{blocked: blocked} = state) when not is_nil(blocked),
+    do: {:reply, {:error, :applications_blocked}, state}
+
+  defp worker_call({:checkpoint, app, activation}, state) do
+    case storage_check(state.job) do
+      :ok -> {:reply, :ok, %{state | running: Map.put(state.running, app, activation)}}
       error -> {:reply, error, state}
     end
   end
 
-  def handle_call({operation, app}, _, state)
-      when operation in [:start, :stop, :restart, :rollback, :uninstall] do
-    if Package.valid_name?(app) and Map.has_key?(state.entries, to_string(app)) do
-      {reply, next} = command(operation, to_string(app), state)
-      {:reply, reply, next}
-    else
-      {:reply, {:error, :not_installed}, state}
+  defp worker_call({:quiesce, app}, state) do
+    if activation = state.running[app], do: Owner.quiesce(activation.owner)
+    {:reply, :ok, %{state | job: Map.put(state.job, :app, app)}}
+  end
+
+  defp worker_call({:unloaded, app}, state) do
+    if activation = state.running[app], do: Owner.revoke(activation.owner)
+    {:reply, :ok, %{state | running: Map.delete(state.running, app)}}
+  end
+
+  defp worker_call({:persist, entries}, %{blocked: nil} = state) do
+    result = with :ok <- storage_check(state.job), do: Metadata.persist(state.file, entries)
+
+    case result do
+      :ok ->
+        {:reply, :ok, %{state | entries: entries}}
+
+      {:error, :metadata_commit_unknown} = error ->
+        {:reply, error, block(state, :metadata_commit_unknown)}
+
+      error ->
+        {:reply, error, state}
     end
   end
 
+  defp worker_call({:persist, entries}, %{job: %{request: {:stop, _}}} = state) do
+    case Metadata.persist(state.file, entries) do
+      :ok -> {:reply, :ok, %{state | entries: entries}}
+      error -> {:reply, error, state}
+    end
+  end
+
+  defp worker_call({:persist, _}, state), do: {:reply, {:error, :applications_blocked}, state}
+
+  defp begin_work(request, from, state) do
+    parent = self()
+    op = make_ref()
+    context = fn message -> GenServer.call(parent, {:worker, op, message}, 10_000) end
+
+    task =
+      Task.Supervisor.async(NervesGate.AppTasks, fn ->
+        try do
+          run(request, state, context)
+        catch
+          _, _ -> {{:error, :lifecycle_failed}, %{state | blocked: :lifecycle_failed}}
+        end
+      end)
+
+    timer = Process.send_after(self(), {:deadline, op}, @budget)
+
+    %{
+      state
+      | job: %{
+          op: op,
+          task: task,
+          timer: timer,
+          from: from,
+          app: nil,
+          request: request,
+          storage_identity: nil
+        }
+    }
+  end
+
   @impl true
+  def handle_info({ref, {reply, next}}, %{job: %{task: %{ref: ref}} = job} = state) do
+    Process.demonitor(ref, [:flush])
+    Process.cancel_timer(job.timer)
+    if job.from, do: GenServer.reply(job.from, reply)
+    # A timed-out worker may finish cleanup, but cannot undo the blocked outcome.
+    cond do
+      next.blocked ->
+        {:noreply, %{block(state, next.blocked) | job: nil}}
+
+      state.blocked && not (match?({:stop, _}, job.request) and reply == :ok) ->
+        {:noreply, %{state | job: nil}}
+
+      true ->
+        {:noreply,
+         %{
+           state
+           | entries: next.entries,
+             running: next.running,
+             errors: next.errors,
+             blocked: nil,
+             blocked_app: nil,
+             job: nil,
+             available?: next.available?,
+             restored?: next.restored?
+         }}
+    end
+  end
+
+  def handle_info({:DOWN, ref, :process, _, _}, %{job: %{task: %{ref: ref}} = job} = state) do
+    Process.cancel_timer(job.timer)
+    if job.from, do: GenServer.reply(job.from, {:error, :lifecycle_failed})
+    {:noreply, block(state, :lifecycle_failed) |> Map.put(:job, nil)}
+  end
+
+  def handle_info({:deadline, op}, %{job: %{op: op} = job} = state) do
+    if job.from, do: GenServer.reply(job.from, {:error, :operation_timeout})
+    {:noreply, block(%{state | job: %{job | from: nil}}, :operation_timeout)}
+  end
+
+  def handle_info(:storage, %{blocked: blocked} = state) when not is_nil(blocked) do
+    Process.send_after(self(), :storage, 1_000)
+    {:noreply, state}
+  end
+
   def handle_info(:storage, state) do
     Process.send_after(self(), :storage, 1_000)
     available? = match?({:ok, _}, Storage.root())
 
-    next =
-      cond do
-        available? and not state.available? -> restore(state)
-        not available? -> Enum.reduce(Map.keys(state.running), state, &halt/2)
-        true -> state
-      end
-
-    started = MapSet.new(Application.started_applications(), &elem(&1, 0))
-
-    next =
-      Enum.reduce(next.running, next, fn {app, info}, acc ->
-        if MapSet.member?(started, info.package.app) do
-          acc
-        else
-          acc = halt(app, acc)
-          %{acc | errors: Map.put(acc.errors, app, :application_stopped)}
-        end
-      end)
-
+    next = storage_changed(state, available?)
     {:noreply, %{next | available?: available?}}
   end
 
-  # Trapping exits lets terminate/2 stop apps; System.cmd ports also report exits.
-  def handle_info({:EXIT, port, _}, state) when is_port(port), do: {:noreply, state}
+  def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
+  def handle_info(_, state), do: {:noreply, state}
+
+  defp storage_changed(%{job: job} = state, _) when not is_nil(job), do: state
+
+  defp storage_changed(state, true) do
+    ready? =
+      Enum.all?([NervesGate.Network, NervesGate.Buses, NervesGate.SDKBackend], &Process.whereis/1)
+
+    if ready? and (not state.restored? or not state.available?),
+      do: begin_work(:restore, nil, state),
+      else: check_running(state)
+  end
+
+  defp storage_changed(state, false) do
+    if map_size(state.running) > 0, do: begin_work(:halt_all, nil, state), else: state
+  end
+
+  defp check_running(state) do
+    started = MapSet.new(Application.started_applications(), &elem(&1, 0))
+
+    case Enum.find(state.running, fn {_, activation} ->
+           activation.phase == :running and not MapSet.member?(started, activation.artifact.app)
+         end) do
+      nil -> state
+      {app, _} -> begin_work({:unexpected_stop, app}, nil, state)
+    end
+  end
 
   @impl true
   def terminate(_, state) do
-    for {app, _} <- state.running, do: halt(app, state)
+    Enum.each(state.running, fn {_, activation} -> Owner.quiesce(activation.owner) end)
     :ok
   end
 
-  defp command(:start, app, %{running: running} = state) when is_map_key(running, app),
-    do: {:ok, state}
+  defp block(state, reason) do
+    if state.job.app && state.running[state.job.app],
+      do: Owner.quiesce(state.running[state.job.app].owner)
 
-  defp command(:start, app, state) do
-    with {:ok, started} <- launch(app, state.entries[app].active_version, state),
-         {:ok, saved} <- save_entry(started, app, %{state.entries[app] | enabled: true}) do
-      {:ok, saved}
+    %{state | blocked: reason, blocked_app: state.job.app || state.blocked_app}
+  end
+
+  defp storage_check(%{request: {:stop, _}}), do: :ok
+
+  defp storage_check(%{storage_identity: identity}) do
+    if Storage.identity() == {:ok, identity}, do: :ok, else: {:error, :storage_changed}
+  end
+
+  defp run({:stop, _} = request, state, context), do: perform(request, state, context)
+  defp run(:halt_all, state, context), do: perform(:halt_all, state, context)
+
+  defp run(request, state, context) do
+    case Storage.identity() do
+      {:ok, identity} ->
+        :ok = context.({:storage_identity, identity})
+        perform(request, %{state | storage_identity: identity}, context)
+
+      error ->
+        {error, state}
+    end
+  end
+
+  defp perform({:install_new, path, expected}, state, context) do
+    with {:ok, package, bytes, sha} <- Artifact.read(path),
+         :ok <- Artifact.review(package, sha, expected, state.entries),
+         %{ready: true, card_id: card} when card == expected.card_id <- Storage.commissioning() do
+      install(package, bytes, sha, state, context)
     else
-      {:error, reason, next} -> {{:error, reason}, halt(app, next)}
+      _ -> {{:error, :review_changed}, state}
     end
   end
 
-  defp command(:stop, app, state) do
-    # Persist the user's intent before stopping; a failed write must not silently
-    # turn into an enabled application after a reboot.
-    case save_entry(state, app, %{state.entries[app] | enabled: false}) do
-      {:ok, next} -> {:ok, halt(app, next)}
-      {:error, reason, next} -> {{:error, reason}, next}
-    end
-  end
-
-  defp command(:restart, app, state), do: command(:start, app, halt(app, state))
-
-  defp command(:rollback, app, state) do
-    case state.entries[app].previous_version do
-      nil -> {{:error, :no_previous_version}, state}
-      version -> switch(app, version, state)
-    end
-  end
-
-  defp command(:uninstall, app, state) do
-    with {:ok, root} <- Storage.apps_dir(),
-         :ok <- persist(state.file, Map.delete(state.entries, app)) do
-      next = halt(app, state)
-
-      result =
-        case File.rm_rf(Path.join(root, app)) do
-          {:ok, _} -> :ok
-          {:error, reason, _} -> {:error, reason}
-        end
-
-      {result,
-       %{next | entries: Map.delete(next.entries, app), errors: Map.delete(next.errors, app)}}
+  defp perform({operation, path}, state, context) when operation in [:install, :upgrade] do
+    with {:ok, _} <- Storage.apps_dir(),
+         {:ok, package, bytes, sha} <- Artifact.read(path) do
+      install_request(operation, package, bytes, sha, state, context)
     else
       error -> {error, state}
     end
   end
 
-  defp install_package(path, state) do
-    with {:ok, _} <- Storage.apps_dir(), {:ok, package} <- Package.read(path) do
-      install_loaded(package, state)
-    else
-      error -> {error, state}
-    end
+  defp perform({operation, name}, state, context)
+       when operation in [:start, :stop, :restart, :rollback, :uninstall] do
+    app = to_string(name)
+
+    if Package.valid_name?(app) and Map.has_key?(state.entries, app),
+      do: lifecycle(operation, app, state, context),
+      else: {{:error, :not_installed}, state}
   end
 
-  defp install_loaded(package, state) do
-    with {:ok, root} <- Storage.apps_dir(),
-         app = to_string(package.app),
-         :ok <- validate(package, app, state),
-         {:ok, directory} <- Storage.directory(root, app),
-         destination = Path.join(directory, package.version),
-         # Never replace a selected version. Other copies (a failed upgrade, or
-         # files left after /data was reset) are unregistered and replaceable.
-         false <- in_use?(state.entries[app], package.version),
-         {:ok, _} <- File.rm_rf(destination),
-         stage = Path.join(directory, ".install-#{System.unique_integer([:positive])}"),
-         :ok <- Package.extract(package, stage),
-         :ok <- rename(stage, destination) do
-      register(state, app, package, destination)
-    else
-      true -> {{:error, :already_installed}, state}
-      error -> {error, state}
-    end
-  end
-
-  defp rename(stage, destination) do
-    with {:error, _} = error <- File.rename(stage, destination) do
-      File.rm_rf(stage)
-      error
-    end
-  end
-
-  defp register(state, app, package, destination) do
-    entry =
-      Map.get(state.entries, app, %{
-        enabled: false,
-        active_version: package.version,
-        previous_version: nil
-      })
-
-    case save_entry(state, app, entry) do
+  defp perform({:unexpected_stop, app}, state, context) do
+    case halt(app, state, context) do
       {:ok, next} ->
-        {{:ok, %{app: package.app, version: package.version}}, next}
+        {{:error, :application_stopped},
+         %{next | errors: Map.put(next.errors, app, :application_stopped)}}
 
       {:error, reason, next} ->
-        File.rm_rf(destination)
         {{:error, reason}, next}
     end
   end
 
-  defp in_use?(nil, _version), do: false
+  defp perform(:halt_all, state, context) do
+    Enum.reduce_while(Map.keys(state.running), {:ok, state}, fn app, {_, state} ->
+      case halt(app, state, context) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        {:error, reason, next} -> {:halt, {{:error, reason}, %{next | blocked: reason}}}
+      end
+    end)
+  end
 
-  defp in_use?(entry, version),
-    do: version in [entry.active_version, entry.previous_version]
+  defp perform(:restore, state, context) do
+    with :ok <- Loader.drain(:inactive),
+         :ok <- reconcile(state.entries) do
+      next = Enum.reduce_while(state.entries, state, &restore_entry(&1, &2, context))
 
-  defp switch(app, version, state) do
-    # Validate before stopping working code. Commit selection only after the
-    # new application has started and passed its bounded health check.
-    with false <- version == state.entries[app].active_version,
-         {:ok, package, _} <- read_package(app, version),
-         :ok <- validate(package, app, state) do
-      switch_validated(app, version, state)
+      {:ok, %{next | restored?: true, available?: true}}
     else
-      true -> {{:error, :already_active}, state}
-      error -> {error, state}
+      {:error, reason} -> {{:error, reason}, %{state | blocked: reason, restored?: true}}
     end
   end
 
-  defp switch_validated(app, version, state) do
-    old = state.entries[app]
-    was_running? = Map.has_key?(state.running, app)
-    stopped = halt(app, state)
-    entry = %{old | enabled: true, active_version: version, previous_version: old.active_version}
+  defp perform(_, state, _), do: {{:error, :invalid_request}, state}
 
-    with {:ok, started} <- launch(app, version, stopped),
-         {:ok, saved} <- save_entry(started, app, entry) do
-      {:ok, saved}
+  defp install_request(:upgrade, package, bytes, sha, state, context) do
+    app = to_string(package.app)
+
+    if Map.has_key?(state.entries, app) do
+      upgrade_installed(
+        install(package, bytes, sha, state, context),
+        app,
+        package.version,
+        context
+      )
     else
-      {:error, reason, next} -> rollback_failed(app, old, was_running?, reason, next)
+      {{:error, :not_installed}, state}
     end
   end
 
-  defp rollback_failed(app, old, was_running?, reason, state) do
-    state = halt(app, state)
-    result = if was_running?, do: launch(app, old.active_version, state), else: {:ok, state}
+  defp install_request(:install, package, bytes, sha, state, context),
+    do: install(package, bytes, sha, state, context)
+
+  defp upgrade_installed({{:ok, _}, state}, app, version, context),
+    do: switch(app, version, state, context)
+
+  defp upgrade_installed(result, _, _, _), do: result
+
+  defp restore_entry({app, %{enabled: true}}, state, context) do
+    case start_selected(app, state, context) do
+      {:ok, next} ->
+        {:cont, next}
+
+      {{:error, reason}, next} ->
+        next = %{next | errors: Map.put(next.errors, app, reason)}
+        if next.blocked, do: {:halt, next}, else: {:cont, next}
+    end
+  end
+
+  defp restore_entry(_, state, _), do: {:cont, state}
+
+  defp install(package, bytes, sha, state, context) do
+    app = to_string(package.app)
+    previous = state.running[app] && state.running[app].artifact
+    registered = get_in(state.entries, [app, :artifacts, package.version])
+
+    cond do
+      registered && registered.sha256 != sha ->
+        {{:error, :artifact_conflict}, state}
+
+      registered ->
+        {{:ok, %{app: package.app, version: package.version, sha256: sha}}, state}
+
+      true ->
+        with :ok <- Artifact.validate(package, state.entries, app, previous),
+             {:ok, artifact} <- Artifact.install(package, bytes, sha),
+             entry =
+               Map.get(state.entries, app, %{
+                 enabled: false,
+                 active_version: package.version,
+                 previous_version: nil,
+                 generation: 0,
+                 artifacts: %{}
+               }),
+             entry = %{
+               entry
+               | artifacts:
+                   Map.put(entry.artifacts, package.version, Artifact.descriptor(artifact))
+             },
+             {:ok, next} <- save(state, app, entry, context) do
+          {{:ok, %{app: package.app, version: package.version, sha256: sha}}, next}
+        else
+          {:error, reason, next} -> {{:error, reason}, next}
+          {:error, reason} -> {{:error, reason}, state}
+        end
+    end
+  end
+
+  defp lifecycle(:start, app, state, context) do
+    case state.running[app] do
+      %{phase: :running} ->
+        {:ok, state}
+
+      nil ->
+        start_selected(app, state, context)
+
+      _ ->
+        {{:error, :cleanup_pending}, state}
+    end
+  end
+
+  defp lifecycle(:stop, app, state, context) do
+    with {:ok, next} <- save(state, app, %{state.entries[app] | enabled: false}, context),
+         {:ok, next} <- halt(app, next, context) do
+      {:ok, %{next | blocked: nil}}
+    else
+      {:error, reason, next} -> {{:error, reason}, next}
+    end
+  end
+
+  defp lifecycle(:restart, app, state, context) do
+    case halt(app, state, context) do
+      {:ok, next} -> lifecycle(:start, app, next, context)
+      {:error, reason, next} -> {{:error, reason}, next}
+    end
+  end
+
+  defp lifecycle(:rollback, app, state, context) do
+    case state.entries[app].previous_version do
+      nil -> {{:error, :no_previous_version}, state}
+      version -> switch(app, version, state, context)
+    end
+  end
+
+  defp lifecycle(:uninstall, app, state, context) do
+    case lifecycle(:stop, app, state, context) do
+      {:ok, next} ->
+        with {:ok, root} <- Storage.apps_dir(),
+             :ok <- remove_artifacts(root, app, next.entries[app]),
+             :ok <- context.({:persist, Map.delete(next.entries, app)}) do
+          {:ok,
+           %{next | entries: Map.delete(next.entries, app), errors: Map.delete(next.errors, app)}}
+        else
+          {:error, reason} -> {{:error, reason}, next}
+        end
+
+      result ->
+        result
+    end
+  end
+
+  defp start_selected(app, state, context) do
+    result =
+      with {:ok, next} <- launch(app, state.entries[app].active_version, state, context),
+           do: commit_running(app, next, context)
 
     case result do
       {:ok, next} ->
-        error = {:rolled_back, reason}
-        {{:error, error}, %{next | errors: Map.put(next.errors, app, error)}}
+        {:ok, next}
 
-      {:error, rollback_reason, next} ->
-        error = {:rollback_failed, reason, rollback_reason}
-        {{:error, error}, %{next | errors: Map.put(next.errors, app, error)}}
+      {:error, reason, next} ->
+        {{:error, reason}, %{next | errors: Map.put(next.errors, app, reason)}}
     end
   end
 
-  defp launch(app, _version, %{running: running} = state) when is_map_key(running, app),
-    do: {:ok, state}
+  defp switch(app, version, state, context) do
+    old = state.entries[app]
+    previous = state.running[app] && state.running[app].artifact
 
-  defp launch(app, version, state) do
-    with {:ok, package, directory} <- read_package(app, version),
-         :ok <- validate(package, app, state) do
-      paths = Enum.map(package.apps, &Path.join([directory, &1.root, "ebin"]))
-      info = %{package: Map.delete(package, :files), paths: paths, started: []}
-      next = put_in(state.running[app], info)
+    with false <- version == old.active_version,
+         {:ok, artifact, package} <- Loader.prepare(app, version, state.entries, previous),
+         {:ok, stopped} <- halt(app, state, context) do
+      selected =
+        put_in(stopped.entries[app], %{
+          old
+          | active_version: version,
+            previous_version: old.active_version,
+            enabled: true
+        })
 
-      case start_package(app, package, paths, next) do
-        {:ok, next} -> {:ok, next}
-        {:error, reason, next} -> {:error, reason, halt(app, next)}
-        {:error, reason} -> {:error, reason, halt(app, next)}
+      result =
+        with {:ok, started} <- activate(artifact, package, selected, context),
+             do: commit_running(app, started, context)
+
+      case result do
+        {:ok, next} ->
+          {:ok, next}
+
+        {:error, reason, next} ->
+          rollback_failed(app, old, previous != nil, reason, next, context)
       end
     else
+      true -> {{:error, :already_active}, state}
+      {:error, reason, next} -> {{:error, reason}, next}
+      {:error, reason} -> {{:error, reason}, state}
+    end
+  end
+
+  defp rollback_failed(app, old, was_running, reason, state, context) do
+    with {:ok, stopped} <- halt(app, state, context),
+         stopped = put_in(stopped.entries[app], old),
+         {:ok, restored} <- restore_previous(app, was_running, stopped, context) do
+      error = {:rolled_back, reason}
+      {{:error, error}, %{restored | errors: Map.put(restored.errors, app, error)}}
+    else
+      {:error, cleanup, next} ->
+        {{:error, {:rollback_failed, reason, cleanup}}, %{next | blocked: :rollback_failed}}
+    end
+  end
+
+  defp restore_previous(app, true, state, context) do
+    with {:ok, started} <- launch(app, state.entries[app].active_version, state, context),
+         do: commit_running(app, started, context)
+  end
+
+  defp restore_previous(_, false, state, _), do: {:ok, state}
+
+  defp launch(app, version, state, context) do
+    case Loader.prepare(app, version, state.entries, nil) do
+      {:ok, artifact, package} -> activate(artifact, package, state, context)
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  defp start_package(app, package, paths, state) do
-    with :ok <- add_paths(paths),
-         :ok <- load_apps(package.apps),
-         {:ok, started} <- Application.ensure_all_started(package.app),
-         next = put_in(state.running[app].started, started),
-         {:ok, next} <- healthy(package, next) do
+  defp activate(artifact, package, state, context) do
+    app = to_string(artifact.app)
+
+    case context.({:bind, artifact}) do
+      {:ok, activation} -> activate_bound(app, activation, package, state, context)
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp activate_bound(app, activation, package, state, context) do
+    state = put_in(state.running[app], activation)
+
+    case Loader.activate(activation, package, &context.({:checkpoint, app, &1})) do
+      {:ok, activation} ->
+        {:ok, put_in(state.running[app], activation)}
+
+      {:error, reason, partial} ->
+        activation_failed(app, reason, put_in(state.running[app], partial), context)
+    end
+  end
+
+  defp activation_failed(app, reason, state, context) do
+    case halt(app, state, context) do
+      {:ok, stopped} -> {:error, reason, stopped}
+      {:error, cleanup, next} -> {:error, {:cleanup_failed, reason, cleanup}, next}
+    end
+  end
+
+  defp commit_running(app, state, context) do
+    activation = state.running[app]
+    {_, sequence} = activation.owner.generation
+
+    with {:ok, _} <- Storage.apps_dir(),
+         {:ok, next} <-
+           save(state, app, %{state.entries[app] | enabled: true, generation: sequence}, context) do
       {:ok, %{next | errors: Map.delete(next.errors, app)}}
-    end
-  end
-
-  defp healthy(package, state) do
-    case health_check(package.main.env[:nerves_gate_health_check]) do
-      :ok -> {:ok, state}
-      {:error, reason} -> {:error, reason, state}
-    end
-  end
-
-  defp health_check(nil), do: :ok
-
-  defp health_check({module, function, args})
-       when is_atom(module) and is_atom(function) and is_list(args) do
-    task =
-      Task.Supervisor.async_nolink(NervesGate.AppTasks, fn -> apply(module, function, args) end)
-
-    case Task.yield(task, 5_000) || Task.shutdown(task, :brutal_kill) do
-      {:ok, :ok} -> :ok
-      {:ok, _} -> {:error, :health_check_failed}
-      {:exit, _} -> {:error, :health_check_failed}
-      nil -> {:error, :health_check_timeout}
-    end
-  end
-
-  defp health_check(_), do: {:error, :invalid_health_check}
-
-  defp halt(app, state) do
-    case Map.pop(state.running, app) do
-      {nil, _} ->
-        state
-
-      {info, running} ->
-        unload(info)
-        %{state | running: running}
-    end
-  end
-
-  # Never stop platform dependencies. Private dependencies belong solely to this
-  # package, and cannot be shared with another installed app.
-  defp unload(info) do
-    names = MapSet.new(info.package.apps, & &1.app)
-    order = Enum.reverse(info.started, Enum.map(info.package.apps, & &1.app))
-    for name <- Enum.uniq(order), MapSet.member?(names, name), do: Application.stop(name)
-
-    for entry <- info.package.apps do
-      Application.unload(entry.app)
-      Enum.each(entry.modules, &purge/1)
-    end
-
-    Enum.each(info.paths, &:code.del_path(String.to_charlist(&1)))
-  end
-
-  defp purge(module) do
-    :code.purge(module)
-    :code.delete(module)
-    :code.purge(module)
-  end
-
-  defp validate(package, owner, state) do
-    own =
-      case state.running[owner] do
-        nil -> []
-        info -> Enum.map(info.package.apps, & &1.app)
-      end
-
-    installed = Map.drop(Package.installed(), own)
-
-    reserved =
-      state.entries
-      |> Map.delete(owner)
-      |> Enum.reduce(installed, fn {app, entry}, acc -> reserve(acc, app, entry) end)
-
-    Package.validate(package, reserved, to_string(Application.spec(:nerves_gate_sdk, :vsn)))
-  end
-
-  # Installed applications keep their names and modules, even while stopped.
-  defp reserve(reserved, app, entry) do
-    case read_package(app, entry.active_version) do
-      {:ok, other, _} -> Enum.reduce(other.apps, reserved, &Map.put(&2, &1.app, &1))
-      _ -> reserved
-    end
-  end
-
-  defp read_package(app, version) do
-    with {:ok, root} <- Storage.apps_dir(),
-         directory = Path.join([root, app, version]),
-         {:ok, package} <- Package.read_directory(directory),
-         true <- to_string(package.app) == app and package.version == version do
-      {:ok, package, directory}
     else
-      false -> {:error, :invalid_package}
-      error -> error
+      {:error, reason, next} -> activation_failed(app, reason, next, context)
+      {:error, reason} -> activation_failed(app, reason, state, context)
     end
   end
 
-  defp add_paths(paths) do
-    Enum.reduce_while(paths, :ok, fn path, :ok ->
-      case :code.add_patha(String.to_charlist(path)) do
-        true -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-  end
+  defp halt(app, state, context) do
+    case state.running[app] do
+      nil ->
+        {:ok, state}
 
-  defp load_apps(apps) do
-    Enum.reduce_while(apps, :ok, fn app, :ok ->
-      case :application.load({:application, app.app, app.spec}) do
-        :ok -> {:cont, :ok}
-        error -> {:halt, error}
-      end
-    end)
-  end
+      activation ->
+        :ok = context.({:quiesce, app})
 
-  defp restore(state) do
-    available? = match?({:ok, _}, Storage.root())
+        case Loader.unload(activation) do
+          :ok ->
+            :ok = context.({:unloaded, app})
+            {:ok, %{state | running: Map.delete(state.running, app)}}
 
-    if available? do
-      enabled = for {app, %{enabled: true} = entry} <- state.entries, do: {app, entry}
-      Enum.reduce(enabled, %{state | available?: true}, &restore_app/2)
-    else
-      %{state | available?: false}
+          {:error, reason} ->
+            {:error, reason, %{state | blocked: :cleanup_pending}}
+        end
     end
   end
 
-  defp restore_app({app, entry}, state) do
-    case launch(app, entry.active_version, state) do
-      {:ok, next} -> next
-      {:error, reason, next} -> %{next | errors: Map.put(next.errors, app, reason)}
-    end
-  end
-
-  defp versions(app) do
-    with {:ok, root} <- Storage.apps_dir(), {:ok, names} <- File.ls(Path.join(root, app)) do
-      names |> Enum.filter(&Package.valid_version?/1) |> Enum.sort()
-    else
-      _ -> []
-    end
-  end
-
-  defp save_entry(state, app, entry) do
+  defp save(state, app, entry, context) do
     entries = Map.put(state.entries, app, entry)
 
-    case persist(state.file, entries) do
+    case context.({:persist, entries}) do
       :ok -> {:ok, %{state | entries: entries}}
       {:error, reason} -> {:error, {:metadata_write, reason}, state}
     end
   end
 
-  defp persist(file, entries) do
-    temp = file <> ".tmp"
+  defp reconcile(entries) do
+    Enum.reduce_while(entries, :ok, fn {app, entry}, :ok ->
+      continue(reconcile_app(app, entry))
+    end)
+  end
 
-    with :ok <- File.mkdir_p(Path.dirname(file)),
-         :ok <- File.write(temp, :erlang.term_to_binary(entries), [:binary, :sync]) do
-      File.rename(temp, file)
+  defp reconcile_app(app, entry) do
+    Enum.reduce_while(entry.artifacts, :ok, fn {version, metadata}, :ok ->
+      continue(reconcile_artifact(app, version, metadata))
+    end)
+  end
+
+  defp reconcile_artifact(app, version, metadata) do
+    with {:ok, artifact, _} <- Artifact.load(app, version, metadata) do
+      if Loader.present?(artifact),
+        do: Loader.unload(%{artifact: artifact, owner: nil, started: [], phase: :quiescing}),
+        else: :ok
     end
   end
 
-  defp read_metadata(file) do
-    case File.read(file) do
-      {:ok, bytes} ->
-        entries = :erlang.binary_to_term(bytes, [:safe])
+  defp remove_artifacts(root, app, entry) do
+    Enum.reduce_while(entry.artifacts, :ok, fn {version, metadata}, :ok ->
+      continue(remove_artifact(root, app, version, metadata))
+    end)
+  end
 
-        if is_map(entries) and Enum.all?(entries, &valid_entry?/1),
-          do: {:ok, entries},
-          else: {:stop, :invalid_app_metadata}
-
-      {:error, :enoent} ->
-        {:ok, %{}}
-
-      {:error, reason} ->
-        {:stop, {:app_metadata, reason}}
+  defp remove_artifact(root, app, version, metadata) do
+    with {:ok, _, _} <- Artifact.load(app, version, metadata) do
+      path = Path.join([root, app, version])
+      Artifact.remove_stage(path)
+      if File.exists?(path), do: {:error, :artifact_removal_failed}, else: :ok
     end
-  rescue
-    # binary_to_term/2 rejects corrupt or unsafe terms.
-    ArgumentError -> {:stop, :invalid_app_metadata}
   end
 
-  defp valid_entry?({app, %{enabled: enabled, active_version: version} = entry})
-       when is_binary(app) and is_boolean(enabled) and map_size(entry) == 3 do
-    previous = Map.get(entry, :previous_version, :missing)
-
-    Package.valid_name?(app) and Package.valid_version?(version) and
-      (is_nil(previous) or Package.valid_version?(previous))
-  end
-
-  defp valid_entry?(_), do: false
+  defp continue(:ok), do: {:cont, :ok}
+  defp continue(error), do: {:halt, error}
 end

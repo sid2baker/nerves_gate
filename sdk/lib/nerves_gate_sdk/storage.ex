@@ -12,7 +12,7 @@ defmodule NervesGateSDK.Storage do
   @spec status() :: {:ok, Status.t()} | {:error, term()}
   def status, do: Backend.call(:storage_status, [])
 
-  @doc "Returns this application's data directory, or an error when the SD card is unavailable."
+  @doc "Returns the managed main application's data directory. The calling PID must belong to that activation and supply its main app name."
   @spec data_dir(atom()) :: {:ok, Path.t()} | {:error, term()}
   def data_dir(app) when is_atom(app) do
     if Regex.match?(~r/\A[a-z][a-z0-9_]*\z/, Atom.to_string(app)),

@@ -18,7 +18,14 @@ alias NervesGateSDK.{CAN, Events, Network, Storage, System}
 
 Subscriptions deliver `%NervesGateSDK.Events.Event{topic: topic, value: value}`
 to the calling process. Backends monitor subscribers and RS485 claim owners;
-resources are released when their owner exits. SDK structs are the public contract,
+resources are released when their owner exits. Stateful calls require an installed,
+starting/running managed application. The backend derives activation identity from
+the actual PID, never a supplied app name. Activation generations fence stale
+subscriptions/claims/in-flight work; restart/rollback requires fresh subscriptions
+and handles. Outside managed applications, read-only queries remain available,
+but resource calls fail with `application_not_running` (network errors use the
+string code). Use administrative domain APIs for IEx/RPC maintenance.
+SDK structs are the public contract,
 not firmware status maps. Commands return `:ok`, `{:ok, value}` or `{:error, reason}`.
 A timeout means an unknown outcome, not cancellation or permission to retry.
 
@@ -75,5 +82,7 @@ device architecture; this task does not cross-compile it.
 
 An optional `:nerves_gate_health_check` environment entry contains an MFA that
 must return `:ok` within five seconds after startup. A failed upgrade restarts the
-previous version without changing its persisted selection. The administrative
+previous verified artifact with a fresh generation. Uncertain cleanup or rollback
+failure blocks activation rather than claiming restoration. Versions are immutable:
+bump the app version for changed package bytes. The administrative
 `NervesGate.Apps` lifecycle API belongs to firmware, not the SDK.

@@ -166,7 +166,20 @@ defmodule NervesGate.Network.Local do
   end
 
   def lease(scope, owner, phase),
-    do: %{scope: scope, owner: owner, monitor: nil, ref: nil, phase: phase, error: nil}
+    do: %{
+      scope: scope,
+      owner: owner,
+      generation: nil,
+      monitor: nil,
+      ref: nil,
+      phase: phase,
+      error: nil
+    }
+
+  def orphan(local) do
+    phase = if local.phase == :blocked, do: :blocked, else: :cleanup_pending
+    %{local | owner: nil, monitor: nil, phase: phase}
+  end
 
   def action_allowed(:release_local, _, _), do: :ok
 

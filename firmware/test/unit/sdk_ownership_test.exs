@@ -46,9 +46,9 @@ defmodule NervesGate.SDKOwnershipTest do
     caller = self()
 
     for {operation, args} <- [can_subscribe: ["can0"], rs485_claim: ["rs485_1"]] do
-      # Real host services have no bus hardware. Rejection still exercises the
-      # full SDK-to-owner call path, without introducing fake devices or UARTs.
-      assert {:error, :bus_unsupported} = SDKBackend.call(operation, args)
+      # The real domain receives the actual caller, but unmanaged callers cannot
+      # gain stateful access, independently of whether hardware is available.
+      assert {:error, :application_not_running} = SDKBackend.call(operation, args)
 
       assert_receive {:trace, ^buses, :receive,
                       {:"$gen_call", {^caller, _}, {:sdk, ^operation, ^args}}}

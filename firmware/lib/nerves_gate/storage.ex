@@ -35,6 +35,13 @@ defmodule NervesGate.Storage do
   def status, do: {:ok, %Status{available?: match?({:ok, _}, root())}}
   def root, do: GenServer.call(__MODULE__, :root)
 
+  @doc false
+  def identity do
+    GenServer.call(__MODULE__, :identity)
+  catch
+    :exit, _ -> {:error, :storage_unavailable}
+  end
+
   def unavailable do
     %{
       available: false,
@@ -70,6 +77,17 @@ defmodule NervesGate.Storage do
   def handle_call(:root, _, state) do
     result = if ready?(state), do: {:ok, mountpoint()}, else: {:error, :storage_unavailable}
     {:reply, result, state}
+  end
+
+  def handle_call(:identity, _, state) do
+    current = card()
+    mount = root_mount()
+
+    if ready?(state) and current.card_id == state.card.card_id and mount != nil do
+      {:reply, {:ok, {current.card_id, mount.mount_id}}, state}
+    else
+      {:reply, {:error, :storage_unavailable}, state}
+    end
   end
 
   def handle_call(:observations, _, state),

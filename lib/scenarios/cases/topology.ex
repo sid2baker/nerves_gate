@@ -207,31 +207,17 @@ defmodule Scenarios.Cases.Topology do
   end
 
   defp refuses_application_forwarding(vm, destination) do
-    parent = self()
+    Scenarios.ManagedApp.with_app(vm, fn owner ->
+      assert {:ok, _} =
+               Scenarios.ManagedApp.call(vm, owner, NervesGateSDK.Network, :claim_local, [
+                 "eth0",
+                 "10.0.3.15",
+                 24
+               ])
 
-    owner =
-      spawn_link(fn ->
-        result =
-          GenServer.call(
-            {NervesGate.Network, vm.node},
-            {:claim_local, "eth0", "10.0.3.15", 24},
-            70_000
-          )
-
-        send(parent, {:forwarding_lease, self(), result})
-
-        receive do
-          :stop -> :ok
-        end
-      end)
-
-    try do
-      assert_receive {:forwarding_lease, ^owner, {:ok, _}}, 75_000
       Scenarios.Device.await(vm, "application local address ready", &addressed?(&1, "eth0"))
       refuses_forwarding(vm, "eth0", "10.0.3.2", destination)
-    after
-      send(owner, :stop)
-    end
+    end)
 
     Scenarios.Device.await(vm, "application lease cleaned", &(&1.network.local == nil), 75_000)
   end

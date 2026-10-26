@@ -12,12 +12,15 @@ defmodule Scenarios.Cases.Apps do
 
   def run(%{device: vm}) do
     commission_storage(vm)
+    Scenarios.ManagedApp.prepare_storage(vm)
     install_generated_app(vm)
+    Scenarios.AppLifecycle.run(vm)
 
     # Card removal uses a disposable Linux mount inside the supervised guest. No
     # host mounts, arbitrary VMs, hardware adapters or physical cards are involved.
     mount = "/tmp/nerves-gate-apps"
-    Scenarios.Device.rpc(vm, File, :mkdir_p!, [mount], 30_000)
+    backing = "/tmp/nerves-gate-app-backing"
+    for path <- [mount, backing], do: Scenarios.Device.rpc(vm, File, :mkdir_p!, [path], 30_000)
     board = Scenarios.Device.rpc(vm, Application, :fetch_env!, [:nerves_gate, :board], 30_000)
 
     Scenarios.Device.rpc(
@@ -33,17 +36,26 @@ defmodule Scenarios.Cases.Apps do
     assert {:ok, %{available?: false}} =
              Scenarios.Device.rpc(vm, NervesGate.Storage, :status, [], 30_000)
 
-    assert {:error, :storage_unavailable} =
-             Scenarios.Device.rpc(vm, NervesGate.Apps, :install, ["/missing.ez"], 30_000)
+    assert {:error, unavailable} =
+             Scenarios.Device.rpc(vm, NervesGate.Apps, :install, ["/missing.ez"], 200_000)
+
+    assert unavailable in [:storage_unavailable, :applications_not_ready]
 
     {_, 0} =
       Scenarios.Device.rpc(
         vm,
         System,
         :cmd,
-        ["mount", ["-t", "tmpfs", "-o", "size=32m", "tmpfs", mount]],
+        ["mount", ["-t", "tmpfs", "-o", "size=32m", "tmpfs", backing]],
         30_000
       )
+
+    assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["mount", ["--bind", backing, mount]])
+
+    await(fn ->
+      state = Scenarios.Device.rpc(vm, :sys, :get_state, [NervesGate.Apps])
+      state.available? and state.restored? and state.job == nil
+    end)
 
     try do
       first = upload(vm, "1.0.0", true)
@@ -83,6 +95,7 @@ defmodule Scenarios.Cases.Apps do
       assert :ok = apps(vm, :rollback, [:gate_fixture])
       assert [{:gate_fixture, "1.0.0", true}] == selection(vm)
       assert :ok = apps(vm, :restart, [:gate_fixture])
+      assert_storage_removal(vm, backing, mount)
 
       assert :ok =
                Scenarios.Device.rpc(
@@ -129,12 +142,29 @@ defmodule Scenarios.Cases.Apps do
     after
       apps(vm, :uninstall, [:gate_fixture])
       Scenarios.Device.rpc(vm, System, :cmd, ["umount", [mount]], 30_000)
+      Scenarios.Device.rpc(vm, System, :cmd, ["umount", [backing]], 30_000)
       Scenarios.Device.rpc(vm, Application, :delete_env, [:nerves_gate, :apps_mount], 30_000)
       Scenarios.Device.rpc(vm, Application, :put_env, [:nerves_gate, :board, board], 30_000)
 
       for version <- ~w(1.0.0 1.1.0 1.2.0),
           do: Scenarios.Device.rpc(vm, File, :rm, ["/tmp/gate_fixture-#{version}.ez"], 30_000)
     end
+  end
+
+  defp assert_storage_removal(vm, backing, mount) do
+    {:ok, [before]} = apps(vm, :list, [])
+    assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["umount", [mount]])
+    await(fn -> selection(vm) == [{:gate_fixture, "1.0.0", false}] end)
+
+    refute :gate_fixture in Enum.map(
+             Scenarios.Device.rpc(vm, Application, :started_applications),
+             &elem(&1, 0)
+           )
+
+    assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["mount", ["--bind", backing, mount]])
+    await(fn -> selection(vm) == [{:gate_fixture, "1.0.0", true}] end)
+    {:ok, [after_return]} = apps(vm, :list, [])
+    assert after_return.generation > before.generation
   end
 
   defp install_generated_app(vm) do
@@ -337,7 +367,7 @@ defmodule Scenarios.Cases.Apps do
          applications: [:kernel, :stdlib, :elixir, :nerves_gate_sdk],
          mod: {module, []},
          env: [
-           nerves_gate_sdk_requirement: "~> 0.1.0",
+           nerves_gate_sdk_requirement: "~> 0.2.0-dev",
            nerves_gate_health_check: {module, :health_check, []}
          ]
        ]}
@@ -361,7 +391,7 @@ defmodule Scenarios.Cases.Apps do
   end
 
   defp apps(vm, function, args),
-    do: Scenarios.Device.rpc(vm, NervesGate.Apps, function, args, 30_000)
+    do: Scenarios.Device.rpc(vm, NervesGate.Apps, function, args, 200_000)
 
   defp await(predicate, attempts \\ 30)
   defp await(_, 0), do: flunk("Expected application storage state was not reached")

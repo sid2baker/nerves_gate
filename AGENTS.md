@@ -46,7 +46,13 @@
   replaces backend validation. Pure policies/read models perform no effects.
 - SDK observations and administrative status/commands are distinct contracts.
   Preserve actual calling-PID ownership of subscriptions, bus claims and network leases; no Tasks
-  proxying those calls. Trusted apps share the BEAM; the SDK is not a sandbox.
+  proxying those calls. Stateful SDK calls require managed activation membership;
+  use the Apps-owned generation bindings without synchronous callbacks into Apps.
+  Trusted apps share the BEAM; the SDK is not a sandbox.
+- `Apps.Artifact` owns immutable archive/content verification; `Apps.Loader` owns
+  verified code loading and checked cleanup. Apps owns serialized admission,
+  protected generation bindings and schema-1 metadata. Never replace a registered
+  version, backfill a digest, import old metadata or bypass blocked cleanup.
 - Keep genuine sharing through the firmware path dependency without starting its
   application on the host. Do not add a common library/UI kit without measured need.
 
