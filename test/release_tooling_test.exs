@@ -2,6 +2,33 @@ defmodule Workbench.ReleaseToolingTest do
   use ExUnit.Case, async: false
   alias Workbench.Release
 
+  test "platform evidence requires completed green main runs for the exact commit" do
+    run = %{
+      "head_sha" => "reviewed",
+      "head_branch" => "main",
+      "status" => "completed",
+      "conclusion" => "success",
+      "event" => "workflow_dispatch"
+    }
+
+    assert Release.validation_passed?([run], "reviewed")
+
+    for {key, value} <- [
+          {"head_sha", "other"},
+          {"head_branch", "feature"},
+          {"status", "in_progress"},
+          {"conclusion", "failure"},
+          {"conclusion", "cancelled"},
+          {"event", "pull_request"}
+        ] do
+      refute Release.validation_passed?([Map.put(run, key, value)], "reviewed")
+    end
+
+    refute Release.validation_passed?([], "reviewed")
+    refute Release.validation_passed?(nil, "reviewed")
+    assert Release.require_validation!(%{project: "sdk"}, "/unused") == :ok
+  end
+
   test "release metadata requires a known tag, exact version and canonical dated notes" do
     root = Path.join(System.tmp_dir!(), "gate_notes_#{System.unique_integer([:positive])}")
     File.mkdir_p!(Path.join(root, "sdk"))

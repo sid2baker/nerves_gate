@@ -157,6 +157,7 @@ defmodule WorkbenchWeb.Components do
       <p>Update {@review.address}:{@review.port} · {@review.target}</p>
       <p>{@review.current_version} → {@review.version} · serial {@review.serial}</p>
       <p>{@review.firmware}</p>
+      <code>Build commit: {@review.source_revision}</code>
       <code>SHA-256: {@review.sha256}</code>
       <p :if={@review[:verify_ssh]}>
         SSH update-and-verify procedure. Reconnect verification requires the same identity, a new boot, reviewed firmware and healthy state. If LAN/Tailscale access does not return, inspect the device; no update is retried.

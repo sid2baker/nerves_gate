@@ -5,7 +5,7 @@ defmodule Workbench.FirmwareUpdateTest do
   test "image and authenticated device must have matching product and platform" do
     image =
       FirmwareUpdate.metadata(
-        "meta-product=nerves_gate\nmeta-platform=ec100\nmeta-architecture=arm\nmeta-version=\"0.2.0-dev\"\nignored=private\n"
+        "meta-product=nerves_gate\nmeta-platform=ec100\nmeta-architecture=arm\nmeta-version=\"0.2.0-dev\"\nmeta-vcs-identifier=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nignored=private\n"
       )
 
     device = %{
@@ -18,6 +18,10 @@ defmodule Workbench.FirmwareUpdateTest do
 
     assert FirmwareUpdate.compatible!(image, device) == :ok
     refute Map.has_key?(image, "ignored")
+
+    assert_raise ArgumentError, fn ->
+      FirmwareUpdate.compatible!(Map.delete(image, "meta-vcs-identifier"), device)
+    end
 
     for incompatible <- [
           Map.put(device, "target", "x86_64"),
@@ -54,7 +58,7 @@ defmodule Workbench.FirmwareUpdateTest do
   end
 
   test "SSH never accepts unknown host keys or prompts for passwords" do
-    options = FirmwareUpdate.ssh_options("ec100.example.ts.net")
+    options = Workbench.DeviceSSH.options("ec100.example.ts.net")
     assert options[:silently_accept_hosts] == false
     assert options[:save_accepted_host] == false
     assert options[:user_interaction] == false
@@ -72,25 +76,20 @@ defmodule Workbench.FirmwareUpdateTest do
     assert FirmwareUpdate.port!("22") == 22
   end
 
-  test "device identity reads active-slot metadata and the runtime serial API" do
-    command = FirmwareUpdate.identity_command()
-    assert {:ok, _} = Code.string_to_quoted(command)
+  test "device reads invoke only current compiled maintenance APIs" do
+    assert Workbench.DeviceSSH.identity_command() ==
+             "Base.encode64(Jason.encode!(NervesGate.System.maintenance_info()))"
 
-    for key <- ["nerves_fw_product", "nerves_fw_platform", "nerves_fw_architecture"] do
-      assert command =~ "Nerves.Runtime.KV.get_active(\"#{key}\")"
-    end
-
-    assert command =~ "Nerves.Runtime.serial_number()"
-    refute command =~ "KV.get("
-    refute command =~ "KV.get_all"
+    assert Workbench.DeviceSSH.hardware_command() ==
+             "Base.encode64(Jason.encode!(NervesGate.System.hardware_info()))"
   end
 
   test "connection failures explain common causes without exposing arbitrary server errors" do
-    assert FirmwareUpdate.connection_error(:timeout) =~ "timed out"
-    assert FirmwareUpdate.connection_error(:econnrefused) =~ "refused"
-    assert FirmwareUpdate.connection_error(:nxdomain) =~ "could not be resolved"
-    assert FirmwareUpdate.connection_error(~c"Service not available") =~ "authentication"
-    refute FirmwareUpdate.connection_error({:server, "private error"}) =~ "private error"
+    assert Workbench.DeviceSSH.connection_error(:timeout) =~ "timed out"
+    assert Workbench.DeviceSSH.connection_error(:econnrefused) =~ "refused"
+    assert Workbench.DeviceSSH.connection_error(:nxdomain) =~ "could not be resolved"
+    assert Workbench.DeviceSSH.connection_error(~c"Service not available") =~ "authentication"
+    refute Workbench.DeviceSSH.connection_error({:server, "private error"}) =~ "private error"
   end
 
   @tag :tmp_dir
@@ -104,6 +103,7 @@ defmodule Workbench.FirmwareUpdateTest do
     public = %{token: "review", address: "ec100.example.ts.net"}
 
     plan = %{
+      owner: Workbench.FirmwareUpdate,
       public: public,
       dir: snapshot_dir,
       snapshot: snapshot,

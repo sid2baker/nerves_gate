@@ -30,7 +30,7 @@ Existing installations are rejected, never automatically upgraded. See
 1. Enroll the gateway in Tailscale using its Remote access page.
 2. Keep independent USB management and use a dedicated, authorized equipment network.
 3. Finish Internet setup, then enable a non-Internet Ethernet interface in **Hardware**.
-   Existing joined configurations are not changed automatically; separating them remains
+   Legacy joined/equipment configurations are rejected, never automatically changed; migrating them remains
    an administrator API operation, not something this app may do.
 4. Choose an unused gateway-side IPv4 address on a non-overlapping local subnet.
 

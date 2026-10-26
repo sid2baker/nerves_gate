@@ -93,6 +93,50 @@ defmodule Workbench.Release do
     end)
   end
 
+  def require_validation!(%{project: "sdk"}, _root), do: :ok
+
+  def require_validation!(%{project: "."}, root) do
+    {sha, 0} = System.cmd("git", ["rev-parse", "HEAD"], cd: root)
+    sha = String.trim(sha)
+
+    for workflow <- ["ci.yml", "qemu.yml"] do
+      args = [
+        "api",
+        "--method",
+        "GET",
+        "repos/#{@repo}/actions/workflows/#{workflow}/runs",
+        "-f",
+        "head_sha=#{sha}",
+        "-f",
+        "status=success",
+        "-f",
+        "per_page=100"
+      ]
+
+      {json, status} = System.cmd("gh", args, stderr_to_stdout: true)
+
+      unless status == 0 and validation_passed?(JSON.decode!(json)["workflow_runs"], sha),
+        do:
+          raise(
+            "A successful main-branch #{workflow} run is required for #{sha} before platform publication"
+          )
+    end
+
+    :ok
+  end
+
+  @doc false
+  def validation_passed?(runs, sha) when is_list(runs) do
+    Enum.any?(
+      runs,
+      &(&1["head_sha"] == sha and &1["head_branch"] == "main" and &1["status"] == "completed" and
+          &1["conclusion"] == "success" and
+          &1["event"] in ["push", "workflow_dispatch", "schedule"])
+    )
+  end
+
+  def validation_passed?(_, _), do: false
+
   # Refuse partial/existing releases instead of replacing immutable package bytes.
   # A failed job after publication requires an explicit, inspected repair.
   def unpublished!(info) do

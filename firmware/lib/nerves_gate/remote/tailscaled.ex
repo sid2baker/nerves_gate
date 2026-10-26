@@ -70,7 +70,7 @@ defmodule NervesGate.Remote.Tailscaled do
   end
 
   def execute(operation, params)
-      when operation in [:sharing_enable, :sharing_disable, :sharing_sync, :sharing_claim] do
+      when operation in [:sharing_disable, :sharing_sync, :sharing_claim] do
     # Refresh is a serialized Controller read, not a write replay. Earlier
     # accepted changes finish first, even if their original caller was killed.
     # Only the route list is ever patched here.

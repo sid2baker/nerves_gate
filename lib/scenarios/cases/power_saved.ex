@@ -23,7 +23,7 @@ defmodule Scenarios.Cases.PowerSaved do
     network = Qemu.network(vm)
     restarted = Qemu.power_cycle(vm)
 
-    assert Scenarios.Qemu.topology(vm) == %{lan1: :equipment, lan2: :internet}
+    assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :internet}
     assert Qemu.network(restarted) == network
 
     Scenarios.Device.await(

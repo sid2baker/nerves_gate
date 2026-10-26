@@ -385,7 +385,7 @@ defmodule WorkbenchWeb.DeviceLive do
   defp sentence(<<first::utf8, rest::binary>>), do: String.upcase(<<first::utf8>>) <> rest
 
   defp network_label(:internet), do: "Internet router"
-  defp network_label(:equipment), do: "Isolated equipment network"
+  defp network_label(:application), do: "Isolated application network"
 
   defp duration(ms) when ms < 1000, do: "#{ms} ms"
   defp duration(ms), do: "#{Float.round(ms / 1000, 1)} s"

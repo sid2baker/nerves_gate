@@ -1,14 +1,12 @@
 defmodule NervesGate.Status do
   @moduledoc "Pure status builder behind `NervesGate.status/0`. No process, cache or command execution."
-  alias NervesGate.{Buses, Cellular, Config, Equipment, Error, Indicators, Network, Remote}
-  alias NervesGate.Equipment.Subnet
+  alias NervesGate.{Buses, Cellular, Config, Error, Indicators, Network, Remote}
   alias NervesGate.Observations.Network, as: NetworkObservation
   alias NervesGate.Remote.Sharing
 
   def build(
         status,
         remote,
-        equipment,
         indicators,
         buses,
         ssh,
@@ -18,7 +16,7 @@ defmodule NervesGate.Status do
     cellular = cellular_supported?(status)
 
     %{
-      version: 8,
+      version: 9,
       system: system,
       device: %{available: true, error: nil},
       network: network(status),
@@ -32,12 +30,11 @@ defmodule NervesGate.Status do
       },
       remote: remote,
       sharing: sharing(status, remote),
-      equipment: equipment(status, equipment),
       indicators: indicators,
       buses: buses,
       ssh: ssh,
       storage: storage,
-      actions: actions(status, remote, equipment, indicators, buses, ssh)
+      actions: actions(status, remote, indicators, buses, ssh)
     }
   end
 
@@ -50,7 +47,6 @@ defmodule NervesGate.Status do
       build(
         nil,
         Remote.unavailable(),
-        Equipment.unavailable(),
         Indicators.unavailable(),
         Buses.unavailable(),
         NervesGate.SSH.unavailable(),
@@ -73,7 +69,7 @@ defmodule NervesGate.Status do
   defp cellular_supported?(_), do: false
 
   # Presentation metadata only. Admission belongs to the domain servers.
-  defp actions(status, remote, equipment, indicators, buses, ssh) do
+  defp actions(status, remote, indicators, buses, ssh) do
     trial = Network.Policy.trial_available(status, :cancel)
     confirm = Network.Policy.trial_available(status, :confirm)
     remote_ready = Remote.Policy.available(remote)
@@ -116,17 +112,6 @@ defmodule NervesGate.Status do
       "remote.configure" => action("Save device name", ["hostname"], remote_ready),
       "remote.disconnect" => action("Disconnect Tailscale", [], remote_ready),
       "remote.login_url" => action("Continue Tailscale login", [], remote_ready),
-      "equipment.scan" =>
-        action("Scan equipment subnet", [], Equipment.scan_available(status, equipment)),
-      "equipment.label" =>
-        action("Save label", ["id", "label"], Equipment.labels_available(equipment)),
-      "equipment.share" =>
-        action(
-          "Share equipment",
-          [],
-          sharing_available(status, remote)
-        ),
-      "equipment.unshare" => action("Turn sharing off", [], unshare_available(status, remote)),
       "buses.configure" =>
         action("Configure bus", ["port", "enabled"], Buses.Policy.available(buses)),
       "buses.capture" => action("Capture bus", ["port"], Buses.Policy.available(buses)),
@@ -165,32 +150,6 @@ defmodule NervesGate.Status do
   defp lan_available(status) do
     with :ok <- Network.Policy.available(status),
          do: Map.get(status, :sharing_admission, :ok)
-  end
-
-  defp sharing_available(status, remote) do
-    with :ok <- Network.Policy.available(status),
-         {:ok, _} <- Sharing.enable(status, remote),
-         do: :ok
-  end
-
-  defp unshare_available(status, remote) do
-    with :ok <- Network.Policy.available(status),
-         {:ok, _} <- Sharing.disable(status, remote),
-         do: :ok
-  end
-
-  defp equipment(status, equipment) do
-    scope =
-      case Subnet.from_status(status) do
-        {:ok, scope} -> scope
-        _ -> nil
-      end
-
-    if equipment.scope == scope and scope != nil do
-      equipment
-    else
-      %{equipment | scope: scope, entries: [], last_scan: nil, operation: nil, error: nil}
-    end
   end
 
   defp action(label, required, result) do
@@ -232,8 +191,6 @@ defmodule NervesGate.Status do
       backup: if(uplinks.backup, do: "active", else: to_string(uplinks.cellular))
     }
   end
-
-  defp port_role(%{"mode" => "shared"}, _), do: "shared"
 
   defp port_role(settings, name),
     do: get_in(Config.ports(settings), [name, "role"]) || "unassigned"

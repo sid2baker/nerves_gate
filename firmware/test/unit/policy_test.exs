@@ -1,7 +1,6 @@
 defmodule NervesGate.PolicyTest do
   use ExUnit.Case, async: true
   alias NervesGate.Config
-  alias NervesGate.Equipment.Labels
   alias NervesGate.Indicators.Policy
 
   test "unknown connectivity is never indicated as healthy" do
@@ -27,72 +26,51 @@ defmodule NervesGate.PolicyTest do
     assert Policy.value(:fast, 0) != Policy.value(:fast, 125)
   end
 
-  test "label validation and capacity are independent of persistence" do
-    assert Labels.normalize("  Pump  ") == {:ok, "Pump"}
-
-    for label <- [nil, <<255>>, "bad\nlabel", String.duplicate("x", 65)] do
-      assert Labels.normalize(label) ==
-               {:error,
-                %{
-                  code: "invalid_label",
-                  message: "Use a label of at most 64 characters without control characters."
-                }}
-    end
-
-    labels = Map.new(1..256, &{to_string(&1), "label"})
-
-    assert Labels.put(labels, "new", "label") ==
-             {:error,
-              %{
-                code: "label_limit",
-                message: "The 256-label limit has been reached. Remove an unused label first."
-              }}
-
-    assert {:ok, updated} = Labels.put(labels, "1", "")
-    refute Map.has_key?(updated, "1")
-    assert {:ok, _} = Labels.put(labels, "1", "replacement")
+  test "equipment registry and compatibility SDK modules are absent" do
+    refute Code.ensure_loaded?(NervesGate.Equipment)
+    refute Code.ensure_loaded?(NervesGateSDK.Equipment)
+    refute Map.has_key?(NervesGate.Status.disconnected(), :equipment)
   end
 
-  test "4G Internet can leave both Ethernet ports on one local network without an uplink" do
-    address = %{
-      "ip_method" => "static",
-      "static_ip" => "192.168.10.2",
-      "subnet_mask" => "255.255.255.0",
-      "gateway" => nil
-    }
+  test "current independent network settings round-trip without role adaptation" do
+    internet = %{"role" => "internet", "address" => Config.address_defaults()}
+    network = %{"mode" => "ports", "eth0" => internet, "eth1" => nil}
+
+    for current <- [Config.defaults()["network"], network] do
+      configs = current |> NervesGate.Network.Vintage.configurations() |> Map.new()
+      assert {:ok, ^current} = NervesGate.Network.Vintage.from_configurations(configs)
+    end
+
+    configs = network |> NervesGate.Network.Vintage.configurations() |> Map.new()
+    unknown = put_in(configs["eth0"][:nerves_gate_role], "unsupported")
+    assert {:error, _} = NervesGate.Network.Vintage.from_configurations(unknown)
+    joined = put_in(configs["br0"][:vintage_net_bridge][:interfaces], ["eth0", "eth1"])
+    assert {:error, _} = NervesGate.Network.Vintage.from_configurations(joined)
+    assert_raise ArgumentError, fn -> NervesGate.Network.LAN.normalize(joined["br0"]) end
+  end
+
+  test "4G supports only isolated application links and rejects legacy joined settings" do
+    application = %{"role" => "application", "address" => nil}
 
     network = %{
-      "mode" => "shared",
-      "equipment" => address,
+      "mode" => "ports",
+      "eth0" => application,
+      "eth1" => application,
       "internet" => %{"mode" => "cellular", "apn" => ""}
     }
 
-    assert {:ok, validated} = Config.validate_network(network)
-    configs = NervesGate.Network.Vintage.configurations(validated)
+    assert {:ok, ^network} = Config.validate_network(network)
+    configs = NervesGate.Network.Vintage.configurations(network)
     {"br0", bridge} = List.keyfind(configs, "br0", 0)
-    assert bridge.vintage_net_bridge.interfaces == ["eth0", "eth1"]
-    assert bridge.ipv4.method == :static
-    refute Map.has_key?(bridge.ipv4, :gateway)
-    refute Map.has_key?(bridge.ipv4, :name_servers)
+    assert bridge.vintage_net_bridge.interfaces == []
 
-    for invalid <- [
-          Config.address_defaults(),
-          Map.put(address, "gateway", "192.168.10.1"),
-          Map.put(address, "nameservers", ["192.168.10.1"])
+    for legacy <- [
+          %{"mode" => "shared", "equipment" => Config.address_defaults()},
+          %{network | "eth1" => %{"role" => "equipment", "address" => Config.address_defaults()}}
         ] do
-      assert {:error, message} = Config.validate_network(%{network | "equipment" => invalid})
-      assert message =~ "4G-only Internet"
+      assert {:error, reason} = Config.validate_network(legacy)
+      assert reason =~ "migration"
     end
-
-    uplink = %{"role" => "internet", "address" => Config.address_defaults()}
-
-    assert {:error, _} =
-             Config.validate_network(%{
-               "mode" => "ports",
-               "eth0" => uplink,
-               "eth1" => nil,
-               "internet" => network["internet"]
-             })
   end
 
   test "network input validation rejects unknown keys and invalid roles" do

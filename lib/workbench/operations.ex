@@ -95,10 +95,10 @@ defmodule Workbench.Operations do
   def handle_call(
         {:confirm_app_install, id, address, project},
         _,
-        %{review: %{public: %{kind: :app_install, project: project}}} = state
+        %{review: %{owner: Workbench.PhysicalAppInstall, public: %{project: project}}} = state
       ) do
     try do
-      :ok = Workbench.PhysicalAppInstall.confirmation!(state.review, id, address)
+      :ok = state.review.owner.confirmation!(state.review, id, address)
       plan = state.review
 
       start_task(
@@ -151,10 +151,10 @@ defmodule Workbench.Operations do
   def handle_call(
         {:confirm_reboot, id, address},
         _,
-        %{review: %{public: %{kind: :reboot}}} = state
+        %{review: %{owner: Workbench.Hardware}} = state
       ) do
     try do
-      :ok = Workbench.Hardware.confirm_reboot!(state.review, id, address)
+      :ok = state.review.owner.confirmation!(state.review, id, address)
       plan = state.review
 
       start_task(
@@ -183,10 +183,10 @@ defmodule Workbench.Operations do
   def handle_call(
         {:confirm_factory, id, text, identified},
         _,
-        %{review: %{public: %{kind: :factory}}} = state
+        %{review: %{owner: Workbench.FactoryProvisioning}} = state
       ) do
     try do
-      :ok = Workbench.FactoryProvisioning.confirmation!(state.review, id, text, identified)
+      :ok = state.review.owner.confirmation!(state.review, id, text, identified)
       plan = state.review
       owner = self()
 
@@ -209,26 +209,13 @@ defmodule Workbench.Operations do
   def handle_call({:confirm_factory, _, _, _}, _, state),
     do: {:reply, {:error, "Review factory provisioning first"}, state}
 
-  def handle_call({:confirm_firmware, _, _}, _, %{review: %{public: %{kind: :factory}}} = state),
-    do: {:reply, {:error, "This is a factory review, not an SSH update"}, state}
-
-  def handle_call({:confirm_firmware, _, _}, _, %{review: %{public: %{kind: :reboot}}} = state),
-    do: {:reply, {:error, "This is a reboot observation review, not a firmware update"}, state}
-
   def handle_call(
-        {:confirm_firmware, _, _},
+        {:confirm_firmware, id, address},
         _,
-        %{review: %{public: %{kind: :app_install}}} = state
-      ),
-      do:
-        {:reply, {:error, "This is an application install review, not a firmware update"}, state}
-
-  def handle_call({:confirm_firmware, _, _}, _, %{review: nil} = state),
-    do: {:reply, {:error, "Review the firmware and device first"}, state}
-
-  def handle_call({:confirm_firmware, id, address}, _, state) do
+        %{review: %{owner: Workbench.FirmwareUpdate}} = state
+      ) do
     try do
-      :ok = Workbench.FirmwareUpdate.confirmation!(state.review, id, address)
+      :ok = state.review.owner.confirmation!(state.review, id, address)
       plan = state.review
       # Consume the review exactly once. The worker owns its snapshot from here.
       start_task(
@@ -244,6 +231,12 @@ defmodule Workbench.Operations do
       error in ArgumentError -> {:reply, {:error, Exception.message(error)}, state}
     end
   end
+
+  def handle_call({:confirm_firmware, _, _}, _, state),
+    do:
+      {:reply,
+       {:error,
+        "Review the firmware and device first; another review cannot authorize an update"}, state}
 
   def handle_call({:start, "device_info", address, _}, _, state),
     do: start_device_info(state, address)
@@ -410,20 +403,7 @@ defmodule Workbench.Operations do
            state.view
            | status: :awaiting_confirmation,
              review: plan.public,
-             result:
-               case Map.get(plan.public, :kind) do
-                 :factory ->
-                   "Factory review complete. Transport loaded into RAM only; no eMMC writes."
-
-                 :app_install ->
-                   "Application install reviewed. No package uploaded or device changes made. Confirmation installs a new stopped app only."
-
-                 :reboot ->
-                   "Reboot observation reviewed. Do not press the button until observation is armed. No reboot command was sent."
-
-                 _ ->
-                   "Review complete. No firmware has been sent."
-               end
+             result: plan.owner.review_message()
          }
      }}
   end
@@ -533,12 +513,7 @@ defmodule Workbench.Operations do
 
   def handle_info({:expire_review, id}, %{review: %{public: %{token: id}}} = state) do
     message =
-      case Map.get(state.review.public, :kind) do
-        :factory -> "Factory review expired; re-enter MASKROM before reviewing again"
-        :reboot -> "Reboot observation review expired. Review again before pressing the button."
-        :app_install -> "Application install review expired; review the package and device again"
-        _ -> "Firmware review expired"
-      end
+      state.review.owner.expiry_message()
 
     GenServer.cast(self(), :read_discovered)
     {:noreply, %{drop_review(state) | view: %{view(:idle, nil) | result: message}}}
@@ -547,12 +522,7 @@ defmodule Workbench.Operations do
   def handle_info({:expire_review, _}, state), do: {:noreply, state}
 
   defp drop_review(state) do
-    case state.review do
-      %{public: %{kind: :factory}} = plan -> Workbench.FactoryProvisioning.cleanup(plan)
-      %{public: %{kind: :reboot}} -> :ok
-      %{public: %{kind: :app_install}} = plan -> Workbench.PhysicalAppInstall.cleanup(plan)
-      plan -> Workbench.FirmwareUpdate.cleanup(plan)
-    end
+    if state.review, do: state.review.owner.cleanup(state.review)
 
     %{state | review: nil, view: %{state.view | review: nil}}
   end

@@ -174,10 +174,9 @@ defmodule NervesGate.Remote do
     end
   end
 
-  defp sharing_allowed(operation, params, remote)
-       when operation in [:sharing_enable, :sharing_claim] do
+  defp sharing_allowed(:sharing_claim, params, remote) do
     with :ok <- Sharing.known(remote),
-         {:ok, _} <- Sharing.change(operation, params, remote.advertised_routes) do
+         {:ok, _} <- Sharing.change(:sharing_claim, params, remote.advertised_routes) do
       :ok
     end
   end

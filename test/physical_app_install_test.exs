@@ -13,7 +13,6 @@ defmodule Workbench.PhysicalAppInstallTest do
       "serial" => "test-board",
       "boot_id" => "11111111-1111-1111-1111-111111111111",
       "sdk_version" => "0.1.0",
-      "install_api" => true,
       "storage_ready" => true,
       "card_id" => "card-hash",
       "installed" => false,
@@ -29,7 +28,6 @@ defmodule Workbench.PhysicalAppInstallTest do
           {"target", "x86_64"},
           {"serial", ""},
           {"boot_id", "bad"},
-          {"install_api", false},
           {"storage_ready", false},
           {"card_id", nil},
           {"installed", true},
@@ -99,15 +97,15 @@ defmodule Workbench.PhysicalAppInstallTest do
     refute review =~ "File.write"
     refute review =~ "Apps.install_new("
     plan = %{public: %{app: "demo", version: "1.0.0", sha256: "hash"}, device: device()}
-    command = Install.install_command(plan, "/tmp/owned", "/tmp/owned/application.ez")
+    command = Install.install_command(plan, "/tmp/owned/application.ez")
     assert {:ok, _} = Code.string_to_quoted(command)
-    assert length(String.split(command, "NervesGate.Apps.install_new(")) == 2
+    assert length(String.split(command, "NervesGate.Apps.install_reviewed(")) == 2
+    assert review =~ "NervesGate.Apps.install_review("
     refute command =~ "Apps.start"
     refute command =~ "Apps.upgrade"
     refute command =~ "Network."
-    assert command =~ "running? == false"
-    assert command =~ "enabled == false"
-    assert command =~ "File.rm_rf"
+    refute command =~ "File.rm_rf"
+    refute command =~ "function_exported?"
   end
 
   @tag :tmp_dir
@@ -116,6 +114,7 @@ defmodule Workbench.PhysicalAppInstallTest do
     {:ok, idle} = Workbench.Operations.init(nil)
 
     plan = %{
+      owner: Workbench.PhysicalAppInstall,
       public: %{
         kind: :app_install,
         token: "app-review",

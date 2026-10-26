@@ -27,7 +27,6 @@ defmodule NervesGateSDK.Backend do
           | :rs485_claim
           | :rs485_write
           | :rs485_release
-          | :equipment_list
 
   @callback call(operation(), list()) :: :ok | {:ok, term()} | {:error, term()}
 

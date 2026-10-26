@@ -21,6 +21,67 @@ defmodule NervesGate.Apps do
   def install_new(path, expected),
     do: GenServer.call(__MODULE__, {:install_new, path, expected}, @timeout)
 
+  @doc "Read-only review of package compatibility and installation prerequisites."
+  def install_review(%{"app" => app, "platform" => platform}) do
+    storage = Storage.commissioning()
+    {:ok, apps} = list()
+    info = NervesGate.System.maintenance_info()
+
+    %{
+      product: info.product,
+      target: info.target,
+      firmware: info.version,
+      source_revision: info.source_revision,
+      serial: info.serial,
+      boot_id: File.read!("/proc/sys/kernel/random/boot_id") |> String.trim(),
+      sdk_version: to_string(Application.spec(:nerves_gate_sdk, :vsn)),
+      storage_ready: storage.ready,
+      card_id: storage.card_id,
+      installed: Enum.any?(apps, &(to_string(&1.app) == app)),
+      platform_compatible: platform_compatible?(platform)
+    }
+  end
+
+  defp platform_compatible?(requirements) do
+    installed =
+      Map.new(Application.loaded_applications(), fn {app, _, version} ->
+        {to_string(app), to_string(version)}
+      end)
+
+    Enum.all?(requirements, fn [app, version] -> installed[app] == version end)
+  end
+
+  @doc "Execute one reviewed install and verify stopped state; remove only the owned staging file/directory."
+  def install_reviewed(path, expected) do
+    %{outcome: reviewed_outcome(install_new(path, expected), expected)}
+  rescue
+    _ in [ArgumentError, KeyError, MatchError, RuntimeError] -> %{outcome: "unknown"}
+  catch
+    _, _ -> %{outcome: "unknown"}
+  after
+    cleanup_staging(path)
+  end
+
+  defp reviewed_outcome({:ok, _}, expected) do
+    {:ok, apps} = list()
+
+    if Enum.any?(
+         apps,
+         &(&1.app == expected.app and &1.active_version == expected.version and not &1.enabled and
+             not &1.running?)
+       ), do: "installed_stopped", else: "unknown"
+  end
+
+  defp reviewed_outcome({:error, _}, _), do: "rejected"
+  defp reviewed_outcome(_, _), do: "unknown"
+
+  defp cleanup_staging(path) do
+    if Regex.match?(~r|\A/tmp/nerves-gate-app-[a-f0-9]{32}/application\.ez\z|, path) do
+      File.rm(path)
+      File.rmdir(Path.dirname(path))
+    end
+  end
+
   def list, do: GenServer.call(__MODULE__, :list)
   def start(app), do: GenServer.call(__MODULE__, {:start, app}, @timeout)
   def stop(app), do: GenServer.call(__MODULE__, {:stop, app}, @timeout)

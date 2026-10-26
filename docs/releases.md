@@ -13,19 +13,27 @@ credential.
 | SDK | `sdk/VERSION`, `sdk/CHANGELOG.md` | `sdk/vX.Y.Z` | Hex, HexDocs and GitHub Release |
 
 The platform is used from a supported checkout. Firmware is built locally from
-that checkout. Apps declare their required SDK version. No generator archive or
+that checkout. Deploy a tagged or explicitly SHA-identified build: semantic
+`firmware` and full `source_revision` are separate public identity fields. Nerves
+VCS metadata includes a `-dirty` suffix for modified tracked files. Source-archive
+builds must supply both `SOURCE_DATE_EPOCH` and full `SOURCE_REVISION`. Apps declare their required SDK version. No generator archive or
 firmware/simulator Hex release is required.
 
 1. Update the relevant version and roll its `Unreleased` changelog into one dated
    `## X.Y.Z - YYYY-MM-DD` section. Firmware and simulator read the root version.
-2. Run host checks, the external application flow, target builds and focused QEMU
-   checks appropriate to the change.
+2. Run `mix check`, operator-owned `mix ci`, external/starter application packaging,
+   EC100 dev/prod and QEMU target builds. Run appropriate focused QEMU checks on
+   the owned bench; before platform publication dispatch the full separate
+   integration workflow for the exact main commit to be tagged.
 3. Run `mix release.check TAG`. This validates exact version, notes and SDK
    publication dependencies without publishing. A `-dev` version and entries in
    `Unreleased` describe ongoing development, not a releasable tag.
 4. Commit and push only when requested, then create/push the immutable tag only
    with release authorization.
-5. `.github/workflows/release.yml` validates the tag is on main, requires outputs
+5. `.github/workflows/release.yml` validates the tag is on main. For platform tags,
+   `release.check integration` requires successful main-branch `ci.yml` and
+   `qemu.yml` runs at that exact SHA; missing, cancelled, failed or older runs do
+   not qualify. SDK tags use their own SDK/payload checks. The workflow requires outputs
    to be unpublished, publishes the SDK when selected and creates/verifies the
    GitHub Release. SDK publication uses `hex-release`; platform publication uses
    `platform-release` and has no Hex credential.
@@ -43,12 +51,20 @@ Do not replace package bytes, clobber assets, move published tags or automatical
 retry a partial publication. Inspect and repair it explicitly.
 
 The workflow uses the same `release.check` task with explicit `prepare`,
-`dependencies`, `unpublished` and `verify` phases. Its dependency-free preload
+`dependencies`, `integration`, `unpublished` and `verify` phases. Its dependency-free preload
 allows metadata validation before compiling workstation tooling:
 
 ```sh
-elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check sdk/v0.1.0
+elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check sdk/v0.2.0
 ```
+
+The current SDK checkout is `0.2.0-dev`, distinct from published `0.1.0`. Local
+app templates and the optional subnet-router require `~> 0.2.0-dev`, which
+admits this prerelease and future stable 0.2 releases. Use `--local-sdk` until
+0.2 is actually published: scaffolding does not fall back to SDK 0.1. At that
+separately authorized release, update templates and starter to the stable requirement.
+No runtime
+capability probe substitutes for the device installer's SDK requirement check.
 
 Only the platform, the SDK and the two systems are released. Older firmware,
 simulator and generator Hex packages remain published; retiring them is a

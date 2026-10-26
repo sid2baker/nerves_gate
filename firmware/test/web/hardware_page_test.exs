@@ -99,17 +99,15 @@ defmodule NervesGateWeb.HardwarePageTest do
              )
   end
 
-  test "remote and legacy distribution addresses share a credential-hidden workspace" do
-    for path <- ["/remote", "/distribution"] do
-      document = page(path)
-      assert [_] = Floki.find(document, "#tailscale-settings")
-      assert [_] = Floki.find(document, "#erlang-distribution")
-      assert [] = Floki.find(document, "#distribution-cookie")
-    end
+  test "remote access keeps credentials hidden" do
+    document = page("/remote")
+    assert [_] = Floki.find(document, "#tailscale-settings")
+    assert [_] = Floki.find(document, "#erlang-distribution")
+    assert [] = Floki.find(document, "#distribution-cookie")
   end
 
-  test "legacy hardware links remain usable without equipment configuration forms" do
-    for path <- ["/equipment", "/hardware/lan/1", "/equipment/rs485/1", "/hardware/can/1"] do
+  test "hardware routes expose resources without equipment configuration forms" do
+    for path <- ["/hardware", "/hardware/lan/1", "/hardware/rs485/1", "/hardware/can/1"] do
       document = page(path)
 
       assert [_] =
@@ -123,6 +121,19 @@ defmodule NervesGateWeb.HardwarePageTest do
                  document,
                  "#equipment-label-form, #modbus-form, #equipment-network-form, input[name='network[equipment_ip]']"
                )
+    end
+  end
+
+  test "replaced routes have no aliases" do
+    for path <- [
+          "/equipment",
+          "/equipment/lan/1",
+          "/equipment/rs485/1",
+          "/equipment/can/1",
+          "/distribution",
+          "/storage"
+        ] do
+      assert Phoenix.Router.route_info(NervesGateWeb.Router, "GET", path, "localhost") == :error
     end
   end
 
@@ -195,7 +206,7 @@ defmodule NervesGateWeb.HardwarePageTest do
              NetworkForm.to_network(%{"enabled" => "true"}, [], base, {:application, "eth0"})
   end
 
-  test "joining local Ethernet preserves 4G policy and requires no Internet route" do
+  test "removed joined and equipment forms cannot submit network settings" do
     base = %{
       "mode" => "ports",
       "eth0" => nil,
@@ -203,22 +214,21 @@ defmodule NervesGateWeb.HardwarePageTest do
       "internet" => %{"mode" => "cellular", "apn" => ""}
     }
 
-    params = NetworkForm.from_settings(base, :ports)
+    for editor <- [:ports, {:equipment, "eth1"}] do
+      assert {:error, _} =
+               NetworkForm.to_network(
+                 %{"mode" => "shared", "enabled" => "true"},
+                 [],
+                 base,
+                 editor
+               )
+    end
 
-    params =
-      Map.merge(params, %{
-        "mode" => "shared",
-        "shared_method" => "static",
-        "shared_ip" => "192.168.10.2",
-        "shared_mask" => "255.255.255.0",
-        "shared_gateway" => "",
-        "shared_dns" => ""
-      })
+    assert {:ok, enabled} =
+             NetworkForm.to_network(%{"enabled" => "true"}, [], base, {:application, "eth1"})
 
-    assert {:ok, network} = NetworkForm.to_network(params, [], base, :ports)
-    assert network["internet"] == base["internet"]
-    assert network["mode"] == "shared"
-    assert network["equipment"]["gateway"] == nil
+    assert enabled["internet"] == base["internet"]
+    assert enabled["eth1"] == %{"role" => "application", "address" => nil}
   end
 
   defp page(path), do: build_conn() |> get(path) |> html_response(200) |> Floki.parse_document!()

@@ -57,7 +57,7 @@ defmodule Workbench.HardwareTest do
 
   test "USB SSH options bind both the interface and source without relaxing host authentication" do
     options =
-      FirmwareUpdate.ssh_options("172.31.211.1", %{local: {172, 31, 211, 2}, interface: "enxusb"})
+      Workbench.DeviceSSH.options("172.31.211.1", %{local: {172, 31, 211, 2}, interface: "enxusb"})
 
     assert options[:ip] == {172, 31, 211, 2}
     assert options[:bind_to_device] == "enxusb"
@@ -68,9 +68,9 @@ defmodule Workbench.HardwareTest do
   end
 
   test "hardware reads use a static, valid Elixir command and retain only public observations" do
-    command = FirmwareUpdate.hardware_command()
+    command = Workbench.DeviceSSH.hardware_command()
     assert {:ok, _} = Code.string_to_quoted(command)
-    assert command =~ "NervesGate.Network.ready?(s.network.observed, s.network.desired)"
+    assert command == Workbench.DeviceSSH.command(NervesGate.System, :hardware_info)
     refute command =~ "ready: s.network.ready"
 
     data =
@@ -78,19 +78,30 @@ defmodule Workbench.HardwareTest do
       |> Map.put("private_key", "private")
       |> put_in(["cellular", "iccid"], "private")
 
-    public = FirmwareUpdate.hardware_snapshot!(data)
+    public = Workbench.DeviceSSH.hardware_snapshot!(data)
     refute inspect(public) =~ "private"
     assert public["internet"]["mode"] == "backup"
-    assert_raise RuntimeError, fn -> FirmwareUpdate.hardware_snapshot!(%{}) end
+    assert_raise RuntimeError, fn -> Workbench.DeviceSSH.hardware_snapshot!(%{}) end
   end
 
   test "update verification requires the same device, reviewed version and a different boot" do
-    before_update = snapshot("backup")
+    revision = String.duplicate("a", 40)
+    before_update = snapshot("backup") |> Map.put("source_revision", revision)
     observed = Map.put(before_update, "boot_id", "00000000-0000-0000-0000-000000000002")
     assert FirmwareUpdate.same_reviewed_boot?(before_update, before_update)
     refute FirmwareUpdate.same_reviewed_boot?(before_update, observed)
-    assert FirmwareUpdate.verified_update?(before_update, observed, "new")
-    refute FirmwareUpdate.verified_update?(before_update, before_update, "new")
+    assert FirmwareUpdate.verified_update?(before_update, observed, "new", revision)
+    refute FirmwareUpdate.verified_update?(before_update, before_update, "new", revision)
+
+    refute FirmwareUpdate.verified_update?(
+             before_update,
+             Map.delete(observed, "source_revision"),
+             "new",
+             revision
+           )
+
+    refute FirmwareUpdate.verified_update?(before_update, observed, "new", nil)
+    refute FirmwareUpdate.verified_update?(before_update, observed, "new", "different")
 
     for altered <- [
           Map.put(observed, "version", "old"),
@@ -100,7 +111,7 @@ defmodule Workbench.HardwareTest do
           Map.put(observed, "pending", true),
           Map.put(observed, "recovering", true)
         ] do
-      refute FirmwareUpdate.verified_update?(before_update, altered, "new")
+      refute FirmwareUpdate.verified_update?(before_update, altered, "new", revision)
     end
   end
 
@@ -192,16 +203,16 @@ defmodule Workbench.HardwareTest do
       expires: System.monotonic_time(:millisecond) + 60_000
     }
 
-    assert :ok = Workbench.Hardware.confirm_reboot!(plan, "review", "172.31.211.1")
+    assert :ok = Workbench.Hardware.confirmation!(plan, "review", "172.31.211.1")
 
     for {token, address} <- [{"other", "172.31.211.1"}, {"review", "other"}] do
       assert_raise ArgumentError, fn ->
-        Workbench.Hardware.confirm_reboot!(plan, token, address)
+        Workbench.Hardware.confirmation!(plan, token, address)
       end
     end
 
     assert_raise ArgumentError, fn ->
-      Workbench.Hardware.confirm_reboot!(
+      Workbench.Hardware.confirmation!(
         %{plan | expires: System.monotonic_time(:millisecond) - 1},
         "review",
         "172.31.211.1"
@@ -222,6 +233,7 @@ defmodule Workbench.HardwareTest do
       "target" => "ec100",
       "product" => "nerves_gate",
       "version" => "new",
+      "source_revision" => String.duplicate("a", 40),
       "serial" => "device-42",
       "boot_id" => "00000000-0000-0000-0000-000000000001",
       "available" => true,

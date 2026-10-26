@@ -85,11 +85,11 @@ ordinary `.app` environment, which the installer checks against firmware.
 
 ## Device SDK
 
-Firmware selects `NervesGate.SDKBackend`. It translates network, equipment,
+Firmware selects `NervesGate.SDKBackend`. It translates network,
 identity and storage observations into SDK structs; it does not expose status
 maps, distribution settings or administrative commands. Subscribe before querying.
 Events describe changes (system uptime and storage are polled once a second).
-Subscriptions and serial claims belong to the calling process, not its OTP app;
+Subscriptions, serial claims and network leases belong to the calling process, not its OTP app;
 subscribe/claim again after that process or the backend restarts.
 
 `NervesGate.Buses` owns both diagnostics and SDK hardware access. `rs485_1` and
@@ -111,8 +111,8 @@ NervesGate.Buses.configure("can0", %{
 Gateway settings default to listen-only; passive diagnostic captures still require
 it. SDK sends validate frame bounds and recheck the kernel mode. QEMU without
 EC100 bus hardware reports unavailable ports rather than pretending to send.
-Equipment observations are not proof of current reachability; their SDK
-`reachable?` field remains false.
+Applications own equipment discovery, identities, configuration and protocol
+sessions. There is no platform equipment registry or compatibility SDK API.
 
 ## Administration
 
@@ -128,6 +128,13 @@ NervesGate.Apps.upgrade("/tmp/my_app-1.1.0.ez")
 NervesGate.Apps.rollback(:my_app)
 NervesGate.Apps.uninstall(:my_app)
 ```
+
+Workbench physical installation uses the new-only `Apps.install_new(path, expected)`
+owner boundary. It checks the reviewed SHA-256, app/version, SD identity and absence
+of any prior installation before extracting the checked bytes. Compiled
+`install_review/1` and `install_reviewed/2` provide bounded SSH protocol responses;
+no application lifecycle intent or executable source is shipped by the workbench.
+Unknown results are never automatically retried. See [physical installation](app-development.md#install-on-a-physical-gateway).
 
 Install registers a disabled application without starting it. The active and
 previous versions are never overwritten; another copy of a version (from a failed

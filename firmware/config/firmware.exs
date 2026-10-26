@@ -12,7 +12,6 @@ config :nerves_gate,
     NervesGate.SSH,
     NervesGate.Network,
     NervesGate.Remote,
-    NervesGate.Equipment,
     NervesGate.Indicators,
     NervesGate.Buses,
     {Task.Supervisor, name: NervesGate.AppTasks},
@@ -85,8 +84,22 @@ end
 
 config :nerves, source_date_epoch: source_date_epoch
 
+# Identify the exact checkout independently of the platform's semantic version.
+source_revision =
+  System.get_env("SOURCE_REVISION") ||
+    case System.cmd("git", ["describe", "--always", "--dirty", "--abbrev=40", "--exclude=*"],
+           stderr_to_stdout: true
+         ) do
+      {revision, 0} -> String.trim(revision)
+      _ -> raise "Set SOURCE_REVISION to the full commit SHA when building without Git history"
+    end
+
+unless Regex.match?(~r/\A[0-9a-f]{40}(?:-dirty)?\z/, source_revision),
+  do: raise("SOURCE_REVISION must be a full commit SHA, optionally suffixed with -dirty")
+
 # Shared console setup plus binaries explicitly installed for the selected target.
 config :nerves, :firmware,
+  fw_vcs_identifier: source_revision,
   rootfs_overlay: [
     Path.expand("../rootfs_overlay/common", __DIR__),
     Path.expand("../rootfs_overlay/#{config_target()}", __DIR__)

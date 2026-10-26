@@ -15,13 +15,16 @@ defmodule NervesGateSDK.MixProject do
         links: %{"GitHub" => "https://github.com/sid2baker/nerves_gate"},
         files: ~w(lib mix.exs VERSION README.md CHANGELOG.md LICENSE)
       ],
-      aliases: [ci: ["compile --warnings-as-errors", "format --check-formatted", "test"]],
+      aliases: [
+        check: ["compile --warnings-as-errors", "format --check-formatted", "test"],
+        ci: ["check"]
+      ],
       docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       deps: [{:ex_doc, "~> 0.40", only: :docs, runtime: false}]
     ]
   end
 
-  def cli, do: [preferred_envs: [ci: :test]]
+  def cli, do: [preferred_envs: [ci: :test, check: :test]]
 
   def application, do: []
 end

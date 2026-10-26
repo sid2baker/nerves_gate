@@ -11,7 +11,7 @@ defmodule NervesGate.Projection do
   def new(inputs), do: %__MODULE__{inputs: inputs, status: derive(inputs)}
 
   def apply(%__MODULE__{inputs: inputs}, {:replace, domain, value})
-      when domain in [:network, :remote, :equipment, :indicators, :buses, :ssh, :system, :storage] do
+      when domain in [:network, :remote, :indicators, :buses, :ssh, :system, :storage] do
     new(Map.replace!(inputs, domain, value))
   end
 
@@ -21,7 +21,6 @@ defmodule NervesGate.Projection do
     Status.build(
       inputs.network,
       inputs.remote,
-      inputs.equipment,
       inputs.indicators,
       inputs.buses,
       inputs.ssh,

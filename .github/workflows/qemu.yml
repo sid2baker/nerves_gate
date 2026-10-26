@@ -1,7 +1,9 @@
 name: QEMU integration
 
-# Integration stays manual; ordinary CI never boots devices.
+# Separate integration workflow; ordinary CI never boots devices.
 on:
+  schedule:
+    - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
       tailscale:

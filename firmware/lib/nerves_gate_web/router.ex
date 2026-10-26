@@ -26,18 +26,12 @@ defmodule NervesGateWeb.Router do
       live("/network", NetworkLive, :network)
       live("/network/details", NetworkLive, :details)
       live("/remote", RemoteLive, :remote)
-      live("/distribution", RemoteLive, :remote)
       live("/hardware", HardwareLive, :hardware)
       live("/hardware/lan/:id", LanLive, :lan)
       live("/hardware/rs485/:id", BusesLive, :rs485)
       live("/hardware/can/:id", BusesLive, :can)
-      live("/equipment", HardwareLive, :hardware)
-      live("/equipment/lan/:id", LanLive, :lan)
-      live("/equipment/rs485/:id", BusesLive, :rs485)
-      live("/equipment/can/:id", BusesLive, :can)
       live("/settings", SettingsLive, :settings)
       live("/settings/storage", StorageLive, :storage)
-      live("/storage", StorageLive, :storage)
     end
   end
 end

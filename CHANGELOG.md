@@ -4,8 +4,12 @@
 
 ### Breaking changes
 
-- Administrative commands now live on their owning `NervesGate.Network`, `Cellular`, `Remote`, `Equipment`, `Buses`, `Indicators`, `SSH` and `Storage` modules. `NervesGate` exposes only `status/0` and `subscribe/0`; use `NervesGate.System.info/0` for identity and explicit domain reads for private login URLs/cookies. Server-injection options and remote gateway-command routing are removed.
-- Administrative status/projections use schema 8: `device` replaces `backend`, `remote` replaces `remote_access`, and action names include `buses.configure`, `buses.capture`, `buses.modbus_read` and `indicators.identify`. SDK observations remain a separate typed contract.
+- Removed the equipment observation domain and SDK compatibility API; status schema is now 9. Device maintenance requires the current compiled APIs with no old-firmware identity fallback. SSH key initialization no longer imports an old NervesSSH key store: provision current configured keys explicitly before deployment.
+
+- Hardware exposes gateway resources, not equipment identities or protocol editors. Equipment label/scan/share commands and legacy `equipment`/joined network configuration are removed. Saved legacy settings are rejected with migration guidance, never rewritten or erased automatically; existing devices need separately authorized migration. Applications own equipment configuration and local addressing through process-owned SDK leases.
+
+- Administrative commands now live on their owning `NervesGate.Network`, `Cellular`, `Remote`, `Buses`, `Indicators`, `SSH` and `Storage` modules. `NervesGate` exposes only `status/0` and `subscribe/0`; use `NervesGate.System.info/0` for identity and explicit domain reads for private login URLs/cookies. Server-injection options and remote gateway-command routing are removed.
+- Administrative status/projections use schema 9: `device` replaces `backend`, `remote` replaces `remote_access`, and action names include `buses.configure`, `buses.capture`, `buses.modbus_read` and `indicators.identify`. SDK observations remain a separate typed contract.
 - Host modules/application are `Workbench`, `WorkbenchWeb` and `:nerves_gate_workbench`; host session metadata uses `WORKBENCH_*` and `_build/workbench/`. Scenarios share one `Scenarios` catalogue/runner and explicit owned-QEMU fixture. Update host tools and disposable guest firmware together; old live sessions and firmware are not supported by the new tools.
 - Cellular code now lives under `NervesGate.Cellular`, including `Cellular.Modem`. Saved interface settings referencing an unavailable modem driver fail startup before UART access; there is no automatic migration or erasure. Physical deployment requires a separately authorized settings reprovision/reset procedure.
 - Use the platform checkout as the developer environment. Create/open ordinary SDK applications directly in the workbench, or use `mix app.new PATH`; no generator archive or solution manifest is needed.
@@ -15,6 +19,13 @@
 - The simulator is part of the root project: `NervesGateSim` modules are now `Simulator` in `lib/simulator/`, and bench configurations moved from `sim/priv/qemu/` to `priv/simulator/`. Gateway discovery belongs to the workbench.
 
 ### Added
+
+- Hardware shows Internet and application interfaces, claim/subscriber usage and explicit passive diagnostics. Remote access groups Tailscale with explicitly revealed developer runtime credentials; application storage lives under Settings. Replaced equipment/distribution/storage URLs are removed, not retained as aliases.
+- Application-enabled isolated Ethernet can be claimed with transient addressing and explicitly advertised through the existing tailnet. Journaled route ownership, owner-exit cleanup and blocked unknown outcomes prevent unowned route adoption or premature address removal.
+- Optional Tailnet subnet-router starter application, never automatically installed, started or enabled.
+- Reviewed physical application installation over verified SSH: private package snapshot, typed one-use device confirmation, device-side hash/app/version/storage checks, and verified stopped/disabled state. Existing apps are rejected, never silently upgraded or started.
+- Physical read-only hardware readiness/diagnostics and operator-assisted Ethernet/cellular failover with independent USB management. Reboot/reset retain physical-button authority, with bounded identity/new-boot/health observations.
+- Public firmware identity includes the source commit separately from its semantic version; source-archive builds require `SOURCE_REVISION`.
 
 - Developer workbench factory provisioning for EC100 over USB MASKROM, with a
   reviewed image, a full eMMC backup by default (skipping it needs a stronger
@@ -35,6 +46,9 @@
 - Prerequisite errors include Linux installation guidance and the macOS Linux-VM route.
 
 ### Fixed
+
+- Physical SSH responses ignore stale notifications from earlier channels on the same connection; only the active channel can complete or reject an operation.
+- CAN configuration is rejected while applications hold active receive subscriptions.
 
 - Manual device entries accept DNS names, including Tailscale names, as well as IPv4 addresses.
 - Workstation commands select the host even when the shell carries a device Mix target; firmware commands retain their selected target.

@@ -2,7 +2,7 @@ defmodule Scenarios.Cases.Sdk do
   @moduledoc false
   import ExUnit.Assertions
   alias Scenarios.Device, as: Device
-  alias NervesGateSDK.{CAN, Equipment, Events, Network, RS485, Storage}
+  alias NervesGateSDK.{CAN, Events, Network, RS485, Storage}
   alias NervesGateSDK.System.Info
 
   def spec do
@@ -36,8 +36,6 @@ defmodule Scenarios.Cases.Sdk do
 
     assert {:error, "not_owner"} = Device.rpc(device, Network, :release_local, [make_ref()])
     assert {:ok, %Storage.Status{}} = Device.rpc(device, Storage, :status)
-    assert {:ok, equipment} = Device.rpc(device, Equipment, :list)
-    assert Enum.all?(equipment, &is_struct(&1, Equipment.Device))
     assert {:ok, can} = Device.rpc(device, CAN, :interfaces)
     assert Enum.all?(can, &is_struct(&1, CAN.Interface))
     assert {:ok, serial} = Device.rpc(device, RS485, :ports)

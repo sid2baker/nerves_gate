@@ -12,8 +12,8 @@ Saved assignments never change when a cable disappears or moves. Use
 or disable application access on independent, non-Internet ports. Enabling assigns
 no IPv4 address and starts no DHCP client, DNS, default route, bridge or advertisement.
 Disabling holds the independent link down. Existing local addresses are removed only
-by an explicitly saved change; existing joined arrangements require deliberate
-administrator API changes, never automatic migration. Internet cannot take an
+by an explicitly saved change. Legacy equipment/joined configurations are rejected
+with migration guidance, never automatically converted or erased. Internet cannot take an
 enabled application port until application access is disabled.
 
 Applications request local addressing with `NervesGateSDK.Network.claim_local/3`.
@@ -23,37 +23,27 @@ Use the optional [Tailnet subnet-router app](../apps/tailnet_subrouter/README.md
 for explicit configuration and route advertisement. Unresolved claims block network
 changes until safe cleanup; no app is enabled by visiting Hardware.
 
-The administrative network API still supports saved configurations below; Hardware
-has no local addressing or topology editor:
+The administrative API accepts independent ports only: at most one Internet port
+(DHCP or static IPv4), application-enabled ports without saved addresses, and
+disabled ports. Hardware has no local-addressing or topology editor. Saved legacy
+`equipment` roles or `shared` mode make Network unavailable with migration guidance;
+they are never rewritten. VintageNet/daemon state may survive independently: inspect
+it using recovery SSH before a separately authorized migration. Keep USB available.
 
-- **Independent ports:** at most one Internet port (DHCP or static IPv4), operator-enabled
-  application ports without addresses, or one legacy equipment port (static IPv4,
-  no default route or DNS). Unassigned ports are held down after saving.
-- **One joined network** (administrator API): both ports join `br0` with DHCP or static
-  addressing and an optional same-subnet router. Use it only for one trusted
-  network. STP is enabled, so a newly joined port may take about 30 seconds to
-  forward. One missing port does not block the other.
-
-Manual addressing supports contiguous IPv4 masks (/1–/30) and up to three DNS
-servers for Internet/shared connections. Switching to manual fills in the observed
-address, mask, router and DNS when valid, otherwise examples (Internet
-`192.168.1.2/24` via `192.168.1.1`, equipment `192.168.10.2/24`). Suggestions avoid
-known other-port and USB subnets but cannot guarantee an unused address; check
-before saving.
-
-Port configuration never changes equipment addresses, runs an Ethernet DHCP server
-or shares Internet. Joining or splitting ports interrupts Ethernet traffic. USB is
-never part of these changes.
+Manual Internet addressing supports contiguous IPv4 masks (/1–/30) and up to three
+DNS servers. Suggestions use observed addressing or `192.168.1.2/24` via
+`192.168.1.1`, avoiding known other-port/USB subnets. They cannot prove an address
+is unused. Application addresses are requested transiently through leases, never
+saved as a second gateway-owned local network. No Ethernet DHCP server or Internet
+sharing is provided; USB is never part of Ethernet changes.
 
 ## Internet source and cellular
 
 **Overview → Internet** offers Ethernet, 4G, or Ethernet with 4G backup; settings
-without a source are Ethernet-only. 4G-only can use independent ports or one joined
-local Ethernet network. A joined local network requires a static gateway address,
-no Ethernet router and no Ethernet DNS servers, so it cannot create a competing
-Internet route. Ethernet or Ethernet with backup can also use a joined network.
-Local Ethernet and USB never bridge to the modem. Independent mode currently
-supports one local network, not two independently addressed local networks.
+without a source are Ethernet-only. 4G-only has no Ethernet Internet assignment;
+backup requires one. Other Ethernet interfaces may be enabled for applications,
+but only one application lease is admitted per gateway. Ethernet and USB never
+bridge to the modem, and application leases create no default routes or DNS.
 
 VintageNet owns connectivity checks, route metrics, DNS and failover: working
 Ethernet beats working cellular, which beats Ethernet that only reaches its LAN.
@@ -280,16 +270,15 @@ Factory reset erases it.
 
 ## Saving and rollback
 
-Internet, equipment and LAN arrangement have separate UI drafts but one Network
-owner and one configuration. All pages show the same active trial and timer. Saving
+Internet and application enablement have separate UI drafts but one Network
+owner and one saved configuration. All pages show the same active trial and timer. Saving
 checks the draft's original configuration inside Network; stale drafts are rejected
 and must be reloaded.
 
-The administrative `Network.propose/2` API can select independent networks or one
-joined network and its gateway address. Hardware only edits application enablement. Joining replaces both port assignments;
-separating leaves both ports unassigned. The Internet source and APN must stay
-valid for the arrangement: 4G-only joined Ethernet needs static local addressing
-without a router/DNS, and 4G backup needs an Ethernet uplink.
+The administrative `Network.propose/2` API accepts independent Internet/application
+ports only. Hardware edits application enablement. All platform changes are blocked
+while an app lease or unknown cleanup exists; apps must release first. 4G backup
+needs an Ethernet uplink.
 
 VintageNet stores interface settings; the trial exists only in memory. Unreadable
 saved settings fail closed. See the [public API](action-api.md) for the format.
@@ -304,7 +293,7 @@ Every other change, including first setup over Ethernet, has a 60-second window:
 **Keep changes**, **Restore previous settings**, or let the timer restore them.
 
 Readiness means the intended configuration, topology and manual addresses are in
-place; it needs no cable, DHCP lease or Internet. Observed Internet/equipment/USB
+place; it needs no cable, DHCP lease or Internet. Observed Internet/application/USB
 subnet overlaps block confirmation; later DHCP overlaps are shown as warnings.
 
 Cancellation, expiry or failed application restores the previous configuration.
@@ -392,12 +381,11 @@ local address. Owner loss schedules cleanup; failed/uncertain cleanup retains th
 journal and blocks reuse. No write is replayed automatically. Approval remains
 unknown until verified externally; advertised does not mean approved or reachable.
 
-The existing administrative `NervesGate.Equipment.share/0` API advertises the confirmed dedicated equipment IPv4
-subnet, for example `192.168.50.0/24`; reach equipment at its normal addresses.
-It requires the confirmed address, link and topology; shared LAN and USB are not
-eligible. Approve the route in Tailscale and restrict it in tailnet policy. Linux
-clients need `tailscale set --accept-routes`. This is routed access, not an
-Ethernet bridge or broadcast discovery.
+`NervesGate.Equipment.scan/label/share/unshare` are removed. Applications own
+equipment discovery/identity and explicit route requests through their leases.
+Approve the advertised route in Tailscale and restrict it in tailnet policy.
+Linux clients need `tailscale set --accept-routes`. This is routed access, not
+an Ethernet bridge or broadcast discovery.
 
 **Overlapping networks are unsupported.** Equipment subnets must not overlap other
 sites, the client's LAN or another VPN's routes. The gateway checks only its own
@@ -433,7 +421,8 @@ Firmware listens on TCP **4369** (EPMD) and **9100** (distribution) on all IPv4
 interfaces. Native distribution is unencrypted; Tailscale encrypts the VPN path.
 Restrict both ports in tailnet and network policy, and never expose them publicly.
 
-**Overview → Erlang distribution** shows the node name and cookie. Anyone who can
+**Overview → Remote access → Developer runtime** shows the node name. Runtime
+credentials require an explicit reveal and can be hidden again. Anyone who can
 read the page and reach these ports can run arbitrary code on the gateway. The
 cookie comes from the explicit private `NervesGate.Distribution.cookie/0` read,
 cached only by the requesting view, never `NervesGate.status()` or broadcasts.
@@ -455,7 +444,7 @@ Permanent equipment sessions belong in their owning application's supervision tr
 ## Observations
 
 Internet status comes only from permitted interfaces, never USB or the global best
-connection. Unconfigured or equipment-only networking does not require Internet.
+connection. Unconfigured or application-only networking does not require Internet.
 Unknown observations are not healthy, and Tailscale Running does not prove Internet.
 
 The [UI projection](architecture.md#ui-projection) only distributes sanitized
@@ -495,8 +484,9 @@ uncertainty. Ethernet, Tailscale, IPv6 and QEMU management need keys.
 Manage SSH public keys under **Settings**. Keys grant full access, including IEx,
 SFTP and firmware uploads. Changes are saved to
 `/data/nerves_gate/ssh_authorized_keys` before taking effect. Build-time
-`NERVES_GATE_SSH_KEYS` and configured NervesSSH keys seed the store only on first
-use or after factory reset. Use `NervesGate.SSH.add_key/1` and
+`NERVES_GATE_SSH_KEYS` populates `:nerves_gate, :ssh_keys`, which seeds the store
+only on first use or after factory reset. No older key store is imported. A
+persisted empty store stays empty. Use `NervesGate.SSH.add_key/1` and
 `NervesGate.SSH.remove_key/1`, not NervesSSH's key APIs.
 
 ## Logs across reboots

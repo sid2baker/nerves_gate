@@ -26,6 +26,7 @@ jobs:
       name: ${{ startsWith(inputs.tag || github.ref_name, 'sdk/') && 'hex-release' || 'platform-release' }}
     permissions:
       contents: write
+      actions: read
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       MIX_TARGET: host
@@ -47,6 +48,10 @@ jobs:
         run: |
           test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor HEAD origin/main
+      - name: Require green validation and QEMU integration for this exact platform commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise exec -- elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check integration "$RELEASE_TAG"
       - name: Reject unsupported Hex dependencies
         run: mise exec -- elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix release.check dependencies "$RELEASE_TAG"
       - name: Require unpublished outputs

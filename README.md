@@ -25,7 +25,7 @@ Apps are ordinary Mix projects in their own directories. Create or open them on
 the Applications page, or:
 
 ```sh
-mix app.new ../my_controller
+mix app.new ../my_controller --local-sdk
 mix app.test ../my_controller
 mix app.package ../my_controller
 ```

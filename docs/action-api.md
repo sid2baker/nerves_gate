@@ -57,10 +57,6 @@ hostname/trial IDs are plain strings. Failures return
 | `Remote.configure(hostname, opts \\ [])` | `:ok`; hostname change accepted |
 | `Remote.disconnect()` | `:ok`; `down` accepted, enrollment kept |
 | `Remote.login_url()` | `{:ok, url_or_nil}`; explicit private read |
-| `Equipment.scan()` | `:ok` after a bounded ARP scan |
-| `Equipment.label(id, label)` | `:ok` after saving a scope-local label |
-| `Equipment.share()` | `:ok` after equipment subnet advertisement readback |
-| `Equipment.unshare()` | `:ok` after equipment subnet withdrawal readback |
 | `Indicators.identify()` | `:ok` once five-second identification starts |
 | `SSH.add_key(public_key)` | `:ok` after validating/saving one OpenSSH public key |
 | `SSH.remove_key(fingerprint)` | `:ok` after saving removal; existing sessions stay open |
@@ -69,7 +65,7 @@ hostname/trial IDs are plain strings. Failures return
 | `Buses.modbus_read(port, params)` | `:ok`; one authorized RTU read accepted |
 | `Storage.setup(action, card_id \\ nil, confirmation \\ nil)` | `:ok`; storage setup accepted |
 | `Distribution.cookie()` | `{:ok, cookie}`; explicit private read |
-| `System.info()` | Sanitized `%{firmware: ..., target: ..., node: ..., elixir: ..., otp: ...}` |
+| `System.info()` | Sanitized `%{firmware: ..., source_revision: ..., target: ..., node: ..., elixir: ..., otp: ...}` |
 | `NervesGate.status()` | Current administrative map, read directly from domains |
 | `NervesGate.subscribe()` | `:ok`; subscriptions belong to the caller |
 
@@ -142,7 +138,7 @@ waits for auto-save; otherwise it returns a pending trial. See
 
 | Command family | When the call succeeds |
 | --- | --- |
-| Network trial, scan, sharing, label and SSH keys | After the requested bounded effect/readback or persistence |
+| Network trial, app lease and SSH keys | After the requested bounded effect/readback or persistence |
 | Cellular, Remote, Buses and Storage | After admission; observe `operation`, `error` and applicable `result`/readiness |
 | Identify | After starting the bounded identification period |
 
@@ -150,17 +146,17 @@ Remote completion is in `status.remote`, not a private URL. Bus completion is in
 `status.buses`. Private `Remote.login_url/0` and `Distribution.cookie/0` results
 belong only in the requesting view; never log, broadcast or put them in status.
 
-Trial/scan calls allow 15 seconds; equipment sharing allows 70. Other calls are
+Trial calls allow 15 seconds; application leases allow 70. Other calls are
 bounded too. Missing owners return unavailable; a lost process-call reply returns
 `outcome_unknown`. A caller timeout does not cancel admitted work. **Read state
 before considering a retry**; never blindly replay writes or PIN attempts.
 Exceptions/throws unrelated to the protected `GenServer.call` exit boundary are
 not converted into successful or generic command results.
 
-Use `Equipment.scan/share/unshare`, not private worker helpers: they hold Network's
-cross-domain admission. Cellular uses the same worker; there is no independent
-cellular process. Sharing accepts no caller-supplied route. See
-[equipment sharing](networking.md#equipment-sharing).
+Use caller-owned SDK network leases for local addressing and advertisement, not
+private Remote/worker helpers. Cellular uses the same Network worker; there is no
+independent cellular process. Legacy Equipment label/scan/share commands and joined
+network settings are removed. See [equipment sharing](networking.md#equipment-sharing).
 
 Commands do not authenticate callers. `actions`/`capabilities` are presentation
 metadata, **not authorization**. The gateway currently trusts reachable management
@@ -192,7 +188,7 @@ See [bus operations](buses.md). Storage choice/erase confirmation is documented 
 ## Status
 
 `NervesGate.status/0` reads domains independently: it is **not an atomic snapshot**.
-Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v8**:
+Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v9**:
 
 - `version`, `system`: schema version and sanitized firmware/runtime identity.
 - `device`: availability/error; a disconnected projection client sets unavailable.
@@ -204,9 +200,8 @@ Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v8**:
   binding hash. Auto-unlock is `ready`, `blocked`, `different_sim`,
   `identity_unknown`, `off` or `unknown`.
 - `remote`: sanitized daemon observations, routes, operation and error.
-- `sharing`: equipment `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
+- `sharing`: application-lease `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
   `other_routes` untouched by the control.
-- `equipment`: scoped neighbors, labels and scan state.
 - `indicators`: availability, button state, LED patterns, identify/recovery state.
 - `buses`: ports, support, observations, operation, result and errors.
 - `ssh`: public-key fingerprints/types/comments and persistence errors.
@@ -232,7 +227,7 @@ remote read-only sources. Gateway commands remain local; see
 
 Public owners document their own interfaces: [Network](../firmware/lib/nerves_gate/network.ex),
 [Cellular](../firmware/lib/nerves_gate/cellular.ex), [Remote](../firmware/lib/nerves_gate/remote.ex),
-[Equipment](../firmware/lib/nerves_gate/equipment.ex), [Indicators](../firmware/lib/nerves_gate/indicators.ex),
+[Indicators](../firmware/lib/nerves_gate/indicators.ex),
 [Buses](../firmware/lib/nerves_gate/buses.ex), [SSH](../firmware/lib/nerves_gate/ssh.ex)
 and [Storage](../firmware/lib/nerves_gate/storage.ex). Fixed infrastructure and raw
 cellular helpers are private implementation boundaries, not alternate client APIs.

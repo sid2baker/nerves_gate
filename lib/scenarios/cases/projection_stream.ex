@@ -36,7 +36,7 @@ defmodule Scenarios.Cases.ProjectionStream do
     assert_http_pages(vm)
 
     clients =
-      for editor <- [:network, :lan, :ports, :remote, :settings],
+      for editor <- [:network, :lan, :remote, :settings],
           do: spawn_link(fn -> client(editor, {ProjectionServer, vm.node}) end)
 
     try do
@@ -123,7 +123,7 @@ defmodule Scenarios.Cases.ProjectionStream do
           "/remote",
           "/settings",
           "/settings/storage",
-          "/distribution"
+          "/remote"
         ] do
       response = Req.get!(device, url: path)
       assert response.status == 200
@@ -228,8 +228,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
       assert state.draft in [
                "192.0.2.123",
-               "10.44.0.123",
-               "shared",
+               "true",
                "unsaved-gateway",
                "unsaved-public-key"
              ]
@@ -247,7 +246,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
     refresh =
       case editor do
-        editor when editor in [:network, :lan, :ports] -> &NetworkEditor.refresh_observations/2
+        editor when editor in [:network, :lan] -> &NetworkEditor.refresh_observations/2
         :remote -> &RemoteLive.refresh_observations/2
         :settings -> &Phoenix.Component.assign(&1, :projection, &2)
       end
@@ -260,7 +259,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
   # An unrelated operation queued before a command reply must not complete or
   # abandon the editor's pending save against an unchanged domain snapshot.
-  defp assert_pending_reply(socket, editor) when editor in [:network, :lan, :ports] do
+  defp assert_pending_reply(socket, editor) when editor in [:network, :lan] do
     socket = Phoenix.Component.assign(socket, own_save: true, saving_network: socket.assigns.base)
     updated = NetworkEditor.refresh_observations(socket, socket.assigns.projection)
     assert updated.assigns.own_save
@@ -289,14 +288,13 @@ defmodule Scenarios.Cases.ProjectionStream do
     Phoenix.Component.assign(socket, :dirty, true)
   end
 
-  defp draft(socket, editor) when editor in [:network, :lan, :ports] do
+  defp draft(socket, editor) when editor in [:network, :lan] do
     settings = socket.assigns.projection.network.desired
 
     {editor, field, value} =
       case editor do
         :network -> {:internet, "internet_ip", "192.0.2.123"}
-        :lan -> {{:equipment, "eth1"}, "equipment_ip", "10.44.0.123"}
-        :ports -> {:ports, "mode", "shared"}
+        :lan -> {{:application, "eth1"}, "enabled", "true"}
       end
 
     params = NetworkForm.from_settings(settings, editor) |> Map.put(field, value)
@@ -333,8 +331,7 @@ defmodule Scenarios.Cases.ProjectionStream do
       {:state, from, ref} ->
         fields = %{
           network: "internet_ip",
-          lan: "equipment_ip",
-          ports: "mode",
+          lan: "enabled",
           remote: "hostname",
           settings: "public_key"
         }

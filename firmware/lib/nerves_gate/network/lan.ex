@@ -1,35 +1,33 @@
 defmodule NervesGate.Network.LAN do
   @moduledoc """
-  VintageNet technology for explicitly shared or isolated Ethernet ports.
+  VintageNet technology for independent Ethernet ports and the empty metadata bridge.
 
-  Delegates bridge/DHCP/address management to the standard technologies. Keeps
-  the fixed Layer 2 bridge alive when changing its management address, including
-  after a manager restart. This also avoids VintageNetBridge 0.10.3's delbr-before-
-  down teardown bug. Members have no IPv6 autoconfiguration or IPv4 addresses.
-  VintageNet remains the sole owner, including interface hotplug and IP cleanup.
+  No Ethernet port can join the bridge. VintageNet owns interface hotplug, address
+  cleanup and the persisted metadata carrier. Ports have no IPv6 autoconfiguration.
   """
   @behaviour VintageNet.Technology
 
   @impl true
-  def normalize(%{vintage_net_bridge: _} = config) do
+  def normalize(%{vintage_net_bridge: %{interfaces: []}} = config) do
     config
     |> Map.put(:type, VintageNetBridge)
     |> VintageNetBridge.normalize()
     |> Map.put(:type, __MODULE__)
   end
 
-  def normalize(config) do
+  def normalize(config) when not is_map_key(config, :vintage_net_bridge) do
     config
     |> Map.put(:type, VintageNetEthernet)
     |> VintageNetEthernet.normalize()
     |> Map.put(:type, __MODULE__)
   end
 
+  def normalize(_), do: raise(ArgumentError, "Only independent Ethernet interfaces are supported")
+
   @impl true
-  def to_raw_config("br0" = ifname, config, opts) do
+  def to_raw_config("br0" = ifname, %{vintage_net_bridge: %{interfaces: []}} = config, opts) do
     raw = VintageNetBridge.to_raw_config(ifname, %{config | type: VintageNetBridge}, opts)
     # The bridge is permanent. Only its address/route/DHCP client is replaced.
-    # Do not disrupt equipment-to-equipment traffic on a management IP change.
     [_delete, _create | configure] = raw.up_cmds
 
     # DHCP down commands only flush the address. Serialize with RouteManager
@@ -51,7 +49,7 @@ defmodule NervesGate.Network.LAN do
         source_config: normalize(config),
         up_cmds: [
           {:fun, __MODULE__, :ensure_bridge, []},
-          {:fun, __MODULE__, :sync_members, [config.vintage_net_bridge.interfaces]},
+          {:fun, __MODULE__, :isolate_ports, []},
           {:fun, __MODULE__, :disable_member_ipv6, [ifname]}
           | configure
         ],
@@ -91,10 +89,9 @@ defmodule NervesGate.Network.LAN do
     end
   end
 
-  # The previous bridge watcher has been stopped before these commands run.
-  # Detach only ports excluded by the explicit topology; USB is never touched.
-  def sync_members(members) do
-    Enum.reduce_while(["eth0", "eth1"] -- members, :ok, fn name, :ok ->
+  # Only independent ports are supported. USB is never touched.
+  def isolate_ports do
+    Enum.reduce_while(["eth0", "eth1"], :ok, fn name, :ok ->
       case detach(name) do
         :ok -> {:cont, :ok}
         error -> {:halt, error}

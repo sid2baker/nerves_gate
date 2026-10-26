@@ -7,7 +7,7 @@ defmodule NervesGate.Config do
   def from_network(network),
     do: %{"setup_completed" => network["mode"] != "unconfigured", "network" => network}
 
-  @doc "Internet policy is independent of the Ethernet topology. Old settings remain Ethernet-only."
+  @doc "Internet policy is independent of the Ethernet topology; Ethernet is the default."
   def internet(network), do: (network && network["internet"]) || %{"mode" => "ethernet"}
   def cellular?(network), do: internet(network)["mode"] in ["cellular", "backup"]
 
@@ -46,15 +46,6 @@ defmodule NervesGate.Config do
 
   defp validate_internet(_), do: :ok
 
-  defp validate_cellular_uplink(%{"mode" => "shared", "equipment" => address}, "cellular") do
-    if address["ip_method"] == "static" and address["gateway"] == nil and
-         Map.get(address, "nameservers", []) == [],
-       do: :ok,
-       else:
-         {:error,
-          "With 4G-only Internet, a joined local network needs a manual address without an Ethernet router or DNS servers."}
-  end
-
   defp validate_cellular_uplink(network, mode) do
     case {mode, ethernet_uplink?(network)} do
       {"cellular", true} ->
@@ -81,7 +72,7 @@ defmodule NervesGate.Config do
     do: is_binary(apn) and Regex.match?(~r/\A[a-zA-Z0-9][a-zA-Z0-9.-]{0,99}\z/, apn)
 
   defp ethernet_uplink?(network),
-    do: network["mode"] == "shared" or role_port(network, "internet") != nil
+    do: role_port(network, "internet") != nil
 
   def address_defaults do
     %{"ip_method" => "dhcp", "static_ip" => nil, "subnet_mask" => nil, "gateway" => nil}
@@ -89,13 +80,6 @@ defmodule NervesGate.Config do
 
   defp validate_ethernet(%{"mode" => "unconfigured"} = network) when map_size(network) == 1 do
     {:ok, network}
-  end
-
-  defp validate_ethernet(%{"mode" => "shared", "equipment" => address} = network)
-       when map_size(network) == 2 do
-    with {:ok, address} <- validate_address(address) do
-      {:ok, %{network | "equipment" => address}}
-    end
   end
 
   defp validate_ethernet(%{"mode" => "ports", "eth0" => left, "eth1" => right} = network)
@@ -109,13 +93,13 @@ defmodule NervesGate.Config do
     else
       _ ->
         {:error,
-         "Choose at most one Internet port and one equipment port. Equipment needs an unused manual address, without a router."}
+         "Use at most one Internet port; other ports must be disabled or application-enabled. Legacy equipment and joined settings require explicit administrator migration; saved state is never rewritten."}
     end
   end
 
   defp validate_ethernet(_) do
     {:error,
-     "Choose separate Internet and equipment ports, or explicitly choose one shared network."}
+     "Choose independent Internet/application ports. Legacy equipment and joined networks require explicit administrator migration; saved state is never rewritten."}
   end
 
   defp validate_port(nil), do: {:ok, nil}
@@ -124,15 +108,10 @@ defmodule NervesGate.Config do
        when map_size(port) == 2,
        do: {:ok, port}
 
-  defp validate_port(%{"role" => role, "address" => address} = port)
-       when map_size(port) == 2 and role in ["internet", "equipment"] do
-    with {:ok, address} <- validate_address(address),
-         true <-
-           role == "internet" or
-             (address["ip_method"] == "static" and is_nil(address["gateway"]) and
-                Map.get(address, "nameservers", []) == []) do
-      {:ok, %{port | "address" => address}}
-    else
+  defp validate_port(%{"role" => "internet", "address" => address} = port)
+       when map_size(port) == 2 do
+    case validate_address(address) do
+      {:ok, address} -> {:ok, %{port | "address" => address}}
       _ -> {:error, :invalid_port}
     end
   end

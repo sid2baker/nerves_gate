@@ -24,7 +24,7 @@ defmodule Simulator.Network do
   def baseline, do: connections(:lan1)
 
   def connections(internet),
-    do: Map.new([:lan1, :lan2], &{&1, if(&1 == internet, do: :internet, else: :equipment)})
+    do: Map.new([:lan1, :lan2], &{&1, if(&1 == internet, do: :internet, else: :application)})
 
   def start_link(dir), do: GenServer.start_link(__MODULE__, dir)
   def snapshot(server), do: GenServer.call(server, :snapshot)

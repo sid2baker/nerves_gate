@@ -9,7 +9,6 @@ defmodule Scenarios.Recovery do
     NervesGate.SSH,
     NervesGate.Network,
     NervesGate.Remote,
-    NervesGate.Equipment,
     NervesGate.Indicators,
     NervesGate.Buses,
     NervesGate.ProjectionServer,

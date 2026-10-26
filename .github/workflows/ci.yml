@@ -67,6 +67,39 @@ jobs:
       - name: Reject workstation-linked native ports
         run: mise exec -- elixir scripts/check_target.exs
 
+  firmware-ec100:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, prod]
+    env:
+      NERVES_SYSTEM: ''
+      NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+      - uses: ./.github/actions/host-tools
+        with:
+          firmware: 'true'
+      - uses: actions/cache@v6
+        with:
+          path: ${{ env.NERVES_DL_DIR }}
+          key: ec100-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'systems/nerves_system_ec100/**', 'mise.toml') }}
+      - name: Fetch locked host dependencies
+        run: mise exec -- mix deps.get --check-locked
+      - name: Fetch locked EC100 dependencies and initialize the target toolchain
+        working-directory: firmware
+        env:
+          MIX_TARGET: ec100
+          MIX_ENV: ${{ matrix.env }}
+        run: |
+          mise exec -- mix deps.get --check-locked
+          mise exec -- mix nerves_bootstrap.init
+      - name: Build EC100 firmware without flashing or booting
+        run: mise exec -- mix firmware ec100 --env ${{ matrix.env }}
+
   applications:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -84,3 +117,5 @@ jobs:
           mise exec -- mix app.test "$RUNNER_TEMP/second_app"
           mise exec -- mix app.package "$RUNNER_TEMP/demo"
           mise exec -- mix app.package "$RUNNER_TEMP/second_app"
+          mise exec -- mix app.test apps/tailnet_subrouter
+          mise exec -- mix app.package apps/tailnet_subrouter

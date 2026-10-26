@@ -326,8 +326,8 @@ defmodule NervesGateWeb.NetworkEditor do
         cellular_available:
           assigns.projection.capabilities.mobile and
             match?(%{cellular: %{present: true}}, assigns.projection.network.observed),
-        equipment_reason:
-          NetworkForm.equipment_reason(assigns.projection.network.desired, assigns.editor)
+        application_reason:
+          NetworkForm.application_reason(assigns.projection.network.desired, assigns.editor)
       )
 
     ~H"""
@@ -345,8 +345,8 @@ defmodule NervesGateWeb.NetworkEditor do
           <.trial pending={@pending} projection={@projection} now={@now} target={@myself} />
         <% @editor == :internet and @step in [0, 3] -> %>
           <p :if={@own_save} role="status">Connecting…</p>
-        <% @equipment_reason != nil -> %>
-          <.notice tone="warning">{@equipment_reason}</.notice>
+        <% @application_reason != nil -> %>
+          <.notice tone="warning">{@application_reason}</.notice>
         <% true -> %>
           <.notice :if={@stale} tone="warning">
             Settings changed in another session. Your draft has not been applied.
@@ -386,42 +386,9 @@ defmodule NervesGateWeb.NetworkEditor do
                     />
                   </.choice_group>
                   <p class="ui-help">
-                    Enabling does not assign an IP address, run DHCP, join ports or advertise a route. Existing local addressing on this port is removed when these changes are saved. Applications own their equipment configuration.
+                    Enabling does not assign an IP address, run DHCP, join ports or advertise a route. Applications own their equipment configuration; active leases must be released before changing enablement.
                   </p>
                 </.panel>
-              <% :ports -> %>
-                <.panel title="Ethernet arrangement" icon="port">
-                  <.choice_group field={@form[:mode]} label="Network topology">
-                    <:option
-                      value="ports"
-                      title="Independent networks"
-                      description="Keep the Internet uplink and local network isolated."
-                    />
-                    <:option
-                      value="shared"
-                      title="One joined network"
-                      description="Use both ports like a switch on the same trusted network."
-                    />
-                  </.choice_group>
-                  <.notice :if={@form.params["mode"] == "shared"} tone="warning">
-                    Only join ports on the same trusted network. Separate port assignments are replaced.
-                    With 4G-only Internet, use a manual local address with no Ethernet router or DNS servers.
-                    Joining does not provide Internet sharing or a DHCP server.
-                  </.notice>
-                  <.address_fields
-                    :if={@form.params["mode"] == "shared"}
-                    form={@form}
-                    prefix="shared"
-                  />
-                  <.notice
-                    :if={@form.params["mode"] != "shared" and @base["mode"] == "shared"}
-                    tone="warning"
-                  >
-                    Separating removes the shared address and leaves both ports unassigned.
-                  </.notice>
-                </.panel>
-              <% _ -> %>
-                <.equipment_form form={@form} />
             <% end %>
             <.notice :if={!@projection.actions["network.propose"].enabled} tone="warning">
               {@projection.actions["network.propose"].reason.message}
@@ -560,7 +527,7 @@ defmodule NervesGateWeb.NetworkEditor do
       </.notice>
       <div :if={@step == 2} class="ui-stack">
         <div
-          :if={@form.params["internet_mode"] != "cellular" and @base["mode"] != "shared"}
+          :if={@form.params["internet_mode"] != "cellular"}
           id="internet-options"
           class="ui-stack"
         >
@@ -589,12 +556,6 @@ defmodule NervesGateWeb.NetworkEditor do
             prefix="internet"
           />
         </div>
-        <p
-          :if={@form.params["internet_mode"] != "cellular" and @base["mode"] == "shared"}
-          class="ui-help"
-        >
-          LAN ports are joined. Their addressing and topology are administrator-managed through the Network API.
-        </p>
         <p
           :if={@form.params["internet_mode"] in ["cellular", "backup"] and !@settings}
           class="ui-help"
@@ -685,35 +646,6 @@ defmodule NervesGateWeb.NetworkEditor do
     """
   end
 
-  defp equipment_form(assigns) do
-    ~H"""
-    <.panel title="Local network" icon="network">
-      <.choice_group field={@form[:enabled]} label="Use this LAN port">
-        <:option
-          value="true"
-          title="Local network"
-          description="Assign a gateway address for application network access."
-        />
-        <:option value="false" title="Not configured" description="Leave this port unused." />
-      </.choice_group>
-      <div :if={@form.params["enabled"] == "true"} class="ui-field-grid">
-        <.field
-          field={@form[:equipment_ip]}
-          label="Gateway address on the local network"
-          help="Use an unused address in the intended subnet. Applications configure their equipment separately."
-          placeholder="192.168.10.2"
-          required
-          autocomplete="off"
-        />
-        <.field field={@form[:equipment_mask]} label="Subnet mask" required autocomplete="off" />
-      </div>
-      <p class="ui-help">
-        This configures only the gateway interface, not connected devices or protocols. Internet settings are preserved.
-      </p>
-    </.panel>
-    """
-  end
-
   defp address_fields(assigns) do
     assigns =
       assign(
@@ -742,9 +674,7 @@ defmodule NervesGateWeb.NetworkEditor do
   end
 
   defp form_id(:internet), do: "network-form"
-  defp form_id(:ports), do: "lan-ports-form"
   defp form_id({:application, _}), do: "application-port-form"
-  defp form_id(_), do: "equipment-network-form"
   defp submit_label(:internet, 1, _, %{"internet_mode" => "cellular"}), do: "Connect"
   defp submit_label(:internet, 1, _, _), do: "Continue"
   defp submit_label(:internet, _, false, _), do: "Connect"

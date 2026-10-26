@@ -96,6 +96,7 @@ defmodule Workbench.Applications do
   def test!(path, report \\ fn _ -> :ok end) do
     app = project!(path)
     run!(app.path, :test, ["deps.get"], report)
+    run!(app.path, :test, ["deps.compile"], report)
     run!(app.path, :test, ["test"], report)
     :ok
   end
@@ -111,6 +112,9 @@ defmodule Workbench.Applications do
     output = Path.join(app.path, relative)
     File.mkdir_p!(Path.dirname(output))
     run!(app.path, :prod, ["deps.get"], report)
+    # Compile path dependencies before loading their packaging task: a changed
+    # SDK requirement must not be checked against an older cached .app version.
+    run!(app.path, :prod, ["deps.compile"], report)
     run!(app.path, :prod, ["nerves_gate.package", "--output", output], report)
     output
   end

@@ -18,6 +18,7 @@ defmodule Workbench.MixProject do
       app: :nerves_gate_workbench,
       version: @version,
       elixir: "~> 1.20",
+      test_ignore_filters: [~r"/support/"],
       listeners: if(Mix.env() == :dev, do: [Phoenix.CodeReloader], else: []),
       deps: [
         {:nerves_gate_sdk, path: "sdk"},
@@ -38,6 +39,7 @@ defmodule Workbench.MixProject do
         format: &format/1,
         firmware: &firmware/1,
         ci: &ci/1,
+        check: &check/1,
         "test.sdk": &run("sdk", ["test" | &1])
       ]
     ]
@@ -47,7 +49,7 @@ defmodule Workbench.MixProject do
   def application,
     do: [extra_applications: [:logger, :crypto, :ssh, :eex], mod: {Workbench.Application, []}]
 
-  def cli, do: [preferred_envs: [ci: :test, "test.qemu": :test]]
+  def cli, do: [preferred_envs: [ci: :test, check: :test, "test.qemu": :test]]
 
   defp deps_get(args) do
     for project <- @projects, do: run(project, ["deps.get" | args])
@@ -111,10 +113,15 @@ defmodule Workbench.MixProject do
 
   defp format(args), do: Mix.Tasks.Format.run(args)
 
-  defp ci([]) do
+  defp ci([]), do: checks("ci")
+  defp ci(_), do: Mix.raise("Usage: mix ci")
+  defp check([]), do: checks("check")
+  defp check(_), do: Mix.raise("Usage: mix check")
+
+  defp checks(task) do
     for project <- @projects do
-      Mix.shell().info("==> #{project}: mix ci")
-      run(project, ["ci"])
+      Mix.shell().info("==> #{project}: mix #{task}")
+      run(project, [task])
     end
 
     # Compile the root last: independent projects may load their own copies of
@@ -124,10 +131,9 @@ defmodule Workbench.MixProject do
     Mix.Task.run("compile", ["--warnings-as-errors"])
     Workbench.Builds.assets!(&Mix.shell().info(&1))
     Mix.Tasks.Format.run(["--check-formatted"])
-    Mix.Task.run("test")
+    Mix.Task.run("test", ["--max-cases", "4"])
+    Workbench.Applications.test!(Path.join(__DIR__, "apps/tailnet_subrouter"))
   end
-
-  defp ci(_), do: Mix.raise("Usage: mix ci")
 
   # Host-only native orchestration. Nerves device builds and user apps run
   # in supervised OS processes instead; their compiler state must be isolated.
@@ -155,7 +161,7 @@ defmodule Workbench.MixProject do
       Code.compiler_options(ignore_module_conflict: true)
       System.put_env("NERVES_GATE_LOCAL_DEPS", "1")
       System.delete_env("NERVES_GATE_DEVICE_NODE")
-      Mix.env(if task in ["test", "ci"], do: :test, else: previous_env)
+      Mix.env(if task in ["test", "ci", "check"], do: :test, else: previous_env)
       Mix.target(target)
 
       Mix.Project.in_project(Map.fetch!(apps, project), Path.join(__DIR__, project), fn _ ->

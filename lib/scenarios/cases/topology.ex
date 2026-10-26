@@ -25,7 +25,7 @@ defmodule Scenarios.Cases.Topology do
              Scenarios.Device.rpc(vm, :inet, :getaddr, [~c"example.com", :inet])
 
     Qemu.network(vm, %{internet: :lan2})
-    assert Scenarios.Qemu.topology(vm) == %{lan1: :equipment, lan2: :internet}
+    assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :internet}
     online(vm, "eth1")
     assert Scenarios.Device.status(vm).network.desired == factory
     assert identities(vm) == original
@@ -33,24 +33,16 @@ defmodule Scenarios.Cases.Topology do
     # Supply a deliberately tempting gateway on the equipment LAN. Even a
     # manually injected route must not turn equipment into a second uplink.
     configured =
-      Map.put(settings("eth1"), "eth0", %{
-        "role" => "equipment",
-        "address" => %{
-          "ip_method" => "static",
-          "static_ip" => "10.0.3.15",
-          "subnet_mask" => "255.255.255.0",
-          "gateway" => nil
-        }
-      })
+      Map.put(settings("eth1"), "eth0", %{"role" => "application", "address" => nil})
 
     save(vm, configured)
     online(vm, "eth1")
-    refuses_forwarding(vm, "eth0", "10.0.3.2", destination)
+    refuses_application_forwarding(vm, destination)
     refuses_forwarding(vm, "eth2", "192.168.77.1", destination)
     refuses_host_loopback(vm)
 
     Qemu.network(vm, %{internet: :off})
-    assert Scenarios.Qemu.topology(vm) == %{lan1: :equipment, lan2: :equipment}
+    assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :application}
     assert {:error, _} = Qemu.internet_request(vm, 3_000)
     assert Scenarios.Device.status(vm).device.available
     assert Scenarios.Device.status(vm).network.desired == configured
@@ -212,6 +204,36 @@ defmodule Scenarios.Cases.Topology do
 
       {interface, {mac, index}}
     end)
+  end
+
+  defp refuses_application_forwarding(vm, destination) do
+    parent = self()
+
+    owner =
+      spawn_link(fn ->
+        result =
+          GenServer.call(
+            {NervesGate.Network, vm.node},
+            {:claim_local, "eth0", "10.0.3.15", 24},
+            70_000
+          )
+
+        send(parent, {:forwarding_lease, self(), result})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    try do
+      assert_receive {:forwarding_lease, ^owner, {:ok, _}}, 75_000
+      Scenarios.Device.await(vm, "application local address ready", &addressed?(&1, "eth0"))
+      refuses_forwarding(vm, "eth0", "10.0.3.2", destination)
+    after
+      send(owner, :stop)
+    end
+
+    Scenarios.Device.await(vm, "application lease cleaned", &(&1.network.local == nil), 75_000)
   end
 
   defp refuses_forwarding(vm, interface, gateway, destination) do

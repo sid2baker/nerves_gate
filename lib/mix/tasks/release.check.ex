@@ -8,11 +8,14 @@ defmodule Mix.Tasks.Release.Check do
         [tag] ->
           {"check", tag}
 
-        [operation, tag] when operation in ~w(prepare dependencies unpublished verify) ->
+        [operation, tag]
+        when operation in ~w(prepare dependencies integration unpublished verify) ->
           {operation, tag}
 
         _ ->
-          Mix.raise("Usage: mix release.check [prepare|dependencies|unpublished|verify] TAG")
+          Mix.raise(
+            "Usage: mix release.check [prepare|dependencies|integration|unpublished|verify] TAG"
+          )
       end
 
     root = Path.expand("../../..", __DIR__)
@@ -29,6 +32,9 @@ defmodule Mix.Tasks.Release.Check do
 
       "dependencies" ->
         Workbench.Release.dependencies!(info, root)
+
+      "integration" ->
+        Workbench.Release.require_validation!(info, root)
 
       "unpublished" ->
         Workbench.Release.unpublished!(info)

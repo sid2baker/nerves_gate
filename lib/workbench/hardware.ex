@@ -30,7 +30,7 @@ defmodule Workbench.Hardware do
   end
 
   def diagnostics!(address) do
-    snapshot = FirmwareUpdate.read_hardware!(address)
+    snapshot = Workbench.DeviceSSH.read_hardware!(address)
     :ok = Workbench.LANDiscovery.record_identity(address, snapshot)
     diagnostic_report(snapshot, address)
   end
@@ -40,7 +40,7 @@ defmodule Workbench.Hardware do
     %{
       observed_at: DateTime.utc_now() |> DateTime.to_iso8601(),
       management: %{transport: "verified SSH", endpoint: endpoint},
-      device: FirmwareUpdate.hardware_snapshot!(snapshot)
+      device: Workbench.DeviceSSH.hardware_snapshot!(snapshot)
     }
   end
 
@@ -53,7 +53,7 @@ defmodule Workbench.Hardware do
         )
 
     peer = FactoryConnection.usb_peer!(address)
-    snapshot = FirmwareUpdate.read_hardware!(peer)
+    snapshot = Workbench.DeviceSSH.read_hardware!(peer)
     check_cancel!()
 
     result =
@@ -63,7 +63,7 @@ defmodule Workbench.Hardware do
         report: report,
         read_snapshot: fn ->
           check_cancel!()
-          observed = FirmwareUpdate.read_hardware!(peer, 2_000)
+          observed = Workbench.DeviceSSH.read_hardware!(peer, 2_000)
 
           unless FirmwareUpdate.same_reviewed_boot?(snapshot, observed) and
                    observed["available"] == true,
@@ -92,7 +92,7 @@ defmodule Workbench.Hardware do
         _ -> raise ArgumentError, "Choose verified SSH or independent USB management"
       end
 
-    snapshot = FirmwareUpdate.read_hardware!(target)
+    snapshot = Workbench.DeviceSSH.read_hardware!(target)
 
     unless snapshot["available"] == true and snapshot["firmware_validated"] == true and
              snapshot["ready"] == true and snapshot["pending"] == false and
@@ -103,6 +103,7 @@ defmodule Workbench.Hardware do
              )
 
     %{
+      owner: __MODULE__,
       public: %{
         kind: :reboot,
         address: address,
@@ -117,7 +118,7 @@ defmodule Workbench.Hardware do
     }
   end
 
-  def confirm_reboot!(plan, token, address) do
+  def confirmation!(plan, token, address) do
     unless plan.public.kind == :reboot and token == plan.public.token and
              address == plan.public.address and System.monotonic_time(:millisecond) < plan.expires,
            do:
@@ -129,9 +130,18 @@ defmodule Workbench.Hardware do
     :ok
   end
 
+  def review_message,
+    do:
+      "Reboot observation reviewed. Do not press the button until observation is armed. No reboot command was sent."
+
+  def expiry_message,
+    do: "Reboot observation review expired. Review again before pressing the button."
+
+  def cleanup(_), do: :ok
+
   def observe_reboot!(plan, report) do
-    :ok = confirm_reboot!(plan, plan.public.token, plan.public.address)
-    current = FirmwareUpdate.read_hardware!(plan.management_target)
+    :ok = confirmation!(plan, plan.public.token, plan.public.address)
+    current = Workbench.DeviceSSH.read_hardware!(plan.management_target)
     check_cancel!()
 
     unless FirmwareUpdate.same_reviewed_boot?(plan.before_reboot, current),
@@ -156,7 +166,7 @@ defmodule Workbench.Hardware do
 
     observed =
       try do
-        FirmwareUpdate.read_hardware!(plan.management_target, 2_000)
+        Workbench.DeviceSSH.read_hardware!(plan.management_target, 2_000)
       rescue
         _ -> nil
       end
@@ -170,7 +180,12 @@ defmodule Workbench.Hardware do
          )
 
     if observed &&
-         FirmwareUpdate.verified_update?(plan.before_reboot, observed, plan.public.version) do
+         FirmwareUpdate.verified_update?(
+           plan.before_reboot,
+           observed,
+           plan.public.version,
+           plan.before_reboot["source_revision"]
+         ) do
       :ok = Workbench.LANDiscovery.record_identity(plan.public.address, observed)
 
       report.(
@@ -200,7 +215,7 @@ defmodule Workbench.Hardware do
     unless profile in profiles(),
       do: raise(ArgumentError, "Choose Ethernet, 4G or Ethernet with 4G backup")
 
-    snapshot = FirmwareUpdate.read_hardware!(address)
+    snapshot = Workbench.DeviceSSH.read_hardware!(address)
 
     result =
       Scenarios.run(Scenarios.Cases.HardwareReadiness, %{

@@ -92,7 +92,6 @@ defmodule NervesGate.Recovery.EC100 do
     # its periodic snapshot after the data partition is unmounted.
     children = [
       NervesGate.Buses,
-      NervesGate.Equipment,
       NervesGate.Remote,
       NervesGate.Network,
       NervesGate.SSH

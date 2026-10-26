@@ -1,7 +1,8 @@
 defmodule NervesGate.Network.LocalTest do
   use ExUnit.Case, async: false
+  alias NervesGate.Config
   alias NervesGate.Network.{Local, Policy, Vintage}
-  alias NervesGate.{Config, Remote.Sharing}
+  alias NervesGate.Remote.Sharing
 
   setup do
     previous = Application.get_env(:nerves_gate, :local_network_journal)
@@ -62,6 +63,42 @@ defmodule NervesGate.Network.LocalTest do
     }
   end
 
+  test "lease transitions preserve unknown outcomes and owner-loss cleanup" do
+    {:ok, scope} = Local.candidate(status(), "eth1", "192.168.50.2", 24)
+    ref = make_ref()
+    local = %{Local.lease(scope, self(), :claim) | ref: ref}
+    assert {configured, {:ok, ^ref}} = Local.complete(local, :claim, :ok)
+    assert configured.phase == :configured
+    assert {advertised, :ok} = Local.complete(configured, :advertise, {:ok, [scope.cidr]})
+    assert advertised.phase == :advertised
+    assert {orphaned, {:ok, ^ref}} = Local.complete(%{local | owner: nil}, :claim, :ok)
+    assert orphaned.phase == :cleanup_pending
+    assert {deferred, :ok} = Local.complete(orphaned, :release, :deferred)
+    assert deferred.phase == :cleanup_pending
+
+    assert {blocked, {:error, %{code: "local_outcome_unknown"}}} =
+             Local.complete(configured, :advertise, {:error, :timeout})
+
+    assert blocked.phase == :blocked
+    assert {:error, _} = Local.action_allowed(:advertise_local, blocked, status())
+    assert Local.action_allowed(:release_local, blocked, status()) == :ok
+    assert Local.complete(blocked, :release, :ok) == {nil, :ok}
+  end
+
+  test "private lease reads use supplied remote observations and never reveal another owner's handle" do
+    {:ok, scope} = Local.candidate(status(), "eth1", "192.168.50.2", 24)
+    ref = make_ref()
+    local = %{Local.lease(scope, self(), :configured) | ref: ref}
+
+    assert %{ref: ^ref, advertised?: true, approval: :unknown} =
+             Local.observation(local, self(), status(), %{advertised_routes: [scope.cidr]})
+
+    assert %{advertised?: nil} =
+             Local.observation(local, self(), status(), %{advertised_routes: nil})
+
+    assert Local.observation(local, nil, status(), %{}) == nil
+  end
+
   test "only an explicitly enabled independent interface can be claimed" do
     assert {:ok, scope} = Local.candidate(status(), "eth1", "192.168.50.2", 24)
     assert scope.cidr == "192.168.50.0/24"
@@ -91,11 +128,22 @@ defmodule NervesGate.Network.LocalTest do
           {"192.168.50.0", 24},
           {"192.168.50.255", 24},
           {"invalid", 24},
+          {"100.64.1.2", 24},
           {"192.168.50.2", 0},
           {"192.168.50.2", 32}
         ] do
       assert {:error, _} = Local.candidate(status(), "eth1", address, prefix)
     end
+  end
+
+  test "claims cannot overlap additional platform management interfaces" do
+    status =
+      put_in(status().observed[:management], [
+        %{addresses: [%{address: "192.168.77.2", prefix_length: 24}]}
+      ])
+
+    assert {:error, %{code: "local_overlap"}} =
+             Local.candidate(status, "eth1", "192.168.77.3", 24)
   end
 
   test "ownership is actual PID plus reference; projections contain neither" do

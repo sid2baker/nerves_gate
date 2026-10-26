@@ -1,6 +1,6 @@
 defmodule NervesGateSDK.APITest do
   use ExUnit.Case, async: false
-  alias NervesGateSDK.{CAN, Equipment, Events, Network, RS485, Storage}
+  alias NervesGateSDK.{CAN, Events, Network, RS485, Storage}
 
   defmodule RecordingBackend do
     @behaviour NervesGateSDK.Backend
@@ -44,7 +44,6 @@ defmodule NervesGateSDK.APITest do
     claim = make_ref()
     assert {:ok, {:rs485_write, [^claim, <<1>>]}} = RS485.write(claim, <<1>>)
     assert {:ok, {:rs485_release, [^claim]}} = RS485.release(claim)
-    assert {:ok, {:equipment_list, []}} = Equipment.list()
   end
 
   test "invalid application input never reaches the backend" do

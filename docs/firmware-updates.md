@@ -20,7 +20,8 @@ artifact; see [system releases](releases.md#systems) for local system builds.
 3. **Review firmware and device** checks the archive, snapshots it privately,
    verifies the SSH host key and reads the device's identity. It sends nothing.
 4. Compare hostname, target, serial, versions and SHA-256. Product and platform
-   must match the device.
+   must match the device. Images must carry the current full build-commit metadata;
+   archives without it are rejected, not verified through a weaker fallback.
 5. Type the reviewed hostname/address and choose **Update firmware and reboot**.
    The snapshot and identity are rechecked before the standard SSH `fwup`
    subsystem receives the image.
@@ -42,10 +43,16 @@ Tailscale and USB addresses. The same immutable image review, host-key checks an
 typed one-use confirmation apply. Review captures serial and boot ID; these are
 rechecked immediately before the single upload. Read-only reconnect probes then
 wait up to about three minutes for a different boot, unchanged serial, reviewed
-version, validated firmware and healthy network state. If LAN/Tailscale access
+version, matching reviewed source revision, validated
+firmware and healthy network state. If LAN/Tailscale access
 does not return, verification is incomplete, not permission to upload again.
 No independent USB link is claimed by this mode. Use the stricter USB option
 below when management must stay independent of Ethernet/cellular connectivity.
+
+All workbench device operations require the current compiled maintenance APIs.
+Unsupported firmware fails explicitly: there is no legacy identity protocol or
+automatic downgrade to manual verification. Updating unsupported firmware requires
+an external, separately authorized procedure; SSH trust must never be relaxed.
 
 ## USB update-and-verify procedure
 
@@ -151,7 +158,11 @@ re-provisioning; otherwise use the SSH update, which also works over USB network
    gateway's Settings page to confirm firmware version and target. Keep `mix dev`,
    USB and power connected until it finishes.
 
-Backups, checksums and readbacks stay in `ec100-backups/`, including after failure.
+Backups, checksums and readbacks stay outside the checkout in the platform's user
+data directory (`~/.local/share/nerves_gate/ec100-backups/` on typical Linux),
+including after failure. The private review shows the exact location. Hosts may
+set `:nerves_gate_workbench, :backup_directory` explicitly. Older in-checkout
+`ec100-backups/` directories are not moved, deleted or uploaded automatically.
 Copy them somewhere safe, and keep the **original** backup: a later attempt may
 back up partially written contents.
 

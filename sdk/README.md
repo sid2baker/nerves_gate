@@ -27,7 +27,7 @@ Applications should not select a device backend themselves. SDK APIs do not mana
 Internet/USB, Tailscale enrollment or credentials, SSH, apps or firmware, expose
 cookies, or reboot/reset the device.
 
-## Isolated local-network access (unreleased source API)
+## Isolated local-network access (SDK 0.2.0-dev checkout)
 
 An operator must explicitly enable a non-Internet Ethernet port for applications.
 `Network.claim_local(interface, address, prefix)` gives the actual caller exclusive
@@ -43,15 +43,23 @@ journals block reuse, including after platform restart. Never blindly retry an
 uncertain write. Lease references are private and must not enter logs/projections.
 The first implementation supports one independent Ethernet claim per gateway.
 See `apps/tailnet_subrouter` in the source repository for an optional, disabled-on-start
-example. This API has not been published in a new SDK release.
+example. Use the local SDK with requirement `~> 0.2.0-dev`; the published 0.1.0
+package does not contain this API. The device installer enforces the declared range.
 
 Applications on a device are trusted same-BEAM OTP applications, not sandboxed.
+
+## Equipment ownership
+
+Applications own identities, discovery and protocol sessions. The SDK has no
+`Equipment` compatibility module or equipment event topic. Use
+`Network.interfaces/0` for platform link observations.
 
 ## Application packages
 
 `mix nerves_gate.package` builds production code into a standard
 `<app>-<version>.ez` OTP archive. Declare
-`env: [nerves_gate_sdk_requirement: "~> 0.1.0"]` in `application/0` and
+`env: [nerves_gate_sdk_requirement: "~> 0.2.0-dev"]` for this checkout (or the
+matching published range for a released SDK) in `application/0` and
 `def cli, do: [preferred_envs: ["nerves_gate.package": :prod]]` to select production
 before dependency discovery on a clean checkout.
 

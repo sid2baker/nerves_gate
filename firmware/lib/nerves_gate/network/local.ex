@@ -2,8 +2,7 @@ defmodule NervesGate.Network.Local do
   @moduledoc "Application-owned, isolated IPv4 links and durable subnet-advertisement cleanup."
   import Bitwise
   alias NervesGate.{Config, Error, Remote}
-  alias NervesGate.Equipment.Subnet
-  alias NervesGate.Network.{Policy, Vintage}
+  alias NervesGate.Network.{Policy, Subnet, Vintage}
 
   def candidate(status, interface, address, prefix) do
     with :ok <- Policy.available(status),
@@ -53,7 +52,8 @@ defmodule NervesGate.Network.Local do
 
     others =
       Enum.reject(observed.ports, &(&1.name == scope.interface)) ++
-        Enum.reject([observed.bridge, observed.usb, Map.get(observed, :cellular)], &is_nil/1)
+        Enum.reject([observed.bridge, observed.usb, Map.get(observed, :cellular)], &is_nil/1) ++
+        Map.get(observed, :management, [])
 
     saved =
       for {name, %{"address" => %{"ip_method" => "static"} = address}} <-
@@ -64,7 +64,9 @@ defmodule NervesGate.Network.Local do
             prefix_length: elem(Config.prefix_length(address["subnet_mask"]), 1)
           }
 
-    addresses = saved ++ Enum.flat_map(others, & &1.addresses)
+    # Tailnet management addresses must never become an application subnet.
+    protected = [%{address: "100.64.0.0", prefix_length: 10}]
+    addresses = protected ++ saved ++ Enum.flat_map(others, & &1.addresses)
 
     if Enum.any?(
          addresses,
@@ -73,7 +75,7 @@ defmodule NervesGate.Network.Local do
        do:
          failure(
            "local_overlap",
-           "The requested subnet overlaps Internet, another local interface, cellular or USB."
+           "The requested subnet overlaps Internet, another local interface, cellular, USB or protected management addressing."
          ),
        else: :ok
   end
@@ -102,9 +104,8 @@ defmodule NervesGate.Network.Local do
   # Called inside Remote's serialized read-before-write boundary, not before
   # admission. A route already advertised by someone else is never adopted.
   def mark_advertising(scope) do
-    with {:ok, %{scope: ^scope, route_owned: false}} <- read() do
-      write(scope, true)
-    else
+    case read() do
+      {:ok, %{scope: ^scope, route_owned: false}} -> write(scope, true)
       _ -> {:error, :route_ownership_unavailable}
     end
   end
@@ -131,7 +132,7 @@ defmodule NervesGate.Network.Local do
 
   defp withdraw(scope, true) do
     case Remote.sharing(:sharing_disable, %{scope: scope, route: scope.cidr}) do
-      {:ok, routes} -> if scope.cidr not in routes, do: :ok, else: {:error, :still_advertised}
+      {:ok, routes} -> if scope.cidr in routes, do: {:error, :still_advertised}, else: :ok
       error -> error
     end
   end
@@ -166,6 +167,79 @@ defmodule NervesGate.Network.Local do
 
   def lease(scope, owner, phase),
     do: %{scope: scope, owner: owner, monitor: nil, ref: nil, phase: phase, error: nil}
+
+  def action_allowed(:release_local, _, _), do: :ok
+
+  def action_allowed(:advertise_local, %{phase: :configured, scope: scope}, status) do
+    if ready?(scope, status),
+      do: :ok,
+      else:
+        failure(
+          "local_not_ready",
+          "The claimed address, independent topology and physical link must be ready before advertising."
+        )
+  end
+
+  def action_allowed(_, _, _),
+    do:
+      failure(
+        "local_outcome_unknown",
+        "Inspect the claim and release it before attempting another advertisement."
+      )
+
+  def cleanup_if_ready(scope) do
+    if cleanup_ready?(), do: cleanup(scope), else: :deferred
+  end
+
+  def complete(local, :release, :deferred), do: {%{local | phase: :cleanup_pending}, :ok}
+
+  def complete(local, action, :ok), do: completed(local, action)
+  def complete(local, action, {:ok, routes}) when is_list(routes), do: completed(local, action)
+
+  def complete(local, _, _), do: failed(local)
+  defp completed(_, :release), do: {nil, :ok}
+
+  defp completed(local, action) do
+    phase = next_phase(local.owner, action)
+    response = if action == :claim, do: {:ok, local.ref}, else: :ok
+    {%{local | phase: phase}, response}
+  end
+
+  defp next_phase(nil, _), do: :cleanup_pending
+  defp next_phase(_, :claim), do: :configured
+  defp next_phase(_, _), do: :advertised
+
+  defp failed(local) do
+    {:error, error} =
+      failure(
+        "local_outcome_unknown",
+        "Local access did not complete safely. Inspect its status; release or explicitly recover it before trying again."
+      )
+
+    {%{local | phase: :blocked, error: error}, {:error, error}}
+  end
+
+  def observation(%{owner: pid} = local, pid, status, remote) when is_pid(pid) do
+    scope = local.scope
+
+    %NervesGateSDK.Network.Local{
+      ref: local.ref,
+      interface: scope.interface,
+      address: scope.address,
+      prefix: scope.prefix,
+      subnet: scope.cidr,
+      phase: local.phase,
+      ready?: ready?(scope, status),
+      approval: :unknown,
+      advertised?: advertised?(remote, scope.cidr),
+      error: local.error && local.error.code
+    }
+  end
+
+  def observation(_, _, _, _), do: nil
+
+  defp advertised?(%{advertised_routes: routes}, cidr) when is_list(routes), do: cidr in routes
+  defp advertised?(_, _), do: nil
 
   def public(nil), do: nil
 

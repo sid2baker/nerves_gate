@@ -134,14 +134,15 @@ defmodule NervesGate.Network.Vintage do
   def from_configurations(configs) when map_size(configs) == 0,
     do: {:ok, Config.defaults()["network"]}
 
+  def from_configurations(%{"br0" => %{vintage_net_bridge: %{interfaces: [_ | _]}}}),
+    do:
+      {:error, "Only independent Ethernet interfaces are supported; saved state was not changed."}
+
   def from_configurations(configs) do
     ports = Map.new(["eth0", "eth1"], &{&1, saved_port(configs[&1])})
 
     network =
       case get_in(configs, ["br0", :nerves_gate_mode]) do
-        "shared" ->
-          %{"mode" => "shared", "equipment" => saved_address(configs["br0"])}
-
         "ports" ->
           Map.put(ports, "mode", "ports")
 
@@ -157,12 +158,20 @@ defmodule NervesGate.Network.Vintage do
     Config.validate_network(network)
   end
 
-  defp saved_port(%{nerves_gate_role: "application"}),
+  defp saved_port(%{nerves_gate_role: "application", ipv4: %{method: :disabled}}),
     do: %{"role" => "application", "address" => nil}
 
-  defp saved_port(%{nerves_gate_role: role} = config) when role in ["internet", "equipment"],
-    do: %{"role" => role, "address" => saved_address(config)}
+  defp saved_port(%{nerves_gate_role: "internet"} = config),
+    do: %{"role" => "internet", "address" => saved_address(config)}
 
+  defp saved_port(%{
+         nerves_gate_role: nil,
+         nerves_gate_disabled: true,
+         ipv4: %{method: :disabled}
+       }),
+       do: nil
+
+  defp saved_port(%{nerves_gate_role: role}), do: %{"role" => role}
   defp saved_port(_), do: nil
 
   defp saved_address(%{ipv4: %{method: :dhcp}}), do: Config.address_defaults()
@@ -194,24 +203,16 @@ defmodule NervesGate.Network.Vintage do
     end)
   end
 
-  defp configs(%{"mode" => "shared", "equipment" => address}) do
-    [
-      {"eth0", port_config(%{method: :disabled})},
-      {"eth1", port_config(%{method: :disabled})},
-      {"br0", bridge_config(["eth0", "eth1"], ipv4(address))}
-    ]
-  end
-
   defp configs(%{"mode" => "unconfigured"}) do
     [
-      {"br0", bridge_config([], %{method: :disabled})}
+      {"br0", metadata_config()}
       | Enum.map(["eth0", "eth1"], &{&1, port_config(%{method: :dhcp})})
     ]
   end
 
   defp configs(%{"mode" => "ports"} = network) do
     [
-      {"br0", bridge_config([], %{method: :disabled})}
+      {"br0", metadata_config()}
       | Enum.map(["eth0", "eth1"], fn name ->
           address =
             if get_in(network, [name, "address"]) do
@@ -227,8 +228,8 @@ defmodule NervesGate.Network.Vintage do
 
   defp port_config(ipv4), do: %{type: LAN, ipv4: ipv4}
 
-  defp bridge_config(members, ipv4),
-    do: %{type: LAN, vintage_net_bridge: %{interfaces: members, stp: true}, ipv4: ipv4}
+  defp metadata_config,
+    do: %{type: LAN, vintage_net_bridge: %{interfaces: [], stp: true}, ipv4: %{method: :disabled}}
 
   defp ipv4(%{"ip_method" => "dhcp"}) do
     %{method: :dhcp}
@@ -268,38 +269,13 @@ defmodule NervesGate.Network.Vintage do
 
   defp apply_network(network, force) do
     with {:ok, configs} <- all_configurations(network) do
-      apply_interfaces(network, configs, force)
+      configure_all(configs, System.monotonic_time(:millisecond) + 8_000, force)
     end
   end
 
   defp all_configurations(network) do
     with {:ok, cellular} <- NervesGate.Cellular.Profile.configurations(network),
          do: {:ok, configurations(network) ++ cellular}
-  end
-
-  defp apply_interfaces(network, configs, force) do
-    desired_members =
-      if network["mode"] == "shared" do
-        ["eth0", "eth1"]
-      else
-        []
-      end
-
-    current_members = get_in(get("br0", "config") || %{}, [:vintage_net_bridge, :interfaces])
-    # Shared by bridge preparation and all ports; stay below the worker's 10s
-    # effect timeout while allowing slower hardware/emulation to settle.
-    deadline = System.monotonic_time(:millisecond) + 8_000
-
-    preparation =
-      if current_members != desired_members do
-        configure("br0", bridge_config([], %{method: :disabled}), deadline)
-      else
-        :ok
-      end
-
-    with :ok <- preparation do
-      configure_all(configs, deadline, force)
-    end
   end
 
   defp configure_all(configs, deadline, force) do
@@ -310,8 +286,6 @@ defmodule NervesGate.Network.Vintage do
       end
     end)
   end
-
-  defp configure(name, config, deadline, force \\ false)
 
   # Modem registration can take minutes. Accept the standard technology's
   # configuration without making carrier registration a LAN trial prerequisite.
@@ -380,9 +354,17 @@ defmodule NervesGate.Network.Vintage do
       bridge: interface("br0"),
       ports: Enum.map(["eth0", "eth1"], &interface/1),
       usb: interface("usb0"),
+      management: management_interfaces(),
       cellular_supported: NervesGate.Cellular.Profile.get() != nil,
       cellular: cellular_interface()
     }
+  end
+
+  defp management_interfaces do
+    Application.get_env(:vintage_net, :config, [])
+    |> Enum.map(fn {name, _} -> name end)
+    |> Enum.reject(&(&1 in ["eth0", "eth1", "br0", "usb0"]))
+    |> Enum.map(&interface/1)
   end
 
   defp cellular_interface do

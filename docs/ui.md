@@ -30,8 +30,8 @@ on owner loss and obtain a fresh snapshot on resubscription.
 
 Hardware keeps Internet uplinks, unassigned ports and all buses visible, including
 disabled or unavailable ones. Roles explain use without hiding physical connectors.
-Route IDs come from a fixed allowlist. `/equipment` and its port routes, `/storage`
-and `/distribution` remain usable aliases to the corresponding workspaces.
+Route IDs come from a fixed allowlist. Only the routes above are supported;
+replaced URLs are not aliases.
 
 Internet settings and Ethernet application enablement use the same device-owned
 save/undo flow; an unconfirmed trial is visible on every page with a link to
@@ -58,7 +58,8 @@ Ethernet addressing, routes and bridging remain Network-owned. An enabled applic
 port starts without IPv4, DHCP, DNS, a default route or bridge. Apps request isolated
 local addressing through a process-owned SDK claim; active or unresolved claims block
 platform network changes. Disabled independent ports are explicitly held down.
-Existing saved joined/local configurations are preserved, not silently migrated.
+Saved legacy joined/equipment configurations are rejected and retained for explicitly
+authorized administrator migration, never silently converted or erased.
 The optional [Tailnet subnet-router starter app](../apps/tailnet_subrouter/README.md)
 provides explicit local configuration and advertisement, disabled on every startup. RS485 claims are
 exclusive and exclude diagnostics; CAN receive subscriptions may be shared.
@@ -67,9 +68,9 @@ handles. CAN reconfiguration is rejected while applications subscribe; UI-disabl
 controls are not the backend interlock. The current UI reports resource use, not
 which installed app owns a caller. EM300/extension-card enumeration is not implemented.
 
-Existing administrative neighbor/scan APIs remain available for confirmed legacy
-local configurations, but the standard Hardware UI has no neighbor inventory, labels,
-scan or sharing controls. Application claims do not grant arbitrary scanning authority.
+Equipment label/scan/share commands are removed. A passive neighbor-cache read model
+belongs to applications, not a platform compatibility API. Hardware has no neighbor
+inventory, labels, scan or sharing controls.
 The first application network API supports one isolated Ethernet claim per gateway.
 
 ## Controls

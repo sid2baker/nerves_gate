@@ -3,12 +3,11 @@ defmodule NervesGate.SDKBackend do
   use GenServer
   @behaviour NervesGateSDK.Backend
 
-  alias NervesGate.{Buses, Equipment, Network, Storage}
-  alias NervesGate.Equipment.Subnet
+  alias NervesGate.{Buses, Network, Storage}
   alias NervesGateSDK.Events.Event
   alias NervesGateSDK.System.Info
 
-  @topics [:system, :network, :storage, :equipment]
+  @topics [:system, :network, :storage]
   @bus_operations [
     :can_interfaces,
     :can_send,
@@ -77,12 +76,11 @@ defmodule NervesGate.SDKBackend do
   end
 
   def handle_call({operation, []}, _, state)
-      when operation in [:system_info, :network_interfaces, :equipment_list, :storage_status] do
+      when operation in [:system_info, :network_interfaces, :storage_status] do
     topic =
       case operation do
         :system_info -> :system
         :network_interfaces -> :network
-        :equipment_list -> :equipment
         :storage_status -> :storage
       end
 
@@ -95,7 +93,6 @@ defmodule NervesGate.SDKBackend do
   def handle_info(:bind, state) do
     # Rebind after a domain or PropertyTable restart. No remote/admin observations.
     available(fn -> Network.observe() end)
-    available(fn -> Equipment.observe() end)
     Process.send_after(self(), :bind, 5_000)
     {:noreply, state}
   end
@@ -136,59 +133,38 @@ defmodule NervesGate.SDKBackend do
   defp query(:storage, _), do: Storage.status()
 
   defp query(:network, _) do
-    available(fn ->
-      case Network.status() do
-        %{observed: observed} = status when is_map(observed) ->
-          local = Map.get(status, :local)
-
-          interfaces =
-            Enum.map(observed.ports, fn port ->
-              %{
-                interface(port, :ethernet)
-                | application_enabled?:
-                    get_in(NervesGate.Config.ports(status.config && status.config["network"]), [
-                      port.name,
-                      "role"
-                    ]) == "application",
-                  claimed?: local != nil and local.interface == port.name
-              }
-            end) ++
-              [
-                interface(observed.bridge, :other),
-                interface(observed.usb, :usb),
-                interface(observed.cellular, :cellular)
-              ]
-
-          {:ok, Enum.reject(interfaces, &is_nil/1)}
-
-        _ ->
-          {:error, :unavailable}
-      end
-    end)
+    available(fn -> network_interfaces(Network.status()) end)
   end
 
-  defp query(:equipment, _) do
-    available(fn ->
-      equipment = Equipment.status()
+  defp network_interfaces(%{observed: observed} = status) when is_map(observed) do
+    interfaces =
+      Enum.map(observed.ports, &ethernet_interface(&1, status)) ++
+        [
+          interface(observed.bridge, :other),
+          interface(observed.usb, :usb),
+          interface(observed.cellular, :cellular)
+        ]
 
-      # Do not expose observations from a previous network scope during a trial.
-      with {:ok, scope} <- Subnet.from_status(Network.status()),
-           true <- equipment.available and equipment.scope == scope do
-        {:ok, Enum.map(equipment.entries, &device(&1, scope))}
-      else
-        _ -> {:ok, []}
-      end
-    end)
+    {:ok, Enum.reject(interfaces, &is_nil/1)}
   end
 
-  defp device(entry, scope) do
-    %NervesGateSDK.Equipment.Device{
-      id: entry.id,
-      interface: scope.interface,
-      label: entry.label,
-      address: entry.ip,
-      # A neighbor-cache entry is not proof of current reachability.
-      reachable?: false
+  defp network_interfaces(_) do
+    {:error, :unavailable}
+  end
+
+  defp ethernet_interface(port, status) do
+    local = Map.get(status, :local)
+
+    role =
+      get_in(NervesGate.Config.ports(status.config && status.config["network"]), [
+        port.name,
+        "role"
+      ])
+
+    %{
+      interface(port, :ethernet)
+      | application_enabled?: role == "application",
+        claimed?: local != nil and local.interface == port.name
     }
   end
 

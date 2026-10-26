@@ -3,7 +3,6 @@ defmodule NervesGate.SSH.Keys do
   @limit 32
   @max_bytes 8192
   @path "/data/nerves_gate/ssh_authorized_keys"
-  @legacy_path "/data/nerves_ssh/default_user/authorized_keys"
 
   def path, do: @path
 
@@ -122,20 +121,11 @@ defmodule NervesGate.SSH.Keys do
   end
 
   defp seed do
-    # Import existing installations once. Once our file exists, even if empty,
-    # deleted keys must not reappear after reboot or a firmware update.
-    with {:ok, legacy} <- legacy(),
-         {:ok, keys} <- parse_lines(legacy ++ Application.get_env(:nerves_gate, :ssh_keys, [])),
+    # Seed only from the current firmware configuration. A persisted empty store
+    # remains empty, so deleted keys never reappear after reboot or an update.
+    with {:ok, keys} <- parse_lines(Application.get_env(:nerves_gate, :ssh_keys, [])),
          :ok <- save(keys) do
       {:ok, keys}
-    end
-  end
-
-  defp legacy do
-    case read(@legacy_path) do
-      {:ok, keys} -> {:ok, Enum.map(keys, & &1.line)}
-      {:error, :enoent} -> {:ok, []}
-      error -> error
     end
   end
 

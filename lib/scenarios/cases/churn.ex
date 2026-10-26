@@ -34,24 +34,23 @@ defmodule Scenarios.Cases.Churn do
   end
 
   defp assert_port_arrangements(vm, saved) do
-    joined = %{"mode" => "shared", "equipment" => saved["eth0"]["address"]}
-
-    trial = propose(vm, joined)
+    legacy = %{"mode" => "shared", "equipment" => saved["eth0"]["address"]}
+    assert {:error, _} = Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [legacy])
+    assert Scenarios.Device.status(vm).network.desired == saved
+    enabled = Map.put(saved, "eth1", %{"role" => "application", "address" => nil})
+    trial = propose(vm, enabled)
     assert :ok = Scenarios.Device.rpc(vm, NervesGate.Network, :cancel, [trial])
 
     Scenarios.Device.await(
       vm,
-      "joining cancelled",
+      "application enablement cancelled",
       &(&1.network.pending == nil and &1.network.desired == saved and not &1.network.recovering)
     )
 
-    assert joined == save(vm, joined)
+    assert enabled == save(vm, enabled)
     observed = Scenarios.Device.status(vm).network.observed
-    # Saving checks topology, not a DHCP lease or Internet access.
-    assert %{present: true, state: :configured} = observed.bridge
-    assert Enum.all?(observed.ports, &(&1.master == "br0"))
-    separate = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
-    assert separate == save(vm, separate)
+    assert Enum.all?(observed.ports, &is_nil(&1.master))
+    assert Enum.any?(observed.ports, &(&1.name == "eth1" and &1.addresses == []))
     assert saved == save(vm, saved)
   end
 end

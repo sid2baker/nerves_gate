@@ -82,9 +82,6 @@ defmodule NervesGate.Alarms do
   defp message(:led_restore_failed), do: "Status LED control is unavailable."
   defp message(:recovery_failed), do: "Physical recovery failed or its outcome is unknown."
 
-  defp message(:equipment_discovery_unavailable),
-    do: "Equipment discovery is unavailable for the confirmed subnet."
-
   defp message(:remote_unavailable),
     do: "The Tailscale daemon is unavailable while remote access is enabled."
 

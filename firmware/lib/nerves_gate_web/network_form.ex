@@ -16,31 +16,10 @@ defmodule NervesGateWeb.NetworkForm do
     |> put_address("internet", Config.role_address(network, "internet"))
   end
 
-  def from_settings(network, :ports) do
-    address =
-      (network && network["equipment"]) || Config.role_address(network, "internet") ||
-        Config.role_address(network, "equipment")
-
-    %{"mode" => if(network && network["mode"] == "shared", do: "shared", else: "ports")}
-    |> put_address("shared", address)
-  end
-
   def from_settings(network, {:application, name}),
     do: %{"enabled" => to_string(get_in(Config.ports(network), [name, "role"]) == "application")}
 
-  def from_settings(network, {:equipment, name}) do
-    port = Config.ports(network)[name]
-    enabled = port != nil and port["role"] == "equipment"
-    address = if enabled, do: port["address"], else: %{}
-
-    %{
-      "enabled" => to_string(enabled),
-      "equipment_ip" => address["static_ip"] || "",
-      "equipment_mask" => address["subnet_mask"] || "255.255.255.0"
-    }
-  end
-
-  def equipment_reason(network, {:application, name}) do
+  def application_reason(network, {:application, name}) do
     cond do
       network == nil or network["mode"] == "unconfigured" ->
         "Finish Internet setup before assigning hardware to applications."
@@ -56,85 +35,40 @@ defmodule NervesGateWeb.NetworkForm do
     end
   end
 
-  def equipment_reason(_, editor) when editor in [:internet, :ports], do: nil
-
-  def equipment_reason(%{"mode" => "shared"}, {:equipment, _}),
-    do:
-      "LAN ports are joined. Their addressing and topology are administrator-managed through the Network API."
-
-  def equipment_reason(network, {:equipment, name}) do
-    cond do
-      Config.role_port(network, "internet") == name ->
-        "This port is used for Internet. Change its assignment under Internet before using it for a local network."
-
-      Config.role_port(network, "equipment") not in [nil, name] ->
-        "An independent local network is already assigned to another LAN port. Joined networks require deliberate administrator configuration through the Network API."
-
-      true ->
-        nil
-    end
-  end
+  def application_reason(_, :internet), do: nil
 
   def internet_port(%{"internet_mode" => "cellular"}, _), do: nil
   def internet_port(%{"internet_port" => "auto"}, ports), do: Suggestions.internet_port(ports)
   def internet_port(params, _), do: blank(params["internet_port"])
 
-  def to_network(params, _ports, %{"mode" => "shared"} = base, :internet) do
-    validate(Map.delete(base, "internet"), params)
-  end
-
   def to_network(params, ports, base, :internet) when is_map(base) do
     internet = internet_port(params, ports)
-    equipment = Config.role_port(base, "equipment")
 
     cond do
       ambiguous_internet?(params, ports, internet) ->
         {:error,
          "More than one network is connected. Choose an Internet port, or choose Not now."}
 
+      internet not in [nil, "eth0", "eth1"] ->
+        {:error, "Choose LAN 1, LAN 2, or Not now."}
+
       internet && get_in(Config.ports(base), [internet, "role"]) == "application" ->
         {:error,
          "Disable application access on this port under Hardware before assigning it to Internet."}
 
-      same_port?(internet, equipment) ->
-        {:error,
-         "This LAN port is assigned to equipment. Choose another Internet port, or remove its local network assignment under Hardware first."}
-
-      internet not in [nil, "eth0", "eth1"] or equipment not in [nil, "eth0", "eth1"] ->
-        {:error, "Choose LAN 1, LAN 2, or Not now."}
-
       true ->
-        network = %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
-
-        network =
-          Enum.reduce(Config.ports(base), network, fn {name, port}, acc ->
-            if port && port["role"] == "application", do: Map.put(acc, name, port), else: acc
-          end)
-
-        network = assign_port(network, internet, "internet", address(params, "internet"))
-
-        network =
-          assign_port(network, equipment, "equipment", Config.role_address(base, "equipment"))
-
-        validate(network, params)
+        with {:ok, _} <- Config.validate_network(base) do
+          base
+          |> application_ports()
+          |> assign_port(internet, "internet", address(params, "internet"))
+          |> validate(params)
+        end
     end
-  end
-
-  def to_network(%{"mode" => mode} = params, _ports, base, :ports)
-      when mode in ["ports", "shared"] and is_map(base) do
-    network =
-      case {mode, base["mode"]} do
-        {"shared", _} -> %{"mode" => "shared", "equipment" => address(params, "shared")}
-        {"ports", "ports"} -> base
-        {"ports", _} -> %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
-      end
-
-    network |> Map.merge(Map.take(base, ["internet"])) |> Config.validate_network()
   end
 
   def to_network(%{"enabled" => enabled}, _ports, base, {:application, name})
       when enabled in ["true", "false"] and name in ["eth0", "eth1"] and is_map(base) do
-    case equipment_reason(base, {:application, name}) do
+    case application_reason(base, {:application, name}) do
       nil ->
         port = if enabled == "true", do: %{"role" => "application", "address" => nil}
         base |> Map.put(name, port) |> Config.validate_network()
@@ -144,32 +78,11 @@ defmodule NervesGateWeb.NetworkForm do
     end
   end
 
-  def to_network(%{"enabled" => enabled} = params, _ports, base, {:equipment, name})
-      when enabled in ["true", "false"] and name in ["eth0", "eth1"] and is_map(base) do
-    case equipment_reason(base, {:equipment, name}) do
-      nil ->
-        network =
-          if base["mode"] == "unconfigured",
-            do: %{"mode" => "ports", "eth0" => nil, "eth1" => nil},
-            else: base
-
-        port =
-          if enabled == "true",
-            do: %{"role" => "equipment", "address" => address(params, "equipment")}
-
-        network |> Map.put(name, port) |> Config.validate_network()
-
-      reason ->
-        {:error, reason}
-    end
-  end
-
   def to_network(_, _, _, _), do: {:error, "Choose valid network settings."}
 
-  def defaults_for_change(params, previous, editor, observed)
-      when editor in [:internet, :ports] do
-    params = if editor == :internet, do: carrier_change(params, previous), else: params
-    prefix = if editor == :internet, do: "internet", else: "shared"
+  def defaults_for_change(params, previous, :internet, observed) do
+    params = carrier_change(params, previous)
+    prefix = "internet"
 
     if previous["#{prefix}_method"] != "static" and params["#{prefix}_method"] == "static",
       do: static_defaults(params, prefix, observed),
@@ -178,15 +91,12 @@ defmodule NervesGateWeb.NetworkForm do
 
   def defaults_for_change(params, _previous, {:application, _}, _observed), do: params
 
-  def defaults_for_change(params, previous, {:equipment, name}, observed) do
-    if previous["enabled"] != "true" and params["enabled"] == "true" do
-      params
-      |> Map.put("equipment_port", name)
-      |> static_defaults("equipment", observed)
-      |> Map.take(Map.keys(params))
-    else
-      params
-    end
+  defp application_ports(base) do
+    Enum.reduce(Config.ports(base), %{"mode" => "ports", "eth0" => nil, "eth1" => nil}, fn {name,
+                                                                                            port},
+                                                                                           acc ->
+      if port && port["role"] == "application", do: Map.put(acc, name, port), else: acc
+    end)
   end
 
   defp ambiguous_internet?(params, ports, internet) do
@@ -237,8 +147,6 @@ defmodule NervesGateWeb.NetworkForm do
     end
   end
 
-  defp same_port?(internet, equipment), do: internet != nil and internet == equipment
-
   defp assign_port(network, nil, _, _), do: network
 
   defp assign_port(network, name, role, address),
@@ -260,15 +168,6 @@ defmodule NervesGateWeb.NetworkForm do
     )
   end
 
-  defp address(params, "equipment") do
-    %{
-      "ip_method" => "static",
-      "static_ip" => params["equipment_ip"],
-      "subnet_mask" => params["equipment_mask"],
-      "gateway" => nil
-    }
-  end
-
   defp address(params, prefix) do
     %{
       "ip_method" => params[prefix <> "_method"],
@@ -283,19 +182,8 @@ defmodule NervesGateWeb.NetworkForm do
     if params[prefix <> "_ip"] in [nil, ""] do
       observed = observed || %{ports: [], bridge: nil, usb: nil}
 
-      name =
-        if prefix == "internet" do
-          internet_port(params, observed.ports)
-        else
-          params["equipment_port"]
-        end
-
-      interface =
-        if prefix == "shared" do
-          observed.bridge
-        else
-          Enum.find(observed.ports, &(&1.name == name))
-        end
+      name = internet_port(params, observed.ports)
+      interface = Enum.find(observed.ports, &(&1.name == name))
 
       defaults = observed_defaults(interface) || example_defaults(prefix, name, observed)
 
@@ -329,12 +217,7 @@ defmodule NervesGateWeb.NetworkForm do
   defp example_defaults(prefix, name, observed) do
     ip = fallback_address(prefix, name, observed)
 
-    gateway =
-      if prefix == "equipment" do
-        ""
-      else
-        String.replace_suffix(ip, ".2", ".1")
-      end
+    gateway = String.replace_suffix(ip, ".2", ".1")
 
     %{"ip" => ip, "mask" => "255.255.255.0", "gateway" => gateway, "dns" => gateway}
   end
@@ -349,13 +232,8 @@ defmodule NervesGateWeb.NetworkForm do
     end
   end
 
-  defp fallback_address(prefix, name, observed) do
-    candidates =
-      if prefix == "equipment" do
-        ["192.168.10.2", "192.168.20.2", "10.42.0.2", "172.22.0.2"]
-      else
-        ["192.168.1.2", "192.168.10.2", "10.42.0.2", "172.22.0.2"]
-      end
+  defp fallback_address(_prefix, name, observed) do
+    candidates = ["192.168.1.2", "192.168.10.2", "10.42.0.2", "172.22.0.2"]
 
     addresses =
       (Enum.reject(observed.ports, &(&1.name == name)) ++ [observed.usb])

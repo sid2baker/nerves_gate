@@ -154,7 +154,6 @@ defmodule NervesGateWeb.NetworkStatus do
   def port_label("eth1"), do: "LAN 2"
   def port_label(_), do: "Ethernet"
   def role_label("internet"), do: "Internet"
-  def role_label("equipment"), do: "Equipment"
   def role_label("shared"), do: "Shared network"
   def role_label(_), do: "Unassigned"
 end

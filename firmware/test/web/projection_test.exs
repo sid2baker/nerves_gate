@@ -118,7 +118,6 @@ defmodule NervesGateWeb.ProjectionTest do
         sharing_admission: :ok
       },
       remote: NervesGate.Remote.unavailable(),
-      equipment: NervesGate.Equipment.unavailable(),
       indicators: NervesGate.Indicators.unavailable(),
       buses: NervesGate.Buses.unavailable(),
       ssh: NervesGate.SSH.unavailable(),
@@ -244,44 +243,37 @@ defmodule NervesGateWeb.ProjectionTest do
   defp assert_network_forms(status) do
     base = status.network.desired
     ports = status.connections.ports
-    equipment = {:equipment, "eth1"}
-    params = NetworkForm.from_settings(base, equipment)
-    params = Map.merge(params, %{"enabled" => "true", "equipment_ip" => "10.44.0.1"})
-    assert {:ok, with_equipment} = NetworkForm.to_network(params, ports, base, equipment)
-    assert with_equipment["eth0"] == base["eth0"]
-    assert with_equipment["internet"] == base["internet"]
-    assert with_equipment["eth1"]["role"] == "equipment"
-
-    internet = NetworkForm.from_settings(with_equipment, :internet)
-    refute Map.has_key?(internet, "equipment_ip")
-    assert {:ok, unchanged} = NetworkForm.to_network(internet, ports, with_equipment, :internet)
-    assert unchanged == with_equipment
+    application = {:application, "eth1"}
+    params = %{"enabled" => "true"}
+    assert {:ok, configured} = NetworkForm.to_network(params, ports, base, application)
+    assert configured["eth0"] == base["eth0"]
+    assert configured["eth1"] == %{"role" => "application", "address" => nil}
+    internet = NetworkForm.from_settings(configured, :internet)
+    assert {:ok, ^configured} = NetworkForm.to_network(internet, ports, configured, :internet)
 
     assert {:error, _} =
              NetworkForm.to_network(
                Map.put(internet, "internet_port", "eth1"),
                ports,
-               with_equipment,
+               configured,
                :internet
              )
 
-    assert {:error, _} = NetworkForm.to_network(params, ports, base, {:equipment, "eth0"})
-    assert {:error, _} = NetworkForm.to_network(params, ports, %{"mode" => "shared"}, equipment)
+    assert {:error, _} = NetworkForm.to_network(params, ports, base, {:application, "eth0"})
+    assert {:error, _} = NetworkForm.to_network(%{"mode" => "shared"}, ports, base, :ports)
+    assert {:error, _} = NetworkForm.to_network(params, ports, base, {:equipment, "eth1"})
+    cellular = Map.put(configured, "internet", %{"mode" => "backup", "apn" => "test.apn"})
 
-    cellular = Map.put(with_equipment, "internet", %{"mode" => "backup", "apn" => "test.apn"})
+    assert {:ok, disabled} =
+             NetworkForm.to_network(%{"enabled" => "false"}, ports, cellular, application)
 
-    assert {:ok, without_equipment} =
-             NetworkForm.to_network(%{"enabled" => "false"}, ports, cellular, equipment)
+    assert disabled["eth1"] == nil
+    assert disabled["eth0"] == base["eth0"]
+    assert disabled["internet"] == cellular["internet"]
 
-    assert without_equipment["eth1"] == nil
-    assert without_equipment["eth0"] == base["eth0"]
-    assert without_equipment["internet"] == cellular["internet"]
-    assert_port_forms(with_equipment, ports)
-
-    for {editor, field, value, foreign_field} <- [
-          {:internet, "internet_ip", "192.0.2.123", "equipment_ip"},
-          {equipment, "equipment_ip", "10.44.0.123", "internet_port"},
-          {:ports, "mode", "shared", "internet_port"}
+    for {editor, field, value, foreign} <- [
+          {:internet, "internet_ip", "192.0.2.123", "enabled"},
+          {application, "enabled", "true", "internet_port"}
         ] do
       assigns = %{id: "draft-check", editor: editor, projection: status, access: %{}}
       assert {:ok, socket} = NetworkEditor.update(assigns, %Socket{})
@@ -289,59 +281,15 @@ defmodule NervesGateWeb.ProjectionTest do
       assert {:noreply, socket} =
                NetworkEditor.handle_event(
                  "change",
-                 %{"network" => %{field => value, foreign_field => "must-not-be-accepted"}},
+                 %{"network" => %{field => value, foreign => "forged"}},
                  socket
                )
 
       assert {:ok, socket} = NetworkEditor.update(assigns, socket)
       assert socket.assigns.form.params[field] == value
-      refute Map.has_key?(socket.assigns.form.params, foreign_field)
+      refute Map.has_key?(socket.assigns.form.params, foreign)
       assert socket.assigns.dirty
     end
-  end
-
-  defp assert_port_forms(base, ports) do
-    params = NetworkForm.from_settings(base, :ports)
-    assert {:ok, ^base} = NetworkForm.to_network(params, ports, base, :ports)
-    refute Map.has_key?(params, "internet_mode")
-
-    params = Map.put(params, "mode", "shared")
-    assert {:ok, shared} = NetworkForm.to_network(params, ports, base, :ports)
-    assert shared["mode"] == "shared"
-    assert shared["equipment"] == base["eth0"]["address"]
-    assert shared["internet"] == base["internet"]
-
-    # Internet cannot change the arrangement or the joined-network address.
-    internet = NetworkForm.from_settings(shared, :internet)
-    refute Map.has_key?(internet, "mode")
-    refute Map.has_key?(internet, "shared_ip")
-    forged = Map.merge(internet, %{"mode" => "ports", "shared_ip" => "192.0.2.123"})
-    assert {:ok, ^shared} = NetworkForm.to_network(forged, ports, shared, :internet)
-
-    backup = Map.merge(internet, %{"internet_mode" => "backup", "cellular_apn" => "test.apn"})
-    assert {:ok, with_backup} = NetworkForm.to_network(backup, ports, shared, :internet)
-    assert with_backup["equipment"] == shared["equipment"]
-    assert with_backup["internet"] == %{"mode" => "backup", "apn" => "test.apn"}
-    default_apn = Map.put(backup, "cellular_apn", "")
-    assert {:ok, automatic} = NetworkForm.to_network(default_apn, ports, shared, :internet)
-    assert automatic["internet"] == %{"mode" => "backup", "apn" => ""}
-    assert NetworkForm.from_settings(automatic, :internet)["cellular_apn"] == ""
-    assert {:ok, ^with_backup} = NetworkForm.to_network(params, ports, with_backup, :ports)
-    assert {:ok, ^shared} = NetworkForm.to_network(internet, ports, with_backup, :internet)
-
-    separate = Map.put(params, "mode", "ports")
-    assert {:ok, unassigned} = NetworkForm.to_network(separate, ports, shared, :ports)
-    assert unassigned == %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
-    assert {:error, _} = NetworkForm.to_network(separate, ports, with_backup, :ports)
-
-    cellular = %{
-      "mode" => "ports",
-      "eth0" => nil,
-      "eth1" => base["eth1"],
-      "internet" => %{"mode" => "cellular", "apn" => "test.apn"}
-    }
-
-    assert {:error, _} = NetworkForm.to_network(params, ports, cellular, :ports)
   end
 
   defp assert_discovery_observations(projection) do

@@ -42,7 +42,8 @@ EC100 builds additionally need the published EC100 system artifact.
 | `mix test.qemu --ci --only ID` | Boot and clean up a separate disposable bench |
 | `mix test`, `mix test.sdk` | Root or SDK host tests |
 | `mix format --force` | Format the root and subprojects |
-| `mix ci` | All host checks and tests; no devices |
+| `mix check` | Required pre-commit host gate, including firmware lint/clone/architecture and starter tests; no dialyzer/devices |
+| `mix ci` | Same host gate plus firmware dialyzer; operator-owned, no devices |
 | `mix release.check TAG` | Read-only release validation |
 
 The user owns the `mix dev` session. Agents must not start, stop or reset it, boot
@@ -148,7 +149,10 @@ rendering/socket security in `firmware/test/web/`. Root tests cover workbench an
 app tooling, discovery, release contracts and shared UI integration. Root `mix ci`
 enters firmware natively and runs both firmware directories once; moved gateway
 tests are not duplicated at the root. Firmware's Credo, Dialyzer, Reach and clone
-checks also run in root `mix ci`.
+checks also run in root `mix ci`. Run `mix check` before commits; it exercises the
+same host paths except dialyzer and includes SDK and optional starter-app tests.
+See [CI scope](ci.md#local-gates-and-project-scope). Split workbench page tests keep
+workspace-specific assertions separate, sharing only pure view fixtures.
 
 ## Assets
 
@@ -161,7 +165,7 @@ or `mix firmware ec100 --env prod`. The workbench's Build action and local QEMU
 builds use the same pipeline: compile assets on the host, then run the target
 firmware build in an isolated process. Asset failures stop packaging. Volt never
 runs on the device. No separate asset command or environment flag is required.
-`mix ci` also builds assets without building firmware or starting devices.
+`mix check` and `mix ci` also build assets without building firmware or starting devices.
 
 For an asset-only diagnostic build, firmware provides `mix assets.build`
 (`volt.build --tailwind`); repository tooling enters that host project natively.

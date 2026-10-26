@@ -20,6 +20,33 @@ defmodule NervesGate.ReviewedInstallTest do
   end
 
   @tag :tmp_dir
+  test "a lost install owner reports unknown and cleans only the private staging file", %{
+    tmp_dir: unrelated
+  } do
+    refute Process.whereis(Apps)
+
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "nerves-gate-app-" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+      )
+
+    File.mkdir!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+    staged = Path.join(dir, "application.ez")
+    retained = Path.join(dir, "retain")
+    File.write!(staged, "package")
+    File.write!(retained, "evidence")
+    assert Apps.install_reviewed(staged, %{}) == %{outcome: "unknown"}
+    refute File.exists?(staged)
+    assert File.read!(retained) == "evidence"
+    outside = Path.join(unrelated, "application.ez")
+    File.write!(outside, "unrelated")
+    assert Apps.install_reviewed(outside, %{}) == %{outcome: "unknown"}
+    assert File.read!(outside) == "unrelated"
+  end
+
+  @tag :tmp_dir
   test "new install rejects a changed hash, package identity or existing entry before any storage effect",
        %{tmp_dir: dir, fixture_module: module, beam: beam} do
     spec =

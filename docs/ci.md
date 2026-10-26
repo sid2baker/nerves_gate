@@ -6,9 +6,12 @@ Routine CI never boots a device. Required checks:
   checks and tests).
 - **firmware-x86_64:** clean `mix setup`, a local target firmware build and a check
   that native ports (`if_monitor`, `uevent`) use the musl loader.
-- **applications:** create, test and package two external apps against the local SDK.
+- **firmware-ec100:** separate dev/prod builds using the locked, fingerprinted system;
+  no flashing or booting. Only verified downloads are cached, never native ports.
+- **applications:** create, test and package two external apps against the local SDK,
+  plus test/package `apps/tailnet_subrouter`.
 
-`qemu.yml` is dispatched manually. It runs `mix setup` and `mix test.qemu --ci` on
+`qemu.yml` is dispatched manually or runs weekly on Monday at 03:00 UTC on main. It runs `mix setup` and `mix test.qemu --ci` on
 disposable devices with portable TCG (KVM is optional), and keeps logs but never
 VM identity disks. Its optional, main-only Tailscale job uses the protected
 `tailnet-ci` environment; see [tailnet CI](tailnet-ci.md).
@@ -16,6 +19,28 @@ VM identity disks. Its optional, main-only Tailscale job uses the protected
 `release.yml` publishes SDK Hex releases and platform GitHub Releases; system
 artifacts have their own workflows. Neither runs from routine CI. See
 [releases](releases.md).
+
+## Local gates and project scope
+
+Run `mix check` at the root before commits. It runs compile/format/tests for root
+and SDK, tests the first-party starter, builds shared assets, and runs firmware
+compile/format/tests, JS checks, strict credo, zero-clone and architecture/smell
+checks. No session or device starts. `mix ci` adds firmware dialyzer and belongs to
+the operator; target builds are separate CI jobs. Passing `mix check` is not a
+claim that dialyzer, target builds or QEMU passed.
+
+Firmware has the additional static gates because it owns long-lived hardware
+workers, admission and persistence. Root changes are checked by host workflow/UI,
+release-policy and native-build contract tests; SDK changes by typed API and
+package-validation tests. Neither currently has a dialyzer/credo gate. This is an
+explicit scope difference, not equal static-analysis coverage; shared firmware
+code is still checked under its owning project. Starter apps are ordinary isolated
+Mix projects, never loaded into the workbench VM to run their tests.
+
+Platform publishing requires successful `ci.yml` and `qemu.yml` main-branch runs on
+**the exact tagged commit**, checked by `release.check integration`. SDK publishing
+runs its own SDK/payload checks and does not require QEMU. Weekly integration has
+no tailnet credentials unless the separate main-only job is explicitly requested.
 
 ## Native target builds
 

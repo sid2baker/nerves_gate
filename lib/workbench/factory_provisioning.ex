@@ -34,7 +34,7 @@ defmodule Workbench.FactoryProvisioning do
       hashes = Map.new(files, &{&1, Workbench.FirmwareUpdate.hash!(Path.join(dir, &1))})
       for name <- files, do: File.chmod!(Path.join(dir, name), 0o400)
 
-      output = Path.join(Workbench.root(), "ec100-backups/#{random()}")
+      output = Path.join(backup_directory(), random())
       File.mkdir_p!(Path.dirname(output))
       File.chmod!(Path.dirname(output), 0o700)
       # Reject clearly insufficient space before touching USB at all. Once the
@@ -55,6 +55,7 @@ defmodule Workbench.FactoryProvisioning do
       space!(available, required)
 
       %{
+        owner: __MODULE__,
         public: %{
           kind: :factory,
           token: random(),
@@ -84,6 +85,16 @@ defmodule Workbench.FactoryProvisioning do
         :erlang.raise(kind, reason, __STACKTRACE__)
     end
   end
+
+  def backup_directory do
+    Application.get_env(:nerves_gate_workbench, :backup_directory) ||
+      Path.join(to_string(:filename.basedir(:user_data, ~c"nerves_gate")), "ec100-backups")
+  end
+
+  def review_message,
+    do: "Factory review complete. Transport loaded into RAM only; no eMMC writes."
+
+  def expiry_message, do: "Factory review expired; re-enter MASKROM before reviewing again"
 
   def confirmation!(plan, token, text, identified) do
     cond do

@@ -44,6 +44,7 @@ defmodule Workbench.OperationsTest do
     factory = %{
       idle
       | review: %{
+          owner: Workbench.FactoryProvisioning,
           public: %{kind: :factory, token: "id", confirmation: "ERASE EC100 101"},
           expires: System.monotonic_time(:millisecond) + 60_000
         }
@@ -71,7 +72,13 @@ defmodule Workbench.OperationsTest do
     backup = Path.join(root, "backup")
     File.mkdir!(dir)
     File.mkdir!(backup)
-    plan = %{dir: dir, public: %{kind: :factory, token: "token", backup: backup}}
+
+    plan = %{
+      owner: Workbench.FactoryProvisioning,
+      dir: dir,
+      public: %{kind: :factory, token: "token", backup: backup}
+    }
+
     state = %{idle | review: plan, view: %{idle.view | review: plan.public}}
 
     assert {:noreply, ^state} =
@@ -353,6 +360,7 @@ defmodule Workbench.OperationsTest do
     {:ok, idle} = Workbench.Operations.init(nil)
 
     plan = %{
+      owner: Workbench.Hardware,
       public: %{kind: :reboot, token: "reboot", address: "usb-device"},
       expires: System.monotonic_time(:millisecond) + 60_000
     }

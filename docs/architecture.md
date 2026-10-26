@@ -1,7 +1,7 @@
 # Architecture
 
-Nerves Gate has three application projects and two Nerves system projects, not an
-umbrella. Device domains hide commands, admission, deadlines and persistence behind
+Nerves Gate has three core application projects, optional ordinary starter apps and
+two Nerves system projects, not an umbrella. Device domains hide commands, admission, deadlines and persistence behind
 named APIs. EC100 and owned QEMU devices run the same application with different
 board profiles and target binaries. The workstation runs the workbench and owns
 disposable QEMU hardware; it does not run device services.
@@ -13,6 +13,7 @@ disposable QEMU hardware; it does not run device services.
 | Root | `:nerves_gate_workbench` | Host tooling, workbench and simulator | Root `VERSION` |
 | `firmware/` | `:nerves_gate` | Host-compiled helpers/checks; EC100 or QEMU runtime | Root `VERSION` |
 | `sdk/` | `:nerves_gate_sdk` | Typed app contract and packaging; no application supervisor | `sdk/VERSION` |
+| `apps/tailnet_subrouter/` | `:tailnet_subrouter` | Optional opt-in app, never automatically installed/enabled | App `mix.exs` |
 | `systems/nerves_system_ec100/` | `:nerves_system_ec100` | ARM Linux, toolchain, boot and board support | System `VERSION` |
 | `systems/nerves_system_ec100_qemu/` | `:nerves_system_ec100_qemu` | x86_64/musl Linux, toolchain and QEMU support | System `VERSION` |
 
@@ -51,6 +52,7 @@ library only when a measured benefit justifies another owner and package.
 | `lib/scenarios.ex`, `lib/scenarios/` | One catalogue, reservations/runner, bounded device access, owned QEMU fixture and cases |
 | `priv/simulator/`, `priv/templates/` | Trusted bench configs/scripts and ordinary SDK app scaffolding |
 | `test/`, `firmware/test/{unit,web}/`, `sdk/test/` | Host tooling/shared UI integration, firmware policy/web checks and SDK tests |
+| `apps/` | Independently packaged/tested optional first-party applications |
 | `systems/` | Independently versioned Nerves system artifact inputs |
 
 ## Host mode and the simulator
@@ -110,7 +112,10 @@ authorize stopping an old session, resetting disks or erasing saved settings.
 ### Admission and hardware ownership
 
 `Workbench.Operations` serializes global workbench operations: builds, app commands
-and physical firmware review/update. `Scenarios.Runner` separately owns lifecycle,
+and reviewed physical firmware/app installation, factory provisioning, diagnostics
+and operator-assisted hardware/reboot observations. Each private review carries its
+owning module for confirmation, cleanup, review and expiry messages; public review
+metadata never carries that owner or its private snapshot. `Scenarios.Runner` separately owns lifecycle,
 manual-control admission and per-device reservations for UI, CLI and CI. They
 protect different resources; UI availability is not admission.
 
@@ -165,8 +170,8 @@ The BSP owns drivers, device trees, boot and Linux device naming. Board config
 selects actual hardware; domains own policy. The network model currently has two
 LAN ports. EM300 and a three-port layout are not implemented.
 
-Fixed infrastructure is called directly: `Network.Vintage`, `Remote.Tailscaled`
-and `Equipment.Linux`. Board-selected buses, indicators and recovery remain real
+Fixed infrastructure is called directly: `Network.Vintage` and `Remote.Tailscaled`.
+Board-selected buses, indicators and recovery remain real
 variation points, as does the published SDK backend contract.
 
 ## Device ownership and supervision
@@ -175,10 +180,10 @@ variation points, as does the published SDK backend contract.
 | --- | --- |
 | VintageNet | Interfaces, saved network settings, connectivity, DNS and routes |
 | Tailscale | Identity, preferences, enrollment and VPN routes |
-| Network | Network admission, trials, deadlines, USB auto-save and rollback; shared worker for cellular/scan/sharing |
+| Network | Single admission/worker for trials, cellular and application leases; USB auto-save/rollback |
+| Network.Local | Lease transitions, overlap/readiness policy, route journal and owned cleanup |
 | Cellular | Named SIM/PIN/PAP operations and eligibility; uses Network's worker, no separate GenServer |
 | Remote | Serialized bounded daemon operations and sanitized metadata |
-| Equipment | Neighbors, scoped labels, scan observations and public scan/sharing entry points |
 | Indicators | LED/button policy, identification and recovery |
 | Buses | Diagnostics, CAN subscriptions and exclusive caller-owned RS485 claims |
 | SSH | Public-key validation, persistence and authentication |
@@ -200,7 +205,7 @@ Dependencies supervise VintageNet, tailscaled and Alarmist. The device's
 
 ```text
 PubSub → Network.Vintage → workflow PropertyTable → persistent Settings PropertyTable
-       → SSH → Network → Remote → Equipment → Indicators → Buses → AppTasks
+       → SSH → Network → Remote → Indicators → Buses → AppTasks
        → Storage → Apps → ProjectionServer → SDKBackend → gateway Endpoint
 ```
 
@@ -211,7 +216,7 @@ its restart limit stops the BEAM and erlinit reboots the device. This is not the
 host session's supervision tree.
 
 Workers are linked and bounded; owners stop/join workers before restoration or new
-work. Trials, scans and sharing reply after completion. Cellular, Remote, bus and
+work. Trials and application lease commands reply after completion. Cellular, Remote, bus and
 storage operations acknowledge acceptance and publish completion. A caller timeout
 does not cancel admitted work or permit replay. Safe errors originate where their
 meaning is known; `Error` only defines the safe shape and `GenServer.call` failure
@@ -242,7 +247,7 @@ log. Subscription registers the caller before returning
 `{:ok, server_pid, projection}`; later operations come from that owner.
 
 Pure [`Projection`](../firmware/lib/nerves_gate/projection.ex) and
-[`Status`](../firmware/lib/nerves_gate/status.ex) derive administrative schema v8:
+[`Status`](../firmware/lib/nerves_gate/status.ex) derive administrative schema v9:
 `device` availability, `remote` observations and domain-qualified action keys such
 as `buses.configure` and `indicators.identify`.
 [`Observations`](../firmware/lib/nerves_gate_web/observations.ex) is an explicit
@@ -258,8 +263,11 @@ verified-SSH identity reads, not live subscriptions or a command proxy.
 ### Applications and SDK
 
 Apps are trusted same-BEAM OTP code, **not a sandbox**. The SDK exposes typed
-observations/events and process-owned bus I/O, not administrative maps, network,
-SSH, firmware or recovery commands. Buses receives SDK calls from the actual caller;
+observations/events, process-owned bus I/O and narrowly scoped local-network leases,
+not administrative maps, arbitrary network configuration, SSH, firmware or recovery
+commands. Equipment identities, labels, scans and industrial protocols belong to
+apps. There is no platform equipment domain or SDK compatibility API.
+Buses receives SDK calls from the actual caller;
 owner death releases claims/subscriptions. No Task becomes owner on its behalf.
 
 Host packaging/device installation share SDK `.ez` validation. Private OTP
@@ -277,7 +285,8 @@ on failure. Ordinary app callbacks still execute in the shared runtime. See
 | VintageNet | Confirmed interface settings |
 | Tailscale | Device identity and preferences |
 | Settings PropertyTable | Small private settings, including SIM-bound PIN and APN-bound PAP |
-| Equipment / SSH | Scoped labels / authorized public keys |
+| SSH | Authorized public keys |
+| Network.Local: `/data/nerves_gate/local_network.json` | Temporary link/route ownership and incomplete cleanup; never enable intent |
 | Apps: `/data/nerves_gate/apps.term` | Selected/previous versions and enabled state |
 | Application SD: `/mnt/apps` | App archives and app data |
 
@@ -333,8 +342,10 @@ public UI/domain boundaries and pure policies/read models; they are not a comple
 root dependency policy. Pure checks/builds do not prove guest callback, restart,
 Internet or physical behavior: those need explicitly authorized runtime checks.
 
-Routine CI runs host checks, target/native-port checks and external-app packaging,
-but boots no devices. QEMU integration and publishing are explicit workflows with
+Root `mix check` runs host tests, SDK/starter tests and all firmware quality gates
+except dialyzer. Root `mix ci` additionally runs dialyzer. Neither starts devices.
+Routine CI also builds EC100 dev/prod and QEMU firmware and packages external and
+starter apps, but boots no devices. QEMU integration and publishing are explicit workflows with
 independent version rules. Publishing credentials never belong in the workbench;
 see [CI](ci.md) and [releases](releases.md).
 
@@ -349,6 +360,14 @@ checks, not a general USB-only management rule.
 
 Discovery is unverified metadata, never authentication or permission to update.
 Physical SSH uses known-host verification separate from disposable-QEMU trust.
+`Workbench.DeviceSSH` owns strict host-key/authentication policy, bounded reads,
+stream completion and private SFTP staging, separately from permissive owned-QEMU
+SSH. `System.maintenance_info/0`, `System.hardware_info/0` and
+`Apps.install_review/1`/`install_reviewed/2` are compiled device APIs. Unsupported
+firmware is rejected; there is no alternate identity protocol or verification downgrade.
+Firmware stores the build commit in Nerves VCS metadata and exposes it as
+`System.info().source_revision`, independently of its semantic version.
+
 An update snapshots the image, verifies identity, requires explicit confirmation
 and rechecks before upload. Acceptance does not prove a healthy reboot. Destructive
 USB provisioning has separate review/confirmation and verified writes; RAM

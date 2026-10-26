@@ -19,6 +19,7 @@ defmodule NervesGate.MixProject do
         if(Mix.target() == :host and Mix.env() == :dev, do: [Phoenix.CodeReloader], else: []),
       elixirc_paths: ["lib"],
       deps: deps(),
+      nerves: if(Mix.target() in @targets, do: [plan_callback: &firmware_metadata/1], else: []),
       releases: [
         nerves_gate: [
           include_erts: &Nerves.erts/0,
@@ -45,16 +46,16 @@ defmodule NervesGate.MixProject do
       ],
       aliases: [
         "assets.build": ["volt.build --tailwind"],
-        ci: [
+        check: [
           "compile --warnings-as-errors",
           "format --check-formatted",
           "test",
           "volt.js.check",
           "credo --strict",
-          "dialyzer",
           "ex_dna --max-clones 0",
           "reach.check --arch --smells"
-        ]
+        ],
+        ci: ["check", "dialyzer"]
       ]
     ]
   end
@@ -64,9 +65,16 @@ defmodule NervesGate.MixProject do
 
   def cli do
     [
-      preferred_targets: [ci: :host, "assets.build": :host],
-      preferred_envs: [ci: :test, "assets.build": :dev]
+      preferred_targets: [ci: :host, check: :host, "assets.build": :host],
+      preferred_envs: [ci: :test, check: :test, "assets.build": :dev]
     ]
+  end
+
+  # Nerves 2 exposes extra firmware metadata through the build plan, not the
+  # legacy application-env compatibility options.
+  defp firmware_metadata(plan) do
+    revision = Application.fetch_env!(:nerves, :firmware) |> Keyword.fetch!(:fw_vcs_identifier)
+    Nerves.BuildPlan.merge_config(plan, fw_vcs_identifier: revision)
   end
 
   # Setting the app mode in applications: also changes its dependencies' modes.

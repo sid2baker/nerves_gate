@@ -1,6 +1,6 @@
 defmodule NervesGate.Remote.Sharing do
-  @moduledoc "Pure admission and route changes for the confirmed IPv4 equipment subnet."
-  alias NervesGate.Equipment.Subnet
+  @moduledoc "Pure admission and route changes for process-owned IPv4 application leases."
+  alias NervesGate.Network.Subnet
   alias NervesGate.Remote.Policy
 
   def scope(%{config: %{"network" => %{"mode" => "ports"}}} = status),
@@ -12,24 +12,8 @@ defmodule NervesGate.Remote.Sharing do
        %{
          code: "sharing_dedicated_only",
          message:
-           "Sharing requires a confirmed, dedicated equipment port. Shared LAN and USB cannot be advertised."
+           "Sharing requires a configured application lease. Internet and USB cannot be advertised."
        }}
-
-  def enable(status, remote) do
-    with :ok <- Policy.available(remote),
-         :ok <- known(remote),
-         {:ok, scope} <- scope(status),
-         {:ok, ^scope} <- Subnet.active(status) do
-      {:ok, %{scope: scope, route: scope.cidr}}
-    end
-  end
-
-  # Turning sharing off must still work when the equipment cable is disconnected.
-  def disable(status, remote) do
-    with :ok <- Policy.available(remote), {:ok, scope} <- scope(status) do
-      {:ok, %{scope: scope, route: scope.cidr}}
-    end
-  end
 
   def known(%{sharing: %{uncertain: [], ready: true}}), do: :ok
 
@@ -55,7 +39,7 @@ defmodule NervesGate.Remote.Sharing do
            %{
              code: "sharing_active",
              message:
-               "Turn equipment sharing off before changing LAN settings. Remove any other subnet advertisements in Tailscale as well."
+               "Release application network access before changing LAN settings. Remove any other subnet advertisements in Tailscale as well."
            }}
     else
       _ ->
@@ -70,7 +54,7 @@ defmodule NervesGate.Remote.Sharing do
 
   def change(:sharing_sync, _, routes) when is_list(routes), do: {:ok, routes}
 
-  def change(:sharing_claim, %{route: route, scope: %{cidr: route}} = params, routes)
+  def change(:sharing_claim, %{route: route, scope: %{cidr: route}}, routes)
       when is_binary(route) and is_list(routes) do
     if route in routes,
       do:
@@ -80,12 +64,8 @@ defmodule NervesGate.Remote.Sharing do
            message:
              "This subnet is already advertised. Existing advertisements cannot be adopted by an application."
          }},
-      else: change(:sharing_enable, params, routes)
+      else: {:ok, Enum.sort(Enum.uniq(routes ++ [route]))}
   end
-
-  def change(:sharing_enable, %{route: route, scope: %{cidr: route}}, routes)
-      when is_binary(route) and is_list(routes),
-      do: {:ok, Enum.sort(Enum.uniq(routes ++ [route]))}
 
   def change(:sharing_disable, %{route: route, scope: %{cidr: route}}, routes)
       when is_binary(route) and is_list(routes),

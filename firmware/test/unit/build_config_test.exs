@@ -8,6 +8,11 @@ defmodule NervesGate.BuildConfigTest do
       assert config[:nerves_runtime][:init_module] == NervesGate.Recovery.DataInit
       assert config[:nerves][:application_sort] == [init: [:nerves_runtime]]
 
+      assert Regex.match?(
+               ~r/\A[0-9a-f]{40}(?:-dirty)?\z/,
+               config[:nerves][:firmware][:fw_vcs_identifier]
+             )
+
       board = config[:nerves_gate][:board]
 
       # Hardware settings have one owner, not parallel top-level defaults.
@@ -50,6 +55,26 @@ defmodule NervesGate.BuildConfigTest do
                   }}
                ]
       end
+    end
+  end
+
+  test "Nerves build-plan metadata carries the configured source revision" do
+    target = Mix.target()
+    previous = Application.get_env(:nerves, :firmware)
+    revision = String.duplicate("a", 40)
+
+    try do
+      Mix.target(:ec100)
+      Application.put_env(:nerves, :firmware, fw_vcs_identifier: revision)
+      callback = Mix.Project.get().project()[:nerves][:plan_callback]
+      plan = callback.(%Nerves.BuildPlan{})
+      assert plan.config.fw_vcs_identifier == revision
+    after
+      Mix.target(target)
+
+      if previous,
+        do: Application.put_env(:nerves, :firmware, previous),
+        else: Application.delete_env(:nerves, :firmware)
     end
   end
 

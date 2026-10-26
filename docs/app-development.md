@@ -13,15 +13,17 @@ Opened directories are remembered for the session only.
 The command-line equivalents:
 
 ```sh
-mix app.new ../my_controller      # --local-sdk uses this checkout's SDK
+mix app.new ../my_controller --local-sdk
 mix app.test ../my_controller
 mix app.package ../my_controller
 mix dev ../my_controller          # open the app when the workbench starts
 ```
 
 An app is an independent Mix project with its own repository and `mix.lock`. It
-depends on `{:nerves_gate_sdk, "~> 0.1.0"}` and declares an SDK requirement and a
-health check (the template provides both). Unit-test pure decisions over typed
+declares matching `~> 0.2.0-dev` dependency/SDK requirements and a health check.
+Use `--local-sdk` until SDK 0.2 is published; otherwise dependency resolution
+requires that version from Hex and fails if unavailable. Scaffolding never falls
+back to an older SDK. Unit-test pure decisions over typed
 observations; test real I/O on QEMU, not with a fake backend.
 
 Packages are written to `APP_DIRECTORY/packages/NAME.ez`; existing output is never
@@ -38,8 +40,9 @@ Installation/startup are explicit and the app starts disabled. Configure and ena
 through its named API; see its [README](../apps/tailnet_subrouter/README.md) for
 operator preparation, tailnet approval limitations and incomplete-cleanup recovery.
 
-The SDK local-network API is new in this checkout and not a published SDK release.
-The starter app checks that capability on startup; older firmware is rejected.
+The SDK local-network API belongs to this checkout's `0.2.0-dev`, not published
+0.1.0. The starter requires `~> 0.2.0-dev` and the device installer rejects an
+older SDK before installation; there is no runtime capability probe.
 Equipment protocols, addressing requirements and polling belong to apps. The gateway
 still enforces shared-resource admission and protects Internet/USB management.
 

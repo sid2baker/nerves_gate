@@ -60,7 +60,7 @@ defmodule Workbench.Devices do
     do: is_nil(device[:identity]) and is_nil(device[:usb_info]) and is_nil(device[:info_read])
 
   def read_info!(address) do
-    identity = Workbench.FirmwareUpdate.read_device!(address)
+    identity = Workbench.DeviceSSH.read_device!(address)
     :ok = Workbench.LANDiscovery.record_identity(address, identity)
     "Device information read over verified SSH. No firmware sent."
   end

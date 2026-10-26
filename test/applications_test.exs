@@ -2,12 +2,17 @@ defmodule Workbench.ApplicationsTest do
   use ExUnit.Case, async: false
   @moduletag :tmp_dir
 
+  setup %{tmp_dir: dir} do
+    on_exit(fn -> File.rm_rf!(dir) end)
+    :ok
+  end
+
   test "the workbench creates and opens a standalone SDK app without a manifest", %{tmp_dir: dir} do
     path = Path.join(dir, "telemetry")
     assert {:ok, app} = Workbench.Applications.create(path)
     assert app.path == path
     assert app in Workbench.Applications.list()
-    assert File.read!(Path.join(path, "mix.exs")) =~ "{:nerves_gate_sdk, \"~> 0.1.0\"}"
+    assert File.read!(Path.join(path, "mix.exs")) =~ "{:nerves_gate_sdk, \"~> 0.2.0-dev\"}"
     refute File.exists?(Path.join(path, "nerves_gate.exs"))
     assert File.exists?(Path.join(path, ".formatter.exs"))
     assert File.exists?(Path.join(path, ".gitignore"))
@@ -44,7 +49,13 @@ defmodule Workbench.ApplicationsTest do
     assert :code.get_path() == paths
     assert System.get_env() == env
     refute Code.ensure_loaded?(SampleApp)
-    assert_raise RuntimeError, fn -> Workbench.Applications.package!(app.path) end
+
+    output =
+      ExUnit.CaptureIO.capture_io(fn ->
+        assert_raise RuntimeError, fn -> Workbench.Applications.package!(app.path) end
+      end)
+
+    assert output =~ "Refusing to overwrite"
   end
 
   test "the single scenario catalogue is loaded by the workbench" do

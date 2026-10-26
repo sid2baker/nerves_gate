@@ -1,6 +1,37 @@
 defmodule Workbench.SSHClientTest do
   use ExUnit.Case, async: true
 
+  test "completion ignores notifications from earlier channels on the same connection" do
+    connection = make_ref()
+    send(self(), {:ssh_cm, connection, {:closed, 0}})
+    send(self(), {:ssh_cm, connection, {:exit_status, 0, 1}})
+    send(self(), {:ssh_cm, connection, {:eof, 1}})
+    send(self(), {:ssh_cm, connection, {:exit_status, 1, 0}})
+
+    assert Workbench.DeviceSSH.receive_result!(
+             connection,
+             1,
+             System.monotonic_time(:millisecond) + 100,
+             "verified",
+             fn _ -> :ok end
+           ) == "verified"
+  end
+
+  test "failure on the active channel still rejects completion" do
+    connection = make_ref()
+    send(self(), {:ssh_cm, connection, {:exit_status, 1, 1}})
+
+    assert_raise RuntimeError, ~r/without success/, fn ->
+      Workbench.DeviceSSH.receive_result!(
+        connection,
+        1,
+        System.monotonic_time(:millisecond) + 100,
+        "",
+        fn _ -> :ok end
+      )
+    end
+  end
+
   @tag :tmp_dir
   test "host verification uses the requested DNS name, rejecting unknown or changed keys", %{
     tmp_dir: dir

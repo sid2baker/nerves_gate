@@ -14,15 +14,7 @@ defmodule Scenarios.Cases.Equipment do
     before = Scenarios.Device.status(vm).network.desired
 
     network =
-      Map.put(settings("eth0"), "eth1", %{
-        "role" => "equipment",
-        "address" => %{
-          "ip_method" => "static",
-          "static_ip" => "10.44.0.1",
-          "subnet_mask" => "255.255.255.0",
-          "gateway" => nil
-        }
-      })
+      Map.put(settings("eth0"), "eth1", %{"role" => "application", "address" => nil})
 
     save(vm, network)
 
@@ -55,8 +47,8 @@ defmodule Scenarios.Cases.Equipment do
       Qemu.network(vm, %{cables: %{lan2: true}})
     end
 
-    Scenarios.Device.await(vm, "equipment and Internet recovered", fn status ->
-      internet?(status) && addressed?(status, "eth1")
+    Scenarios.Device.await(vm, "application link and Internet recovered", fn status ->
+      internet?(status) && Enum.any?(status.connections.ports, &(&1.name == "eth1" and &1.link))
     end)
 
     assert_application_link(vm, network)

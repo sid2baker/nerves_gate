@@ -281,7 +281,7 @@ defmodule Scenarios.Cases.TestBench do
   defp faults(pid, vm) do
     action(pid, "lan1_down")
     action(pid, "connect_lan2")
-    assert Scenarios.Qemu.topology(vm) == %{lan1: :equipment, lan2: :internet}
+    assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :internet}
     assert device(vm).faults["lan1"]
     assert_bench_controls(vm)
 

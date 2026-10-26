@@ -7,6 +7,10 @@
   real policy, transport or hardware; remove wrappers that only rename calls.
 - One concept, one name, one implementation. No mirrored command facades, generic
   operation dispatchers, single-implementation adapters or speculative frameworks.
+- No legacy code: remove replaced APIs, deprecated shims, old route aliases,
+  compatibility fallbacks and automatic migrations. Support the current contracts
+  only. Reject unsupported firmware/configuration explicitly and never erase or
+  rewrite live state merely to make it compatible.
 - Keep seams for real board variation and the published typed SDK contract.
 - Create safe errors where their meaning is known; no global reason catalogue.
 - Document the current system, not the history of replaced code.
@@ -17,6 +21,9 @@
   use external tools for actual firmware, networking, QEMU and Git operations.
 - Root is `:nerves_gate_workbench`, not an umbrella. `firmware/`, `sdk/` and
   `systems/*` remain independent projects with distinct targets and releases.
+- `apps/`: optional first-party ordinary Mix applications, independently packaged
+  and tested. Never install, start or enable them automatically. Applications own
+  equipment identities, addressing requirements, protocol sessions and use cases.
 - `lib/workbench/`, `lib/workbench_web/`, `priv/workbench/`: host sessions, builds,
   apps, discovery, physical tools and workbench UI. Ordinary tasks start no session.
 - `lib/simulator.ex`, `lib/simulator/`: separate simulator BEAM and owned disposable
@@ -30,7 +37,7 @@
   deadlines and persistence. Use named public domain functions, not infrastructure.
 - `NervesGate.status/0` directly reads domains independently; `subscribe/0` belongs
   to the caller. `NervesGate` is a read/subscribe entry point and domain API index.
-- Cellular and equipment network effects share Network's single worker/trial
+- Cellular and application network effects share Network's single worker/trial
   admission. A separate API module does not need a separate GenServer.
 - Gateway LiveViews call local domains. Workbench device views explicitly subscribe
   to a remote **read-only** projection; there is no remote gateway-command proxy.
@@ -38,7 +45,7 @@
   resubscribe fresh after loss, and keep drafts separate. UI availability never
   replaces backend validation. Pure policies/read models perform no effects.
 - SDK observations and administrative status/commands are distinct contracts.
-  Preserve actual calling-PID ownership of subscriptions and bus claims; no Tasks
+  Preserve actual calling-PID ownership of subscriptions, bus claims and network leases; no Tasks
   proxying those calls. Trusted apps share the BEAM; the SDK is not a sandbox.
 - Keep genuine sharing through the firmware path dependency without starting its
   application on the host. Do not add a common library/UI kit without measured need.
@@ -70,8 +77,10 @@
 - Repository host checks use native `Mix.Project.in_project/4` with state restoration.
   Target compilation and external app builds require isolated supervised OS
   processes, never target application compilation in the workbench VM.
-- Run focused checks, warnings-as-errors compilation, formatting, architecture and
-  whitespace checks. Never weaken `--check-locked`, deadlines or fault coverage.
+- Run root `mix check` before commits: host tests, compile/format, firmware JS,
+  credo, clone and architecture/smell checks, SDK tests and starter-app tests.
+  It boots no devices and excludes dialyzer and target builds. Also run
+  `git diff --check`. Never weaken `--check-locked`, deadlines or fault coverage.
 - Full `mix ci` is expensive and belongs to the user unless separately requested.
   Report source, artifact, runtime and full-CI results distinctly.
 - `mix format --force` formats root/subprojects, excluding system inputs.
@@ -85,6 +94,16 @@
   versions. System inputs require a system version bump. Only SDK goes to Hex.
   Tags, publishing, retirement, commits, pushes and physical operations need a request.
 - Protected CI owns publishing credentials; never put them in the workbench VM.
+  Platform publication requires green routine CI and separate QEMU integration on
+  the exact tagged main-branch commit. SDK development advances its own version;
+  local starter apps may require that prerelease, never pretend a published SDK
+  contains unreleased capabilities. Firmware records its commit in `source_revision`.
+- Physical SSH transport/protocol reads belong to `Workbench.DeviceSSH`; device
+  maintenance logic is compiled in `NervesGate.System` and `Apps`, not shipped as
+  source strings. Older firmware must be updated through an explicitly authorized
+  external procedure; do not retain a compatibility fallback.
+- Legacy equipment/joined network settings are rejected, not rewritten. Explicit
+  migration or reset of existing devices still requires separate authorization.
 
 ## Start here
 

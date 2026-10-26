@@ -9,7 +9,7 @@ defmodule NervesGateSDK.Events do
     @type t :: %__MODULE__{topic: atom() | tuple(), value: term()}
   end
 
-  @topics [:system, :network, :storage, :equipment]
+  @topics [:system, :network, :storage]
 
   @spec subscribe(atom()) :: :ok | {:error, term()}
   def subscribe(topic) when topic in @topics, do: Backend.call(:events_subscribe, [topic])

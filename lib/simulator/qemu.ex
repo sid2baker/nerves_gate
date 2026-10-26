@@ -171,7 +171,7 @@ defmodule Simulator.Qemu do
       result = try do NervesGate.status() && :ok catch kind, _ -> kind end
       {result, System.monotonic_time(:millisecond) - started}
     end).(),
-    domains: for(name <- [NervesGate.Network, NervesGate.Remote, NervesGate.Equipment, NervesGate.Indicators, NervesGate.Buses, NervesGate.Storage, NervesGate.Apps], do: {name, (pid = Process.whereis(name)) && Process.info(pid, [:status, :current_function, :message_queue_len])})
+    domains: for(name <- [NervesGate.Network, NervesGate.Remote, NervesGate.Indicators, NervesGate.Buses, NervesGate.Storage, NervesGate.Apps], do: {name, (pid = Process.whereis(name)) && Process.info(pid, [:status, :current_function, :message_queue_len])})
   }
   """
 

@@ -77,7 +77,7 @@ defmodule NervesGate.Network do
   def release_local(ref), do: call({:release_local, ref}, 70_000)
 
   @doc "Private caller-owned lease observation. Never put its handle in public projections."
-  def local_status, do: call(:local_status)
+  def local_status, do: call({:local_status, Remote.status()})
 
   @doc "Explicitly retry cleanup of an orphaned claim after inspecting an incomplete outcome. Never re-advertises."
   def recover_local, do: call(:recover_local, 70_000)
@@ -178,7 +178,7 @@ defmodule NervesGate.Network do
 
     with :ok <- Local.owned(state.local, pid, ref),
          :ok <- Policy.available(Map.put(public(state), :local, nil)),
-         :ok <- local_action_allowed(operation, state) do
+         :ok <- Local.action_allowed(operation, state.local, public(state)) do
       scope = state.local.scope
 
       {action, fun} =
@@ -192,37 +192,9 @@ defmodule NervesGate.Network do
     end
   end
 
-  def handle_call(:local_status, {pid, _}, state) do
+  def handle_call({:local_status, remote}, {pid, _}, state) do
     state = refresh(state)
-    local = state.local
-
-    result =
-      if local && local.owner == pid do
-        remote = Remote.status()
-        scope = local.scope
-
-        {:ok,
-         %NervesGateSDK.Network.Local{
-           ref: local.ref,
-           interface: scope.interface,
-           address: scope.address,
-           prefix: scope.prefix,
-           subnet: scope.cidr,
-           phase: local.phase,
-           ready?: Local.ready?(scope, public(state)),
-           advertised?:
-             if(is_list(remote.advertised_routes),
-               do: scope.cidr in remote.advertised_routes,
-               else: nil
-             ),
-           approval: :unknown,
-           error: local.error && local.error.code
-         }}
-      else
-        {:ok, nil}
-      end
-
-    {:reply, result, state}
+    {:reply, {:ok, Local.observation(state.local, pid, public(state), remote)}, state}
   end
 
   def handle_call(:recover_local, from, %{local: %{owner: nil, scope: scope}} = state)
@@ -245,30 +217,6 @@ defmodule NervesGate.Network do
           "local_cleanup_required",
           "No recoverable orphaned claim is available. Inspect its owner and persistent journal."
         )}, state}
-
-  def handle_call(:scan, from, state) do
-    state = refresh(state)
-
-    with :ok <- Policy.available(public(state)),
-         {:ok, scope} <- NervesGate.Equipment.Subnet.active(public(state)) do
-      {:noreply,
-       work(state, :scan, from, fn -> NervesGate.Equipment.perform_scan(scope) end)
-       |> publish()}
-    else
-      error -> {:reply, error, state}
-    end
-  end
-
-  def handle_call({:sharing, operation, params}, from, state) do
-    state = refresh(state)
-
-    with :ok <- Policy.available(public(state)),
-         {:ok, params} <- sharing_params(operation, params, state) do
-      {:noreply, share(state, operation, params, from) |> publish()}
-    else
-      error -> {:reply, error, state}
-    end
-  end
 
   def handle_call({:cellular, :unlock, params, :tracked}, from, state) do
     case handle_call({:cellular, :unlock, params}, from, state) do
@@ -515,30 +463,6 @@ defmodule NervesGate.Network do
     %{state | worker: %{task: task, timer: timer, operation: operation, from: from}}
   end
 
-  defp local_action_allowed(:release_local, _), do: :ok
-
-  defp local_action_allowed(
-         :advertise_local,
-         %{local: %{phase: :configured, scope: scope}} = state
-       ) do
-    if Local.ready?(scope, public(state)),
-      do: :ok,
-      else:
-        {:error,
-         NervesGate.Error.new(
-           "local_not_ready",
-           "The claimed address, independent topology and physical link must be ready before advertising."
-         )}
-  end
-
-  defp local_action_allowed(_, _),
-    do:
-      {:error,
-       NervesGate.Error.new(
-         "local_outcome_unknown",
-         "Inspect the claim and release it before attempting another advertisement."
-       )}
-
   defp reconcile_local(
          %{
            local: %{phase: :cleanup_pending, scope: scope},
@@ -547,9 +471,7 @@ defmodule NervesGate.Network do
            recovering: false
          } = state
        ) do
-    if Local.cleanup_ready?(),
-      do: local_work(state, :release, nil, fn -> Local.cleanup(scope) end),
-      else: state
+    local_work(state, :release, nil, fn -> Local.cleanup_if_ready(scope) end)
   end
 
   defp reconcile_local(state), do: state
@@ -562,33 +484,14 @@ defmodule NervesGate.Network do
   end
 
   defp complete(state, %{operation: :local, local_action: action, from: from}, result) do
-    success = result == :ok or match?({:ok, routes} when is_list(routes), result)
+    {local, response} = Local.complete(state.local, action, result)
 
-    cond do
-      success and action == :release ->
-        if state.local.monitor, do: Process.demonitor(state.local.monitor, [:flush])
-        reply(from, :ok)
-        %{state | local: nil}
-
-      success ->
-        phase =
-          if state.local.owner == nil,
-            do: :cleanup_pending,
-            else: if(action == :claim, do: :configured, else: :advertised)
-
-        reply(from, if(action == :claim, do: {:ok, state.local.ref}, else: :ok))
-        %{state | local: %{state.local | phase: phase}}
-
-      true ->
-        error =
-          NervesGate.Error.new(
-            "local_outcome_unknown",
-            "Local access did not complete safely. Inspect its status; release or explicitly recover it before trying again."
-          )
-
-        reply(from, {:error, error})
-        %{state | local: %{state.local | phase: :blocked, error: error}}
+    if local == nil and state.local.monitor do
+      Process.demonitor(state.local.monitor, [:flush])
     end
+
+    reply(from, response)
+    %{state | local: local}
   end
 
   defp complete(state, %{operation: :cellular} = worker, result) do
@@ -613,17 +516,6 @@ defmodule NervesGate.Network do
       end
     )
 
-    state
-  end
-
-  defp complete(state, %{operation: :scan, from: from}, result) do
-    result =
-      case result do
-        {:error, reason} -> {:error, error(reason)}
-        success -> success
-      end
-
-    reply(from, result)
     state
   end
 
@@ -682,7 +574,7 @@ defmodule NervesGate.Network do
   end
 
   defp interrupt(%{worker: %{operation: operation} = worker} = state, reason)
-       when operation in [:sharing, :scan, :cellular, :local] do
+       when operation in [:sharing, :cellular, :local] do
     {state, _} = stop_work(state)
     complete(state, worker, {:error, reason})
   end
@@ -853,23 +745,6 @@ defmodule NervesGate.Network do
 
   defp lan_change(_state), do: Remote.status() |> Sharing.lan_change()
 
-  defp sharing_params(:sharing_enable, _, state) do
-    Sharing.enable(public(state), Remote.status())
-  end
-
-  defp sharing_params(:sharing_disable, _, state) do
-    Sharing.disable(public(state), Remote.status())
-  end
-
-  defp sharing_params(_, _, _),
-    do:
-      {:error,
-       %{
-         code: "sharing_unknown",
-         message:
-           "Sharing state is unknown. Turn sharing off and wait for confirmation before changing LAN settings."
-       }}
-
   defp share(state, operation, params, from) do
     work(state, :sharing, from, fn -> Remote.sharing(operation, params) end)
   end
@@ -907,7 +782,8 @@ defmodule NervesGate.Network do
   defp error({:load, _}),
     do: %{
       code: "invalid_saved_config",
-      message: "Saved settings could not be read. Use recovery SSH or serial."
+      message:
+        "Saved settings could not be used. Legacy equipment/joined networks require explicitly authorized migration; use recovery SSH or serial. No saved settings were rewritten."
     }
 
   defp error({:discovery, _}),

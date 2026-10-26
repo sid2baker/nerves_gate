@@ -15,7 +15,8 @@ defmodule NervesGate.Network.Policy do
       {:error,
        %{
          code: "invalid_saved_config",
-         message: "Saved settings could not be read. Use recovery SSH or serial."
+         message:
+           "Saved settings could not be used. Legacy equipment/joined networks require explicitly authorized migration; use recovery SSH or serial. No saved settings were rewritten."
        }}
 
   def available(%{recovering: true}),
@@ -98,15 +99,6 @@ defmodule NervesGate.Network.Policy do
   end
 
   @doc "Readiness is configured topology, NOT Internet access, a link or a DHCP lease."
-  def ready?(
-        %{bridge: bridge, ports: ports} = observed,
-        %{"mode" => "shared", "equipment" => network} = settings
-      ) do
-    bridge.present and bridge.state == :configured and bridge.method == network["ip_method"] and
-      Enum.all?(ports, &(not &1.present or &1.master == "br0")) and
-      (network["ip_method"] == "dhcp" or address_matches?(bridge.addresses, network)) and
-      cellular_ready?(observed, settings) and conflicts(observed, settings) == []
-  end
 
   def ready?(%{ports: ports} = observed, %{"mode" => "ports"} = network) do
     Enum.all?(Config.ports(network), fn {name, setting} ->
@@ -116,8 +108,8 @@ defmodule NervesGate.Network.Policy do
 
   def ready?(_, _), do: false
 
-  def conflicts(%{ports: ports, bridge: bridge} = observed, network) do
-    networks = if network["mode"] == "shared", do: [bridge], else: ports
+  def conflicts(%{ports: ports} = observed, network) do
+    networks = ports
     cellular = if Config.cellular?(network), do: List.wrap(Map.get(observed, :cellular)), else: []
     networks = networks ++ cellular
     usb = Map.get(observed, :usb, %{addresses: []})
