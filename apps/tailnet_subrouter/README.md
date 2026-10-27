@@ -10,8 +10,7 @@ DHCP server, Internet sharing or automatic discovery is included.
 On updated firmware, open **Applications → Check GitHub releases**, select the
 subnet router and **Review install / upgrade**, then confirm the displayed version,
 digest and compatibility requirements. The gateway fetches the package itself.
-New installs remain stopped: choose **Start**, then **Open application**. Upgrading
-an existing 1.0.0 installation starts the new version with sharing still disabled.
+New installs remain stopped: choose **Start**, then **Open application**.
 No SSH file copy or IEx command is needed for this path.
 
 The release workflow is prepared separately from publication. If no app release
@@ -67,8 +66,12 @@ reload once the new activation is ready. This first version uses the gateway's
 existing styles and has no custom JavaScript. Device app code is not loaded by
 host-only `mix dev.ui` previews: use the gateway's own HTTP service for app pages.
 
-The UI adds no automatic configuration or enable intent. Version 1.1.0 is a new
-immutable artifact; do not replace an installed 1.0.0 archive with changed bytes.
+The initial release version is 0.1.0. The UI adds no automatic configuration or
+enable intent. Earlier local development installs numbered 1.0.0 or 1.1.0 are not
+published releases, but remain immutable on-device: the GitHub installer rejects
+0.1.0 as a downgrade. Moving such a device to the initial release requires an
+explicitly authorized uninstall/reinstall; no saved state is migrated or erased
+automatically.
 
 ## Explicit application commands
 

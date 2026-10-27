@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-## 1.1.0 - 2026-10-26
+## 0.1.0 - 2026-10-26
 
 ### Added
 
+- Opt-in subnet routing over the gateway's existing Tailscale connection, with explicit local address configuration, advertisement and checked cleanup.
 - Gateway application page for configuring a local address, inspecting link and sharing state, and explicitly enabling or disabling subnet sharing.
 
 ### Compatibility

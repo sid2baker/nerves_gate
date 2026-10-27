@@ -84,14 +84,14 @@ requirements accompany the app archive.
 Plan metadata without publishing:
 
 ```sh
-mix app.release plan apps/tailnet_subrouter/v1.1.0
+mix app.release plan apps/tailnet_subrouter/v0.1.0
 ```
 
 After a separately authorized commit, prepare assets from a **clean committed
 checkout**, using a new output directory outside it:
 
 ```sh
-mix app.release prepare apps/tailnet_subrouter/v1.1.0 --output /tmp/subrouter-release-1.1.0
+mix app.release prepare apps/tailnet_subrouter/v0.1.0 --output /tmp/subrouter-release-0.1.0
 ```
 
 Preparation checks the packaged app/version, pure-BEAM payload, digest/size and
