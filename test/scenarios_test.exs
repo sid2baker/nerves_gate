@@ -114,7 +114,7 @@ defmodule Workbench.ScenariosTest do
     status = %{
       hardware_status()
       | cellular: %{supported: false, present: nil},
-        buses: %{available: false, ports: []}
+        hardware: %{available: false, ports: []}
     }
 
     assert Device.resources(status) == [:ethernet]
@@ -129,8 +129,8 @@ defmodule Workbench.ScenariosTest do
   test "missing or unobserved declared buses fail instead of becoming unsupported" do
     for present <- [false, nil] do
       status = hardware_status()
-      ports = Enum.map(status.buses.ports, &Map.put(&1, :present, present))
-      status = put_in(status.buses.ports, ports)
+      ports = Enum.map(status.hardware.ports, &Map.put(&1, :present, present))
+      status = put_in(status.hardware.ports, ports)
 
       assert Device.resources(status) == [:ethernet, :cellular, :can, :rs485]
 
@@ -224,7 +224,7 @@ defmodule Workbench.ScenariosTest do
         ports: [%{name: "enp1s0", present: true, link: false, addresses: []}]
       },
       cellular: %{supported: true, present: true, enabled: false},
-      buses: %{
+      hardware: %{
         available: true,
         ports: [
           %{name: "can0", transport: "can", present: true, up: false},

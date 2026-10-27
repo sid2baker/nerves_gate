@@ -8,23 +8,22 @@ device services reports `{:error, :unavailable}`. Run applications on real firmw
 the QEMU gateways of the Nerves Gate developer workbench.
 
 ```elixir
-alias NervesGateSDK.{CAN, Events, Network, Storage, System}
+alias NervesGateSDK.{Events, Hardware, Network, Storage, System}
 
 {:ok, info} = System.info()
 {:ok, interfaces} = Network.interfaces()
 :ok = Events.subscribe(:network)
 {:ok, directory} = Storage.data_dir(:my_app)
-:ok = CAN.subscribe("can0")
-:ok = CAN.send("can0", %CAN.Frame{id: 0x123, data: <<1, 2>>})
+{:ok, assigned_ports} = Hardware.resources() # managed plugin caller only
 ```
 
 Subscriptions deliver `%NervesGateSDK.Events.Event{topic: topic, value: value}`
-to the calling process. Backends monitor subscribers and RS485 claim owners;
-resources are released when their owner exits. Stateful calls require an installed,
+to the calling process. The backend monitors subscribers. Plugins supervise their
+own serial/CAN libraries and handles; ordinary OTP shutdown must close them. Stateful calls require an installed,
 starting/running managed application. The backend derives activation identity from
 the actual PID, never a supplied app name. Activation generations fence stale
 subscriptions/claims/in-flight work; restart/rollback requires fresh subscriptions
-and handles. Outside managed applications, read-only queries remain available,
+and handles. Outside managed applications, general platform read-only queries remain available,
 but resource calls fail with `application_not_running` (network errors use the
 string code). Use administrative domain APIs for IEx/RPC maintenance.
 SDK structs are the public contract,
@@ -58,6 +57,26 @@ example. Use the local SDK with requirement `~> 0.2.0-dev`; the published 0.1.0
 package does not contain this API. The device installer enforces the declared range.
 
 Applications on a device are trusted same-BEAM OTP applications, not sandboxed.
+
+## Exclusive hardware assignments
+
+Plugins may declare `nerves_gate_hardware: [:serial]` or `[:can]` in their main OTP
+environment. `Hardware.resources/0` returns enabled allowlisted assignments for the
+actual managed caller, as `%Hardware.Port{id: ..., kind: ..., present?: ..., path: ...}`.
+It opens nothing and accepts no app name or arbitrary operator-supplied path. One
+port belongs to one plugin; a plugin may own several ports with supervised workers.
+The former CAN/RS485 SDK claim, subscription and byte-I/O APIs are removed.
+
+The plugin uses its ordinary transport library directly. Hardware assignment and
+enablement changes require checked whole-plugin stop before mutation, including
+both affected plugins, and leave them stopped. Native handles must drain. Unknown
+cleanup/persistence blocks reuse. Assignments persist independently of plugin code.
+The SDK is not a sandbox; trusted code can bypass coordination conventions.
+
+TCP connections need no hardware assignment. UART's native driver is platform
+provided; plugins declare compatible `circuits_uart` and packaging excludes its
+native payload while recording an exact version requirement. No native plugin
+binaries are introduced. See [hardware assignments](../docs/hardware.md).
 
 ## Equipment ownership
 

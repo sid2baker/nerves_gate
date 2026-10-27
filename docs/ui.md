@@ -52,7 +52,7 @@ See [recovery access](networking.md#local-recovery-and-http-exposure).
 The standard UI configures gateway interfaces, not connected equipment. Equipment
 names, Modbus units/registers, S7 endpoints and polling belong to applications.
 There is no equipment-label editor or Modbus register form in Hardware. The
-existing network-observation and diagnostic APIs remain available independently.
+network observations remain available independently; built-in bus diagnostics are removed.
 
 Ethernet addressing, routes and bridging remain Network-owned. An enabled application
 port starts without IPv4, DHCP, DNS, a default route or bridge. Apps request isolated
@@ -61,12 +61,12 @@ platform network changes. Disabled independent ports are explicitly held down.
 Saved legacy joined/equipment configurations are rejected and retained for explicitly
 authorized administrator migration, never silently converted or erased.
 The optional [Tailnet subnet-router plugin](../plugins/tailnet_subrouter/README.md)
-provides explicit local configuration and advertisement, disabled on every startup. RS485 claims are
-exclusive and exclude diagnostics; CAN receive subscriptions may be shared.
-Active claims/subscription counts are public observations, never PIDs or opaque
-handles. CAN reconfiguration is rejected while applications subscribe; UI-disabled
-controls are not the backend interlock. The current UI reports resource use, not
-which installed app owns a caller. EM300/extension-card enumeration is not implemented.
+provides explicit local configuration and advertisement, disabled on every startup.
+Serial/CAN ports have exclusive persistent plugin assignments; Hardware shows the
+assigned plugin and its lifecycle state, not protocol or capture controls. A plugin
+may own multiple ports. Reassignment explicitly stops both affected plugins and
+leaves them stopped after checked cleanup. UI controls never replace backend
+admission. EM300/extension-card enumeration is not implemented. See [hardware](hardware.md).
 
 Equipment label/scan/share commands are removed. A passive neighbor-cache read model
 belongs to applications, not a platform compatibility API. Hardware has no neighbor
@@ -85,8 +85,8 @@ The first application network API supports one isolated Ethernet claim per gatew
   Ethernet, VPN or USB. PIN commands are explicit, never replayed on reconnect;
   advanced PIN/security controls appear once the SIM is ready. Use trusted
   management access and HTTPS for remote entry.
-- **Buses:** pages distinguish unsupported targets, missing devices, disabled ports
-  and active operations. See [CAN/RS485](buses.md).
+- **Hardware:** pages distinguish unsupported targets, missing devices, disabled ports
+  and active operations. See [CAN/RS485](hardware.md).
 - **Identify** (Settings) blinks the status LEDs, then resumes current patterns.
   There is no web reboot or reset. See [LEDs and button](indicators.md).
 

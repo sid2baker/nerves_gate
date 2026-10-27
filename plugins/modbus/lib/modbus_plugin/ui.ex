@@ -7,11 +7,15 @@ defmodule ModbusPlugin.UI do
      socket
      |> assign(assigns)
      |> assign_new(:devices, &devices/0)
+     |> assign_new(:ports, &ports/0)
      |> assign_new(:message, fn -> nil end)
      |> assign_new(:uncertain?, fn -> false end)
      |> assign_new(:form, fn ->
        to_form(
          %{
+           "transport" => "tcp",
+           "serial_port" => "",
+           "authorized" => "false",
            "id" => "device1",
            "host" => "",
            "port" => "502",
@@ -31,9 +35,9 @@ defmodule ModbusPlugin.UI do
     ~H"""
     <section class="ui-panel" id="modbus-plugin">
       <div class="ui-panel-body">
-        <h2>Modbus TCP</h2>
+        <h2>Modbus TCP / RTU</h2>
         <p class="ui-help">
-          Read-only holding/input registers using yamodbus. Configure a device, then explicitly connect to start polling. Addresses are zero-based. No serial access, register writes or automatic discovery.
+          Read-only holding/input registers using yamodbus. Configure a device, then explicitly connect to start polling. Addresses are zero-based. TCP uses ordinary sockets. RTU uses an exclusively assigned RS485 port at 9600 8N1. No register writes or automatic discovery.
         </p>
         <p :if={@message} role="alert">{@message}</p>
         <p :if={@devices == :unavailable} role="alert">
@@ -43,11 +47,40 @@ defmodule ModbusPlugin.UI do
           for={@form}
           id="modbus-config"
           class="ui-stack"
+          phx-change="edit"
           phx-submit="configure"
           phx-target={@myself}
         >
           <label>Device ID<input name="device[id]" value={@form[:id].value} required maxlength="32" /></label>
-          <label>Host<input
+          <label>Transport<select name="device[transport]">
+            <option value="tcp" selected={@form[:transport].value == "tcp"}>TCP</option>
+            <option value="rtu" selected={@form[:transport].value == "rtu"}>RTU · RS485</option>
+          </select></label>
+          <div :if={@form[:transport].value == "rtu"}>
+            <label>Assigned RS485 port<select name="device[serial_port]" required>
+              <option value="">Select assigned port</option>
+              <option
+                :for={port <- @ports}
+                value={port.id}
+                selected={@form[:serial_port].value == port.id}
+                disabled={!port.present?}
+              >
+                {port.id}{if !port.present?, do: " — not detected"}
+              </option>
+            </select></label>
+            <p :if={@ports == []}>
+              No enabled RS485 port is assigned to this plugin. Stop it, assign a port under Hardware, then start it again.
+            </p>
+            <input type="hidden" name="device[authorized]" value="false" />
+            <label><input
+              type="checkbox"
+              name="device[authorized]"
+              value="true"
+              checked={@form[:authorized].value == "true"}
+              required
+            />I am authorized to poll this bus and have verified no other master is active.</label>
+          </div>
+          <label :if={@form[:transport].value != "rtu"}>Host<input
             name="device[host]"
             value={@form[:host].value}
             required
@@ -87,13 +120,20 @@ defmodule ModbusPlugin.UI do
         </.form>
         <button class="ui-button ui-button--secondary" phx-click="refresh" phx-target={@myself}>Refresh status</button>
         <article :for={device <- if(is_list(@devices), do: @devices, else: [])}>
-          <h3>{device.id} · {device.host}:{device.port}</h3>
+          <h3>
+            {device.id} · {if device.transport == "rtu",
+              do: device.serial_port,
+              else: "#{device.host}:#{device.port}"}
+          </h3>
           <p>
             Unit {device.unit} · {device.table} · {device.address} + {device.count} · {device.state}
           </p>
           <p :if={device.values != nil}>Values: {Enum.join(device.values, ", ")}</p>
           <p :if={device.read_at}>Last successful read: {device.read_at}</p>
           <p :if={device.error} role="alert">{inspect(device.error)}</p>
+          <p :if={device.state == :cleanup_required} role="alert">
+            RTU cleanup is unverified. Stop the whole plugin from Plugins and inspect cleanup before restarting; this interrupts all its connections.
+          </p>
           <button
             :if={device.state == :disconnected}
             class="ui-button ui-button--primary"
@@ -112,12 +152,15 @@ defmodule ModbusPlugin.UI do
           >Disconnect</button>
         </article>
         <p class="ui-help">
-          Configuration is volatile. Restart clears devices and never reconnects automatically. While explicitly connected, yamodbus may reconnect the TCP transport; polling is read-only. Disconnect stops both polling and reconnects.
+          Configuration is volatile. Restart clears devices and never reconnects automatically. While explicitly connected, yamodbus may reconnect the selected transport; polling is read-only. Disconnect stops both polling and reconnects.
         </p>
       </div>
     </section>
     """
   end
+
+  def handle_event("edit", %{"device" => params}, socket),
+    do: {:noreply, assign(socket, :form, to_form(params, as: :device))}
 
   def handle_event("configure", %{"device" => params}, socket) do
     socket = assign(socket, :form, to_form(params, as: :device))
@@ -134,7 +177,12 @@ defmodule ModbusPlugin.UI do
     devices = devices()
 
     {:noreply,
-     assign(socket, devices: devices, uncertain?: devices == :unavailable, message: nil)}
+     assign(socket,
+       devices: devices,
+       ports: ports(),
+       uncertain?: devices == :unavailable,
+       message: nil
+     )}
   end
 
   defp command(%{assigns: %{uncertain?: true}} = socket, _), do: {:noreply, socket}
@@ -145,6 +193,7 @@ defmodule ModbusPlugin.UI do
     {:noreply,
      assign(socket,
        devices: devices(),
+       ports: ports(),
        message: if(result == :ok, do: nil, else: inspect(result))
      )}
   catch
@@ -154,6 +203,15 @@ defmodule ModbusPlugin.UI do
          uncertain?: true,
          message: "Command outcome unknown. Refresh and inspect; no automatic retry."
        )}
+  end
+
+  defp ports do
+    case ModbusPlugin.ports() do
+      {:ok, ports} -> Enum.filter(ports, &(&1.kind == :serial))
+      _ -> []
+    end
+  catch
+    :exit, _ -> []
   end
 
   defp devices do

@@ -196,7 +196,7 @@ defmodule NervesGateWeb.HardwarePageTest do
     end
   end
 
-  test "claimed serial hardware disables administrative use and has no protocol editor" do
+  test "serial hardware offers assignments and no built-in protocol or capture controls" do
     port = %{
       name: "ttyS3",
       transport: "rs485",
@@ -207,7 +207,7 @@ defmodule NervesGateWeb.HardwarePageTest do
       subscribers: 0
     }
 
-    buses = %{
+    hardware = %{
       available: true,
       simulated: false,
       ports: [port],
@@ -217,27 +217,42 @@ defmodule NervesGateWeb.HardwarePageTest do
     }
 
     document =
-      Phoenix.LiveViewTest.render_component(&NervesGateWeb.BusesLive.render/1,
-        projection: %{buses: buses},
-        forms: %{},
+      Phoenix.LiveViewTest.render_component(&NervesGateWeb.HardwarePortLive.render/1,
+        projection: %{hardware: hardware},
+        hardware: %{
+          ports: %{"ttyS3" => %{enabled: true, plugin: "modbus_plugin"}},
+          capabilities: %{"modbus_plugin" => [:serial]},
+          error: nil,
+          operation: false
+        },
+        busy: false,
+        uncertain?: false,
+        outcome: nil,
+        draft: nil,
         port_name: "ttyS3",
         title: "RS485 1",
         live_action: :rs485
       )
       |> Floki.parse_document!()
 
-    assert Floki.text(document) =~ "In use by applications"
-    assert [_] = Floki.find(document, "#configure-ttyS3 button[type=submit][disabled]")
-    assert [_] = Floki.find(document, "#capture-ttyS3[disabled]")
-    assert [] = Floki.find(document, "#modbus-form, input[name='modbus[unit]']")
+    assert Floki.text(document) =~ "Assigned plugin: modbus_plugin"
+
+    assert [_] =
+             Floki.find(
+               document,
+               "select[name='assignment[plugin]'] option[value='modbus_plugin'][selected]"
+             )
+
+    assert [] =
+             Floki.find(document, "[phx-click=capture], #modbus-form, input[name='modbus[unit]']")
   end
 
   test "removed equipment actions cannot trigger protocol requests or label writes" do
     socket =
       %Phoenix.LiveView.Socket{private: %{live_temp: %{}}} |> Phoenix.LiveView.clear_flash()
 
-    assert {:noreply, rejected} = NervesGateWeb.BusesLive.handle_event("modbus-read", %{}, socket)
-    assert rejected.assigns.flash["error"] =~ "hardware diagnostic action"
+    assert {:noreply, ^socket} =
+             NervesGateWeb.HardwarePortLive.handle_event("modbus-read", %{}, socket)
 
     assert {:noreply, ^socket} =
              NervesGateWeb.LanLive.handle_event("edit-label", %{"id" => "anything"}, socket)

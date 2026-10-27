@@ -15,7 +15,7 @@ config :nerves_gate, :board, %{
       vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
     }
   },
-  buses_adapter: {NervesGate.Buses.EC100, nil},
+  hardware_adapter: {NervesGate.Hardware.EC100, nil},
   recovery_adapter: {NervesGate.Recovery.EC100, nil},
   indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"}
 }

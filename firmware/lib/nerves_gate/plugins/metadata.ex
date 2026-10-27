@@ -27,7 +27,8 @@ defmodule NervesGate.Plugins.Metadata do
     end
   end
 
-  defp write(file, bytes) do
+  @doc false
+  def write(file, bytes) do
     temp = file <> ".#{Base.encode16(:crypto.strong_rand_bytes(12))}.tmp"
 
     with :ok <- File.mkdir_p(Path.dirname(file)),

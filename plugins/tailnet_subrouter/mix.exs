@@ -4,7 +4,7 @@ defmodule TailnetSubrouter.MixProject do
   def project do
     [
       app: :tailnet_subrouter,
-      version: "0.1.0",
+      version: "0.1.2",
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       deps: [

@@ -19,8 +19,10 @@ checks and firmware builds are not proof that device fault paths have been exerc
   health and owns one checked unload path. Shared platform libraries are not private
   dependencies and cannot be stopped as part of plugin cleanup.
 - A fresh private `{epoch, sequence}` activation binds actual OTP membership, including
-  owned dependency processes. SDKBackend, Buses and Network fence actual calling PIDs,
-  lease references and in-flight effects with this activation. No UI or Task proxy
+  owned dependency processes. SDKBackend and Network fence actual calling PIDs,
+  lease references and in-flight effects with this activation. Bus transport proxies
+  are removed; Plugins owns exclusive assignment intent and plugin supervision owns
+  native handles. Checked whole-plugin stop precedes reassignment. No UI or Task proxy
   becomes the plugin's resource owner.
 - Quiescing blocks new ownership/UI admission; checked stop closes real page PIDs,
   stops applications, drains resources and checks code unload. Busy code and uncertain

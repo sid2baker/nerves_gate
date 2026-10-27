@@ -2,6 +2,11 @@
 
 ## Status and scope
 
+The subsequent [hardware assignment/RTU cutover](HARDWARE_PLUGIN_ASSIGNMENT_PLAN.md)
+replaces SDK bus proxies with exclusive assignments and extends Modbus to TCP/RTU
+in plugin 0.2.0. It uses the existing firmware UART driver, not a native plugin
+payload. The validation summary below records the initial bundled-plugin cutover.
+
 Source implementation now provides firmware-selected `tailnet_subrouter` and
 `modbus_plugin` (yamodbus 0.1.0), build-generated read-only inventory, source-aware
 artifacts, one renamed Plugins manager, explicit version selection and `/plugins`

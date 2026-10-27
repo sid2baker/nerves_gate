@@ -1,5 +1,5 @@
 defmodule ModbusPlugin.Connection do
-  @moduledoc "One supervised read-only TCP connection, with at most one poll in flight."
+  @moduledoc "One supervised read-only TCP/RTU connection, with at most one poll in flight."
   use GenServer, restart: :temporary
 
   def start_link(config),
@@ -10,7 +10,7 @@ defmodule ModbusPlugin.Connection do
 
   def pid(id) do
     case Registry.lookup(ModbusPlugin.Registry, id) do
-      [{pid, _}] -> pid
+      [{pid, _}] -> if Process.alive?(pid), do: pid
       [] -> nil
     end
   end
@@ -28,14 +28,7 @@ defmodule ModbusPlugin.Connection do
     # Supervisor shutdown must run terminate/2 and synchronously close the client.
     Process.flag(:trap_exit, true)
 
-    {:ok, client} =
-      Modbus.Client.start_link(
-        tcp: config.host,
-        port: config.port,
-        timeout: config.timeout,
-        connect_timeout: config.timeout,
-        max_pending: 1
-      )
+    {:ok, client} = Modbus.Client.start_link(client_options(config))
 
     send(self(), :poll)
 
@@ -46,6 +39,28 @@ defmodule ModbusPlugin.Connection do
        pending: nil,
        status: %{state: :polling, values: nil, error: nil, read_at: nil}
      }}
+  end
+
+  @doc false
+  def client_options(%{transport: "rtu"} = config) do
+    [
+      rtu: config.serial_path,
+      speed: 9600,
+      data_bits: 8,
+      stop_bits: 1,
+      parity: :none,
+      timeout: config.timeout
+    ]
+  end
+
+  def client_options(config) do
+    [
+      tcp: config.host,
+      port: config.port,
+      timeout: config.timeout,
+      connect_timeout: config.timeout,
+      max_pending: 1
+    ]
   end
 
   def handle_call(:status, _, state), do: {:reply, state.status, state}

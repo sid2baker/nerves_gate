@@ -6,7 +6,7 @@ defmodule NervesGateSDK.Events do
     @moduledoc "A public event delivered directly to the subscribing process."
     @enforce_keys [:topic, :value]
     defstruct [:topic, :value]
-    @type t :: %__MODULE__{topic: atom() | tuple(), value: term()}
+    @type t :: %__MODULE__{topic: :system | :network | :storage, value: term()}
   end
 
   @topics [:system, :network, :storage]

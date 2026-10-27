@@ -22,14 +22,7 @@ defmodule NervesGateSDK.Backend do
           | :events_unsubscribe
           | :storage_status
           | :storage_data_dir
-          | :can_interfaces
-          | :can_send
-          | :can_subscribe
-          | :can_unsubscribe
-          | :rs485_ports
-          | :rs485_claim
-          | :rs485_write
-          | :rs485_release
+          | :hardware_resources
 
   @callback call(operation(), list()) :: :ok | {:ok, term()} | {:error, term()}
 

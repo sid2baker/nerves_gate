@@ -1,7 +1,7 @@
 defmodule Simulator.Prerequisites do
   @moduledoc "Workstation requirements for real QEMU devices and firmware builds."
   @tools ~w(qemu-system-x86_64 fwup flock mkfs.ext4 git make cc pkg-config inotifywait
-            mksquashfs unsquashfs timeout)
+            mksquashfs unsquashfs timeout socat)
 
   def check! do
     unless :os.type() == {:unix, :linux} and

@@ -82,7 +82,7 @@ defmodule NervesGate.Plugins.Loader do
 
   def drain(tag) do
     Enum.reduce_while(
-      [NervesGate.SDKBackend, NervesGate.Buses, NervesGate.Network],
+      [NervesGate.SDKBackend, NervesGate.Network],
       :ok,
       fn domain, :ok ->
         case GenServer.call(domain, {:drain_generation, tag}, 75_000) do

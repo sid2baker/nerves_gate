@@ -60,9 +60,8 @@ hostname/trial IDs are plain strings. Failures return
 | `Indicators.identify()` | `:ok` once five-second identification starts |
 | `SSH.add_key(public_key)` | `:ok` after validating/saving one OpenSSH public key |
 | `SSH.remove_key(fingerprint)` | `:ok` after saving removal; existing sessions stay open |
-| `Buses.configure(port, params)` | `:ok`; CAN configuration or RS485 opt-in accepted |
-| `Buses.capture(port)` | `:ok`; receive-only capture accepted |
-| `Buses.modbus_read(port, params)` | `:ok`; one authorized RTU read accepted |
+| `Plugins.hardware()` | Current exclusive port intent, eligible plugin kinds and lifecycle availability |
+| `Plugins.assign_port(port, enabled, plugin, stop_confirmed \\ false, expected \\ nil)` | Checked whole-plugin stop, then persist assignment; leave stopped |
 | `Storage.setup(action, card_id \\ nil, confirmation \\ nil)` | `:ok`; storage setup accepted |
 | `Distribution.cookie()` | `{:ok, cookie}`; explicit private read |
 | `System.info()` | Sanitized `%{firmware: ..., source_revision: ..., target: ..., node: ..., elixir: ..., otp: ...}` |
@@ -139,11 +138,11 @@ waits for auto-save; otherwise it returns a pending trial. See
 | Command family | When the call succeeds |
 | --- | --- |
 | Network trial, app lease and SSH keys | After the requested bounded effect/readback or persistence |
-| Cellular, Remote, Buses and Storage | After admission; observe `operation`, `error` and applicable `result`/readiness |
+| Cellular, Remote and Storage | After admission; observe `operation`, `error` and applicable `result`/readiness |
 | Identify | After starting the bounded identification period |
 
 Remote completion is in `status.remote`, not a private URL. Bus completion is in
-`status.buses`. Private `Remote.login_url/0` and `Distribution.cookie/0` results
+`status.hardware`. Private `Remote.login_url/0` and `Distribution.cookie/0` results
 belong only in the requesting view; never log, broadcast or put them in status.
 
 Trial calls allow 15 seconds; application leases allow 70. Other calls are
@@ -163,32 +162,24 @@ metadata, **not authorization**. The gateway currently trusts reachable manageme
 users, so restrict Ethernet/VPN/USB access. There is no public/web reboot or
 factory-reset command.
 
-## Bus parameters
+## Hardware assignments
 
 ```elixir
-NervesGate.Buses.configure("can0", %{"enabled" => true, "bitrate" => 125_000})
-NervesGate.Buses.capture("can0")
-
-NervesGate.Buses.configure("ttyS3", %{"enabled" => true})
-NervesGate.Buses.modbus_read("ttyS3", %{
-  "unit" => 1, "function" => 3, "address" => 0, "count" => 2,
-  "authorized" => true
-})
+NervesGate.Plugins.hardware()
+NervesGate.Plugins.assign_port("ttyS3", true, "modbus_plugin", true)
 ```
 
-Only can0/can1 and ttyS3/ttyS4 are eligible. Numbers also accept decimal strings;
-booleans accept `"true"`/`"false"`. Modbus `authorized` means the operator approved
-that request and ensured no other master; it is not access control.
-
-Results include `port`, `kind`, `completed_at` and bounded `data`: CAN `frames`,
-serial `hex`/`bytes`, or Modbus `unit`/`function`/`address`/`count`/`registers`.
-See [bus operations](buses.md). Storage choice/erase confirmation is documented in
-[application storage](applications.md#commissioning).
+The `true` explicitly permits stopping BOTH affected plugins, interrupting all their
+ports/connections. Changes persist only after checked cleanup, and plugins remain
+stopped. The optional expected old setting binds UI confirmation to reviewed intent.
+Hardware never captures traffic or issues protocol reads. Plugins own direct I/O;
+`NervesGateSDK.Hardware.resources/0` queries the actual managed caller's assignments.
+See [hardware and Modbus](hardware.md) and [storage](applications.md#storage-and-state).
 
 ## Status
 
 `NervesGate.status/0` reads domains independently: it is **not an atomic snapshot**.
-Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v9**:
+Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v11**:
 
 - `version`, `system`: schema version and sanitized firmware/runtime identity.
 - `device`: availability/error; a disconnected projection client sets unavailable.
@@ -203,12 +194,13 @@ Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v9**:
 - `sharing`: application-lease `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
   `other_routes` untouched by the control.
 - `indicators`: availability, button state, LED patterns, identify/recovery state.
-- `buses`: ports, support, observations, operation, result and errors.
+- `hardware`: port inventory, support, assignment/enablement observations and errors.
+  Legacy diagnostic operation/result fields and bus action entries are removed.
 - `ssh`: public-key fingerprints/types/comments and persistence errors.
 - `storage`: detected card, commissioning choice, readiness, operation and error.
 - `capabilities`, `actions`: presentation-only availability, labels and safe reasons.
-  Action names are domain-qualified, including `buses.configure`, `buses.capture`,
-  `buses.modbus_read` and `indicators.identify`.
+  Action names are domain-qualified, such as `indicators.identify`. Hardware
+  diagnostics are not actions; assignment admission is owned by Plugins.
 
 Unknown routes are `nil`, not empty. Advertisements prove neither route approval
 nor reachability. There is no cross-domain revision lock, and the SDK does not
@@ -228,7 +220,7 @@ remote read-only sources. Gateway commands remain local; see
 Public owners document their own interfaces: [Network](../firmware/lib/nerves_gate/network.ex),
 [Cellular](../firmware/lib/nerves_gate/cellular.ex), [Remote](../firmware/lib/nerves_gate/remote.ex),
 [Indicators](../firmware/lib/nerves_gate/indicators.ex),
-[Buses](../firmware/lib/nerves_gate/buses.ex), [SSH](../firmware/lib/nerves_gate/ssh.ex)
+[Hardware](../firmware/lib/nerves_gate/hardware.ex), [SSH](../firmware/lib/nerves_gate/ssh.ex)
 and [Storage](../firmware/lib/nerves_gate/storage.ex). Fixed infrastructure and raw
 cellular helpers are private implementation boundaries, not alternate client APIs.
 See [scenarios](../lib/scenarios/cases) for bounded explicit domain RPCs against

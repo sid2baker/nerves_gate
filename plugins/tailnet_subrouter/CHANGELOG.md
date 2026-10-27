@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.1.2 - 2026-10-27
+
+### Compatibility
+
+- Rebuilt for the renamed Hardware inventory domain and administrative schema 11.
+
+## 0.1.1 - 2026-10-27
+
+### Compatibility
+
+- Packages the subnet router against the firmware's current hardware-assignment SDK. Select this version explicitly when upgrading from 0.1.0; firmware never substitutes changed code under an existing plugin version.
+
 ## 0.1.0 - 2026-10-26
 
 ### Added

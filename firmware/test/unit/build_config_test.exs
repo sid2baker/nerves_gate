@@ -28,7 +28,7 @@ defmodule NervesGate.BuildConfigTest do
                      vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
                    }
                  },
-                 buses_adapter: {NervesGate.Buses.EC100, nil},
+                 hardware_adapter: {NervesGate.Hardware.EC100, nil},
                  indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"},
                  recovery_adapter: {NervesGate.Recovery.EC100, nil},
                  data_partition: "/sys/class/block/mmcblk0p3/dev",
@@ -39,7 +39,7 @@ defmodule NervesGate.BuildConfigTest do
       else
         assert board == %{
                  cellular: nil,
-                 buses_adapter: nil,
+                 hardware_adapter: nil,
                  indicators_adapter: nil,
                  recovery_adapter: nil,
                  data_partition: "/sys/class/block/vda4/dev",

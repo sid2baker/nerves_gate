@@ -4,9 +4,12 @@
 
 ### Breaking changes
 
+- Removed CAN/RS485 claim, subscription and byte-I/O APIs. Plugins query their caller-derived exclusive assignments through `Hardware.resources/0` and supervise ordinary transport libraries directly. Reassignment requires checked whole-plugin stop; Internet/local-network leases retain their separate platform contract.
+- `circuits_uart` is a shared firmware library, never a private plugin native payload; packaging records its exact compatible platform version.
+
 - Phoenix/LiveView and Req HTTP libraries are shared with firmware, not bundled as private copies. Packaging records exact shared platform versions, including transitive dependencies; align application lockfiles with the target firmware before rebuilding.
 
-- Stateful subscriptions, bus I/O and network leases require a managed activation. The firmware derives generation scope from the actual caller, rejects stale scope, and drains resources before reactivation. Read-only SDK queries remain available outside apps. Resource calls are not maintenance RPCs; no proxy Task becomes owner.
+- Stateful subscriptions, hardware assignment queries and network leases require a managed activation. The firmware derives generation scope from the actual caller, rejects stale scope, and drains resources before reactivation. Read-only SDK queries remain available outside apps. Resource calls are not maintenance RPCs; no proxy Task becomes owner.
 
 - Removed `Equipment.list/0`, its device struct and the `:equipment` event topic. Applications own equipment identities, discovery and protocols; use `Network.interfaces/0` for platform link observations.
 

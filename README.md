@@ -22,7 +22,7 @@ Nothing flashes physical hardware unless you explicitly confirm it.
 ## Plugins
 
 `plugins/selection.exs` selects independent OTP projects for firmware. The initial
-selection contains `tailnet_subrouter` and read-only Modbus TCP using `yamodbus`.
+selection contains `tailnet_subrouter` and read-only Modbus TCP/RTU using `yamodbus`.
 Their private pure-BEAM libraries are bundled with them; SDK/LiveView stay shared.
 
 ```sh
@@ -49,7 +49,7 @@ mix test.qemu --only sdk --device gateway_a    # against your running mix dev
 | `lib/scenarios/` | One scenario catalogue/runner, device access and owned-QEMU checks |
 | `firmware/` | Device runtime and gateway UI (separate Nerves project) |
 | `sdk/` | Small plugin integration contract and packaging (separately versioned, published on Hex) |
-| `plugins/` | Firmware selection, subnet-router and Modbus TCP projects |
+| `plugins/` | Firmware selection, subnet-router and Modbus TCP/RTU projects |
 | `systems/` | EC100 and QEMU Nerves systems |
 
 Read [development](docs/development.md), [architecture](docs/architecture.md),
@@ -61,7 +61,7 @@ Read [development](docs/development.md), [architecture](docs/architecture.md),
 - [Networking and recovery](docs/networking.md)
 - [Firmware builds and updates](docs/firmware-updates.md)
 - [Plugins and storage](docs/applications.md)
-- [CAN and RS485](docs/buses.md)
+- [CAN and RS485](docs/hardware.md)
 - [LEDs and button](docs/indicators.md)
 - [Gateway and workbench UI](docs/ui.md)
 

@@ -3,7 +3,7 @@ defmodule NervesGate do
   Gateway reads and caller-owned observation subscriptions.
 
   Commands belong to their domains: `NervesGate.Network`, `NervesGate.Cellular`,
-  `NervesGate.Remote`, `NervesGate.Buses`,
+  `NervesGate.Remote`, `NervesGate.Hardware`,
   `NervesGate.Indicators`, `NervesGate.SSH` and `NervesGate.Storage`.
   Read build/runtime identity with `NervesGate.System.info/0`.
   Equipment identities and discovery belong to applications.
@@ -14,7 +14,7 @@ defmodule NervesGate do
   replay. Private login URLs and distribution cookies are explicit domain reads,
   never part of this administrative status or the separate typed SDK contract.
   """
-  alias NervesGate.{Buses, Indicators, Network, Remote, SSH, Status, Storage}
+  alias NervesGate.{Hardware, Indicators, Network, Remote, SSH, Status, Storage}
 
   @doc "Read domain state directly and independently, without consulting the projection cache."
   @spec status() :: map()
@@ -23,7 +23,7 @@ defmodule NervesGate do
       Network.status(),
       Remote.status(),
       Indicators.status(),
-      Buses.status(),
+      Hardware.status(),
       SSH.status(),
       NervesGate.System.info(),
       Storage.commissioning()
@@ -36,7 +36,7 @@ defmodule NervesGate do
     with :ok <- Network.observe(),
          :ok <- Remote.observe(),
          :ok <- Indicators.observe(),
-         :ok <- Buses.observe(),
+         :ok <- Hardware.observe(),
          :ok <- SSH.observe(),
          do: Storage.observe()
   end

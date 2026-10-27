@@ -24,8 +24,9 @@ The initial selection contains:
 - `tailnet_subrouter`: explicitly claims an eligible local Ethernet interface and
   optionally advertises its subnet through the platform's existing Tailscale.
 - `modbus_plugin`: uses [yamodbus](https://github.com/tallakt/yamodbus) for read-only
-  Modbus TCP holding/input register polling. No serial support, register writes or
-  automatic discovery. Configuration and connection are explicit, separate actions.
+  Modbus TCP/RTU holding/input register polling. RTU requires enabled exclusive RS485
+  assignment and explicit operator approval; no register writes or automatic discovery.
+  Configuration and connection are explicit, separate actions.
 
 New plugins are stopped/disabled. Starting them starts their supervision trees;
 it does not configure Ethernet, advertise routes or connect to equipment. Saved
@@ -37,7 +38,8 @@ forget their volatile equipment/sharing configuration and require explicit actio
 Each project declares and locks its own libraries. The package includes its
 non-platform runtime dependency closure, including `yamodbus` for the Modbus
 plugin. Missing optional OTP dependencies are allowed; missing required dependencies
-are not. The Modbus plugin does not include the optional native `circuits_uart`.
+are not. The Modbus plugin declares `circuits_uart` but uses firmware's exact 1.7.0
+native driver; its native payload is never included in the plugin archive.
 
 SDK, Phoenix/LiveView and other supported platform libraries are supplied once by
 firmware and checked for compatible/exact versions. Private dependency names and
@@ -114,10 +116,12 @@ not require an SDK socket wrapper or an exclusive interface lease. Plugins own
 protocol/equipment semantics; firmware protects shared infrastructure.
 
 `NervesGateSDK` exposes typed platform observations, caller-owned subscriptions,
-data directories and exclusive bus/local-network resources. Its fixed firmware
+data directories, assigned hardware observations and exclusive local-network resources. Its fixed firmware
 bridge preserves the actual calling PID. Resource calls require active managed
 membership and generation-bound references; UI processes or proxy Tasks cannot
-claim resources on a plugin's behalf. Internet/USB configuration, enrollment,
+claim resources on a plugin's behalf. Serial/CAN libraries open assigned resources
+in supervised plugin workers, not SDK transport proxies. See [hardware](hardware.md).
+Internet/USB configuration, enrollment,
 credentials, plugin lifecycle and firmware updates remain administrative operations.
 
 ## Development artifacts

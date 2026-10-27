@@ -119,7 +119,7 @@ defmodule NervesGateWeb.ProjectionTest do
       },
       remote: NervesGate.Remote.unavailable(),
       indicators: NervesGate.Indicators.unavailable(),
-      buses: NervesGate.Buses.unavailable(),
+      hardware: NervesGate.Hardware.unavailable(),
       ssh: NervesGate.SSH.unavailable(),
       storage: NervesGate.Storage.unavailable(),
       system: %{

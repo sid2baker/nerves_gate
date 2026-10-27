@@ -9,7 +9,7 @@ config :nerves_gate, :board, %{
   # The simulator's prepared ext4 virtual SD card.
   apps_device: "/dev/vdb",
   cellular: nil,
-  buses_adapter: nil,
+  hardware_adapter: nil,
   recovery_adapter: nil,
   indicators_adapter: nil
 }

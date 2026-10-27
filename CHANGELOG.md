@@ -4,15 +4,19 @@
 
 ### Breaking changes
 
+- Renamed the physical inventory domain to `NervesGate.Hardware` and its adapter configuration to `hardware_adapter`, with no old-name aliases.
+
+- Hardware now exposes exclusive plugin assignments, not built-in capture/Modbus diagnostics. Removed bus diagnostic commands and SDK CAN/RS485 transport proxies; plugins own direct supervised I/O. Assignment and enablement changes require checked stop of both affected plugins and leave them stopped.
+
 - Trusted plugins are selected at firmware build time and managed by `NervesGate.Plugins` at `/plugins`; the application store, GitHub app-release workflow and old gateway application routes/APIs are removed. Schema-2 plugin metadata records immutable artifact identity and source. Old application metadata blocks activation without automatic migration or erasure. Stateful SDK resource access requires managed activation membership; raw IEx/RPC callers use administrative domain APIs.
 - The SDK uses the fixed firmware runtime bridge rather than configurable backends; absent firmware returns `:runtime_unavailable`. Plugin packages reject contributed native payloads and direct NIF loaders.
 
-- Removed the equipment observation domain and SDK compatibility API; status schema is now 9. Device maintenance requires the current compiled APIs with no old-firmware identity fallback. SSH key initialization no longer imports an old NervesSSH key store: provision current configured keys explicitly before deployment.
+- Removed the equipment observation domain and SDK compatibility API; status schema is now 11. Device maintenance requires the current compiled APIs with no old-firmware identity fallback. SSH key initialization no longer imports an old NervesSSH key store: provision current configured keys explicitly before deployment.
 
 - Hardware exposes gateway resources, not equipment identities or protocol editors. Equipment label/scan/share commands and legacy `equipment`/joined network configuration are removed. Saved legacy settings are rejected with migration guidance, never rewritten or erased automatically; existing devices need separately authorized migration. Applications own equipment configuration and local addressing through process-owned SDK leases.
 
-- Administrative commands now live on their owning `NervesGate.Network`, `Cellular`, `Remote`, `Buses`, `Indicators`, `SSH` and `Storage` modules. `NervesGate` exposes only `status/0` and `subscribe/0`; use `NervesGate.System.info/0` for identity and explicit domain reads for private login URLs/cookies. Server-injection options and remote gateway-command routing are removed.
-- Administrative status/projections use schema 9: `device` replaces `backend`, `remote` replaces `remote_access`, and action names include `buses.configure`, `buses.capture`, `buses.modbus_read` and `indicators.identify`. SDK observations remain a separate typed contract.
+- Administrative commands now live on their owning `NervesGate.Network`, `Cellular`, `Remote`, `Hardware`, `Indicators`, `SSH` and `Storage` modules. `NervesGate` exposes only `status/0` and `subscribe/0`; use `NervesGate.System.info/0` for identity and explicit domain reads for private login URLs/cookies. Server-injection options and remote gateway-command routing are removed.
+- Administrative status/projections use schema 11: `hardware` replaces `buses`, `device` replaces `backend`, `remote` replaces `remote_access`, and action names include `indicators.identify`; built-in bus diagnostic actions are removed. SDK observations remain a separate typed contract.
 - Host modules/application are `Workbench`, `WorkbenchWeb` and `:nerves_gate_workbench`; host session metadata uses `WORKBENCH_*` and `_build/workbench/`. Scenarios share one `Scenarios` catalogue/runner and explicit owned-QEMU fixture. Update host tools and disposable guest firmware together; old live sessions and firmware are not supported by the new tools.
 - Cellular code now lives under `NervesGate.Cellular`, including `Cellular.Modem`. Saved interface settings referencing an unavailable modem driver fail startup before UART access; there is no automatic migration or erasure. Physical deployment requires a separately authorized settings reprovision/reset procedure.
 - Use the platform checkout as the developer environment. Create/open ordinary SDK applications directly in the workbench, or use `mix app.new PATH`; no generator archive or solution manifest is needed.
@@ -24,12 +28,12 @@
 ### Added
 
 - Gateway Plugins page with explicit Start/Stop and optional plugin-owned LiveComponents. Firmware bundles the selected pure-BEAM dependency closures and a verified inventory; bundled code needs no SD card. Saved unavailable versions require explicit selection, never silent replacement. Uncertain commands are never replayed.
-- Read-only Modbus TCP plugin using yamodbus, with explicit per-device configuration/connection, bounded holding/input-register polling and connection cleanup. No equipment connections occur at startup.
+- Read-only Modbus TCP/RTU plugin using yamodbus, with explicit per-device configuration/connection, bounded holding/input-register polling and connection cleanup. RTU requires an enabled exclusive RS485 assignment, operator approval and firmware-provided circuits_uart; the initial profile is 9600 8N1. No equipment connections occur at startup.
 - Subnet-router interface picker uses gateway observations and disables Internet, claimed, addressed and operator-disabled ports with explanations.
 
 - Verified retained archives and exact extracted content/modes for every activation, with no same-version replacement. Explicit verified module preload, bounded lifecycle workers, generation-fenced SDK resources and one checked cleanup/rollback path preserve actual-PID ownership and fail closed on uncertain effects.
 
-- Hardware shows Internet and application interfaces, claim/subscriber usage and explicit passive diagnostics. Remote access groups Tailscale with explicitly revealed developer runtime credentials; application storage lives under Settings. Replaced equipment/distribution/storage URLs are removed, not retained as aliases.
+- Hardware shows Internet and application interfaces, bus presence and exclusive assigned plugin identity. Remote access groups Tailscale with explicitly revealed developer runtime credentials; application storage lives under Settings. Replaced equipment/distribution/storage URLs are removed, not retained as aliases.
 - Application-enabled isolated Ethernet can be claimed with transient addressing and explicitly advertised through the existing tailnet. Journaled route ownership, owner-exit cleanup and blocked unknown outcomes prevent unowned route adoption or premature address removal.
 - Firmware-selected Tailnet subnet-router plugin, stopped on first discovery and never automatically configured or sharing-enabled.
 - Reviewed physical application installation over verified SSH: private package snapshot, typed one-use device confirmation, device-side hash/app/version/storage checks, and verified stopped/disabled state. Existing apps are rejected, never silently upgraded or started.
@@ -56,8 +60,8 @@
 
 ### Fixed
 
+- Hardware-resource queries skip unassigned and disabled ports instead of crashing plugin management when opening the Modbus RTU configuration.
 - Physical SSH responses ignore stale notifications from earlier channels on the same connection; only the active channel can complete or reject an operation.
-- CAN configuration is rejected while applications hold active receive subscriptions.
 
 - Manual device entries accept DNS names, including Tailscale names, as well as IPv4 addresses.
 - Workstation commands select the host even when the shell carries a device Mix target; firmware commands retain their selected target.

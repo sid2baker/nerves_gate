@@ -45,9 +45,11 @@
   resubscribe fresh after loss, and keep drafts separate. UI availability never
   replaces backend validation. Pure policies/read models perform no effects.
 - SDK observations and administrative status/commands are distinct contracts.
-  Preserve actual calling-PID ownership of subscriptions, bus claims and network leases; no Tasks
-  proxying those calls. Stateful SDK calls require managed activation membership;
-  use the Plugins-owned generation bindings without synchronous callbacks into Plugins.
+  Preserve actual calling-PID ownership of subscriptions and network leases; no Tasks
+  proxying those calls. Stateful SDK calls require managed activation membership.
+  Membership resolution uses Plugins-owned generation bindings; assignment queries
+  run in its responsive controller. Serial/CAN handles belong to plugin supervision,
+  not SDK transport proxies. Assignment changes require checked whole-plugin stop.
   Trusted apps share the BEAM; the SDK is not a sandbox.
 - `Plugins.Artifact` owns immutable archive/content verification; `Plugins.Loader` owns
   verified code loading and checked cleanup. Plugins owns serialized admission,

@@ -1,7 +1,7 @@
 defmodule NervesGate.Plugins do
   @moduledoc "Serialized cold lifecycle for firmware-bundled plugins and development artifacts. Trusted OTP code, not a sandbox."
   use GenServer
-  alias NervesGate.Plugins.{Artifact, Bundled, Loader, Metadata, Owner, UI}
+  alias NervesGate.Plugins.{Artifact, Assignments, Bundled, Loader, Metadata, Owner, UI}
   alias NervesGate.Storage
   alias NervesGateSDK.Package
   @timeout 190_000
@@ -11,6 +11,12 @@ defmodule NervesGate.Plugins do
   def install(path), do: command({:install, path})
   def install_new(path, expected), do: command({:install_new, path, expected})
   def list, do: GenServer.call(__MODULE__, :list)
+  def hardware, do: GenServer.call(__MODULE__, :hardware)
+  def resources, do: GenServer.call(__MODULE__, :resources)
+
+  def assign_port(port, enabled, plugin, stop_confirmed \\ false, expected \\ nil),
+    do: command({:assign_port, port, enabled, plugin, stop_confirmed, expected})
+
   @doc false
   def mount_ui(app), do: GenServer.call(__MODULE__, {:mount_ui, app})
   def start(app), do: command({:start, app})
@@ -83,7 +89,19 @@ defmodule NervesGate.Plugins do
 
     {entries, blocked} = initial_entries(file)
 
+    hardware_file =
+      Application.get_env(:nerves_gate, :hardware_assignments, "/data/nerves_gate/hardware.term")
+
+    {assignments, assignment_error} =
+      case Assignments.read(hardware_file) do
+        {:ok, ports} -> {ports, nil}
+        {:error, reason} -> {%{}, reason}
+      end
+
     state = %{
+      hardware_file: hardware_file,
+      assignments: assignments,
+      assignment_error: assignment_error,
       file: file,
       entries: entries,
       running: %{},
@@ -151,6 +169,45 @@ defmodule NervesGate.Plugins do
     {:reply, {:ok, Enum.sort_by(entries, & &1.app)}, state}
   end
 
+  def handle_call(:hardware, _, state) do
+    {:reply,
+     %{
+       ports: state.assignments,
+       error: state.assignment_error || state.blocked,
+       capabilities: capabilities(state),
+       plugins:
+         Map.new(state.entries, fn {app, _} ->
+           {app, if(Map.has_key?(state.running, app), do: :running, else: :stopped)}
+         end),
+       operation: state.job != nil
+     }, state}
+  end
+
+  def handle_call(:resources, {pid, _}, state) do
+    with nil <- state.assignment_error,
+         {:ok, owner} <- Owner.resolve(pid) do
+      resources =
+        for port <- NervesGate.Hardware.inventory(),
+            %{enabled: true, plugin: plugin} <- [state.assignments[port.name]],
+            plugin == owner.app,
+            kind = Assignments.kind(port.name),
+            kind in Map.get(capabilities(state), plugin, []) do
+          %NervesGateSDK.Hardware.Port{
+            id: port.name,
+            kind: kind,
+            present?: port.present,
+            path: Map.get(port, :path),
+            interface: if(kind == :can, do: port.name)
+          }
+        end
+
+      {:reply, {:ok, resources}, state}
+    else
+      {:error, _} = error -> {:reply, error, state}
+      _ -> {:reply, {:error, :hardware_assignments_unavailable}, state}
+    end
+  end
+
   def handle_call({:mount_ui, app}, {pid, _}, state) do
     with nil <- state.blocked,
          nil <- state.job,
@@ -207,6 +264,27 @@ defmodule NervesGate.Plugins do
     do: to_string(app) == blocked
 
   defp recovery?(_, _), do: false
+
+  defp worker_call({:assignments, ports}, %{blocked: nil, assignment_error: nil} = state) do
+    case Assignments.persist(state.hardware_file, ports) do
+      :ok ->
+        NervesGate.Observations.put(
+          ["hardware", "assignments"],
+          System.unique_integer([:positive])
+        )
+
+        {:reply, :ok, %{state | assignments: ports}}
+
+      {:error, :metadata_commit_unknown} = error ->
+        {:reply, error, %{state | assignment_error: :metadata_commit_unknown}}
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  defp worker_call({:assignments, _}, state),
+    do: {:reply, {:error, :hardware_assignments_unavailable}, state}
 
   defp worker_call(:check_storage, %{blocked: nil} = state),
     do: {:reply, storage_check(state.job), state}
@@ -367,7 +445,10 @@ defmodule NervesGate.Plugins do
 
   defp storage_changed(state, true) do
     ready? =
-      Enum.all?([NervesGate.Network, NervesGate.Buses, NervesGate.SDKBackend], &Process.whereis/1)
+      Enum.all?(
+        [NervesGate.Network, NervesGate.Hardware, NervesGate.SDKBackend],
+        &Process.whereis/1
+      )
 
     identity = Storage.identity()
 
@@ -444,6 +525,7 @@ defmodule NervesGate.Plugins do
     do: true
 
   defp firmware_request?({:select, _, _}, _), do: true
+  defp firmware_request?({:assign_port, _, _, _, _, _}, _), do: true
 
   defp firmware_request?({operation, app}, state)
        when operation in [:start, :stop, :restart, :rollback, :uninstall, :unexpected_stop],
@@ -458,6 +540,71 @@ defmodule NervesGate.Plugins do
 
   defp missing_selection(app, entry) do
     if firmware_entry?(entry) and not Bundled.selected?(app, entry), do: :plugin_not_in_firmware
+  end
+
+  defp capabilities(state) do
+    Map.new(state.entries, fn {app, entry} ->
+      kinds =
+        case Artifact.load(app, entry.active_version, entry.artifacts[entry.active_version]) do
+          {:ok, _, package} -> package.main.env[:nerves_gate_hardware] || []
+          _ -> []
+        end
+
+      {app, kinds}
+    end)
+  end
+
+  defp assignment_unchanged(_, nil), do: :ok
+  defp assignment_unchanged(setting, setting), do: :ok
+  defp assignment_unchanged(_, _), do: {:error, :assignment_changed}
+
+  defp stop_and_assign(affected, port, setting, state, context) do
+    affected = Enum.filter(affected, &Map.has_key?(state.entries, &1))
+
+    result =
+      Enum.reduce_while(affected, {:ok, state}, fn app, {:ok, next} ->
+        case lifecycle(:stop, app, next, context) do
+          {:ok, stopped} -> {:cont, {:ok, stopped}}
+          {error, stopped} -> {:halt, {error, stopped}}
+        end
+      end)
+
+    case result do
+      {:ok, next} ->
+        ports = Map.put(next.assignments, port, setting)
+
+        case context.({:assignments, ports}) do
+          :ok -> {:ok, %{next | assignments: ports}}
+          error -> {error, next}
+        end
+
+      failure ->
+        failure
+    end
+  end
+
+  defp perform({:assign_port, port, enabled, plugin, confirmed, expected}, state, context) do
+    old = state.assignments[port] || %{enabled: false, plugin: nil}
+    affected = Enum.reject(Enum.uniq([old.plugin, plugin]), &is_nil/1)
+    running = Enum.filter(affected, &Map.has_key?(state.running, &1))
+
+    with nil <- state.assignment_error,
+         :ok <- assignment_unchanged(old, expected),
+         :ok <-
+           Assignments.validate(
+             port,
+             enabled,
+             plugin,
+             NervesGate.Hardware.inventory(),
+             capabilities(state)
+           ),
+         true <- running == [] or confirmed == true do
+      stop_and_assign(affected, port, %{enabled: enabled, plugin: plugin}, state, context)
+    else
+      false -> {{:error, :stop_confirmation_required}, state}
+      {:error, _} = error -> {error, state}
+      _ -> {{:error, :hardware_assignments_unavailable}, state}
+    end
   end
 
   defp perform({:select, name, version}, state, context) do
@@ -589,6 +736,9 @@ defmodule NervesGate.Plugins do
 
   defp upgrade_installed(result, _, _, _), do: result
 
+  defp restore_entry(_, %{assignment_error: error} = state, _) when not is_nil(error),
+    do: {:cont, state}
+
   defp restore_entry({app, %{enabled: true} = entry}, state, context) do
     identity = if firmware_entry?(entry), do: {:ok, :firmware}, else: Storage.identity()
 
@@ -654,6 +804,10 @@ defmodule NervesGate.Plugins do
         end
     end
   end
+
+  defp lifecycle(:start, _app, %{assignment_error: error} = state, _context)
+       when not is_nil(error),
+       do: {{:error, :hardware_assignments_unavailable}, state}
 
   defp lifecycle(:start, app, state, context) do
     case state.running[app] do
@@ -833,9 +987,13 @@ defmodule NervesGate.Plugins do
         {:ok, state}
 
       activation ->
+        ports = Enum.filter(:erlang.ports(), &owned_port?(&1, activation.owner))
+
         :ok = context.({:quiesce, app})
 
-        case Loader.unload(activation) do
+        result = with :ok <- Loader.unload(activation), do: ports_closed(ports)
+
+        case result do
           :ok ->
             :ok = context.({:unloaded, app})
             {:ok, %{state | running: Map.delete(state.running, app)}}
@@ -844,6 +1002,19 @@ defmodule NervesGate.Plugins do
             {:error, reason, %{state | blocked: :cleanup_pending}}
         end
     end
+  end
+
+  defp owned_port?(port, owner) do
+    case :erlang.port_info(port, :connected) do
+      {:connected, pid} -> Owner.matches?(pid, owner, :release)
+      _ -> false
+    end
+  end
+
+  defp ports_closed(ports) do
+    if Enum.all?(ports, &(:erlang.port_info(&1) == :undefined)),
+      do: :ok,
+      else: {:error, :hardware_cleanup_pending}
   end
 
   defp save(state, app, entry, context) do

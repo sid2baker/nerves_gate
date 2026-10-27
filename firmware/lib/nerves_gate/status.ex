@@ -1,6 +1,6 @@
 defmodule NervesGate.Status do
   @moduledoc "Pure status builder behind `NervesGate.status/0`. No process, cache or command execution."
-  alias NervesGate.{Buses, Cellular, Config, Error, Indicators, Network, Remote}
+  alias NervesGate.{Cellular, Config, Error, Hardware, Indicators, Network, Remote}
   alias NervesGate.Observations.Network, as: NetworkObservation
   alias NervesGate.Remote.Sharing
 
@@ -8,7 +8,7 @@ defmodule NervesGate.Status do
         status,
         remote,
         indicators,
-        buses,
+        hardware,
         ssh,
         system,
         storage \\ NervesGate.Storage.unavailable()
@@ -16,7 +16,7 @@ defmodule NervesGate.Status do
     cellular = cellular_supported?(status)
 
     %{
-      version: 9,
+      version: 11,
       system: system,
       device: %{available: true, error: nil},
       network: network(status),
@@ -31,10 +31,10 @@ defmodule NervesGate.Status do
       remote: remote,
       sharing: sharing(status, remote),
       indicators: indicators,
-      buses: buses,
+      hardware: hardware,
       ssh: ssh,
       storage: storage,
-      actions: actions(status, remote, indicators, buses, ssh)
+      actions: actions(status, remote, indicators, hardware, ssh)
     }
   end
 
@@ -48,7 +48,7 @@ defmodule NervesGate.Status do
         nil,
         Remote.unavailable(),
         Indicators.unavailable(),
-        Buses.unavailable(),
+        Hardware.unavailable(),
         NervesGate.SSH.unavailable(),
         system
       )
@@ -69,7 +69,7 @@ defmodule NervesGate.Status do
   defp cellular_supported?(_), do: false
 
   # Presentation metadata only. Admission belongs to the domain servers.
-  defp actions(status, remote, indicators, buses, ssh) do
+  defp actions(status, remote, indicators, _hardware, ssh) do
     trial = Network.Policy.trial_available(status, :cancel)
     confirm = Network.Policy.trial_available(status, :confirm)
     remote_ready = Remote.Policy.available(remote)
@@ -112,15 +112,6 @@ defmodule NervesGate.Status do
       "remote.configure" => action("Save device name", ["hostname"], remote_ready),
       "remote.disconnect" => action("Disconnect Tailscale", [], remote_ready),
       "remote.login_url" => action("Continue Tailscale login", [], remote_ready),
-      "buses.configure" =>
-        action("Configure bus", ["port", "enabled"], Buses.Policy.available(buses)),
-      "buses.capture" => action("Capture bus", ["port"], Buses.Policy.available(buses)),
-      "buses.modbus_read" =>
-        action(
-          "Read Modbus registers",
-          ["port", "unit", "function", "address", "count", "authorized"],
-          Buses.Policy.available(buses)
-        ),
       "ssh.add_key" => action("Add SSH key", ["public_key"], ssh_ready),
       "ssh.remove_key" => action("Remove SSH key", ["fingerprint"], ssh_ready),
       "indicators.identify" =>

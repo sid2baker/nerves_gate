@@ -3,29 +3,16 @@ defmodule NervesGate.SDKBackend do
   use GenServer
   @behaviour NervesGateSDK.Backend
 
-  alias NervesGate.{Buses, Network, Storage}
+  alias NervesGate.{Network, Storage}
   alias NervesGateSDK.Events.Event
   alias NervesGateSDK.System.Info
 
   @topics [:system, :network, :storage]
-  @bus_operations [
-    :can_interfaces,
-    :can_send,
-    :can_subscribe,
-    :can_unsubscribe,
-    :rs485_ports,
-    :rs485_claim,
-    :rs485_write,
-    :rs485_release
-  ]
-
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
-  # Call Buses from the application process, not from this server: subscriptions
-  # and exclusive UART claims must belong to the actual caller.
   @impl NervesGateSDK.Backend
-  def call(operation, arguments) when operation in @bus_operations,
-    do: available(fn -> Buses.sdk(operation, arguments) end)
+  def call(:hardware_resources, []),
+    do: available(fn -> NervesGate.Plugins.resources() end)
 
   # These calls must also originate from the actual application process, never
   # this observation server or a Task acting as a caller proxy.

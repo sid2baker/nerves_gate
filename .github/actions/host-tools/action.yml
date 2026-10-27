@@ -18,7 +18,7 @@ runs:
         QEMU: ${{ inputs.qemu }}
         GH_TOKEN: ${{ github.token }}
       run: |
-        packages=(build-essential pkg-config libmnl-dev libnl-genl-3-dev)
+        packages=(build-essential pkg-config libmnl-dev libnl-genl-3-dev socat)
         if [[ "$FIRMWARE" == true || "$QEMU" == true ]]; then
           gh release download v1.17.1 --repo fwup-home/fwup --pattern fwup_1.17.1_amd64.deb --dir "$RUNNER_TEMP/fwup"
           printf '%s  %s\n' b73ca78effe61e4c8cedcff567ca137b6bdaa1772b84f9e4d88913f192c09bf2 "$RUNNER_TEMP/fwup/fwup_1.17.1_amd64.deb" | sha256sum --check

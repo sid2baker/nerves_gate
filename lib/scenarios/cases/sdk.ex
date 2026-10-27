@@ -2,7 +2,7 @@ defmodule Scenarios.Cases.Sdk do
   @moduledoc false
   import ExUnit.Assertions
   alias Scenarios.Device
-  alias NervesGateSDK.{CAN, Events, Network, RS485, Storage}
+  alias NervesGateSDK.{Events, Hardware, Network, Storage}
   alias NervesGateSDK.System.Info
 
   def spec do
@@ -41,13 +41,8 @@ defmodule Scenarios.Cases.Sdk do
     assert {:error, :application_not_running} =
              Device.rpc(device, Storage, :data_dir, [:sdk_fixture])
 
-    assert {:ok, can} = Device.rpc(device, CAN, :interfaces)
-    assert Enum.all?(can, &is_struct(&1, CAN.Interface))
-    assert {:ok, serial} = Device.rpc(device, RS485, :ports)
-    assert Enum.all?(serial, &is_struct(&1, RS485.Port))
+    assert {:error, :application_not_running} = Device.rpc(device, Hardware, :resources)
     assert {:error, :application_not_running} = Device.rpc(device, Events, :subscribe, [:system])
-    assert {:error, :application_not_running} = Device.rpc(device, RS485, :claim, ["rs485_1"])
-    assert {:error, :invalid_port} = Device.rpc(device, RS485, :claim, [123])
     assert {:error, :invalid_topic} = Device.rpc(device, Events, :subscribe, [:remote])
 
     assert {:error, :invalid_request} =

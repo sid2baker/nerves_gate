@@ -163,9 +163,11 @@ journals route ownership before writes and withdraws owned advertisements before
 removing temporary addresses. Unknown cleanup blocks reuse, including after owner
 or Network restart. No enable intent is restored automatically. The optional
 `plugins/tailnet_subrouter` project demonstrates this boundary and starts disabled.
-Network owns addresses/routes/bridges; Buses arbitrates caller-owned
-serial claims and shared CAN receive subscriptions. Hardware use observations
-contain flags/counts, not private process or claim handles.
+Network owns addresses/routes/bridges. Hardware inventories allowlisted physical
+ports without opening handles or capturing traffic. Plugins owns persistent exclusive
+assignments and checked stop-before-reassignment. Plugins supervise ordinary
+transport libraries and per-port workers; Hardware shows assigned plugin identity,
+not protocol controls. A plugin may own multiple ports.
 
 Overview keeps Internet and Remote access together as operational entry points.
 Remote access groups Tailscale enrollment and advanced Erlang distribution without
@@ -198,7 +200,7 @@ variation points, as does the published SDK backend contract.
 | Cellular | Named SIM/PIN/PAP operations and eligibility; uses Network's worker, no separate GenServer |
 | Remote | Serialized bounded daemon operations and sanitized metadata |
 | Indicators | LED/button policy, identification and recovery |
-| Buses | Diagnostics, CAN subscriptions and exclusive caller-owned RS485 claims |
+| Hardware | Allowlisted serial/CAN inventory; Plugins owns exclusive assignment intent |
 | SSH | Public-key validation, persistence and authentication |
 | Storage | SD detection, commissioning, mounting and formatting |
 | Apps | Trusted OTP app admission, lifecycle and version selection; guards destructive storage changes |
@@ -218,7 +220,7 @@ Dependencies supervise VintageNet, tailscaled and Alarmist. The device's
 
 ```text
 PubSub → Network.Vintage → workflow PropertyTable → persistent Settings PropertyTable
-       → SSH → Network → Remote → Indicators → Buses → AppTasks
+       → SSH → Network → Remote → Indicators → Hardware → PluginTasks
        → Storage → Apps → ProjectionServer → SDKBackend → gateway Endpoint
 ```
 
@@ -243,7 +245,7 @@ gateway LiveView / IEx → named domain command → admission → bounded implem
 NervesGate.status     → independent domain reads → pure Status.build
 
 subsystem observations → ProjectionServer → sanitized replacements → LiveView
-trusted app → NervesGateSDK → SDKBackend / Buses → typed values, events and I/O
+trusted plugin → NervesGateSDK → SDKBackend → typed values, events and assigned hardware
 workstation CLI → private workbench HTTP API → Workbench.Operations / Scenarios.Runner
 ```
 
@@ -260,9 +262,9 @@ log. Subscription registers the caller before returning
 `{:ok, server_pid, projection}`; later operations come from that owner.
 
 Pure [`Projection`](../firmware/lib/nerves_gate/projection.ex) and
-[`Status`](../firmware/lib/nerves_gate/status.ex) derive administrative schema v9:
+[`Status`](../firmware/lib/nerves_gate/status.ex) derive administrative schema v11:
 `device` availability, `remote` observations and domain-qualified action keys such
-as `buses.configure` and `indicators.identify`.
+as `indicators.identify`; physical inventory is under `hardware`.
 [`Observations`](../firmware/lib/nerves_gate_web/observations.ex) is an explicit
 read-only client: local source for gateway views, `{ProjectionServer, node}` for
 `WorkbenchWeb.DeviceLive`. It monitors owners, ignores replaced instances, clears
@@ -276,11 +278,11 @@ verified-SSH identity reads, not live subscriptions or a command proxy.
 ### Applications and SDK
 
 Apps are trusted same-BEAM OTP code, **not a sandbox**. The SDK exposes typed
-observations/events, process-owned bus I/O and narrowly scoped local-network leases,
+observations/events, caller-derived hardware assignments and narrowly scoped local-network leases,
 not administrative maps, arbitrary network configuration, SSH, firmware or recovery
 commands. Equipment identities, labels, scans and industrial protocols belong to
 apps. There is no platform equipment domain or SDK compatibility API.
-Buses and Network receive SDK calls from the actual caller. Stateful calls require
+Plugins and Network receive SDK calls from the actual caller. Stateful calls require
 managed activation membership, resolved through OTP and Apps-owned protected ETS,
 not a caller-supplied app name or synchronous Plugins call. PID/ref ownership remains;
 private generations fence revoked activations and in-flight work. No Task becomes
@@ -320,6 +322,7 @@ See [optional plugin UI](applications.md#optional-ui).
 | Network.Local: `/data/nerves_gate/local_network.json` | Temporary link/route ownership and incomplete cleanup; never enable intent |
 | Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
+| Plugins: `/data/nerves_gate/hardware.term` | Bounded exclusive port assignment and enablement intent |
 | Application SD: `/mnt/apps` | App archives and app data |
 
 Both targets require writable ext4 data before data users start. Unreadable saved

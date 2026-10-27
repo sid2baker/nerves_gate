@@ -8,7 +8,9 @@ equipment semantics. No custom adapter framework or separate web server is neede
 
 `plugins/selection.exs` selects `plugins/tailnet_subrouter` and `plugins/modbus`.
 Each project declares its dependencies normally. The Modbus plugin declares
-`{:yamodbus, "== 0.1.0"}`; its private library code is bundled with it. LiveView is a
+`{:yamodbus, "== 0.1.0"}`; its private library code is bundled with it. Modbus 0.2.0
+also declares `circuits_uart` 1.7.0, supplied natively by firmware and never included
+in the pure-BEAM plugin archive. LiveView is a
 direct dependency only of plugins that provide UI. Keep shared library versions
 aligned with firmware. No contributed native libraries, executables or NIFs.
 
@@ -39,7 +41,8 @@ MIX_ENV=prod mix nerves_gate.package --output /tmp/modbus-plugin.ez
 ```
 
 The Modbus tests use the real yamodbus client against a disposable, supervised
-loopback TCP peer. No equipment is contacted. Pure policy/component tests run on
+loopback TCP peer and real circuits_uart/yamodbus RTU over disposable PTYs. Install
+`socat` for the RTU test suite; missing tools fail explicitly. No equipment is contacted. Pure policy/component tests run on
 the host; device lifecycle and SDK ownership qualification use owned QEMU scenarios.
 Host success is not runtime/vendor-equipment qualification.
 
@@ -62,8 +65,10 @@ See [runtime](applications.md) for dependency ownership and cleanup guarantees.
 
 Read-only hardware observations can be queried through the SDK. Protocol clients
 should use normal libraries/TCP. Claim exclusive shared resources only where needed:
-serial/CAN/local-network access must respect platform ownership, while creating a
-TCP connection does not claim or reconfigure the Internet interface.
+serial/CAN workers open exclusively assigned resources from
+`NervesGateSDK.Hardware.resources/0`, supervised by their plugin. There are no SDK
+bus transport proxies. Local-network addressing still uses platform leases; creating
+a TCP connection does not claim or reconfigure the Internet interface. See [hardware](hardware.md).
 
 ## Disposable development installs
 

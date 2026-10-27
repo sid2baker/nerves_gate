@@ -91,7 +91,7 @@ defmodule NervesGate.Recovery.EC100 do
     # its worker alive. Stop logger_backends too, so RingLogger cannot write
     # its periodic snapshot after the data partition is unmounted.
     children = [
-      NervesGate.Buses,
+      NervesGate.Hardware,
       NervesGate.Remote,
       NervesGate.Network,
       NervesGate.SSH

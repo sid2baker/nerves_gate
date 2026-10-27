@@ -87,5 +87,4 @@ defmodule NervesGate.Alarms do
 
   defp message(:remote_offline), do: "Tailscale is offline while remote access is enabled."
   defp message(:remote_health), do: "Tailscale reports a health problem."
-  defp message(:bus_port_unavailable), do: "An enabled bus port is missing."
 end

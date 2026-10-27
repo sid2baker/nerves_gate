@@ -50,7 +50,7 @@ defmodule NervesGateWeb.HardwareLive do
           icon="port"
           href={"/hardware/#{kind}/#{number}"}
           id={"hardware-#{kind}-#{number}"}
-          status={bus_status(@projection.buses, name)}
+          status={port_status(@projection.hardware, name)}
         >
           {if kind == "rs485",
             do: "Exclusive serial access · passive diagnostics",
@@ -75,14 +75,13 @@ defmodule NervesGateWeb.HardwareLive do
   defp lan_status(%{observed: nil}, _), do: "Not detected"
   defp lan_status(port, _), do: equipment_status(port.observed)
 
-  defp bus_status(%{available: false}, _), do: "Unavailable"
+  defp port_status(%{available: false}, _), do: "Unavailable"
 
-  defp bus_status(buses, name) do
-    case Enum.find(buses.ports, &(&1.name == name)) do
+  defp port_status(hardware, name) do
+    case Enum.find(hardware.ports, &(&1.name == name)) do
       nil -> "Not detected"
       %{present: false} -> "Not detected"
-      %{claimed: true} -> "In use by an application"
-      %{subscribers: count} when count > 0 -> "In use by applications"
+      %{assigned_plugin: plugin} when is_binary(plugin) -> "Assigned to #{plugin}"
       %{enabled: false} -> "Disabled"
       _ -> "Available"
     end

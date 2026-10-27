@@ -1,34 +1,22 @@
 defmodule NervesGateSDK.APITest do
   use ExUnit.Case, async: false
-  alias NervesGateSDK.{CAN, Events, Network, RS485, Storage}
+  alias NervesGateSDK.{Events, Hardware, Network, Storage}
 
-  test "valid capabilities report errors without running gateway services" do
+  test "capabilities fail explicitly without a running gateway" do
     assert {:error, _} = NervesGateSDK.System.info()
-    assert {:error, _} = NervesGateSDK.Network.interfaces()
-
-    assert {:error, _} = NervesGateSDK.Network.claim_local("eth1", "192.168.50.2", 24)
-
-    assert {:error, _} = NervesGateSDK.Network.local_status()
-    local = make_ref()
-    assert {:error, _} = NervesGateSDK.Network.advertise_local(local)
-    assert {:error, _} = NervesGateSDK.Network.release_local(local)
-    assert {:error, _} = NervesGateSDK.Events.subscribe(:network)
-    assert {:error, _} = NervesGateSDK.Events.unsubscribe(:network)
-    assert {:error, _} = NervesGateSDK.Storage.status()
-    assert {:error, _} = NervesGateSDK.Storage.data_dir(:example)
-    assert {:error, _} = NervesGateSDK.CAN.interfaces()
-    assert {:error, _} = NervesGateSDK.CAN.subscribe("can0")
-    assert {:error, _} = NervesGateSDK.CAN.unsubscribe("can0")
-    frame = %CAN.Frame{id: 1, data: <<1>>}
-    assert {:error, _} = NervesGateSDK.CAN.send("can0", frame)
-    assert {:error, _} = NervesGateSDK.RS485.ports()
-    assert {:error, _} = NervesGateSDK.RS485.claim("rs485_1")
-    claim = make_ref()
-    assert {:error, _} = NervesGateSDK.RS485.write(claim, <<1>>)
-    assert {:error, _} = NervesGateSDK.RS485.release(claim)
+    assert {:error, _} = Network.interfaces()
+    assert {:error, _} = Network.claim_local("eth1", "192.168.50.2", 24)
+    assert {:error, _} = Network.local_status()
+    assert {:error, _} = Network.advertise_local(make_ref())
+    assert {:error, _} = Network.release_local(make_ref())
+    assert {:error, _} = Events.subscribe(:network)
+    assert {:error, _} = Events.unsubscribe(:network)
+    assert {:error, _} = Storage.status()
+    assert {:error, _} = Storage.data_dir(:example)
+    assert {:error, _} = Hardware.resources()
   end
 
-  test "invalid application input never reaches the backend" do
+  test "invalid input never reaches the firmware" do
     assert {:error, :invalid_topic} = Events.subscribe(:credentials)
     assert {:error, :invalid_local_network} = Network.claim_local("usb0", "192.168.50.2", 24)
     assert {:error, :invalid_local_network} = Network.claim_local("eth1", "192.168.50.2", 32)
@@ -36,26 +24,12 @@ defmodule NervesGateSDK.APITest do
     assert {:error, :invalid_claim} = Network.release_local(:anything)
     assert {:error, :invalid_application} = Storage.data_dir(:"../platform")
     assert {:error, :invalid_application} = Storage.data_dir("example")
-    assert {:error, :invalid_frame} = CAN.send("can0", %CAN.Frame{id: 2048, data: <<>>})
-    assert {:error, :invalid_frame} = CAN.send("can0", %CAN.Frame{id: -1, data: <<>>})
-    assert {:error, :invalid_frame} = CAN.send("can0", %CAN.Frame{id: 1, data: <<0::72>>})
-    assert {:error, :invalid_write} = RS485.write(make_ref(), <<0::32776>>)
-    assert {:error, :invalid_claim} = RS485.release(:not_a_claim)
   end
 
-  test "classic and extended CAN bounds" do
-    assert CAN.Frame.valid?(%CAN.Frame{id: 0x7FF, data: <<0::64>>})
-    assert CAN.Frame.valid?(%CAN.Frame{id: 0x1FFFFFFF, data: <<>>, extended?: true})
-    refute CAN.Frame.valid?(%CAN.Frame{id: 0x20000000, data: <<>>, extended?: true})
-    refute CAN.Frame.valid?(%CAN.Frame{id: 1, data: "", remote?: :yes})
-  end
+  test "fixed firmware bridge is optional at compile time" do
+    expected =
+      if Code.ensure_loaded?(NervesGate.SDKBackend), do: :unavailable, else: :runtime_unavailable
 
-  test "the fixed firmware entry point is optional at SDK compile time" do
-    if Code.ensure_loaded?(NervesGate.SDKBackend) do
-      # Root host checks also load firmware code, but do not start its services.
-      assert {:error, :unavailable} = NervesGateSDK.System.info()
-    else
-      assert {:error, :runtime_unavailable} = NervesGateSDK.System.info()
-    end
+    assert {:error, ^expected} = NervesGateSDK.System.info()
   end
 end
