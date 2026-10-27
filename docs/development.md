@@ -6,23 +6,29 @@ children. App developers use [ordinary app projects](app-development.md).
 
 ## Dev-device inspection from Pi
 
-The host-only executable skill `priv/skills/device_inspection.skill.exs` exposes
-`Workbench.DeviceInspection` through pi-elixir. Reload Pi resources after adding
-it. Use `identity/1`, `status/1`, `plugins/1`, `hardware/1` and `logs/2` with a node
-such as `"nerves_gate@100.120.69.127"`. It connects with the fixed development
-cookie automatically; no firmware dependency or running Workbench session is
-required. Calls are read-only and bounded. Logs default to warnings and omit
-session/credential lines and crash-state dumps. This is for trusted dev devices,
-not production authentication. Updates still use the reviewed Workbench workflow.
+`mix dev` starts a uniquely named hidden node. Its supervised `Workbench.Gateways`
+automatically connects known LAN/Tailnet/manual gateways and running owned QEMU
+gateways with `mycookie`, verifies firmware identity and tracks reconnects. It
+never boots devices or opens equipment connections. Home shows the same directory.
+
+Reload Pi resources, then use the `dev-environment` executable skill: call
+`Workbench.Skill.DevEnvironment.attach("/absolute/path/to/nerves_gate")` through
+`elixir_eval` with target `bridge`. It reads local session metadata and configures
+pi-elixir's normal runtime attachment. Use target `runtime` for
+`Workbench.DeviceInspection.devices/0`, then `identity/1`, `status/1`, `plugins/1`,
+`hardware/1` and bounded sanitized `logs/2` on an explicitly selected directory node.
+Reattach after the Workbench restarts. Inspection does not start another node or
+connection loop. Use the project target for source work, not device inspection.
 
 ## Firmware updates from Pi
 
 After explicit operator authorization, the `firmware-update` executable skill calls
-`Workbench.DeviceUpdate.update(host, firmware_path)` in the project runtime. The
-user-owned `mix dev` must be running. The helper reads plugin inventory from the
-actual image, checks saved artifact compatibility, then uses the existing reviewed
-Workbench queue for one upload and verified reboot. It checks plugin management
-and reports active/available versions afterward; it never selects or starts plugins.
+`Workbench.Jobs.review_firmware(node, firmware_path)` in the attached Workbench.
+The user-owned `mix dev` must be running. Show the completed review to the user;
+only after confirmation call `Workbench.Jobs.confirm_firmware(token, address)`.
+Review checks the exact image, saved plugin artifacts, identity, health and SSH
+trust. Confirmation consumes the review once, uploads over SSH and verifies a new
+healthy boot over distribution. It never selects or starts plugins.
 Errors or timeouts require inspection, not automatic replay. It does not build,
 bump versions, erase metadata or bypass SSH host-key verification.
 
@@ -40,8 +46,10 @@ sudo dnf install gcc make git pkgconf-pkg-config libmnl-devel libnl3-devel qemu-
 ```
 
 Install fwup from its [releases](https://github.com/fwup-home/fwup/releases). On
-macOS, use a Linux VM such as arm64 Ubuntu in OrbStack. No root privileges, KVM,
-bridges or workstation network changes are needed.
+macOS, use a Linux VM such as arm64 Ubuntu in OrbStack. QEMU management requires
+explicitly prepared private bridge/TAP hardware and `iproute2` (Fedora: `iproute`).
+QEMU itself stays unprivileged; no KVM, physical LAN bridge or VPN changes are needed.
+See [management network](qemu-management-network.md) for privileges and cleanup.
 
 `mix setup` fetches locked dependencies, tailscaled and the prebuilt QEMU
 system/toolchain, and checks these prerequisites. It neither builds firmware nor
@@ -57,8 +65,10 @@ EC100 builds additionally need the published EC100 system artifact.
 | `mix setup` | Prepare tools and artifacts |
 | `mix firmware [x86_64 \| ec100] [--env dev \| prod]` | Build assets and selected pure-BEAM plugins on the host, then firmware in an isolated process; never boots a device |
 | `mix dev [APP_DIRECTORY] [--config PATH] [--port 4000]` | Start the workbench; optionally open an app |
-| `mix dev.status`, `mix dev.stop` | Read or gracefully stop this checkout's session |
-| `mix app.new/test/package/install PATH`, `mix app.console` | [App operations](app-development.md) |
+| `mix dev.status`, `mix dev.stop` | Read (including the attachable node) or gracefully stop this checkout's session |
+| `mix dev.network setup --subnet PRIVATE/24 [--config PATH]` | Explicitly prepare private QEMU bridge/TAPs; requires approved sudo access |
+| `mix dev.network cleanup` | Remove only recorded network resources after stopping the session |
+| `mix app.new/test/package/install PATH` | [App operations](app-development.md) |
 | `mix test.qemu --only ID [--device ID]` | Run scenarios on the running bench |
 | `mix test.qemu --lifecycle start/stop/reset` | Explicit lifecycle action on that bench |
 | `mix test.qemu --ci --only ID` | Boot and clean up a separate disposable bench |
@@ -73,7 +83,7 @@ its devices, or run `--ci` benches without authorization.
 
 ## Workbench and simulator
 
-`mix dev` serves localhost:4000 and supervises a separate simulator BEAM. The
+`mix dev` serves localhost:4000 and locally supervises the simulator hardware owner. The
 default bench is `priv/simulator/simulator.exs` with two devices;
 `priv/simulator/tailnet.exs` adds [real Tailscale](tailnet-ci.md). Use
 `--config PATH` for another trusted bench file.
@@ -87,15 +97,21 @@ installation and scenario run; UI button state is only presentation. Host tools
 and guests must come from the same checkout; coordinate session replacement and
 disposable-device resets explicitly when updating incompatible firmware.
 
-The simulator owns QEMU processes, QMP sockets, disks and Ethernet relays. Each
-device has private socket networks; libslirp provides real traffic without host
-networking changes. `_build/workbench/session.lock` is held with flock until
-cleanup finishes: never delete it to bypass ownership. Session metadata and its
-private CLI socket live in that directory; simulator disks/diagnostics live under
-`_build/simulator/`. Internal session inputs are `WORKBENCH_SESSION_ID`,
-`WORKBENCH_SESSION_DIR`, `WORKBENCH_HTTP_SOCKET`, `WORKBENCH_HTTP_PORT`,
-`WORKBENCH_CI` and `WORKBENCH_SCENARIO`. `QEMU_SIM_CONFIG`/`QEMU_SIM_DIR` configure
-the actual simulator. The launcher manages these inputs; ordinary app development
+The simulator owns QEMU processes, QMP sockets, disks and Ethernet relays. The
+private socket LANs/libslirp still provide simulated Internet and fault injection.
+Protected eth2 uses the explicitly prepared bridge/TAP network. Firmware receives
+its static management IP through the virtual disk serial, starts its own ordinary
+EPMD and exposes services directly at that IP. Only USB recovery uses a host forward.
+Prepare the network before starting the session if QEMU devices are needed; physical
+inspection works without prepared QEMU networking. Network cleanup is explicit and
+never happens on application startup. `_build/workbench/session.lock` is held with flock until
+cleanup finishes: never delete it to bypass ownership. Session metadata advertises the hidden node, session identity and browser port in
+that directory; simulator disks/diagnostics live under `_build/simulator/`.
+Mix tasks attach over distribution and call ordinary functions; there is no HTTP
+control API or CLI socket. Internal session inputs are `WORKBENCH_SESSION_ID`,
+`WORKBENCH_DIR`, `WORKBENCH_HTTP_PORT`,
+`WORKBENCH_CI` and `WORKBENCH_SCENARIO`. `QEMU_SIM_CONFIG` selects the simulator configuration; diagnostics use the session's
+owned simulator directory. The launcher manages these inputs; ordinary app development
 needs none of them.
 
 Device builds and user apps run in separate, supervised OS processes. Repository
@@ -115,7 +131,8 @@ UI, CLI and CI use the explicit `Scenarios` catalogue and `Scenarios.Runner`;
 every case lives in `lib/scenarios/cases/`. Independent devices can run
 concurrently; `devices: :all` reserves the whole bench and `fresh_disk` scenarios
 own disposable state. `tailscale_auth` is opt-in. Global workbench operations have
-a separate admission owner, `Workbench.Operations`.
+a separate admission owner, `Workbench.Jobs`, which also reserves lifecycle and
+session shutdown until each job worker exits.
 
 Every case declares `requires: %{device: [...], fixture: [...]}`. Device resources
 are `:ethernet`, `:cellular`, `:can` and `:rs485`; fixture capabilities describe
@@ -131,22 +148,14 @@ Targets have `:node`, optional diagnostics `:dir` and optional
 `fixture: {:qemu, owned_handle}`. The caller must already own/reserve the
 authorized disposable target and manage cleanup. There is no configurable fixture
 module, automatic discovery, physical attachment or grant of control from a node
-name. The only supplied **control** fixture is owned QEMU. Physical read-only
-readiness uses `:ssh_management`: the workbench reads a narrow public snapshot
-over verified SSH on LAN, Tailscale or USB and invokes `hardware_readiness`.
-This capability provides no fixture controls or arbitrary RPC authority. Its
-Ethernet/4G/backup profiles verify current configuration and observations, not
-failover transitions. Snapshot topology readiness uses `Network.ready?/2` with
-observations and saved settings; `status.network.ready` is only readiness to
-confirm an active trial, not steady-state health. The opt-in `hardware_backup` case requires independent
-`:usb_management` plus `:manual_ethernet`: after explicit operator consent, the
-workbench verifies the independent USB /30 route, binds SSH to its source/interface,
-and provides a USB-bound snapshot reader; the human unplugs/restores
-Ethernet when prompted. The case verifies physical link transitions, cellular
-takeover and Ethernet preference on return, with two-minute phase deadlines.
-It never changes settings or controls a physical switch. A cancelled/failed test
-still requires the operator to restore cables. The shared management markers
-provide no device/fixture command authority.
+name. The only supplied **control** fixture is owned QEMU. Physical checks have
+their own explicit catalogue, `Scenarios.physical/0`, and run individually through
+Jobs on a verified connected gateway. Readiness uses distribution observations;
+Ethernet/4G failover and button-reboot checks are operator-attended procedures.
+Keep management independent from the link being tested. The human restores cables
+and controls the button; the Workbench sends no physical switch or reboot command.
+A failed/cancelled check is not permission to repeat an action. Connectivity and
+the `:physical` requirement do not grant fixture-control authority.
 
 Add physical checks deliberately at this admission boundary; do not send the
 whole QEMU catalogue to a discovered board. No physical procedures or hardware

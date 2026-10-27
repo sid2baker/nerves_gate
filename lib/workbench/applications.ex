@@ -119,36 +119,54 @@ defmodule Workbench.Applications do
     output
   end
 
-  def install!(path, device, report \\ fn _ -> :ok end) do
+  @doc "Install and start a development package on an owned simulated device under reservation."
+  def install!(path, target, report \\ fn _ -> :ok end) do
     output = package!(path, report, :temporary)
+    {owner, _} = Scenarios.Runner.watch(self())
+    monitor = Process.monitor(owner)
 
     try do
-      case Scenarios.Runner.install(device, output) do
-        {:ok, id} -> await_install!(id, report)
-        {:error, message} -> raise ArgumentError, message
+      case Scenarios.Runner.install(target, output) do
+        {:ok, id} ->
+          await_install!(
+            id,
+            report,
+            Scenarios.Runner.snapshot(),
+            monitor,
+            System.monotonic_time(:millisecond) + 600_000
+          )
+
+        {:error, message} ->
+          raise ArgumentError, message
       end
     after
+      Process.demonitor(monitor, [:flush])
       File.rm(output)
     end
   end
 
-  defp await_install!(id, report) do
-    run =
-      Enum.find(Scenarios.Runner.snapshot().runs, &(&1.id == id)) ||
-        raise("Install outcome unknown; inspect the device page")
+  defp await_install!(id, report, snapshot, monitor, deadline) do
+    run = Enum.find(snapshot.runs, &(&1.id == id))
+    if run, do: report.(run.phase)
 
-    report.(run.phase)
+    case run do
+      %{status: :passed} ->
+        "Application running"
 
-    case run.status do
-      :running ->
-        Process.sleep(250)
-        await_install!(id, report)
-
-      :passed ->
-        :ok
+      %{status: status} when status != :running ->
+        raise "Installation failed; inspect the device page"
 
       _ ->
-        raise "Installation failed; inspect the device page"
+        receive do
+          {:scenarios, snapshot} ->
+            await_install!(id, report, snapshot, monitor, deadline)
+
+          {:DOWN, ^monitor, :process, _, _} ->
+            raise "Install outcome unknown; inspect before retrying"
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            raise "Install deadline reached; inspect before retrying"
+        end
     end
   end
 

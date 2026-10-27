@@ -16,6 +16,7 @@ defmodule Scenarios.Runner do
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
+  def watch(pid), do: GenServer.call(__MODULE__, {:watch, pid})
   def run(device, selection \\ "all"), do: GenServer.call(__MODULE__, {:run, device, selection})
   def mode(device, mode), do: GenServer.call(__MODULE__, {:mode, device, mode})
   def manual(device, action), do: GenServer.call(__MODULE__, {:manual, device, action})
@@ -24,8 +25,10 @@ defmodule Scenarios.Runner do
     GenServer.call(__MODULE__, {:install, device, path})
   end
 
-  def console(device), do: GenServer.call(__MODULE__, {:console, device})
   def lifecycle(action), do: GenServer.call(__MODULE__, {:lifecycle, action})
+
+  def admit_job(pid, kind, subject),
+    do: GenServer.call(__MODULE__, {:admit_job, pid, kind, subject})
 
   def stop_session(id, request \\ self()),
     do: GenServer.call(__MODULE__, {:stop_session, id, request})
@@ -37,10 +40,9 @@ defmodule Scenarios.Runner do
   @impl true
   def init(_) do
     Process.flag(:trap_exit, true)
-    simulator = Application.fetch_env!(:nerves_gate_workbench, :simulator_node)
 
     view = %{
-      lifecycle: Simulator.subscribe(simulator),
+      lifecycle: Simulator.subscribe(),
       devices: %{},
       scenarios: Enum.map(Scenarios.all(), &Map.delete(&1, :module)),
       runs: [],
@@ -54,27 +56,40 @@ defmodule Scenarios.Runner do
        handles: %{},
        workers: %{},
        session_stopping: false,
-       simulator: simulator,
-       simulator_monitor: Process.monitor({Simulator, simulator})
+       job: nil,
+       watchers: %{},
+       simulator_monitor: Process.monitor(Process.whereis(Simulator))
      }}
   end
 
   @impl true
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
 
+  def handle_call({:watch, pid}, _, state) when is_pid(pid) do
+    watchers = Map.get(state, :watchers, %{})
+    watchers = Map.put_new_lazy(watchers, pid, fn -> Process.monitor(pid) end)
+    {:reply, {self(), state.view}, Map.put(state, :watchers, watchers)}
+  end
+
   def handle_call(_, _, %{session_stopping: true} = state),
     do:
       {:reply, {:error, "Simulator session is stopping; wait for mix dev.stop to finish."}, state}
 
-  def handle_call({:console, device}, _, state) do
-    with {:ok, id} <- device_id(state, device),
-         false <- state.view.blocked,
-         %{owner: :manual, manual_action: nil, blocked: false} <- state.view.devices[id] do
-      vm = state.handles[id]
-      {:reply, {:ok, %{address: vm.address, port: vm.forwards.usb}}, state}
-    else
-      {:error, _} = error -> {:reply, error, state}
-      _ -> {:reply, {:error, "Acquire idle Manual control on the device page first."}, state}
+  def handle_call({:admit_job, pid, kind, subject}, _, state) when is_pid(pid) do
+    cond do
+      Map.get(state, :job) != nil ->
+        {:reply, {:error, "Finish the current job first"}, state}
+
+      state.view.lifecycle.status in [:starting, :stopping] ->
+        {:reply, {:error, "Wait for device lifecycle completion before starting a job"}, state}
+
+      kind == "firmware" and subject == "x86_64" and
+          (state.view.lifecycle.status != :stopped or state.view.lifecycle.prepared) ->
+        {:reply, {:error, "Reset and stop simulated devices before rebuilding QEMU firmware"},
+         state}
+
+      true ->
+        {:reply, :ok, Map.put(state, :job, %{pid: pid, ref: Process.monitor(pid)})}
     end
   end
 
@@ -99,6 +114,9 @@ defmodule Scenarios.Runner do
     owner = Process.whereis(:nerves_gate_workbench_session)
 
     cond do
+      Map.get(state, :job) != nil ->
+        {:reply, {:error, "Finish the current Workbench job before stopping the session."}, state}
+
       map_size(state.workers) > 0 ->
         {:reply,
          {:error, "Finish scenario runs and release manual control before stopping the session."},
@@ -114,8 +132,7 @@ defmodule Scenarios.Runner do
         {:reply, {:error, "Session identity changed. Inspect mix dev.status."}, state}
 
       not is_pid(owner) or System.get_env("WORKBENCH_CI") == "true" ->
-        {:reply,
-         {:error, "This session cannot be stopped through the API. Use its original terminal."},
+        {:reply, {:error, "This session cannot be stopped remotely. Use its original terminal."},
          state}
 
       true ->
@@ -133,13 +150,16 @@ defmodule Scenarios.Runner do
     end
   end
 
+  def handle_call({kind, _}, _, %{job: %{}} = state) when kind in [:lifecycle, :configure],
+    do: {:reply, {:error, "Finish the current Workbench job first."}, state}
+
   def handle_call({kind, _}, _, state)
       when kind in [:lifecycle, :configure] and map_size(state.workers) > 0,
       do: {:reply, {:error, "Finish the current operations first."}, state}
 
   def handle_call({:lifecycle, action}, _, state) do
     with true <- lifecycle_allowed?(action, state.view),
-         :ok <- Simulator.lifecycle(state.simulator, action) do
+         :ok <- Simulator.lifecycle(action) do
       # Close admission immediately, before the asynchronous progress arrives.
       status = if action == "start", do: :starting, else: :stopping
       view = %{state.view | lifecycle: %{state.view.lifecycle | status: status}, devices: %{}}
@@ -159,7 +179,7 @@ defmodule Scenarios.Runner do
   end
 
   def handle_call({:configure, change}, _, state) do
-    {:reply, Simulator.configure(state.simulator, change), state}
+    {:reply, Simulator.configure(change), state}
   catch
     :exit, _ -> {:reply, {:error, "Simulator unavailable; restart mix dev."}, state}
   end
@@ -256,7 +276,7 @@ defmodule Scenarios.Runner do
 
   @impl true
   def handle_info({:simulator, %{status: :ready} = lifecycle}, state) do
-    handles = Simulator.devices(state.simulator)
+    handles = Simulator.devices()
     devices = Map.new(handles, fn {id, vm} -> {id, device_view(vm)} end)
     view = %{state.view | devices: devices}
     {:noreply, lifecycle_progress(%{state | view: view, handles: handles}, lifecycle)}
@@ -395,6 +415,9 @@ defmodule Scenarios.Runner do
     {:noreply, publish(%{state | view: view, handles: %{}})}
   end
 
+  def handle_info({:DOWN, ref, :process, pid, _reason}, %{job: %{pid: pid, ref: ref}} = state),
+    do: {:noreply, %{state | job: nil}}
+
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case state.workers[pid] do
       %{ref: ^ref} = worker ->
@@ -408,7 +431,11 @@ defmodule Scenarios.Runner do
         {:noreply, publish(%{state | view: view, workers: Map.delete(state.workers, pid)})}
 
       _ ->
-        {:noreply, state}
+        watchers = Map.get(state, :watchers, %{})
+
+        if watchers[pid] == ref,
+          do: {:noreply, Map.put(state, :watchers, Map.delete(watchers, pid))},
+          else: {:noreply, state}
     end
   end
 
@@ -700,6 +727,7 @@ defmodule Scenarios.Runner do
 
   defp publish(state) do
     Phoenix.PubSub.broadcast(NervesGate.PubSub, @topic, {:scenarios, state.view})
+    for pid <- Map.keys(Map.get(state, :watchers, %{})), do: send(pid, {:scenarios, state.view})
     state
   end
 

@@ -3,7 +3,7 @@ defmodule WorkbenchWeb.FactoryLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
   import WorkbenchWeb.Components
-  import WorkbenchWeb.WorkbenchLive, only: [command: 2]
+  import WorkbenchWeb.Live, only: [command: 2]
 
   def mount(_, _, socket), do: {:ok, assign(socket, :images, Workbench.Builds.images())}
 
@@ -11,13 +11,13 @@ defmodule WorkbenchWeb.FactoryLive do
     do: {:noreply, assign(socket, :images, Workbench.Builds.images())}
 
   def handle_event("review_factory", params, socket),
-    do: command(socket, Workbench.Operations.review_factory(params))
+    do: command(socket, Workbench.Jobs.review_factory(params))
 
   def handle_event("confirm_factory", params, socket),
     do:
       command(
         socket,
-        Workbench.Operations.confirm_factory(
+        Workbench.Jobs.confirm_factory(
           params["review_id"],
           params["confirmation"],
           params["identified"]
@@ -25,11 +25,11 @@ defmodule WorkbenchWeb.FactoryLive do
       )
 
   def render(assigns) do
-    assigns = assign(assigns, :review, factory_review(assigns.operation))
+    assigns = assign(assigns, :review, factory_review(assigns.job))
 
     ~H"""
     <main class="ui-main ui-stack bench" id="factory-page">
-      <.back_link navigate="/devices?kind=physical">Existing gateways and routine updates</.back_link>
+      <.back_link navigate="/devices">Existing gateways and routine updates</.back_link>
       <.page_header
         eyebrow="Provision · Physical EC100 · initial USB installation"
         title="Factory provisioning"
@@ -66,14 +66,14 @@ defmodule WorkbenchWeb.FactoryLive do
             id="factory-image"
             name="firmware"
             required
-            disabled={@images == [] or @operation.status == :running}
+            disabled={@images == [] or @job.status == :running}
           >
             <option :for={image <- @images} value={image.path}>
               {image.version} · {image.build}
             </option>
           </select>
           <label for="factory-backup">Full eMMC backup</label>
-          <select id="factory-backup" name="backup" disabled={@operation.status == :running}>
+          <select id="factory-backup" name="backup" disabled={@job.status == :running}>
             <option value="true">Create full backup (recommended)</option>
             <option value="false">
               Skip full backup — I accept losing the existing firmware and data
@@ -84,7 +84,7 @@ defmodule WorkbenchWeb.FactoryLive do
             this run cannot restore the previous firmware/data without one. Readbacks are always retained.
           </p>
           <label for="factory-access">USB permissions</label>
-          <select id="factory-access" name="sudo" disabled={@operation.status == :running}>
+          <select id="factory-access" name="sudo" disabled={@job.status == :running}>
             <option value="false">Direct USB access (udev permissions)</option>
             <option value="true">Noninteractive sudo (-n)</option>
           </select>
@@ -95,7 +95,7 @@ defmodule WorkbenchWeb.FactoryLive do
             A device appearing in rkdeveloptool ld does not prove read/write USB access.
           </p>
           <div class="ui-actions">
-            <.button type="submit" disabled={@images == [] or @operation.status == :running}>
+            <.button type="submit" disabled={@images == [] or @job.status == :running}>
               Load RAM transport and review
             </.button>
             <.button type="button" phx-click="refresh_images" variant="secondary">Refresh firmware list</.button>
@@ -132,17 +132,11 @@ defmodule WorkbenchWeb.FactoryLive do
           never retry automatically after an uncertain result.
         </p>
         <p>
-          After verified writes and reset, the workbench waits up to three minutes for this USB port
-          to return, then reads firmware, target and runtime from the gateway. Your workstation must
-          accept DHCP on the USB interface. A reconnect timeout does not mean flashing failed;
-          no commands are replayed and workstation networking is never changed.
+          After verified writes the board resets. It appears on the Devices page once it is on
+          your network and its node accepts the development cookie.
         </p>
-        <.notice :if={Map.get(@review, :usb_tracking, true) == false} tone="warning">
-          The USB port could not be tracked on this host. Flashing can proceed, but automatic
-          reconnection will be unavailable; use the Devices page after boot.
-        </.notice>
         <p>
-          Review expires after ten minutes and is single-use. Another operation cancels it.
+          Review expires after ten minutes and is single-use. Another job cancels it.
           After expiry or failure, re-enter MASKROM before reviewing again.
         </p>
         <form id="confirm-factory" phx-submit="confirm_factory" class="ui-stack">
@@ -153,7 +147,7 @@ defmodule WorkbenchWeb.FactoryLive do
           </label>
           <label for="factory-confirmation">Type {@review.confirmation}</label>
           <input id="factory-confirmation" name="confirmation" autocomplete="off" required />
-          <.button type="submit" variant="danger" disabled={@operation.status == :running}>
+          <.button type="submit" variant="danger" disabled={@job.status == :running}>
             {if Map.get(@review, :backup_enabled, true),
               do: "Back up, erase and provision EC100",
               else: "Erase and provision EC100 WITHOUT BACKUP"}
@@ -161,12 +155,12 @@ defmodule WorkbenchWeb.FactoryLive do
         </form>
       </.panel>
       <.panel
-        :if={@operation.kind in ["factory_review", "factory_provision"]}
-        title="3 · Progress, verification and connection"
+        :if={@job.kind in ["factory_review", "factory_provision"]}
+        title="3 · Progress and verification"
         icon="clock"
       >
-        <.operation operation={@operation} />
-        <p :if={@operation.kind == "factory_review" and @operation.status == :failed} class="ui-help">
+        <.job job={@job} />
+        <p :if={@job.kind == "factory_review" and @job.status == :failed} class="ui-help">
           This failed review's temporary files have been removed. Fix the reported cause, inspect the device and start a new review; do not copy a temporary loader command from an old run.
         </p>
       </.panel>
@@ -174,7 +168,7 @@ defmodule WorkbenchWeb.FactoryLive do
         <p>
           Use a device's Firmware tab for a non-provisioning SSH A/B update, including over USB networking.
         </p>
-        <.link navigate="/devices?kind=physical" class="ui-text-link">Choose an existing gateway</.link>
+        <.link navigate="/devices" class="ui-text-link">Choose an existing gateway</.link>
       </.panel>
     </main>
     """

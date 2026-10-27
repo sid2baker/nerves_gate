@@ -7,21 +7,14 @@ defmodule Workbench.SessionServicesTest do
     refute Process.whereis(Workbench.SessionServices)
     refute Process.whereis(WorkbenchWeb.Endpoint)
 
-    previous = Application.fetch_env(:nerves_gate_workbench, :simulator_node)
     endpoint = Application.fetch_env!(:nerves_gate_workbench, WorkbenchWeb.Endpoint)
 
     on_exit(fn ->
-      case previous do
-        {:ok, node} -> Application.put_env(:nerves_gate_workbench, :simulator_node, node)
-        :error -> Application.delete_env(:nerves_gate_workbench, :simulator_node)
-      end
-
       Application.put_env(:nerves_gate_workbench, WorkbenchWeb.Endpoint, endpoint)
     end)
 
     # The real lifecycle owner starts empty. No QEMU process or network is created.
     start_supervised!({Simulator, %{devices: %{}}})
-    Application.put_env(:nerves_gate_workbench, :simulator_node, node())
 
     Application.put_env(
       :nerves_gate_workbench,
@@ -29,14 +22,16 @@ defmodule Workbench.SessionServicesTest do
       Keyword.put(endpoint, :server, false)
     )
 
-    supervisor = start_supervised!(Workbench.SessionServices)
+    supervisor = start_supervised!({Workbench.SessionServices, poll: false})
 
-    assert {:ok, {flags, children}} = Workbench.SessionServices.init([])
+    assert {:ok, {flags, children}} = Workbench.SessionServices.init(poll: false)
     assert flags.strategy == :rest_for_one
 
     assert Enum.map(children, & &1.id) == [
              Phoenix.PubSub.Supervisor,
+             Workbench.Gateways,
              Scenarios.Runner,
+             Workbench.Jobs,
              WorkbenchWeb.Endpoint
            ]
 

@@ -5,11 +5,13 @@ defmodule Workbench.SessionServices do
   def start_link(opts \\ []), do: Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
 
   @impl true
-  def init(_) do
+  def init(opts) do
     Supervisor.init(
       [
         {Phoenix.PubSub, name: NervesGate.PubSub},
+        {Workbench.Gateways, poll: Keyword.get(opts, :poll, true)},
         Scenarios.Runner,
+        Workbench.Jobs,
         WorkbenchWeb.Endpoint
       ],
       strategy: :rest_for_one

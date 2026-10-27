@@ -78,7 +78,8 @@ storage. `mix app.new`, `app.test`, `app.package` and `app.install` refer to ord
 OTP development projects, not an app store. Build processes remain isolated from
 the workbench VM. Existing immutable output/version conflicts are errors.
 
-Reviewed physical development installs remain a separately explicit SSH operation:
+Physical development installs require review and typed-address confirmation through
+`Workbench.Jobs` on the application page. Transfer uses distribution:
 verify device identity, package hash, boot/storage identity and compatibility; confirm
 once, install stopped, then inspect state. They cannot replace firmware-owned plugins.
 Unknown outcomes are never automatically replayed. Do not use this workflow to bypass

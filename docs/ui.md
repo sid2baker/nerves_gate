@@ -105,96 +105,54 @@ not restricted to USB. QEMU reports EC100 peripherals as unavailable. The UI has
 
 | Page | Route | Purpose |
 | --- | --- | --- |
-| Home | `/` | Resume applications/runs, current operation and actionable bench problems |
-| Devices | `/devices` | Physical gateways and owned QEMU devices, with filters |
-| Physical device | `/devices/physical/:address` | Overview, read-only SSH checks, USB-only disruptive tests and reviewed device procedures |
-| Simulated device | `/devices/:id` | Read-only observations, gateway link and diagnostic fault/wiring state |
-| Develop → Applications | `/develop`, `/develop/applications`, `/develop/applications/:id` | Create/open SDK projects; QEMU install/run; reviewed physical install leaving apps stopped |
-| Develop → Firmware | `/develop/firmware` | Build, owned QEMU Start/Stop/Reset and wiring, test/debug device selection, results and action log in one workspace |
-| Firmware → Scenarios | `/develop/firmware/scenarios/:id` | Confirm runs and inspect device results; return to the firmware workspace |
-| Firmware → Manual debugging | `/develop/firmware/manual/:id` | Explicitly acquire manual control, inject reversible faults, inspect console instructions and release control |
-| Provision | `/provision` | Guided initial EC100 USB MASKROM preparation, destructive review and verification |
+| Home | `/` | Resume applications/runs, current job and bench problems |
+| Devices | `/devices` | Verified gateways and disconnected candidates with last-seen time |
+| Gateway | `/devices/:node` | Shared read-only projection, identity and gateway UI link; physical checks and reviewed firmware update |
+| Develop → Applications | `/develop/applications`, `/develop/applications/:id` | Create/open SDK projects; QEMU install/run; reviewed physical install leaving apps stopped |
+| Develop → Firmware | `/develop/firmware` | Build, owned QEMU lifecycle/wiring, results and action log |
+| Gateway → Scenarios | `/devices/:node/scenarios` | Confirm QEMU runs and inspect results |
+| Gateway → Manual debugging | `/devices/:node/manual` | Acquire owned QEMU control, inject reversible faults and release control |
+| Provision | `/provision` | Initial EC100 MASKROM provisioning with destructive review, backup and readbacks |
 
-Physical workspaces separate **Hardware tests** from **Procedures**. Use **Find
-USB gateways** to add EC100s found over an existing independent USB management
-network. Read-only hardware readiness checks explicitly select Ethernet, 4G or
-Ethernet with 4G backup and work over verified SSH on LAN, Tailscale or USB. No
-independent USB connection is required. They do not configure the selected
-profile, unlock a SIM, interrupt a link or prove failover/failback. The disruptive
-assisted failover test still fails closed without independent USB management,
-even if LAN/Tailscale works.
-The separate **assisted failover test** requires explicit cellular-data and cable
-disruption consent. A human disconnects Ethernet when prompted, while the
-workbench observes physical link loss and online 4G takeover over USB, then
-prompts restoration and verifies Ethernet preference with 4G still ready. Each
-phase has a two-minute deadline. Identity, firmware and boot must stay unchanged;
-USB loss or a changed trial fails closed. Restore all cables after failure,
-cancellation or a lost workbench connection. No automatic cable fixture exists.
+Physical pages offer the separate `Scenarios.physical/0` catalogue: readiness,
+operator-assisted Ethernet/4G failover, and physical-button reboot observation.
+Checks use distribution and run one at a time through Jobs. Keep management
+independent of the link being tested; the operator restores cables and controls
+the button. A lost connection or identity change fails the check, never authorizes
+another action. There is no automatic physical fixture or reboot command.
 
-**Procedures** links setup/restore to the native gateway Internet, remote-access
-and settings editors; the workbench never proxies configuration/PIN commands.
-Sanitized diagnostic snapshots work over verified SSH without USB and contain
-only public identity/boot and readiness
-fields, not raw logs/settings/credentials/SIM identifiers. Reports stay in the
-owning workspace for review/copying; no file is uploaded automatically.
-
-**Reboot and verify** reviews identity and the current boot over LAN/Tailscale SSH
-or explicitly selected independent USB, requires typed
-address confirmation, then arms a three-minute observation window. The operator
-uses the physical button once as instructed; there is no remote reboot command.
-A different boot ID, the same identity and firmware, validated firmware and healthy
-network state must be observed over the reviewed management connection. Remote
-management may not return; that leaves verification incomplete, never a retry. Reviews expire after ten
-minutes and are consumed once. Observation can be stopped cooperatively after a
-bounded read; it cannot undo a physical action or cancel a firmware write.
-
-**SSH update, reboot and verify** is available over LAN/Tailscale without USB and
-reuses the firmware review and typed confirmation, then checks a new boot,
-identity, version and ready state. Independent USB verification is a separate,
-stricter choice that binds SSH to the direct interface. Standard SSH updates also
-remain available with manual verification. **Factory reset**
-is a deliberate physical-button recovery checklist, not a remote erase button;
-full USB MASKROM reprovisioning has its own destructive review. See
-[firmware updates](firmware-updates.md) and [button recovery](indicators.md).
+Configuration and recovery remain in the gateway's own UI and physical-button
+interlock. Firmware updates privately snapshot the image, review identity/health,
+plugin artifacts and SSH trust, require one-use typed confirmation, upload once
+through SSH, and verify a healthy new boot over distribution. No manual-verification
+fallback is retained. See [firmware updates](firmware-updates.md) and
+[button recovery](indicators.md).
 
 The main navigation has four destinations: **Home · Develop · Devices · Provision**.
-Develop switches between application and firmware workspaces locally. Firmware keeps
-build/run/test/results together; no separate test-lab navigation is required. Older
-`/test-lab/*` links remain accepted.
+Develop switches between applications and firmware. Replaced routes are removed,
+not retained as aliases. The **Simulated · QEMU** badge comes only from the
+simulator's owned inventory, never advertisements or node names.
 
-The **Simulated · QEMU** badge comes only from the simulator's own inventory, never
-from names or advertisements. Discovery and manual additions queue one bounded,
-read-only SSH information attempt per new address. These reads share operation
-admission with builds and physical updates, and wait while work or a destructive
-review is active. Host-key verification and public-key authentication remain
-mandatory; there are no password prompts or automatic host-key acceptance. The
-directory and device workspace show progress, identity or the failure reason with
-**Retry information read**. Refreshing discovery/pages does not retry failed reads
-or re-read known identities during the workbench process lifetime. Explicit retries
-and information refreshes remain available. Successful USB observations already
-provide information and are not automatically queried over SSH.
+`Workbench.Gateways` owns discovery, connection and verified identity. All pages
+subscribe to its changes; gateway observations come directly from the device-owned
+projection stream. Discovery does not occupy the Jobs queue.
 
-Opening a page never starts devices, builds firmware or sends updates. The Devices
-page starts bounded LAN mDNS and local Tailscale-daemon discovery. Tailnet candidates
-are online peers named `nerves-gate` or `nerves-gate-*`; names are hints, not gateway
-identity. The local daemon is read through its Unix socket without changing VPN
-configuration. If unavailable, the directory still supports LAN and manual entries.
-Manual entries accept a hostname/IPv4 address (HTTP port 4000) or a root HTTP(S) URL
-with an optional port. Credentials, paths, query strings and fragments are rejected.
-An explicit URL survives discovery refreshes; other gateway names can be added
-manually. Tailnet candidates use HTTPS MagicDNS links, whose availability depends
-on the gateway's Serve configuration. Physical devices never get QEMU controls. The simulated-device page explicitly
-subscribes to that owned guest's remote **read-only** projection; it is not a
-remote gateway-command proxy.
+Opening a page never starts devices, builds firmware or sends updates. Candidate
+sources are LAN mDNS, online Tailnet `nerves-gate*` peers, manual hostnames/IPv4
+addresses and owned QEMU. URLs are not accepted. Tailnet discovery reads the local
+daemon without changing VPN configuration. Names are hints: cookie connection and
+compiled firmware identity checks establish directory membership, not control
+authority. Physical gateways never receive QEMU controls. Gateway links use HTTPS
+for Tailnet names and port 4000 otherwise.
 
 Operations belong to the backend: navigating away does not cancel them, and their
 status links back to their owning workspace from every page. Output stays alongside
 that workspace's actions, not in a global expander. Application details include
-**Install on physical device**: package snapshot and read-only verified SSH review,
+physical installation: package snapshot and read-only distribution review,
 then a ten-minute, one-use typed-address confirmation. The new app is installed
 stopped/disabled; existing installs are rejected rather than upgraded or started.
 Identity/boot/storage are rechecked, hash validation and new-app admission happen
-inside the device's Apps owner, and uncertain writes are never automatically retried.
+inside the device's Plugins owner, and uncertain writes are never automatically retried.
 Review/results stay with the application, never a firmware confirmation panel.
 QEMU installation keeps its separate owned-device reservations and install/run
 behavior. Backend admission is authoritative. See [firmware updates](firmware-updates.md)

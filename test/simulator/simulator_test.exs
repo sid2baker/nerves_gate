@@ -18,14 +18,15 @@ defmodule SimulatorTest do
     assert config.firmware_project == Path.join(dir, "firmware")
     assert config.raw.firmware == "firmware/gate.fw"
 
-    start_supervised!({Simulator, config})
+    network = Workbench.ManagementNetwork.plan!("10.203.42.0/24", [:gateway_a, :gateway_b], [])
+    start_supervised!({Simulator, Map.put(config, :management, network)})
 
-    view = Simulator.subscribe(node())
+    view = Simulator.subscribe()
     assert view.status == :stopped
 
     assert [
-             %{id: :gateway_a, address: "127.0.0.2", internet: :lan2},
-             %{id: :gateway_b, address: "127.0.0.3", internet: :lan1}
+             %{id: :gateway_a, address: "10.203.42.2", internet: :lan2},
+             %{id: :gateway_b, address: "10.203.42.3", internet: :lan1}
            ] = Enum.map(view.devices, &Map.take(&1, [:id, :address, :internet]))
   end
 end

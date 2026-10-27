@@ -67,25 +67,66 @@ defmodule Workbench.AdmissionTest do
     end
   end
 
-  test "console details require idle manual ownership and expose no credentials" do
+  test "long jobs exclude lifecycle and shutdown until their worker exits" do
+    pid =
+      spawn(fn ->
+        receive do
+          :finish -> :ok
+        end
+      end)
+
     from = {self(), make_ref()}
-    state = state()
-    assert {:reply, {:error, _}, ^state} = Runner.handle_call({:console, :a}, from, state)
-    state = put_in(state.view.devices.a.owner, :manual)
 
-    state =
-      put_in(state.handles.a, %{address: "127.0.0.2", forwards: %{usb: 22}, secret: "private"})
+    {:reply, :ok, held} =
+      Runner.handle_call({:admit_job, pid, "install", "/tmp/app"}, from, state())
 
-    assert {:reply, {:ok, %{address: "127.0.0.2", port: 22}}, ^state} =
-             Runner.handle_call({:console, :a}, from, state)
+    assert held.job.pid == pid
 
-    for state <- [
-          put_in(state.view.devices.a.blocked, true),
-          put_in(state.view.devices.a.manual_action, "release"),
-          put_in(state.view.blocked, true)
+    for request <- [
+          {:lifecycle, "stop"},
+          {:lifecycle, "reset"},
+          {:configure, :anything},
+          {:stop_session, "anything", self()},
+          {:admit_job, self(), "test", nil}
         ] do
-      assert {:reply, {:error, _}, ^state} = Runner.handle_call({:console, :a}, from, state)
+      assert {:reply, {:error, _}, ^held} = Runner.handle_call(request, from, held)
     end
+
+    ref = held.job.ref
+    send(pid, :finish)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    {:noreply, released} = Runner.handle_info({:DOWN, ref, :process, pid, :normal}, held)
+    assert released.job == nil
+  end
+
+  test "session shutdown prevents admission of a new job" do
+    state = %{state() | session_stopping: true}
+
+    assert {:reply, {:error, _}, ^state} =
+             Runner.handle_call({:admit_job, self(), "install", nil}, {self(), make_ref()}, state)
+  end
+
+  test "distributed CLI watchers receive snapshots and are removed on exit" do
+    pid =
+      spawn(fn ->
+        receive do
+          :finish -> :ok
+        end
+      end)
+
+    from = {self(), make_ref()}
+    initial = state()
+    assert {:reply, {owner, view}, watched} = Runner.handle_call({:watch, pid}, from, initial)
+    assert owner == self()
+    assert view == initial.view
+    ref = watched.watchers[pid]
+    send(pid, :finish)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+
+    assert {:noreply, released} =
+             Runner.handle_info({:DOWN, ref, :process, pid, :normal}, watched)
+
+    assert released.watchers == %{}
   end
 
   defp state do

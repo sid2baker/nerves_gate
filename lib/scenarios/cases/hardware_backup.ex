@@ -1,36 +1,32 @@
 defmodule Scenarios.Cases.HardwareBackup do
-  @moduledoc "Operator-assisted cable-loss and failback, observed over independent USB management."
+  @moduledoc "Operator-assisted Ethernet loss → 4G takeover → Ethernet return on a physical gateway."
   import ExUnit.Assertions
+  alias Scenarios.Cases.HardwareReadiness
 
   def spec do
     %{
-      name: "USB-observed Ethernet / 4G takeover and return (operator-assisted)",
-      requires: %{device: [], fixture: [:usb_management, :manual_ethernet]},
+      name: "Ethernet / 4G takeover and return (operator unplugs cables; uses cellular data)",
+      requires: %{device: [], fixture: [:physical]},
       opt_in: true
     }
   end
 
-  def run(context) do
-    Scenarios.Cases.HardwareReadiness.run(%{snapshot: context.snapshot, profile: "backup"})
+  def run(%{device: device}) do
+    report = Process.get(:scenario_report, fn _ -> :ok end)
+    before = HardwareReadiness.check!(HardwareReadiness.observe(device))
+    assert before["internet"]["mode"] == "backup", "Configure Ethernet with 4G backup first"
 
-    assert context.snapshot["internet"]["ethernet_link"] == true,
+    assert before["internet"]["ethernet_link"] == true,
            "A linked Ethernet Internet port must be observed before disconnecting a cable"
 
-    context.report.(
-      "Disconnect Ethernet Internet uplink cables now, never USB or power. Waiting up to two minutes for physical link loss and online 4G takeover. Cellular data may be used."
+    report.(
+      "Disconnect the Ethernet Internet uplink cables now (never power). Waiting two minutes for link loss and online 4G."
     )
 
-    wait_for!(context, :takeover, deadline())
-
-    context.report.(
-      "4G takeover observed with Ethernet link down. Restore every Ethernet cable now. Waiting up to two minutes for Ethernet preference and online connectivity."
-    )
-
-    wait_for!(context, :return, deadline())
-
-    context.report.(
-      "Ethernet link and preference restored; 4G remains ready. USB management and device boot were unchanged."
-    )
+    wait_for!(device, before, :takeover, deadline())
+    report.("4G takeover observed. Restore every Ethernet cable now. Waiting two minutes.")
+    wait_for!(device, before, :return, deadline())
+    report.("Ethernet link and preference restored; 4G remains ready.")
   end
 
   @doc false
@@ -49,21 +45,23 @@ defmodule Scenarios.Cases.HardwareBackup do
       internet["health"] == "online"
   end
 
-  defp wait_for!(context, phase, until) do
+  defp wait_for!(device, before, phase, until) do
     assert System.monotonic_time(:millisecond) < until,
-           "Timed out waiting for #{phase}. Restore Ethernet cables; no configuration was changed or recovery action retried."
+           "Timed out waiting for #{phase}. Restore Ethernet cables; nothing was changed or retried."
 
-    snapshot = context.read_snapshot.()
+    snapshot = HardwareReadiness.observe(device)
 
-    assert snapshot["ready"] == true and snapshot["pending"] == false and
-             snapshot["recovering"] == false and snapshot["internet"]["mode"] == "backup",
-           "Network configuration/trial changed during the test. Restore Ethernet and inspect the gateway."
+    assert Map.take(snapshot, ~w(serial boot_id version)) ==
+             Map.take(before, ~w(serial boot_id version)),
+           "Gateway rebooted or changed during the test. Restore Ethernet and inspect it."
 
-    if phase?(phase, snapshot) do
-      :ok
-    else
+    assert snapshot["pending"] == false and snapshot["recovering"] == false and
+             snapshot["internet"]["mode"] == "backup",
+           "Network configuration changed during the test. Restore Ethernet and inspect the gateway."
+
+    unless phase?(phase, snapshot) do
       Process.sleep(1_000)
-      wait_for!(context, phase, until)
+      wait_for!(device, before, phase, until)
     end
   end
 

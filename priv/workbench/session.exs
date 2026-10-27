@@ -1,7 +1,6 @@
-# The UI owns only the simulator BEAM's MuonTrap wrapper. QMP sockets, disks and
-# Ethernet relays stay inside that BEAM, never in scenario/UI worker processes.
+# The single Workbench session BEAM, started by Workbench.Launcher under flock and
+# MuonTrap. It owns the simulator, gateway directory, runner, jobs and UI.
 Workbench.configure()
-# Scenario failures inside libraries must still show the scenario's own frames.
 :erlang.system_flag(:backtrace_depth, 32)
 alias Scenarios.Runner
 alias Workbench.Session
@@ -10,97 +9,34 @@ Process.register(self(), :nerves_gate_workbench_session)
 # mix run --no-start keeps Mix's Logger, so apply the configured level (test: warning).
 if level = Application.get_env(:logger, :level), do: Logger.configure(level: level)
 
+dir = System.fetch_env!("WORKBENCH_DIR")
+ci? = System.get_env("WORKBENCH_CI") == "true"
+port = String.to_integer(System.fetch_env!("WORKBENCH_HTTP_PORT"))
+
 {:ok, _} = Application.ensure_all_started(:muontrap)
+node = Workbench.Distribution.start!(dir)
 {:ok, supervisor} = Supervisor.start_link([], strategy: :one_for_one, max_restarts: 0)
 
-epmd =
-  Path.join([to_string(:code.root_dir()), "erts-#{:erlang.system_info(:version)}", "bin/epmd"])
+simulator_dir =
+  Path.expand("_build/simulator/#{System.system_time(:millisecond)}-#{System.pid()}")
 
-{:ok, epmd_daemon} =
-  Supervisor.start_child(
-    supervisor,
-    Supervisor.child_spec(
-      {MuonTrap.Daemon,
-       [
-         epmd,
-         ["-address", "127.0.0.1", "-port", System.fetch_env!("ERL_EPMD_PORT")],
-         []
-       ]},
-      id: :epmd
-    )
-  )
+File.mkdir_p!(simulator_dir)
+File.chmod!(simulator_dir, 0o700)
+IO.puts("Simulator diagnostics: #{simulator_dir}")
+config = Simulator.config(System.fetch_env!("QEMU_SIM_CONFIG"), simulator_dir)
+{:ok, _} = Supervisor.start_child(supervisor, {Simulator, config})
 
-# Do not let Node.start race the supervised EPMD and auto-start an unowned one.
-# A names request uses ERL_EPMD_PORT; a bare connection makes EPMD log a partial packet.
-true =
-  Enum.reduce_while(1..100, false, fn _, _ ->
-    unless Process.alive?(epmd_daemon), do: raise("Session EPMD exited during startup")
-
-    case :erl_epmd.names({127, 0, 0, 1}) do
-      {:ok, _names} ->
-        {:halt, true}
-
-      {:error, _} ->
-        Process.sleep(50)
-        {:cont, false}
-    end
-  end)
-
-# The UI initiates connections and needs no inbound distribution listener.
-{:ok, _} = Node.start(:"workbench@127.0.0.1", name_domain: :longnames, dist_listen: false)
-Node.set_cookie(:mycookie)
-dir = Path.expand("_build/simulator/#{System.system_time(:millisecond)}-#{System.pid()}")
-File.mkdir_p!(dir)
-File.chmod!(dir, 0o700)
-IO.puts("Simulator diagnostics: #{dir}")
-
-{:ok, simulator} =
-  Supervisor.start_child(
-    supervisor,
-    Supervisor.child_spec(
-      {MuonTrap.Daemon,
-       [
-         "mix",
-         ["do", "compile", "+", "run", "--no-start", Simulator.script("simulator_node")],
-         [env: [{"QEMU_SIM_DIR", dir}], stderr_to_stdout: true, logger_fun: &IO.puts/1]
-       ]},
-      id: :simulator,
-      restart: :temporary
-    )
-  )
-
-connected =
-  Enum.reduce_while(1..120, false, fn _, _ ->
-    unless Process.alive?(simulator), do: raise("Simulator exited during startup")
-
-    ready =
-      Node.connect(:"simulator@127.0.0.1") and
-        is_pid(:erpc.call(:"simulator@127.0.0.1", Process, :whereis, [Simulator], 5000))
-
-    if ready do
-      {:halt, true}
-    else
-      Process.sleep(500)
-      {:cont, false}
-    end
-  end)
-
-true = connected
-
-Application.put_env(:nerves_gate_workbench, :simulator_node, :"simulator@127.0.0.1")
-
-# The workstation serves only the workbench. Each device serves its gateway UI.
-port = String.to_integer(System.fetch_env!("WORKBENCH_HTTP_PORT"))
 site = Application.fetch_env!(:nerves_gate_workbench, WorkbenchWeb.Endpoint)
 
-site =
+Application.put_env(
+  :nerves_gate_workbench,
+  WorkbenchWeb.Endpoint,
   Keyword.merge(site,
     server: true,
     url: [host: "localhost", port: port],
-    http: [ip: {:local, System.fetch_env!("WORKBENCH_HTTP_SOCKET")}, port: 0]
+    http: [ip: {127, 0, 0, 1}, port: port]
   )
-
-Application.put_env(:nerves_gate_workbench, WorkbenchWeb.Endpoint, site)
+)
 
 views = fn timeout, message ->
   Stream.repeatedly(fn ->
@@ -114,23 +50,17 @@ end
 
 result =
   try do
-    # The simulator's own dependencies (such as Req), then the workstation UI.
     {:ok, _} = Application.ensure_all_started(:nerves_gate_workbench)
-    if path = System.get_env("NERVES_GATE_APP"), do: {:ok, _} = Workbench.Applications.open(path)
+
+    if (path = System.get_env("NERVES_GATE_APP", "")) != "",
+      do: {:ok, _} = Workbench.Applications.open(path)
+
     {:ok, _} = Supervisor.start_child(supervisor, Workbench.SessionServices)
+    {:ok, {_, listening_port}} = WorkbenchWeb.Endpoint.server_info(:http)
+    System.put_env("WORKBENCH_HTTP_PORT", Integer.to_string(listening_port))
+    Session.advertise!(dir, listening_port, node)
 
-    if System.get_env("WORKBENCH_CI") != "true" do
-      [spec] =
-        Bandit.PhoenixAdapter.child_specs(WorkbenchWeb.Endpoint,
-          otp_app: :nerves_gate_workbench,
-          code_reloader: site[:code_reloader],
-          http: [ip: {127, 0, 0, 1}, port: port]
-        )
-
-      {:ok, _} = Supervisor.start_child(supervisor, spec)
-    end
-
-    if System.get_env("WORKBENCH_CI") == "true" do
+    if ci? do
       Runner.subscribe()
       :ok = Runner.lifecycle("start")
 
@@ -149,21 +79,15 @@ result =
       views.(600_000, "QEMU runner stopped reporting")
       |> Enum.reduce_while(MapSet.new(), fn view, printed ->
         run = Enum.find(view.runs, &(&1.id == id))
-
-        printed =
-          Enum.reduce(run.rows, printed, fn row, printed ->
-            if row.status in [:passed, :failed, :skipped] and not MapSet.member?(printed, row.id) do
-              IO.puts("#{row.status}: #{row.id} (#{row.milliseconds} ms) #{row.detail}")
-              MapSet.put(printed, row.id)
-            else
-              printed
-            end
-          end)
-
+        printed = Workbench.CLI.print_rows(run, printed)
         if run.status == :running, do: {:cont, printed}, else: {:halt, run.status}
       end)
     else
-      Session.await_stop(System.fetch_env!("WORKBENCH_SESSION_DIR"))
+      IO.puts(
+        "Workbench ready: http://localhost:#{port} · node #{node} (hidden, cookie mycookie)"
+      )
+
+      Session.await_stop()
     end
   after
     if Process.whereis(NervesGate.PubSub), do: Runner.unsubscribe()

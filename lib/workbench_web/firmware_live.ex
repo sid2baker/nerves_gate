@@ -11,7 +11,7 @@ defmodule WorkbenchWeb.FirmwareLive do
   end
 
   def handle_event("build", %{"target" => target}, socket),
-    do: command(socket, Workbench.Operations.start("firmware", target, nil))
+    do: command(socket, Workbench.Jobs.build(target))
 
   def handle_event("prepare_reset", _, socket),
     do: {:noreply, assign(socket, confirm_reset: true, error: nil)}
@@ -20,7 +20,7 @@ defmodule WorkbenchWeb.FirmwareLive do
     do: {:noreply, assign(socket, :confirm_reset, false)}
 
   def handle_event("lifecycle", %{"action" => action}, socket),
-    do: command(socket, Workbench.Operations.lifecycle(action))
+    do: command(socket, Runner.lifecycle(action))
 
   def handle_event("wiring", %{"device" => id, "internet" => internet}, socket),
     do: command(socket, Runner.configure({:put, id, internet}))
@@ -36,14 +36,7 @@ defmodule WorkbenchWeb.FirmwareLive do
   defp command(socket, {:error, message}), do: {:noreply, assign(socket, :error, message)}
 
   defp command(socket, :ok),
-    do:
-      {:noreply,
-       assign(socket,
-         bench: Runner.snapshot(),
-         operation: Workbench.Operations.snapshot(),
-         error: nil,
-         confirm_reset: false
-       )}
+    do: {:noreply, assign(socket, bench: Runner.snapshot(), error: nil, confirm_reset: false)}
 
   def render(assigns) do
     ~H"""
@@ -66,14 +59,14 @@ defmodule WorkbenchWeb.FirmwareLive do
             <option value="x86_64">x86_64 · simulated QEMU</option>
             <option value="ec100">EC100 · physical hardware</option>
           </select>
-          <.button type="submit" disabled={@operation.status == :running}>Build firmware</.button>
+          <.button type="submit" disabled={@job.status == :running}>Build firmware</.button>
         </form>
         <p class="ui-help">
           Building never installs or flashes firmware. QEMU builds require stopped/reset simulated devices. Backend admission is authoritative.
         </p>
-        <.operation :if={@operation.kind == "firmware"} operation={@operation} />
+        <.job :if={@job.kind == "firmware"} job={@job} />
         <p class="ui-help">
-          Physical EC100 image ready? <.link navigate="/devices?kind=physical" class="ui-text-link">Choose a device to review an SSH update</.link>, or <.link
+          Physical EC100 image ready? <.link navigate="/devices" class="ui-text-link">Choose a gateway to review an update</.link>, or <.link
             navigate="/provision"
             class="ui-text-link"
           >provision new hardware over USB</.link>.
@@ -101,7 +94,7 @@ defmodule WorkbenchWeb.FirmwareLive do
             loading={@bench.lifecycle.status == :starting}
             disabled={
               @bench.lifecycle.status != :stopped || @bench.lifecycle.reset_required || @bench.blocked ||
-                @operation.status == :running
+                @job.status == :running
             }
           >Start devices</.button>
           <.button
@@ -111,7 +104,7 @@ defmodule WorkbenchWeb.FirmwareLive do
             phx-value-action="stop"
             loading={@bench.lifecycle.status == :stopping}
             disabled={
-              @operation.status == :running || @bench.lifecycle.status not in [:starting, :ready] ||
+              @job.status == :running || @bench.lifecycle.status not in [:starting, :ready] ||
                 (@bench.lifecycle.status == :ready && (@bench.blocked || held?(@bench)))
             }
           >Stop</.button>
@@ -120,7 +113,7 @@ defmodule WorkbenchWeb.FirmwareLive do
             variant="secondary"
             phx-click="prepare_reset"
             disabled={
-              @operation.status == :running ||
+              @job.status == :running ||
                 @bench.lifecycle.status not in [:stopped, :ready, :failed] || held?(@bench)
             }
           >Reset…</.button>
@@ -145,12 +138,13 @@ defmodule WorkbenchWeb.FirmwareLive do
           >
             <div>
               <h3>
-                <.link navigate={"/devices/#{config.id}"} class="ui-text-link">{config.id}</.link>
+                <.link :if={config.node} navigate={"/devices/#{config.node}"} class="ui-text-link">{config.id}</.link>
+                <span :if={!config.node}>{config.id} · run mix dev.network setup</span>
               </h3><p class="ui-help">{config.node}</p>
             </div>
             <div class="ui-setting-value">
-              <.device_kind kind={:simulated} />
-              <span>{Workbench.Devices.simulated_status(@bench, config.id)}</span>
+              <.device_kind source={:qemu} />
+              <span>{simulated_status(@bench, config.id)}</span>
               <span class="ui-help" id={"wiring-label-#{config.id}"}>Internet</span>
               <div class="ui-segmented" role="group" aria-labelledby={"wiring-label-#{config.id}"}>
                 <.button
@@ -202,17 +196,17 @@ defmodule WorkbenchWeb.FirmwareLive do
           Owned simulated devices only. Start the bench above before running scenarios or acquiring manual control.
         </p>
         <.setting_row :for={config <- @bench.lifecycle.devices} label={to_string(config.id)}>
-          <.device_kind kind={:simulated} />
-          <span>{Workbench.Devices.simulated_status(@bench, config.id)}</span>
-          <.link navigate={"/develop/firmware/scenarios/#{config.id}"} class="ui-text-link">Run scenarios</.link>
-          <.link navigate={"/develop/firmware/manual/#{config.id}"} class="ui-text-link">Debug device</.link>
+          <.device_kind source={:qemu} />
+          <span>{simulated_status(@bench, config.id)}</span>
+          <.link :if={config.node} navigate={"/devices/#{config.node}/scenarios"} class="ui-text-link">Run scenarios</.link>
+          <.link :if={config.node} navigate={"/devices/#{config.node}/manual"} class="ui-text-link">Debug device</.link>
         </.setting_row>
       </.panel>
       <.panel title="Runs and results" icon="check" id="lab-runs">
         <p :if={@bench.runs == []} class="ui-help">No runs yet. Choose a device above.</p>
         <div :for={run <- @bench.runs} class="ui-setting-row" id={"run-#{run.id}"}>
           <div>
-            <.link navigate={"/develop/firmware/scenarios/#{run.device}"} class="ui-text-link">Run #{run.id} · {run.selection} · {run.device}</.link>
+            <strong>Run #{run.id} · {run.selection} · {run.device}</strong>
             <p class="ui-help">{run.phase} · Holds {Enum.join(run.devices, ", ")}</p>
             <ul class="bench-scenarios">
               <li :for={row <- run.rows}>

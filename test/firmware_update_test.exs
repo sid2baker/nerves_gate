@@ -1,5 +1,5 @@
 defmodule Workbench.FirmwareUpdateTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   alias Workbench.FirmwareUpdate
 
   test "image and authenticated device must have matching product and platform" do
@@ -58,92 +58,102 @@ defmodule Workbench.FirmwareUpdateTest do
   end
 
   test "SSH never accepts unknown host keys or prompts for passwords" do
-    options = Workbench.DeviceSSH.options("ec100.example.ts.net")
+    options = Workbench.SSH.verified("ec100.example.ts.net")
     assert options[:silently_accept_hosts] == false
-    assert options[:save_accepted_host] == false
-    assert options[:user_interaction] == false
     assert options[:auth_methods] == ~c"publickey"
     assert options[:user] == ~c"nerves_gate"
     assert {Workbench.SSHHostKeys, callback} = options[:key_cb]
     assert callback[:host] == ~c"ec100.example.ts.net"
     assert callback[:agent] == not is_nil(System.get_env("SSH_AUTH_SOCK"))
-    refute Keyword.has_key?(options, :preferred_algorithms)
-
-    for invalid <- [0, -1, 65536, "22;command", "bad"] do
-      assert_raise ArgumentError, fn -> FirmwareUpdate.port!(invalid) end
-    end
-
-    assert FirmwareUpdate.port!("22") == 22
   end
 
-  test "device reads invoke only current compiled maintenance APIs" do
-    assert Workbench.DeviceSSH.identity_command() ==
-             "Base.encode64(Jason.encode!(NervesGate.System.maintenance_info()))"
+  test "a new healthy boot of the same serial with the reviewed build verifies the update" do
+    before = %{"serial" => "s", "boot_id" => "1", "version" => "0.1", "source_revision" => "old"}
+    plan = %{before: before, public: %{version: "0.2", source_revision: "new"}}
 
-    assert Workbench.DeviceSSH.hardware_command() ==
-             "Base.encode64(Jason.encode!(NervesGate.System.hardware_info()))"
+    healthy = %{
+      "serial" => "s",
+      "boot_id" => "2",
+      "version" => "0.2",
+      "source_revision" => "new",
+      "available" => true,
+      "firmware_validated" => true,
+      "pending" => false,
+      "recovering" => false
+    }
+
+    assert FirmwareUpdate.verified?(plan, healthy)
+    refute FirmwareUpdate.verified?(plan, %{healthy | "boot_id" => "1"})
+    refute FirmwareUpdate.verified?(plan, %{healthy | "serial" => "other"})
+    refute FirmwareUpdate.verified?(plan, %{healthy | "version" => "0.1"})
+    refute FirmwareUpdate.verified?(plan, %{healthy | "firmware_validated" => false})
+    assert FirmwareUpdate.same_boot?(before, Map.put(before, "available", false))
+    refute FirmwareUpdate.same_boot?(before, %{before | "boot_id" => "2"})
   end
 
-  test "connection failures explain common causes without exposing arbitrary server errors" do
-    assert Workbench.DeviceSSH.connection_error(:timeout) =~ "timed out"
-    assert Workbench.DeviceSSH.connection_error(:econnrefused) =~ "refused"
-    assert Workbench.DeviceSSH.connection_error(:nxdomain) =~ "could not be resolved"
-    assert Workbench.DeviceSSH.connection_error(~c"Service not available") =~ "authentication"
-    refute Workbench.DeviceSSH.connection_error({:server, "private error"}) =~ "private error"
+  test "changed plugin artifacts under an existing version are conflicts" do
+    saved = %{"modbus" => %{artifacts: %{"0.2.1" => %{sha256: "a"}}}}
+    same = %{"modbus" => %{artifacts: %{"0.2.1" => %{sha256: "a"}, "0.2.2" => %{sha256: "b"}}}}
+    changed = %{"modbus" => %{artifacts: %{"0.2.1" => %{sha256: "c"}}}}
+    assert FirmwareUpdate.conflicts(saved, same) == []
+    assert FirmwareUpdate.conflicts(saved, changed) == [{"modbus", "0.2.1"}]
+    assert FirmwareUpdate.conflicts(%{}, changed) == []
   end
 
   @tag :tmp_dir
-  test "review projection excludes private snapshot state and stale reviews are cleaned", %{
-    tmp_dir: dir
-  } do
+  test "review projection excludes private plan state; stale confirmations and expiry clean up",
+       %{
+         tmp_dir: dir
+       } do
     snapshot_dir = Path.join(dir, "owned-review")
     File.mkdir!(snapshot_dir)
     snapshot = Path.join(snapshot_dir, "image.fw")
     File.write!(snapshot, "owned snapshot")
-    public = %{token: "review", address: "ec100.example.ts.net"}
+    public = %{kind: :firmware, token: "review", address: "ec100.example.ts.net"}
 
     plan = %{
       owner: Workbench.FirmwareUpdate,
       public: public,
       dir: snapshot_dir,
       snapshot: snapshot,
-      device: %{private: "not projected"},
+      before: %{"private" => "not projected"},
       expires: System.monotonic_time(:millisecond) + 60_000
     }
 
-    {:ok, idle} = Workbench.Operations.init(nil)
+    start_supervised!({Phoenix.PubSub, name: NervesGate.PubSub})
+    {:ok, idle} = Workbench.Jobs.init(nil)
     ref = make_ref()
 
     assert {:noreply, ready} =
-             Workbench.Operations.handle_info({ref, {:review, plan}}, %{idle | task: %{ref: ref}})
+             Workbench.Jobs.handle_info({ref, {:review, plan}}, %{idle | task: %{ref: ref}})
 
     assert ready.view.review == public
     refute inspect(ready.view) =~ "not projected"
     refute inspect(ready.view) =~ snapshot
 
     assert {:reply, {:error, _}, ^ready} =
-             Workbench.Operations.handle_call(
-               {:confirm_firmware, "stale", public.address},
-               {self(), make_ref()},
+             Workbench.Jobs.handle_call(
+               {:confirm, :firmware, "stale", [public.address]},
+               nil,
                ready
              )
 
+    assert {:reply, {:error, _}, ^ready} =
+             Workbench.Jobs.handle_call({:confirm, :factory, "review", ["x", "true"]}, nil, ready)
+
     assert File.exists?(snapshot)
-
-    assert {:noreply, expired} =
-             Workbench.Operations.handle_info({:expire_review, "review"}, ready)
-
+    assert {:noreply, expired} = Workbench.Jobs.handle_info({:expire, "review"}, ready)
     assert expired.review == nil
     refute File.exists?(snapshot_dir)
   end
 
   test "an update cannot be confirmed without a prepared review" do
-    {:ok, state} = Workbench.Operations.init(nil)
+    {:ok, state} = Workbench.Jobs.init(nil)
 
     assert {:reply, {:error, _}, ^state} =
-             Workbench.Operations.handle_call(
-               {:confirm_firmware, "guessed", "ec100.example.ts.net"},
-               {self(), make_ref()},
+             Workbench.Jobs.handle_call(
+               {:confirm, :firmware, "guessed", ["ec100.example.ts.net"]},
+               nil,
                state
              )
   end

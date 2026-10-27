@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Test.Qemu do
   use Mix.Task
-  @shortdoc "Run real QEMU scenarios on the owned bench"
+  @shortdoc "Run QEMU scenarios on the running mix dev session, or a disposable --ci bench"
   @requirements ["app.config"]
-  def run(args), do: Workbench.QemuCLI.run(args)
+  def run(args), do: Workbench.CLI.test_qemu(args)
 end

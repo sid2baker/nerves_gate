@@ -2,11 +2,10 @@ defmodule Scenarios.Cases.MultiDevice do
   @moduledoc false
   import ExUnit.Assertions
   import Scenarios.Device
-  alias Simulator.SSH
 
   def spec,
     do: %{
-      name: "independent devices: USB bootstrap, disks, faults and power",
+      name: "independent devices: USB recovery, disks, faults and power",
       devices: :all,
       requires: %{device: [], fixture: [:qemu]}
     }
@@ -23,25 +22,20 @@ defmodule Scenarios.Cases.MultiDevice do
     for vm <- [first, second] do
       assert Simulator.observe(vm).ready
 
-      assert {:ok, %{active: "b", next: "b"}} =
+      assert {:ok, %{active: "a", next: "a"}} =
                Scenarios.Device.rpc(vm, Nerves.Runtime.FwupOps, :status, [])
 
       assert %{type: VintageNetDirect} =
                Scenarios.Device.rpc(vm, VintageNet, :get_configuration, ["usb0"])
 
       assert {:ok, connection} =
-               SSH.connect(vm, vm.forwards.usb,
+               ssh(vm, :usb,
                  user: ~c"root",
                  password: ~c"nerves_gate",
                  auth_methods: ~c"password"
                )
 
-      try do
-        assert SSH.request(connection, "Node.self()") == vm.node
-        assert SSH.request(connection, "NervesGate.System.info().target") == "x86_64"
-      after
-        :ssh.close(connection)
-      end
+      :ok = :ssh.close(connection)
     end
 
     original = Simulator.observe(first).config
@@ -51,18 +45,8 @@ defmodule Scenarios.Cases.MultiDevice do
     other_settings = Scenarios.Device.status(second).network.desired
     {_key, line, fingerprint} = ssh_key()
 
-    assert {:ok, connection} =
-             SSH.connect(first, first.forwards.usb,
-               user: ~c"root",
-               password: ~c"nerves_gate",
-               auth_methods: ~c"password"
-             )
-
-    try do
-      assert :ok = SSH.provision(connection, %{ssh_keys: [line], network: settings("eth0")})
-    after
-      :ssh.close(connection)
-    end
+    assert :ok = Scenarios.Device.rpc(first, NervesGate.SSH, :add_key, [line])
+    save(first, settings("eth0"))
 
     try do
       assert not has_key?(second, fingerprint)

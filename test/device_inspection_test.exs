@@ -1,12 +1,14 @@
 defmodule Workbench.DeviceInspectionTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   alias Workbench.DeviceInspection
   alias Workbench.DeviceInspection.Logs
 
-  test "local target does not start distribution" do
+  test "inspection only uses the Workbench directory and never starts distribution" do
     before = Node.alive?()
-    assert {:ok, node} = DeviceInspection.connect(Node.self())
-    assert node == Node.self()
+    start_supervised!({Phoenix.PubSub, name: NervesGate.PubSub})
+    start_supervised!({Workbench.Gateways, poll: false})
+    assert [] = DeviceInspection.devices()
+    assert {:error, :not_connected} = DeviceInspection.identity("unknown@127.0.0.1")
     assert Node.alive?() == before
   end
 
@@ -60,10 +62,6 @@ defmodule Workbench.DeviceInspectionTest do
   end
 
   test "invalid requests do not attempt a connection" do
-    assert {:error, :invalid_node} = DeviceInspection.connect("not-a-node")
-    assert {:error, :invalid_node} = DeviceInspection.connect(123)
-    assert {:error, :invalid_node} = DeviceInspection.connect(String.duplicate("x", 256))
-
     for opts <- [[limit: 0], [limit: 101], [level: :invalid]] do
       assert {:error, :invalid_log_options} = DeviceInspection.logs("not-a-node", opts)
     end

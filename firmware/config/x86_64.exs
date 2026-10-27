@@ -14,15 +14,5 @@ config :nerves_gate, :board, %{
   indicators_adapter: nil
 }
 
-# The QEMU system exposes usb0 before Erlang starts, so USB is configured exactly
-# as on EC100. eth2 is the bench's private management link (distribution, HTTP,
-# SSH forwards); it is separate from eth0/eth1 and LAN trials cannot remove it.
-config :vintage_net,
-  config: [
-    {"usb0", %{type: VintageNetDirect}},
-    {"eth2",
-     %{
-       type: VintageNetEthernet,
-       ipv4: %{method: :static, address: "192.168.77.2", prefix_length: 24}
-     }}
-  ]
+# runtime.exs configures USB recovery and eth2's actual management IP from the
+# virtual disk serial. eth2 is separate from eth0/eth1 and cannot be a trial port.

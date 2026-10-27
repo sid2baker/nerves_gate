@@ -51,11 +51,16 @@ jobs:
           restore-keys: simulator-downloads-${{ runner.os }}-
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
+      - name: Prepare isolated management hardware
+        run: mise exec -- mix dev.network setup --subnet 10.203.42.0/24
       - name: Two-device simulator scenarios
         run: |
           mkdir -p _build/simulator
           set -o pipefail
           mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci 2>&1 | tee _build/simulator/suite.log
+      - name: Remove recorded management hardware
+        if: always()
+        run: mise exec -- mix dev.network cleanup
       - name: Retain diagnostics (never VM disks)
         if: always()
         uses: actions/upload-artifact@v7
@@ -86,6 +91,8 @@ jobs:
           qemu: 'true'
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
+      - name: Prepare isolated management hardware
+        run: mise exec -- mix dev.network setup --subnet 10.203.42.0/24 --config priv/simulator/tailnet.exs
       - name: Authenticate three QEMU guests and verify peer traffic
         env:
           TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
@@ -93,3 +100,6 @@ jobs:
           TS_TAGS: tag:ci
         # Never tee stdout or upload daemon logs, identity disks or credentials.
         run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci --only tailscale_auth --config priv/simulator/tailnet.exs
+      - name: Remove recorded management hardware
+        if: always()
+        run: mise exec -- mix dev.network cleanup

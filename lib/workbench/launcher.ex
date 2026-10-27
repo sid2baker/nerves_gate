@@ -1,23 +1,36 @@
 defmodule Workbench.Launcher do
-  @moduledoc false
-  alias Workbench.Session
+  @moduledoc """
+  `mix dev` and disposable `--ci` benches: flock → MuonTrap → one session BEAM
+  running `priv/workbench/session.exs`. The OS wrapper owns the lock and child
+  cleanup even if the session BEAM aborts.
+  """
 
   def run(args) do
     options = options!(args)
     Simulator.Prerequisites.check!()
-    Workbench.configure()
+    ci? = options[:ci] || false
+    port = options[:port] || if(ci?, do: 0, else: 4000)
 
     dir =
-      Path.expand(
-        if options[:ci], do: "_build/workbench-ci-#{System.pid()}", else: "_build/workbench"
-      )
+      Path.expand(if ci?, do: "_build/workbench-ci-#{System.pid()}", else: "_build/workbench")
 
     File.mkdir_p!(dir)
     File.chmod!(dir, 0o700)
-
-    # Execute flock before MuonTrap so the OS wrapper owns the lock throughout
-    # child cleanup, even when this BEAM aborts. Never unlink the lock file.
+    unless ci?, do: check_port!(port)
     flock = System.find_executable("flock") || Mix.raise("Install flock (util-linux)")
+
+    env = [
+      {"MIX_TARGET", "host"},
+      {"MIX_ENV", if(ci?, do: "test", else: "dev")},
+      {"WORKBENCH_DIR", dir},
+      {"WORKBENCH_HTTP_PORT", Integer.to_string(port)},
+      {"WORKBENCH_CI", to_string(ci?)},
+      {"WORKBENCH_SCENARIO", options[:only] || "all"},
+      {"QEMU_SIM_CONFIG", config_path!(options, dir)},
+      {"NERVES_GATE_APP", options[:app] || ""},
+      {"ERL_EPMD_PORT", false},
+      {"NERVES_GATE_DEVICE_NODE", false}
+    ]
 
     port =
       Port.open({:spawn_executable, flock}, [
@@ -34,69 +47,37 @@ defmodule Workbench.Launcher do
           "--capture-output",
           "--capture-stderr",
           "--",
-          "mix",
+          System.find_executable("mix"),
           "run",
           "--no-start",
-          Workbench.script("host"),
-          dir | args
+          Workbench.script("session")
         ],
-        env: [{~c"MIX_TARGET", ~c"host"}, {~c"MIX_ENV", Atom.to_charlist(Mix.env())}]
+        env: Enum.map(env, fn {key, value} -> {~c"#{key}", value && ~c"#{value}"} end)
       ])
 
     status =
       try do
-        session_output(port)
+        output(port)
       after
         if Port.info(port), do: Port.close(port)
       end
 
     case status do
       0 -> :ok
-      75 -> Mix.raise(Session.conflict_message())
-      _ -> Mix.raise("QEMU session failed (exit #{status})")
+      75 -> Mix.raise(Workbench.Session.conflict_message())
+      _ -> Mix.raise("Workbench session failed (exit #{status})")
     end
   end
 
-  defp session_output(port) do
+  defp output(port) do
     receive do
       {^port, {:data, data}} ->
         IO.binwrite(data)
         MuonTrap.Port.report_bytes_handled(port, byte_size(data))
-        session_output(port)
+        output(port)
 
       {^port, {:exit_status, status}} ->
         status
-    end
-  end
-
-  # Entered only by the owned workbench host script, under flock and MuonTrap.
-  def session(dir, args) do
-    options = options!(args)
-    ci? = options[:ci] || false
-    port = options[:port] || 4000
-    socket = Path.join(dir, "http.sock")
-    config = config_path!(options, dir)
-    session_id = Session.prepare(dir, port)
-    System.put_env("WORKBENCH_SESSION_ID", session_id)
-    System.put_env("WORKBENCH_SESSION_DIR", dir)
-    unless ci?, do: check_port!(port)
-    File.rm(socket)
-    {:ok, _} = Application.ensure_all_started(:muontrap)
-
-    try do
-      IO.puts("Starting the simulator site with an empty simulator...")
-
-      status =
-        if ci? do
-          run_session(true, socket, options[:only] || "all", port, config)
-        else
-          serve(port, socket, config)
-        end
-
-      if status != 0, do: Mix.raise("QEMU session failed (exit #{status})")
-    after
-      Session.phase(dir, :stopping)
-      File.rm(socket)
     end
   end
 
@@ -115,13 +96,11 @@ defmodule Workbench.Launcher do
     case applications do
       [] -> options
       [path] -> Keyword.put(options, :app, Workbench.Applications.project!(path).path)
-      _ -> raise ArgumentError, "Usage: mix dev [APP_DIRECTORY] [--port PORT]"
+      _ -> Mix.raise("Usage: mix dev [APP_DIRECTORY] [--port PORT]")
     end
   end
 
   defp config_path!(options, dir) do
-    if options[:app], do: System.put_env("NERVES_GATE_APP", options[:app])
-
     cond do
       options[:config] ->
         Path.expand(options[:config])
@@ -149,83 +128,7 @@ defmodule Workbench.Launcher do
     end
   end
 
-  defp serve(port, socket, config) do
-    {:ok, _} = Application.ensure_all_started(:req)
-    task = Task.async(fn -> run_session(false, socket, "all", port, config) end)
-
-    try do
-      await_http(task, socket, port, System.monotonic_time(:millisecond) + 600_000)
-      IO.puts("Simulator site ready: http://localhost:#{port}")
-      Task.await(task, :infinity)
-    after
-      Task.shutdown(task, :brutal_kill)
-    end
-  end
-
-  defp await_http(task, socket, port, deadline) do
-    case Task.yield(task, 100) do
-      {:ok, status} -> Mix.raise("QEMU exited before HTTP was ready (exit #{status})")
-      nil -> :ok
-    end
-
-    options = [
-      retry: false,
-      redirect: false,
-      connect_options: [timeout: 200],
-      receive_timeout: 500
-    ]
-
-    with {:ok, %{status: 200}} <-
-           Req.get("http://localhost/api/state", [unix_socket: socket] ++ options),
-         {:ok, %{status: 200}} <- Req.get("http://127.0.0.1:#{port}/api/state", options) do
-      :ok
-    else
-      _ ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          Mix.raise("Timed out waiting for QEMU HTTP readiness")
-        end
-
-        await_http(task, socket, port, deadline)
-    end
-  end
-
-  defp run_session(ci?, socket, selection, port, config) do
-    # erl reads ERL_EPMD_PORT into -epmd_port at VM startup, not at Node.start.
-    # Reserve a candidate here; the child checks it again before QEMU binds it.
-    {:ok, reservation} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
-    {:ok, epmd_port} = :inet.port(reservation)
-    :gen_tcp.close(reservation)
-
-    # Nerves initialization needs argv before mix run consumes it.
-    {_, status} =
-      MuonTrap.cmd(
-        "mix",
-        ["do", "compile", "+", "run", "--no-start", Workbench.script("session")],
-        env: [
-          {"MIX_TARGET", "host"},
-          {"MIX_ENV",
-           if ci? do
-             "test"
-           else
-             "dev"
-           end},
-          {"ERL_EPMD_PORT", Integer.to_string(epmd_port)},
-          {"QEMU_SIM_CONFIG", config},
-          {"NERVES_GATE_DEVICE_NODE", nil},
-          {"WORKBENCH_HTTP_SOCKET", socket},
-          {"WORKBENCH_HTTP_PORT", Integer.to_string(port)},
-          {"WORKBENCH_CI", to_string(ci?)},
-          {"WORKBENCH_SCENARIO", selection}
-        ],
-        into: IO.stream(),
-        stderr_to_stdout: true
-      )
-
-    status
-  end
-
   defp check_port!(port) do
-    # Closed connections in TIME_WAIT are not a running server.
     case :gen_tcp.listen(port, ip: {127, 0, 0, 1}, reuseaddr: true) do
       {:ok, socket} ->
         :gen_tcp.close(socket)

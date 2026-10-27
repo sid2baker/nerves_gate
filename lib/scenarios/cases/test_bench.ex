@@ -9,8 +9,6 @@ defmodule Scenarios.Cases.TestBench do
 
   alias Workbench.TailnetAuth
 
-  alias Workbench.Session, as: DevSession
-
   alias Scenarios.Qemu, as: Qemu
 
   # Holding every device proves that a run excludes other runs and manual control.
@@ -23,7 +21,6 @@ defmodule Scenarios.Cases.TestBench do
 
   def run(%{device: vm, devices: devices}) do
     assert_configuration(vm)
-    assert_session_tools(vm)
     assert_tailnet_tools()
     assert {:error, _} = Runner.stop_session(System.get_env("WORKBENCH_SESSION_ID"))
     assert_shutdown_admission()
@@ -45,11 +42,9 @@ defmodule Scenarios.Cases.TestBench do
     assert Enum.map(before.connections.ports, & &1.name) |> Enum.sort() == ["eth0", "eth1"]
     assert Scenarios.Qemu.topology(vm) == Simulator.Network.baseline()
     assert Simulator.observe(vm).ready
-    simulator = Application.fetch_env!(:nerves_gate_workbench, :simulator_node)
-    assert node(vm.owner) == simulator
-    refute node(vm.owner) == node()
+    assert node(vm.owner) == node()
     {:monitors, monitors} = Process.info(Process.whereis(Runner), :monitors)
-    assert {:process, {Simulator, simulator}} in monitors
+    assert {:process, Process.whereis(Simulator)} in monitors
     config = Qemu.network(vm)
 
     for patch <- [
@@ -68,7 +63,6 @@ defmodule Scenarios.Cases.TestBench do
       assert Qemu.network(vm) == config
     end
 
-    assert_bench_controls(vm)
     owner = self()
     report = Process.get(:qemu_fault)
     topology = Process.get(:qemu_topology)
@@ -106,57 +100,6 @@ defmodule Scenarios.Cases.TestBench do
     assert Enum.count_until(events, 101) <= 100
     ids = Enum.map(events, & &1.id)
     assert ids == Enum.sort(Enum.uniq(ids))
-  end
-
-  @doc false
-
-  def assert_session_tools(vm) do
-    dir = Path.join(vm.dir, "session-tooling")
-    File.mkdir_p!(dir)
-    id = DevSession.prepare(dir, 4_321)
-    # Metadata and a leftover socket path must never be mistaken for a live lock.
-    File.write!(Path.join(dir, "http.sock"), "stale")
-    assert %{status: :stopped} = DevSession.status(dir)
-    assert :ok = DevSession.stop(dir)
-    lock = Path.join(dir, "session.lock")
-
-    port =
-      Port.open({:spawn_executable, System.find_executable("flock")}, [
-        :binary,
-        :exit_status,
-        args: ["--nonblock", "--no-fork", lock, System.find_executable("cat")]
-      ])
-
-    try do
-      Port.command(port, "locked\n")
-      assert_receive {^port, {:data, "locked\n"}}, 5_000
-      assert DevSession.locked?(dir)
-      assert %{status: :starting, id: ^id, url: "http://localhost:4321"} = DevSession.status(dir)
-      DevSession.phase(dir, :running)
-      assert %{status: :unresponsive} = info = DevSession.status(dir)
-      refute DevSession.describe(info) =~ id
-      assert {:error, _} = DevSession.stop(dir)
-      assert DevSession.locked?(dir)
-      metadata = Path.join(dir, "session.json")
-      saved = File.read!(metadata)
-      File.write!(metadata, "not JSON")
-      assert %{status: :unresponsive, id: nil} = DevSession.status(dir)
-      assert {:error, _} = DevSession.stop(dir)
-      assert DevSession.locked?(dir)
-      File.write!(metadata, saved)
-      DevSession.phase(dir, :stopping)
-      assert %{status: :stopping} = DevSession.status(dir)
-      task = Task.async(fn -> DevSession.stop(dir) end)
-      assert Task.yield(task, 100) == nil
-      Port.close(port)
-      assert Task.await(task, 5_000) == :ok
-      assert File.exists?(lock)
-      assert %{status: :stopped} = DevSession.status(dir)
-      assert_response_handoff(dir)
-    after
-      if Port.info(port), do: Port.close(port)
-      File.rm_rf!(dir)
-    end
   end
 
   @doc false
@@ -203,29 +146,6 @@ defmodule Scenarios.Cases.TestBench do
     end
   end
 
-  defp assert_response_handoff(dir) do
-    request =
-      spawn(fn ->
-        receive do
-          :done -> :ok
-        after
-          5_000 -> :ok
-        end
-      end)
-
-    task = Task.async(fn -> DevSession.await_stop(dir) end)
-
-    try do
-      send(task.pid, {:stop_session, request})
-      assert Task.yield(task, 100) == nil
-      send(request, :done)
-      assert Task.await(task, 5_000) == :stopped
-    after
-      send(request, :done)
-      Task.shutdown(task, :brutal_kill)
-    end
-  end
-
   # Exercise configuration persistence without starting another simulator or VM.
   @doc false
 
@@ -244,8 +164,8 @@ defmodule Scenarios.Cases.TestBench do
 
       assert Simulator.config(path, dir).devices.second.network.internet == :lan2
 
-      assert Enum.map(state.view.devices, & &1.node) ==
-               [:"nerves_gate@127.0.0.2", :"nerves_gate@127.0.0.3"]
+      # New device IDs need explicit network preparation; no loopback aliases.
+      assert Enum.map(state.view.devices, & &1.node) == [nil, nil]
 
       preserved = %{state | prepared: true}
       reject_configuration(preserved, {:put, "third", "lan1"})
@@ -283,7 +203,6 @@ defmodule Scenarios.Cases.TestBench do
     action(pid, "connect_lan2")
     assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :internet}
     assert device(vm).faults["lan1"]
-    assert_bench_controls(vm)
 
     for action <- ~w(lan1_down lan2_down latency_on latency_on internet_loss internet_down),
         do: action(pid, action)
@@ -319,39 +238,5 @@ defmodule Scenarios.Cases.TestBench do
     assert status.network.desired == before.network.desired
     assert status.remote.auth_state == before.remote.auth_state
     assert status.remote.ipv4 == before.remote.ipv4
-  end
-
-  alias NervesGate.ProjectionServer
-
-  defp assert_bench_controls(vm) do
-    bench = put_in(Scenarios.Runner.snapshot(), [:devices, vm.id, :owner], :manual)
-
-    id = Atom.to_string(vm.id)
-
-    page =
-      %{
-        __changed__: nil,
-        projection: NervesGate.ProjectionServer.snapshot({ProjectionServer, vm.node}).status,
-        id: id,
-        tab: "tests",
-        error: nil,
-        confirm_run: nil
-      }
-      |> Map.merge(WorkbenchWeb.DeviceLive.bench_assigns(bench, id))
-      |> WorkbenchWeb.DeviceLive.render()
-      |> Phoenix.HTML.Safe.to_iodata()
-      |> IO.iodata_to_binary()
-      |> Floki.parse_document!()
-
-    for id <- ~w(connect_lan1 connect_lan2 connect_off lan1_down lan2_down) do
-      assert [_] = Floki.find(page, "#manual-#{id}")
-    end
-
-    for {port, network} <- bench.devices[vm.id].topology do
-      text = page |> Floki.find("#bench-#{port}-network") |> Floki.text()
-
-      assert text ==
-               if(network == :internet, do: "Internet router", else: "Isolated equipment network")
-    end
   end
 end

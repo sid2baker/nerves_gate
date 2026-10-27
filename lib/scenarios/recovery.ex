@@ -242,7 +242,7 @@ defmodule Scenarios.Recovery do
     })
   end
 
-  # A fresh, bounded request on the private management forward. No body is logged,
+  # A fresh, bounded request to the guest's private management IP. No body is logged,
   # even on failure: error pages can contain private state. Never follow redirects.
   def http_ready?(vm) do
     case Req.get(Qemu.ui_url(vm) <> "/",

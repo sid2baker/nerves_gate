@@ -1,7 +1,7 @@
 defmodule Simulator.Device do
   @moduledoc false
   use GenServer
-  alias Simulator.{Network, Qemu, SSH}
+  alias Simulator.{Network, Qemu}
 
   def start_link(config), do: GenServer.start_link(__MODULE__, config)
   def handle(pid), do: GenServer.call(pid, :handle, 480_000)
@@ -15,7 +15,7 @@ defmodule Simulator.Device do
     {:ok, network} = Supervisor.start_child(supervisor, {Network, config.dir})
     {:ok, _, initial_network} = Network.configure(network, Map.get(config, :network, %{}))
     network_monitor = Process.monitor(network)
-    usb = usb(config.serial)
+    usb = Map.put(usb(config.serial), :port, recovery_port())
 
     vm =
       Map.merge(config, %{
@@ -25,7 +25,6 @@ defmodule Simulator.Device do
         initial_network: initial_network,
         usb: usb,
         options: [],
-        forwards: forward_ports(config.address),
         owner: self(),
         daemon_monitor: nil,
         boot_worker: nil,
@@ -145,64 +144,43 @@ defmodule Simulator.Device do
 
   defp boot(vm, :boot) do
     report(vm, "Booting #{if vm.existing_disk, do: "preserved", else: "factory"} disk")
-    if vm.existing_disk, do: Qemu.boot(vm), else: vm |> Qemu.image() |> Qemu.boot() |> bootstrap()
+    if vm.existing_disk, do: Qemu.boot(vm), else: vm |> Qemu.image() |> Qemu.boot() |> provision()
   end
 
-  defp boot(vm, {:fresh, options}), do: vm |> Qemu.fresh(options) |> bootstrap()
+  defp boot(vm, {:fresh, options}), do: vm |> Qemu.fresh(options) |> provision()
 
   defp public_handle(vm),
-    do: Map.take(vm, [:id, :node, :address, :forwards, :usb, :owner, :dir, :firmware])
+    do: Map.take(vm, [:id, :node, :address, :management_host, :usb, :owner, :dir, :firmware])
 
   defp monitor(vm), do: %{vm | daemon_monitor: Process.monitor(vm.daemon)}
 
-  defp bootstrap(vm) do
-    report(vm, "Factory boot ready; applying current firmware over USB SSH")
-    connection = connect(vm)
-    before = :erpc.call(vm.node, Nerves.Runtime.FwupOps, :status, [], 5000)
-    {:ok, %{active: active}} = before
-    next = if active == "a", do: "b", else: "a"
+  # The disk image already holds the current firmware; configure it over distribution.
+  defp provision(vm) do
+    config = Map.get(vm, :provision, %{})
+    report(vm, "Booted; provisioning")
 
-    try do
-      :ok = SSH.upload(connection, vm.firmware)
-    after
-      :ssh.close(connection)
-    end
+    for key <- Map.get(config, :ssh_keys, []),
+        do: :ok = :erpc.call(vm.node, NervesGate.SSH, :add_key, [key], 10_000)
 
-    Qemu.poll(vm, "current firmware boot", 180_000, fn ->
-      match?(
-        {:ok, %{active: ^next, next: ^next}},
-        :rpc.call(vm.node, Nerves.Runtime.FwupOps, :status, [], 2000)
-      )
-    end)
-
-    Qemu.await_boot(vm)
-    report(vm, "Current firmware booted; provisioning")
-    connection = connect(vm)
-
-    try do
-      :ok = SSH.provision(connection, Map.get(vm, :provision, %{}))
-    after
-      :ssh.close(connection)
+    if settings = config[:network] do
+      await_action(vm, "network.propose")
+      {:ok, trial} = :erpc.call(vm.node, NervesGate.Network, :propose, [settings], 10_000)
+      await_action(vm, "network.confirm")
+      :ok = :erpc.call(vm.node, NervesGate.Network, :confirm, [trial], 10_000)
     end
 
     vm
   end
 
-  defp report(%{progress: {owner, token}, id: id}, phase),
-    do: send(owner, {:device_phase, token, id, phase})
-
-  defp connect(vm) do
-    Qemu.poll(vm, "USB recovery SSH", 90_000, fn ->
-      case SSH.connect(vm, vm.forwards.usb,
-             user: ~c"root",
-             password: ~c"nerves_gate",
-             auth_methods: ~c"password"
-           ) do
-        {:ok, connection} -> connection
-        {:error, _} -> nil
-      end
+  defp await_action(vm, action) do
+    Qemu.poll(vm, action, 30_000, fn ->
+      status = Qemu.status(vm)
+      status && status.actions[action].enabled
     end)
   end
+
+  defp report(%{progress: {owner, token}, id: id}, phase),
+    do: send(owner, {:device_phase, token, id, phase})
 
   defp usb(serial) do
     {a, b, c, _} = subnet = OneDHCPD.IPCalculator.default_subnet("usb0", serial)
@@ -214,31 +192,11 @@ defmodule Simulator.Device do
     }
   end
 
-  # The gateway UI forward listens on 127.0.0.1, which VM hosts such as OrbStack
-  # forward to the workstation. The others need the device's own address.
-  defp forward_ports(address) do
-    {:ok, ip} = :inet.parse_address(String.to_charlist(address))
-    epmd = System.fetch_env!("ERL_EPMD_PORT") |> String.to_integer()
-
-    sockets =
-      for {name, ip, port} <- [
-            {:epmd, ip, epmd},
-            {:distribution, ip, 9100},
-            {:http, {127, 0, 0, 1}, 0},
-            {:ssh, ip, 0},
-            {:usb, ip, 0}
-          ] do
-        {:ok, socket} = :gen_tcp.listen(port, ip: ip, reuseaddr: true)
-        {name, socket}
-      end
-
-    try do
-      Map.new(sockets, fn {name, socket} ->
-        {:ok, port} = :inet.port(socket)
-        {name, port}
-      end)
-    after
-      for {_, socket} <- sockets, do: :gen_tcp.close(socket)
-    end
+  # Only USB recovery has a loopback forward; normal services use the guest IP.
+  defp recovery_port do
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port} = :inet.port(socket)
+    :gen_tcp.close(socket)
+    port
   end
 end

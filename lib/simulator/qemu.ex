@@ -1,6 +1,6 @@
 defmodule Simulator.Qemu do
   @moduledoc false
-  alias Simulator.{Network, SSH}
+  alias Simulator.Network
 
   def image(vm) do
     {_, 0} =
@@ -52,7 +52,7 @@ defmodule Simulator.Qemu do
         "-device",
         "virtio-blk-pci,id=sd-card,drive=sd,werror=report,rerror=report"
       ] ++
-        Network.arguments(vm.dir, vm.address, vm.forwards, vm.usb) ++
+        Network.arguments(vm.dir, "127.0.0.1", vm.usb.port, vm.usb, vm.management) ++
         [
           "-object",
           "filter-buffer,id=lan1-stall,netdev=lan1,queue=tx,interval=3600000000,status=#{stall}"
@@ -115,15 +115,14 @@ defmodule Simulator.Qemu do
   end
 
   # Locate a failed boot without trusting the path that failed. Distribution
-  # crosses libslirp forwards and the management relay; USB SSH does not.
+  # uses the direct management bridge; the console log is the independent record.
   # Never record packet contents, process state, mailboxes, cookies or keys.
   defp boot_diagnostics(vm) do
     report = %{
       status_errors: Process.get(:qemu_status_errors, %{}),
       connected?: vm.node in Node.list(:connected),
       relay: vm.network |> Network.snapshot() |> Map.take([:connected, :ready, :stats]),
-      epmd_forward: epmd_names(vm),
-      guest_over_usb_ssh: guest_facts(vm)
+      epmd: epmd_names(vm)
     }
 
     File.write(
@@ -135,11 +134,11 @@ defmodule Simulator.Qemu do
       File.write(Path.join(vm.dir, "boot.log"), Exception.format(kind, reason))
   end
 
-  # EPMD NAMES_REQ through the host forward. The reply lists node names/ports only.
+  # EPMD NAMES_REQ to the actual guest. The reply lists node names/ports only.
   defp epmd_names(vm) do
     {:ok, ip} = :inet.parse_address(String.to_charlist(vm.address))
 
-    case :gen_tcp.connect(ip, vm.forwards.epmd, [:binary, active: false], 2000) do
+    case :gen_tcp.connect(ip, 4369, [:binary, active: false], 2000) do
       {:ok, socket} ->
         try do
           :ok = :gen_tcp.send(socket, <<1::16, ?n>>)
@@ -159,41 +158,6 @@ defmodule Simulator.Qemu do
       {:error, :closed} -> {:ok, data}
       other -> {:incomplete, other, data}
     end
-  end
-
-  @guest_facts """
-  %{
-    node: Node.self(),
-    epmd: :erl_epmd.names(),
-    eth2: Map.new(~w(lower_up connection addresses), &{&1, VintageNet.get(["interface", "eth2", &1])}),
-    status_ms: (fn ->
-      started = System.monotonic_time(:millisecond)
-      result = try do NervesGate.status() && :ok catch kind, _ -> kind end
-      {result, System.monotonic_time(:millisecond) - started}
-    end).(),
-    domains: for(name <- [NervesGate.Network, NervesGate.Remote, NervesGate.Indicators, NervesGate.Hardware, NervesGate.Storage, NervesGate.Plugins], do: {name, (pid = Process.whereis(name)) && Process.info(pid, [:status, :current_function, :message_queue_len])})
-  }
-  """
-
-  defp guest_facts(vm) do
-    case SSH.connect(vm, vm.forwards.usb,
-           user: ~c"root",
-           password: ~c"nerves_gate",
-           auth_methods: ~c"password"
-         ) do
-      {:ok, connection} ->
-        try do
-          # A string: the host must not create atoms from guest replies.
-          SSH.request(connection, "inspect(#{@guest_facts}, limit: :infinity)")
-        after
-          :ssh.close(connection)
-        end
-
-      error ->
-        error
-    end
-  catch
-    kind, reason -> {kind, Exception.format_banner(kind, reason)}
   end
 
   def status(vm) do

@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.App.Install do
   use Mix.Task
-  @shortdoc "Install an application on an owned simulated device"
+  @shortdoc "Install an application on a running simulated device"
   @requirements ["app.config"]
-  def run(args), do: Workbench.AppCLI.run(:install, args)
+  def run(args), do: Workbench.CLI.app(:install, args)
 end

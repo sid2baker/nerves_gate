@@ -46,7 +46,6 @@ defmodule Workbench.FactoryProvisioning do
 
       run = runner(sudo, report)
       location = device!(run.(["ld"]), "Maskrom")
-      usb_path = Workbench.FactoryConnection.usb_path(location)
       report.("Loading temporary USB transport into RAM only; no eMMC writes")
       run.(["db", loader!(dir, hashes["ec100-maskrom-loader.bin"])])
       sectors = probe!(run, location, 10)
@@ -69,12 +68,10 @@ defmodule Workbench.FactoryProvisioning do
           available_space: available,
           backup: output,
           backup_enabled: backup?,
-          usb_tracking: not is_nil(usb_path),
           sudo: sudo
         },
         dir: dir,
         snapshot: snapshot,
-        usb_path: usb_path,
         hashes: hashes,
         sectors: sectors,
         expires: System.monotonic_time(:millisecond) + @ttl
@@ -90,11 +87,6 @@ defmodule Workbench.FactoryProvisioning do
     Application.get_env(:nerves_gate_workbench, :backup_directory) ||
       Path.join(to_string(:filename.basedir(:user_data, ~c"nerves_gate")), "ec100-backups")
   end
-
-  def review_message,
-    do: "Factory review complete. Transport loaded into RAM only; no eMMC writes."
-
-  def expiry_message, do: "Factory review expired; re-enter MASKROM before reviewing again"
 
   def confirmation!(plan, token, text, identified) do
     cond do

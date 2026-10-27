@@ -15,17 +15,17 @@ defmodule Scenarios.Cases.FrontendAssets do
 
     # Independent probes: development error pages may close a keep-alive
     # connection after sending their response. Never retry to conceal failures.
+    port = String.to_integer(System.fetch_env!("WORKBENCH_HTTP_PORT"))
+
     host =
       Req.new(
-        base_url: "http://localhost",
-        unix_socket: System.fetch_env!("WORKBENCH_HTTP_SOCKET"),
+        base_url: "http://127.0.0.1:#{port}",
         headers: [connection: "close"],
         retry: false
       )
 
-    port = String.to_integer(System.fetch_env!("WORKBENCH_HTTP_PORT"))
-    assert %URI{scheme: "http", host: "localhost", port: ^port} = URI.parse(Site.url())
-    assert Site.config(:http)[:ip] == {:local, System.fetch_env!("WORKBENCH_HTTP_SOCKET")}
+    assert {:ok, {{127, 0, 0, 1}, ^port}} = Site.server_info(:http)
+    assert Site.config(:http)[:ip] == {127, 0, 0, 1}
     # Gateway HTTP services belong to devices, not the workbench.
     assert Process.whereis(NervesGateWeb.Endpoint) == nil
 
@@ -125,7 +125,7 @@ defmodule Scenarios.Cases.FrontendAssets do
     assert [_] = Floki.find(overview, "#workbench-overview")
     assert [] = Floki.find(overview, "form")
     assert [_] = Floki.find(overview, "nav[aria-label='Workbench navigation']")
-    simulator = Req.get!(client, url: "/simulator").body |> Floki.parse_document!()
+    simulator = Req.get!(client, url: "/develop/firmware").body |> Floki.parse_document!()
     assert [_] = Floki.find(simulator, "#simulator-lifecycle")
     assert [_] = Floki.find(simulator, "#add-device")
     directory = Req.get!(client, url: "/devices").body |> Floki.parse_document!()
@@ -133,20 +133,20 @@ defmodule Scenarios.Cases.FrontendAssets do
     assert [_] =
              Floki.find(
                directory,
-               "#device-directory tr[data-device-kind=simulated] a[href='/devices/#{vm.id}']"
+               "#gateways a[href='/devices/#{vm.node}']"
              )
 
     assert [] = Floki.find(overview, "#internet-editor")
     assert Req.get!(client, url: "/network").status == 404
 
-    device = Req.get!(client, url: "/devices/#{vm.id}").body |> Floki.parse_document!()
+    device = Req.get!(client, url: "/devices/#{vm.node}").body |> Floki.parse_document!()
     assert [_] = Floki.find(device, "#device-summary")
     assert [] = Floki.find(device, "#test-results")
-    tests = Req.get!(client, url: "/devices/#{vm.id}?tab=tests").body |> Floki.parse_document!()
+    tests = Req.get!(client, url: "/devices/#{vm.node}/scenarios").body |> Floki.parse_document!()
     assert [_] = Floki.find(tests, "#test-results")
 
-    assert Floki.attribute(device, "#device-ui-link", "href") ==
-             [Qemu.ui_url(vm)]
+    assert Floki.attribute(device, "#gateway-ui-link", "href") ==
+             [Qemu.ui_url(vm) <> "/"]
   end
 
   defp assert_assets(client) do

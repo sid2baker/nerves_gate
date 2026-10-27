@@ -4,6 +4,9 @@
 
 ### Breaking changes
 
+- Workbench is one attachable hidden development node with a verified gateway directory and shared projection-driven pages for physical and simulated gateways. Disconnected gateways retain their last-seen time. Pi and Mix clients use distribution; the internal HTTP control API, split physical pages, `mix app.console`, separate simulator BEAM and private EPMD namespace are removed.
+- QEMU management uses explicitly prepared bridge/TAP hardware and firmware-owned EPMD at the guest IP. Run `mix dev.network setup --subnet <private-/24>` before QEMU use and explicit cleanup afterward. Existing disposable disks with loopback-index serials require an authorized reset; physical devices are not migrated.
+
 - Renamed the physical inventory domain to `NervesGate.Hardware` and its adapter configuration to `hardware_adapter`, with no old-name aliases.
 
 - Hardware now exposes exclusive plugin assignments, not built-in capture/Modbus diagnostics. Removed bus diagnostic commands and SDK CAN/RS485 transport proxies; plugins own direct supervised I/O. Assignment and enablement changes require checked stop of both affected plugins and leave them stopped.
@@ -36,14 +39,14 @@
 - Hardware shows Internet and application interfaces, bus presence and exclusive assigned plugin identity. Remote access groups Tailscale with explicitly revealed developer runtime credentials; application storage lives under Settings. Replaced equipment/distribution/storage URLs are removed, not retained as aliases.
 - Application-enabled isolated Ethernet can be claimed with transient addressing and explicitly advertised through the existing tailnet. Journaled route ownership, owner-exit cleanup and blocked unknown outcomes prevent unowned route adoption or premature address removal.
 - Firmware-selected Tailnet subnet-router plugin, stopped on first discovery and never automatically configured or sharing-enabled.
-- Reviewed physical application installation over verified SSH: private package snapshot, typed one-use device confirmation, device-side hash/app/version/storage checks, and verified stopped/disabled state. Existing apps are rejected, never silently upgraded or started.
-- Physical read-only hardware readiness/diagnostics and operator-assisted Ethernet/cellular failover with independent USB management. Reboot/reset retain physical-button authority, with bounded identity/new-boot/health observations.
+- Reviewed physical application installation over distribution: private package snapshot, typed one-use device confirmation, device-side hash/app/version/storage checks, and verified stopped/disabled state. Existing apps are rejected, never silently upgraded or started.
+- Physical readiness and operator-assisted Ethernet/cellular failover scenarios over distribution. Reboot/reset retain physical-button authority, with bounded identity/new-boot/health observations.
 - Public firmware identity includes the source commit separately from its semantic version; source-archive builds require `SOURCE_REVISION`.
 
 - Developer workbench factory provisioning for EC100 over USB MASKROM, with a
   reviewed image, a full eMMC backup by default (skipping it needs a stronger
   confirmation), explicit physical-board/erase confirmation, verified readbacks
-  before reset and a read-only USB reconnection check afterwards.
+  before reset. Healthy boot is checked separately through the verified gateway directory.
 - EC100 4G support for the Quectel EG800AK-GL using CDC-ECM, an operator APN and
   the existing Internet-source and Ethernet-backup settings, the network's default
   APN unless overridden, and SIM PIN commissioning with an optional SIM-bound saved
@@ -54,14 +57,13 @@
 - The developer workbench creates/opens applications and offers explicit test, package, simulator install and EC100/QEMU firmware-build actions.
 - Physical firmware updates use verified-host SSH public-key authentication, image/device compatibility review, SHA-256 and a single-use typed confirmation before upload and reboot. No initial provisioning or disk formatting is performed.
 - Local mDNS discovery lists advertised Nerves Gate gateways without subnet scans or VPN changes. Known IPv4 addresses can be added manually. New firmware advertises public device metadata; discovery is not authentication.
-- `mix app.console` prints the SSH command only while an owned simulated device has idle Manual control.
 - Generated apps demonstrate pure decisions over SDK observations and ordinary host unit tests. Generated Elixir files are formatted.
 - Prerequisite errors include Linux installation guidance and the macOS Linux-VM route.
 
 ### Fixed
 
 - Hardware-resource queries skip unassigned and disabled ports instead of crashing plugin management when opening the Modbus RTU configuration.
-- Physical SSH responses ignore stale notifications from earlier channels on the same connection; only the active channel can complete or reject an operation.
+- Physical firmware uploads use verified SSH; identity, health and plugin-artifact checks use distribution before upload and new-boot verification.
 
 - Manual device entries accept DNS names, including Tailscale names, as well as IPv4 addresses.
 - Workstation commands select the host even when the shell carries a device Mix target; firmware commands retain their selected target.

@@ -5,49 +5,48 @@ defmodule Workbench.Skill.FirmwareUpdate do
     name("firmware-update")
 
     description(
-      "Flash explicitly authorized physical EC100 firmware through the running Workbench, with plugin compatibility preflight and verified reboot."
+      "Review and apply explicitly authorized physical EC100 firmware through the attached Workbench."
     )
 
     markdown("""
     # Update physical firmware
 
-    Only call this after the user explicitly authorizes flashing the target.
-    Use the compiled project API through `elixir_eval` in the project target:
+    Only after the user explicitly authorizes flashing the target. Attach with
+    `dev-environment`, then in `elixir_eval` with target `runtime`:
 
     ```elixir
-    Workbench.DeviceUpdate.update(
-      "nerves-gate.tail40465.ts.net",
-      "firmware/_build/ec100_dev/nerves/images/nerves_gate.fw"
-    )
+    {:ok, gateway} = Workbench.Gateways.fetch(:"nerves_gate@100.120.69.127")
+    :ok = Workbench.Jobs.review_firmware(gateway.node, "firmware/_build/ec100_dev/nerves/images/nerves_gate.fw")
+    Workbench.Jobs.snapshot() # wait for :awaiting_confirmation; show review to user
     ```
 
-    The user must have `mix dev` running. The firmware must already be built.
-    This helper uses the existing Workbench review/confirm operation queue and
-    strict authenticated SSH, not distribution or a second flashing implementation.
-    `mycookie` belongs to the separate dev inspection skill, not firmware upload.
+    Only after the user confirms that exact review, use its token and address:
 
-    One call checks device identity, reads plugin inventory from the exact image,
-    rejects changed artifacts under saved versions, reviews and confirms the exact
-    image, uploads once, verifies the new healthy boot, and checks plugin management.
-    It returns `{:ok, summary}` or `{:error, message}`. Allow up to six minutes.
-    Summaries report active/available plugin versions; selection and startup remain
-    explicit operator actions. No build, version bump, metadata erasure, hardware
-    assignment, plugin start or equipment connection is performed automatically.
+    ```elixir
+    %{status: :awaiting_confirmation, review: review} = Workbench.Jobs.snapshot()
+    :ok = Workbench.Jobs.confirm_firmware(review.token, review.address)
+    Workbench.Jobs.snapshot() # observe progress and final outcome
+    ```
 
-    If there is an error or timeout, inspect the current Workbench operation and
-    device state. Never automatically repeat the call: an update may have been
-    accepted even if its response or postcheck was lost. Do not stop/restart the
-    user's Workbench, bypass admission, or flash from a temporary shell script.
+    Prefer the gateway page's review/confirm UI when the user is present; it is the
+    same code. Review checks identity, health and plugin artifacts over distribution
+    and the exact image; update uploads once over verified SSH and waits up to three
+    minutes for a healthy new boot of the same serial. Jobs consumes each review
+    once and publishes progress. Do not call low-level update helpers directly.
+
+    Never repeat an update after an error or timeout: the device may have accepted
+    it. Inspect with `device-inspection` instead. No build, version bump, plugin
+    selection/start or metadata change happens here.
     """)
   end
 
   def apis do
     [
       Pi.Plugin.API.new(
-        name: :device_update,
-        module: Workbench.DeviceUpdate,
-        alias: :DeviceUpdate,
-        description: "One explicitly authorized firmware update through Workbench."
+        name: :firmware_update,
+        module: Workbench.Jobs,
+        alias: :Jobs,
+        description: "Reviewed physical firmware update."
       )
     ]
   end

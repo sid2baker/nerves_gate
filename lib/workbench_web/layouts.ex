@@ -22,13 +22,13 @@ defmodule WorkbenchWeb.Layouts do
       <div class="dev-content">
         <header class="dev-topbar">
           <.link
-            navigate={operation_path(@operation)}
+            navigate={job_path(@job)}
             class="dev-operation-link"
-            id="global-operation"
+            id="global-job"
             aria-live="polite"
           >
-            <.status tone={result_tone(@operation.status)}>
-              {operation_label(@operation.kind)} · {@operation.status}
+            <.status tone={result_tone(@job.status)}>
+              {job_label(@job.kind)} · {@job.status}
             </.status>
           </.link>
           <.theme_toggle />
@@ -50,15 +50,15 @@ defmodule WorkbenchWeb.Layouts do
     """
   end
 
-  defp current_section(action) when action in [:apps, :firmware, :scenarios, :manual, :simulator],
-    do: :develop
+  defp current_section(action) when action in [:apps, :firmware], do: :develop
+  defp current_section(action) when action in [:scenarios, :manual], do: :devices
 
   defp current_section(action), do: action
 
   defp navigation do
     [
       {:overview, "/", "Home", "overview"},
-      {:develop, "/develop", "Develop", "equipment"},
+      {:develop, "/develop/applications", "Develop", "equipment"},
       {:devices, "/devices", "Devices", "network"},
       {:factory, "/provision", "Provision", "usb"}
     ]

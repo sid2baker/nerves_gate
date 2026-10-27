@@ -26,13 +26,14 @@
   equipment identities, addressing requirements, protocol sessions and use cases.
 - `lib/workbench/`, `lib/workbench_web/`, `priv/workbench/`: host sessions, builds,
   apps, discovery, physical tools and workbench UI. Ordinary tasks start no session.
-- `lib/simulator.ex`, `lib/simulator/`: separate simulator BEAM and owned disposable
+- `lib/simulator.ex`, `lib/simulator/`: locally supervised simulator and owned disposable
   QEMU processes, disks and private networks. Never attach controls to arbitrary VMs.
 - `lib/scenarios.ex`, `lib/scenarios/`: one catalogue, runner and real scenarios.
   Check explicit requirements before preparation. Independent devices can run
   concurrently; `devices: :all` reserves every device and excludes manual controls.
-- Scenario reservations and global `Workbench.Operations` admission protect
-  different resources. Unknown RPC/control outcomes block further control/cleanup.
+- Scenario reservations and serialized `Workbench.Jobs` protect different resources.
+  Jobs reserve lifecycle/shutdown admission with Runner until worker exit.
+  Unknown RPC/control outcomes block further control/cleanup.
 - `firmware/lib/nerves_gate/`: domains own commands, validation, admission,
   deadlines and persistence. Use named public domain functions, not infrastructure.
 - `NervesGate.status/0` directly reads domains independently; `subscribe/0` belongs
@@ -106,6 +107,8 @@
   builds prepare assets before
   isolated target compilation. Include changed `firmware/priv/static/assets/` with
   sources. Gateway Elixir/HEEx changes require rebuilt guests.
+- QEMU management uses explicit checkout-owned bridge/TAP preparation with `mix dev.network setup --subnet <private-/24>` and cleanup after the session stops. These change host networking and need explicit authorization; ordinary startup must not create/delete interfaces. Physical inspection needs no QEMU setup.
+- Pi attaches to the unique hidden Workbench node with the `dev-environment` skill; inspect its verified directory from the runtime target, not a standalone device-connection loop.
 - Documentation-only changes need no QEMU checks. Do not claim unperformed checks.
 - Root/firmware share `VERSION` and `CHANGELOG.md`; SDK/systems keep independent
   versions. System inputs require a system version bump. Only SDK goes to Hex.
@@ -115,9 +118,9 @@
   the exact tagged main-branch commit. SDK development advances its own version;
   local starter apps may require that prerelease, never pretend a published SDK
   contains unreleased capabilities. Firmware records its commit in `source_revision`.
-- Physical SSH transport/protocol reads belong to `Workbench.DeviceSSH`; device
-  maintenance logic is compiled in `NervesGate.System` and `Apps`, not shipped as
-  source strings. Older firmware must be updated through an explicitly authorized
+- `Workbench.Gateways` is the sole verified gateway directory. Inspection and
+  application transfer use distribution; firmware upload uses strictly verified
+  `Workbench.SSH`. Device maintenance logic is compiled, never shipped as source strings. Older firmware must be updated through an explicitly authorized
   external procedure; do not retain a compatibility fallback.
 - Legacy equipment/joined network settings are rejected, not rewritten. Explicit
   migration or reset of existing devices still requires separate authorization.

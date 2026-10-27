@@ -11,7 +11,7 @@ defmodule Simulator.Network do
   use GenServer, restart: :temporary
   alias __MODULE__.Ethernet
 
-  @ports [:lan1, :lan2, :internet, :management, :control]
+  @ports [:lan1, :lan2, :internet]
   @max_bytes 4 * 1024 * 1024
   @max_frames 4096
   @defaults %{
@@ -34,7 +34,7 @@ defmodule Simulator.Network do
   def release(server), do: GenServer.call(server, :release)
 
   # A fixed graph: only frame forwarding changes, never a realized NIC's netdev.
-  def arguments(dir, address, forwards, usb) do
+  def arguments(dir, recovery_address, recovery_port, usb, management) do
     streams =
       Enum.flat_map(@ports, fn port ->
         [
@@ -44,30 +44,30 @@ defmodule Simulator.Network do
       end)
 
     nics =
-      Enum.flat_map([lan1: "56", lan2: "57", management: "58"], fn {port, suffix} ->
+      Enum.flat_map([lan1: "56", lan2: "57"], fn {port, suffix} ->
         ["-device", "virtio-net-pci,netdev=#{port},id=#{port}-nic,mac=52:54:00:12:34:#{suffix}"]
       end)
 
     internet = router(0, :internet, "user,id=wan,net=10.0.2.0/24,ipv6=off", "wan")
 
-    management =
-      "user,id=mgmt,net=192.168.77.0/24,host=192.168.77.1,ipv6=off,restrict=on" <>
-        forward(address, forwards.epmd, "192.168.77.2", 4369) <>
-        forward(address, forwards.distribution, "192.168.77.2", 9100) <>
-        forward("127.0.0.1", forwards.http, "192.168.77.2", 4000) <>
-        forward(address, forwards.ssh, "192.168.77.2", 22)
+    management = [
+      "-netdev",
+      "tap,id=management,ifname=#{management.tap},script=no,downscript=no",
+      "-device",
+      "virtio-net-pci,netdev=management,id=management-nic,mac=#{management.mac}"
+    ]
 
     # VintageNetDirect runs in the guest, including its DHCP server. Libslirp is
     # a statically addressed recovery peer, not a DHCP-client qualification.
     usb = [
       "-netdev",
       "user,id=usb,net=#{usb.network}/24,host=#{usb.peer},ipv6=off,restrict=on" <>
-        forward(address, forwards.usb, usb.device, 22),
+        forward(recovery_address, recovery_port, usb.device, 22),
       "-device",
       "virtio-net-pci,netdev=usb,id=usb-nic,mac=52:54:00:12:34:59"
     ]
 
-    streams ++ nics ++ internet ++ router(1, :control, management, "mgmt") ++ usb
+    streams ++ nics ++ management ++ internet ++ usb
   end
 
   defp router(id, stream, user, backend) do
@@ -102,7 +102,7 @@ defmodule Simulator.Network do
        stats: %{
          forwarded: 0,
          denied: 0,
-         rejected: %{lan1: 0, lan2: 0, management: 0},
+         rejected: %{lan1: 0, lan2: 0},
          dropped: 0,
          candidates: 0,
          overflow: 0,
@@ -227,11 +227,6 @@ defmodule Simulator.Network do
   end
 
   # Management never passes through the LAN fault queue.
-  defp route(:control, frame, state), do: deliver(state, :management, frame)
-
-  defp route(:management, frame, state),
-    do: admit(state, :management, :control, frame, :management)
-
   defp route(_, _, %{held: true} = state), do: count(state, :discarded)
 
   defp route(:internet, frame, state) do

@@ -1,56 +1,53 @@
 defmodule Scenarios.Cases.HardwareReadiness do
-  @moduledoc "Read-only EC100 readiness. This does not exercise failover or change configuration."
+  @moduledoc "Read-only readiness of a physical gateway for its configured Internet profile."
   import ExUnit.Assertions
 
   def spec do
     %{
-      name: "Physical network readiness over verified SSH (read-only)",
-      requires: %{device: [], fixture: [:ssh_management]},
+      name: "Physical network readiness for the configured profile (read-only)",
+      requires: %{device: [], fixture: [:physical]},
       opt_in: true
     }
   end
 
-  def run(%{snapshot: snapshot, profile: profile}) do
-    assert snapshot["target"] == "ec100", "Expected a physical EC100"
+  def run(%{device: device}), do: check!(observe(device))
+
+  @doc "Sanitized hardware observation with string keys."
+  def observe(device) do
+    device
+    |> Scenarios.Device.rpc(NervesGate.System, :hardware_info, [], 5_000)
+    |> Jason.encode!()
+    |> Jason.decode!()
+  end
+
+  def check!(snapshot) do
     assert snapshot["available"] == true, "Device status is unavailable"
-
-    assert snapshot["pending"] == false,
-           "Finish or restore the active network trial in the gateway first"
-
-    assert snapshot["recovering"] == false,
-           "Network recovery is still active; wait for restoration before testing"
+    assert snapshot["pending"] == false, "Finish or restore the active network trial first"
+    assert snapshot["recovering"] == false, "Network recovery is still active"
 
     assert snapshot["ready"] == true,
-           "Saved network topology is not applied or has address conflicts. Open the gateway's Internet/settings pages and inspect port configuration; this is not an Internet reachability check."
+           "Saved network topology is not applied or has address conflicts; inspect the gateway's Internet settings"
 
     internet = snapshot["internet"]
     assert internet["health"] == "online", "Internet connectivity has not been confirmed"
 
-    case profile do
+    case internet["mode"] do
       "ethernet" ->
-        assert internet["mode"] == "ethernet",
-               "Expected Ethernet-only, but the gateway reports #{internet["mode"] || "unknown"}. Select the matching expected profile above, or deliberately change the profile in the gateway first."
-
         ethernet!(internet)
 
       "cellular" ->
-        assert internet["mode"] == "cellular",
-               "Expected 4G-only, but the gateway reports #{internet["mode"] || "unknown"}. Select the matching expected profile above, or deliberately change the profile in the gateway first."
-
         cellular!(snapshot)
         assert internet["selected"] == "cellular", "4G is not the selected Internet source"
 
       "backup" ->
-        assert internet["mode"] == "backup",
-               "Expected Ethernet with 4G backup, but the gateway reports #{internet["mode"] || "unknown"}. Select the matching expected profile above, or deliberately change the profile in the gateway first."
-
         ethernet!(internet)
         cellular!(snapshot)
-        assert internet["cellular"] == "internet", "Backup cellular Internet is not ready"
 
-      _ ->
-        flunk("Unknown network readiness profile")
+      mode ->
+        flunk("Unknown Internet profile #{inspect(mode)}")
     end
+
+    snapshot
   end
 
   defp ethernet!(internet) do
@@ -63,9 +60,7 @@ defmodule Scenarios.Cases.HardwareReadiness do
     assert cellular["supported"] == true, "This target does not support cellular Internet"
     assert cellular["present"] == true, "The declared modem is missing"
     assert cellular["enabled"] == true, "Cellular Internet is disabled"
-
-    assert cellular["sim"] == "ready",
-           "The SIM is not ready; complete SIM commissioning on the gateway"
+    assert cellular["sim"] == "ready", "The SIM is not ready; complete SIM commissioning"
 
     assert snapshot["internet"]["cellular"] == "internet",
            "Cellular Internet has not been confirmed"

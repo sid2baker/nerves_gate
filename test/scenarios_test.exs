@@ -182,7 +182,7 @@ defmodule Workbench.ScenariosTest do
     assert ids == Enum.uniq(ids)
 
     portable = ~w(cable_loss invalid_configuration invalid_trial_ids public_status sdk)
-    assert length(scenarios) == 46
+    assert length(scenarios) == 44
 
     for scenario <- scenarios do
       assert Enum.sort(Map.keys(scenario.requires)) == [:device, :fixture]
@@ -190,12 +190,15 @@ defmodule Workbench.ScenariosTest do
       assert is_boolean(scenario.all)
       assert is_boolean(scenario.opt_in)
 
-      assert :qemu in scenario.requires.fixture ==
-               scenario.id not in ["hardware_readiness", "hardware_backup" | portable]
-
-      assert :usb_management in scenario.requires.fixture == (scenario.id == "hardware_backup")
-      assert :ssh_management in scenario.requires.fixture == (scenario.id == "hardware_readiness")
+      assert :qemu in scenario.requires.fixture == scenario.id not in portable
     end
+
+    # Physical checks are separate: only physical gateways run them, one at a time.
+    assert Enum.map(Scenarios.physical(), & &1.id) ==
+             ~w(hardware_readiness hardware_backup button_reboot)
+
+    for check <- Scenarios.physical(),
+        do: assert(check.requires.fixture == [:physical] and check.opt_in)
 
     assert [%{module: Scenarios.Cases.PublicStatus}] =
              Scenarios.select("public_status")

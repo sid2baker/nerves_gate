@@ -25,7 +25,7 @@ runs:
           packages+=("$RUNNER_TEMP/fwup/fwup_1.17.1_amd64.deb" squashfs-tools)
         fi
         if [[ "$QEMU" == true ]]; then
-          packages+=(qemu-system-x86 util-linux inotify-tools e2fsprogs)
+          packages+=(qemu-system-x86 util-linux inotify-tools e2fsprogs iproute2)
         fi
         # A stalled runner mirror must fail clearly instead of consuming the job.
         apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)

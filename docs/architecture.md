@@ -55,8 +55,8 @@ library only when a measured benefit justifies another owner and package.
 | `firmware/config/` | Board profiles, device services and host-only checks/assets |
 | `sdk/lib/nerves_gate_sdk/` | Typed app API, fixed firmware bridge contract and archive validation |
 | `lib/workbench/` | Sessions, apps, discovery, builds, updates, provisioning and release checks |
-| `lib/workbench_web/`, `config/`, `priv/workbench/` | Workbench UI, Unix-socket CLI API, host config and launch scripts |
-| `lib/simulator.ex`, `lib/simulator/` | Separate simulator BEAM, owned QEMU lifecycle and virtual hardware |
+| `lib/workbench_web/`, `config/`, `priv/workbench/` | Workbench browser UI, host config and session script |
+| `lib/simulator.ex`, `lib/simulator/` | Locally supervised owned QEMU lifecycle and virtual hardware |
 | `lib/scenarios.ex`, `lib/scenarios/` | One catalogue, reservations/runner, bounded device access, owned QEMU fixture and cases |
 | `priv/simulator/`, `priv/templates/` | Trusted bench configs/scripts and ordinary SDK app scaffolding |
 | `test/`, `firmware/test/{unit,web}/`, `sdk/test/` | Host tooling/shared UI integration, firmware policy/web checks and SDK tests |
@@ -69,24 +69,22 @@ library only when a measured benefit justifies another owner and package.
 
 [`Workbench.Launcher`](../lib/workbench/launcher.ex) owns the launch chain under
 `flock` and MuonTrap. The lock lasts through child cleanup; never unlink it to
-bypass ownership. The workbench session supervises a private loopback EPMD and a
-separate simulator BEAM.
+bypass ownership. The workbench session is a uniquely named hidden node with an
+inbound listener for local Pi attachment. It supervises the simulator locally.
 
 ```text
 Workbench.Supervisor (:nerves_gate_workbench, one_for_one)
 ├─ Workbench.Tasks
-├─ Workbench.Applications
-├─ Workbench.LANDiscovery
-└─ Workbench.Operations
+└─ Workbench.Applications
 
-session supervisor (also owns EPMD and simulator wrapper)
+session supervisor
+├─ Simulator → per-device owners → QEMU, disks, QMP and Ethernet relays
 └─ Workbench.SessionServices (rest_for_one)
    ├─ NervesGate.PubSub
-   ├─ Scenarios.Runner
+   ├─ Workbench.Gateways (verified directory)
+   ├─ Scenarios.Runner (lifecycle and reservations)
+   ├─ Workbench.Jobs (serialized long jobs and reviews)
    └─ WorkbenchWeb.Endpoint
-
-owned simulator BEAM
-└─ Simulator → per-device owners → QEMU, disks, QMP and Ethernet relays
 ```
 
 [`priv/workbench/session.exs`](../priv/workbench/session.exs) explicitly starts
@@ -95,9 +93,9 @@ owned simulator BEAM
 supervisor. Ordinary host tasks start none of these session services. Root config
 leaves `:nerves_gate, :services` empty and the firmware application stays stopped.
 The shared bus name is deliberately `NervesGate.PubSub`; its host owner is the
-session. Shutdown stops the endpoint, runner and PubSub before the simulator and
-EPMD. A separate loopback Bandit listener serves the browser; the endpoint's
-private Unix listener serves CLI commands.
+session. Shutdown stops the endpoint, jobs, runner, directory and PubSub before the
+simulator. It does not stop the workstation's shared EPMD or delete prepared network
+resources. The loopback endpoint serves only the browser; CLI control uses distribution.
 
 There is no host gateway endpoint, VintageNet service or Tailscale daemon. Native
 networking dependencies compile for helpers, not workstation service startup.
@@ -105,12 +103,16 @@ The session sets its own distribution cookie; firmware cookie initialization and
 cellular credential filtering do not run on the workstation. Phoenix reload
 plugs and asset watching are host-owned.
 
-The session node is `workbench@127.0.0.1`. It initiates distribution connections
-without an inbound listener; the simulator is hidden and uses private management
-forwards. Interactive session state is `_build/workbench/`; explicitly requested
+The session node is `workbench_<checkout-id>@127.0.0.1`, explicitly hidden with
+`mycookie` and a local inbound distribution listener. `Workbench.Gateways` connects
+known dev gateways through ordinary EPMD. Pi-elixir attaches directly to this node;
+inspection uses its verified directory rather than another connection process.
+The node name hashes the checkout path and machine ID, remaining stable across
+session restarts while distinct checkouts/workstations coexist; session tokens
+still distinguish individual runs. Interactive session state is `_build/workbench/`; explicitly requested
 CI sessions use `_build/workbench-ci-<run>/`. Simulator diagnostics/disks are under
 `_build/simulator/<session>/`. Internal session inputs use `WORKBENCH_*`; actual
-simulator inputs are `QEMU_SIM_CONFIG` and `QEMU_SIM_DIR`.
+simulator configuration is selected by `QEMU_SIM_CONFIG`.
 
 Starting the session boots no devices. An explicit Start builds selected local
 firmware if needed and starts configured disposable devices from this checkout.
@@ -119,13 +121,12 @@ authorize stopping an old session, resetting disks or erasing saved settings.
 
 ### Admission and hardware ownership
 
-`Workbench.Operations` serializes global workbench operations: builds, app commands
-and reviewed physical firmware/app installation, factory provisioning, diagnostics
-and operator-assisted hardware/reboot observations. Each private review carries its
-owning module for confirmation, cleanup, review and expiry messages; public review
-metadata never carries that owner or its private snapshot. `Scenarios.Runner` separately owns lifecycle,
-manual-control admission and per-device reservations for UI, CLI and CI. They
-protect different resources; UI availability is not admission.
+`Workbench.Jobs` serializes builds, app commands, reviewed firmware/application
+installation, factory provisioning and operator-assisted physical scenarios. Private
+reviews carry their owner and immutable snapshot; public metadata never does.
+`Scenarios.Runner` owns lifecycle, manual control and per-device reservations for
+UI, CLI and CI. Jobs reserve lifecycle/shutdown admission with Runner until their
+worker exits. UI availability is not admission.
 
 Independent devices can run concurrently. `devices: :all` reserves the whole
 bench, including exclusion of manual actions. Reservations last until worker exit,
@@ -139,8 +140,10 @@ handles, not ownership. QMP operations verify the supervised process relationshi
 Discovery, node names and reachable IPs never grant hardware-control authority.
 
 Virtual LANs are real Ethernet over private Unix sockets with libslirp Internet
-access. A separate management path bypasses injected LAN faults. No workstation
-bridge, VPN or routing changes are needed. QEMU has separate system and app-SD
+access. A separate, explicitly prepared bridge/TAP management path bypasses injected
+LAN faults. It has no physical uplink, NAT, global forwarding or VPN changes. The
+checkout-owned network persists until explicit cleanup; QEMU stays unprivileged.
+Guest firmware owns EPMD at its actual management IP, without management port forwards. QEMU has separate system and app-SD
 disks. Stop preserves them; Reset erases them and invalidates the prepared build.
 Fresh-disk scenarios use the runner's explicitly owned disposable-state lifecycle.
 See [development](development.md#workbench-and-simulator).
@@ -246,7 +249,7 @@ NervesGate.status     → independent domain reads → pure Status.build
 
 subsystem observations → ProjectionServer → sanitized replacements → LiveView
 trusted plugin → NervesGateSDK → SDKBackend → typed values, events and assigned hardware
-workstation CLI → private workbench HTTP API → Workbench.Operations / Scenarios.Runner
+Mix task / Pi → distribution → Workbench.Jobs / Scenarios.Runner / Workbench.Gateways
 ```
 
 `NervesGate` has only `status/0` and `subscribe/0`, plus its domain API index.
@@ -267,13 +270,13 @@ Pure [`Projection`](../firmware/lib/nerves_gate/projection.ex) and
 as `indicators.identify`; physical inventory is under `hardware`.
 [`Observations`](../firmware/lib/nerves_gate_web/observations.ex) is an explicit
 read-only client: local source for gateway views, `{ProjectionServer, node}` for
-`WorkbenchWeb.DeviceLive`. It monitors owners, ignores replaced instances, clears
+`WorkbenchWeb.GatewayLive` for both simulated and physical gateways. It monitors owners, ignores replaced instances, clears
 availability on loss and resubscribes with a fresh snapshot. Drafts stay separate.
 
 Gateway commands always run locally. Private enrollment URLs and cookies are
 explicit reads cached only in the requesting gateway view, never projections or
-notifications. Physical workbench pages show bounded discovery and requested
-verified-SSH identity reads, not live subscriptions or a command proxy.
+notifications. Workbench gateway pages consume the same read-only projection
+stream; hardware ownership remains separate from connectivity.
 
 ### Applications and SDK
 
@@ -395,9 +398,9 @@ checks, not a general USB-only management rule.
 
 Discovery is unverified metadata, never authentication or permission to update.
 Physical SSH uses known-host verification separate from disposable-QEMU trust.
-`Workbench.DeviceSSH` owns strict host-key/authentication policy, bounded reads,
-stream completion and private SFTP staging, separately from permissive owned-QEMU
-SSH. `System.maintenance_info/0`, `System.hardware_info/0` and
+`Workbench.SSH` owns strict host-key/authentication policy and a single firmware
+upload. Identity, health and application transfer use distribution. Permissive
+owned-QEMU SSH is reserved for explicit SSH scenarios. `System.maintenance_info/0`, `System.hardware_info/0` and
 `Apps.install_review/1`/`install_reviewed/2` are compiled device APIs. Unsupported
 firmware is rejected; there is no alternate identity protocol or verification downgrade.
 Firmware stores the build commit in Nerves VCS metadata and exposes it as

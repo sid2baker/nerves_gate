@@ -2,30 +2,29 @@ defmodule Scenarios.Cases.FirmwareUpgrade do
   @moduledoc false
   import ExUnit.Assertions
   import Scenarios.Device
-  alias Simulator.SSH
 
   def spec,
     do: %{
-      name: "real SSH/fwup upgrades B → A → B preserve SSH access and saved settings",
+      name: "real SSH/fwup upgrades A → B → A preserve SSH access and saved settings",
       fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
 
   def run(%{device: vm}) do
     assert Scenarios.Device.status(vm).system.target == "x86_64"
-    # Factory A → current B is part of simulator bootstrap, also on fresh disks.
-    assert slot?(vm, "b")
+    # Fresh disks boot the written image from slot A.
+    assert slot?(vm, "a")
     {key, line, fingerprint} = ssh_key()
     assert :ok = Scenarios.Device.rpc(vm, NervesGate.SSH, :add_key, [line])
     saved = save(vm, settings("eth0"))
 
     # Same disk and VM: fwup selects the next slot and its callback reboots.
-    for slot <- ["a", "b"] do
+    for slot <- ["b", "a"] do
       await_ssh(vm)
       assert {:ok, connection} = ssh_public_key(vm, key)
 
       try do
-        assert :ok = SSH.upload(connection, vm.firmware)
+        assert :ok = Workbench.SSH.upload_firmware(connection, vm.firmware)
       after
         :ssh.close(connection)
       end

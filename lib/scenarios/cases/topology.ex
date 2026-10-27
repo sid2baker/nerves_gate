@@ -38,7 +38,7 @@ defmodule Scenarios.Cases.Topology do
     save(vm, configured)
     online(vm, "eth1")
     refuses_application_forwarding(vm, destination)
-    refuses_forwarding(vm, "eth2", "192.168.77.1", destination)
+    refuses_forwarding(vm, "eth2", vm.management_host, destination)
     refuses_host_loopback(vm)
 
     Qemu.network(vm, %{internet: :off})
@@ -91,7 +91,6 @@ defmodule Scenarios.Cases.Topology do
           {0x0A00020F, 0x0A000202, 6, 0, tcp, :deny},
           {0x0A00020F, 0x7F000001, 6, 0, tcp, :deny},
           {0x0A00020F, 0xFFFFFFFF, 6, 0, tcp, :deny},
-          {0x0A00020F, 0xC0A84D02, 6, 0, tcp, :deny},
           {0x0A00020F, 0xAC1FFF02, 6, 0, tcp, :deny},
           {0x0A00020F, 0xAC1F0001, 6, 0, tcp, :deny},
           {0x0A00020F, 0xAC1F7F81, 6, 0, tcp, :deny},
@@ -119,43 +118,7 @@ defmodule Scenarios.Cases.Topology do
     end
 
     assert Ethernet.classify(<<>>, :internet) == :deny
-    assert_management_policy()
     :ok
-  end
-
-  defp assert_management_policy do
-    alias Simulator.Network.Ethernet
-
-    for {port, flags, target, expected} <- [
-          {9100, 0x12, 0xC0A84D01, :local},
-          {4369, 0x10, 0xC0A84D01, :local},
-          {4000, 0x11, 0xC0A84D01, :local},
-          {22, 0x10, 0xC0A84D01, :local},
-          {22, 0x02, 0xC0A84D01, :deny},
-          {80, 0x10, 0xC0A84D01, :deny},
-          {22, 0x10, 0x01010101, :deny}
-        ] do
-      tcp = <<port::16, 12_345::16, 0::64, 0x50, flags, 0::48>>
-
-      frame =
-        <<0::96, 0x0800::16, 0x45, 0, 40::16, 0::32, 64, 6, 0::16, 0xC0A84D02::32, target::32,
-          tcp::binary>>
-
-      assert Ethernet.classify(frame, :management) == expected
-    end
-
-    for {network, source, target, expected} <- [
-          {:internet, 0, 0x0A000202, :local},
-          {:internet, 0xC0A84D02, 0x0A000202, :deny},
-          {:management, 0xC0A84D02, 0xC0A84D01, :local},
-          {:management, 0xC0A84D02, 0x0A000202, :deny}
-        ] do
-      arp =
-        <<0::96, 0x0806::16, 1::16, 0x0800::16, 6, 4, 1::16, 0::48, source::32, 0::48,
-          target::32>>
-
-      assert Ethernet.classify(arp, network) == expected
-    end
   end
 
   defp refuses_host_loopback(vm) do
@@ -248,7 +211,7 @@ defmodule Scenarios.Cases.Topology do
       end
 
     mac = router_mac(vm, router_interface, router_address)
-    before = Scenarios.Qemu.network_stats(vm).rejected[port]
+    before = if port == :lan1, do: Scenarios.Qemu.network_stats(vm).rejected[port]
     neighbor(vm, :replace, interface, gateway, mac)
 
     try do
@@ -264,7 +227,7 @@ defmodule Scenarios.Cases.Topology do
                    3000
                  )
 
-        assert Scenarios.Qemu.network_stats(vm).rejected[port] > before
+        if port == :lan1, do: assert(Scenarios.Qemu.network_stats(vm).rejected[port] > before)
         assert Scenarios.Device.rpc(vm, Node, :alive?, [])
       after
         assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["ip", ["route", "del" | route]])

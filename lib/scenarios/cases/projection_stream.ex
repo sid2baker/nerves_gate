@@ -106,11 +106,11 @@ defmodule Scenarios.Cases.ProjectionStream do
 
   # Called by the real, unenrolled Tailscale scenario after its private URL is ready.
 
-  # Real pages from the device's own Endpoint, through the bench's management
-  # forward. That peer is not USB and must never count as USB management access.
+  # Real pages from the device's own Endpoint over its management IP.
+  # This peer is not USB and must never count as USB management access.
   # The device serves the release UI; it has no development pages.
   defp assert_http_pages(vm) do
-    device = Req.new(base_url: Qemu.ui_url(vm), retry: false)
+    device = Req.new(base_url: Qemu.ui_url(vm), headers: [connection: "close"], retry: false)
     assert Req.get!(device, url: "/tests").status == 404
 
     for path <- [

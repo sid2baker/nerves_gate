@@ -21,8 +21,7 @@ defmodule Scenarios.Qemu do
   def topology(vm), do: Network.connections(network(vm).internet)
   def network_stats(vm), do: Simulator.observe(vm).stats
 
-  # Simulator.Device binds the gateway UI forward to 127.0.0.1.
-  def ui_url(vm), do: "http://127.0.0.1:#{vm.forwards.http}"
+  def ui_url(vm), do: "http://#{vm.address}:4000"
 
   def network(vm, patch) do
     on_exit({vm.id, :network}, fn -> network(vm, Network.defaults()) end)

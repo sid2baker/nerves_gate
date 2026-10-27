@@ -33,8 +33,7 @@ defmodule Simulator.Network.Ethernet do
   defp arp?(:internet, source, target),
     do: (source == 0 or internet_source?(source)) and target >>> 8 == 0x0A0002
 
-  defp arp?(:management, source, target),
-    do: source in [0, 0xC0A84D02] and target in [0xC0A84D01, 0xC0A84D02]
+  defp arp?(_, _, _), do: false
 
   # DHCP clients send from 0.0.0.0, or from their Internet lease when renewing.
   defp ipv4(:internet, 0, target, 17, 0, <<68::16, 67::16, _::binary>>), do: dhcp(target)
@@ -52,19 +51,6 @@ defmodule Simulator.Network.Ethernet do
       true -> :deny
     end
   end
-
-  # Host forwards originate at libslirp's virtual host. Only service replies can
-  # enter the restricted management backend; libslirp also enforces restrict=on.
-  defp ipv4(
-         :management,
-         0xC0A84D02,
-         0xC0A84D01,
-         6,
-         0,
-         <<port::16, _destination::16, _sequence::32, _ack::32, _offset, flags, _::binary>>
-       )
-       when port in [22, 4000, 4369, 9100] and (flags &&& 0x10) != 0,
-       do: :local
 
   defp ipv4(_, _, _, _, _, _), do: :deny
 
@@ -87,7 +73,7 @@ defmodule Simulator.Network.Ethernet do
     first = address >>> 24
 
     first in [0, 127] or first >= 224 or
-      (address >>> 8) in [0x0A0002, 0xC0A84D] or
+      address >>> 8 == 0x0A0002 or
       (address >>> 16) in [0xAC1F, 0xA9FE]
   end
 end

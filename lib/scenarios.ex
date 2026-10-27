@@ -26,8 +26,6 @@ defmodule Scenarios do
     Scenarios.Cases.FirmwareUpgrade,
     Scenarios.Cases.Freeze,
     Scenarios.Cases.FrontendAssets,
-    Scenarios.Cases.HardwareReadiness,
-    Scenarios.Cases.HardwareBackup,
     Scenarios.Cases.Hotplug,
     Scenarios.Cases.Internet,
     Scenarios.Cases.InvalidConfiguration,
@@ -67,6 +65,18 @@ defmodule Scenarios do
     Enum.sort_by(scenarios, & &1.id)
   end
 
+  @doc "Operator-attended checks for physical gateways; run one at a time as a job."
+  def physical do
+    Enum.map(
+      [
+        Scenarios.Cases.HardwareReadiness,
+        Scenarios.Cases.HardwareBackup,
+        Scenarios.Cases.ButtonReboot
+      ],
+      &describe/1
+    )
+  end
+
   def select(selection) do
     Enum.filter(all(), &(&1.id == selection or (selection == "all" and not &1.opt_in)))
   end
@@ -85,9 +95,7 @@ defmodule Scenarios do
                    :ethernet_link,
                    :reboot,
                    :power_cycle,
-                   :ssh_management,
-                   :usb_management,
-                   :manual_ethernet
+                   :physical
                  ])
              ),
            do: raise(ArgumentError, "Invalid requirements for #{inspect(module)}")

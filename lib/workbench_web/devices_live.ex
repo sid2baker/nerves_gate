@@ -1,167 +1,70 @@
 defmodule WorkbenchWeb.DevicesLive do
-  @moduledoc "One directory for unverified network gateways and owned simulated devices."
+  @moduledoc "The gateway directory: every connected or last-seen gateway, live by subscription."
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
   import WorkbenchWeb.Components
-  alias Scenarios.Runner
+  import WorkbenchWeb.Live, only: [command: 2]
 
   def mount(_, _, socket) do
-    if connected?(socket) do
-      Runner.subscribe()
-      Workbench.LANDiscovery.refresh()
-      Process.send_after(self(), :directory, 500)
-    end
-
-    {:ok, socket |> assign(kind: "all", query: "") |> refresh()}
+    if connected?(socket), do: Workbench.Gateways.subscribe()
+    {:ok, assign(socket, gateways: Workbench.Gateways.list())}
   end
 
-  def handle_params(params, _, socket) do
-    kind = if params["kind"] in ["physical", "simulated"], do: params["kind"], else: "all"
-    {:noreply, assign(socket, kind: kind, query: params["q"] || "")}
-  end
+  def handle_info({:gateways, gateways}, socket),
+    do: {:noreply, assign(socket, :gateways, gateways)}
 
-  def handle_event("search", %{"q" => query}, socket) do
-    {:noreply,
-     push_patch(socket,
-       to: "/devices?" <> URI.encode_query(%{kind: socket.assigns.kind, q: query})
-     )}
-  end
+  def handle_event("add", %{"address" => address}, socket),
+    do: command(socket, Workbench.Gateways.add(address))
 
-  def handle_event("discover", _, socket), do: command(socket, Workbench.LANDiscovery.refresh())
-
-  def handle_event("find_usb", _, socket),
-    do: command(socket, Workbench.Operations.start("find_usb"))
-
-  def handle_event("retry_info", %{"address" => address}, socket),
-    do: command(socket, Workbench.Operations.start("device_info", address))
-
-  def handle_event("add_address", %{"address" => address}, socket),
-    do: command(socket, Workbench.LANDiscovery.add(address))
-
-  def handle_info(:directory, socket) do
-    Process.send_after(self(), :directory, 500)
-    {:noreply, refresh(socket)}
-  end
-
-  def handle_info({:scenarios, _}, socket), do: {:noreply, refresh(socket)}
-
-  defp refresh(socket) do
-    discovery = Workbench.LANDiscovery.snapshot()
-
-    assign(socket,
-      discovery: discovery,
-      devices: Workbench.Devices.list(Runner.snapshot(), discovery)
-    )
-  end
-
-  defp command(socket, :ok), do: {:noreply, socket |> assign(:error, nil) |> refresh()}
-  defp command(socket, {:error, message}), do: {:noreply, assign(socket, :error, message)}
+  def handle_event("refresh", _, socket), do: command(socket, Workbench.Gateways.refresh())
 
   def render(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :filtered,
-        Workbench.Devices.filter(assigns.devices, assigns.kind, assigns.query)
-      )
-
     ~H"""
     <main class="ui-main ui-stack bench" id="devices-page">
       <.page_header
-        eyebrow="Developer workbench"
-        title="Devices"
-        description="Physical gateways and owned QEMU devices, in one place."
+        eyebrow="Devices"
+        title="Gateways"
+        description="Every Nerves Gate node this Workbench connected to with the development cookie: simulated and physical alike."
       >
         <:actions>
-          <.button phx-click="discover" disabled={@discovery.status == :searching}>Refresh discovery</.button>
-          <.button phx-click="find_usb" variant="secondary" disabled={@operation.status == :running}>Find USB gateways</.button>
-          <.link
-            navigate="/develop/firmware#simulator-lifecycle"
-            class="ui-button ui-button--secondary"
-          >Set up QEMU</.link>
+          <.button phx-click="refresh" variant="secondary">Discover now</.button>
         </:actions>
       </.page_header>
-      <.notice :if={@discovery.error} tone="warning">{@discovery.error}</.notice>
-      <.operation :if={@operation.kind == "find_usb"} operation={@operation} />
-      <div class="dev-list-toolbar">
-        <nav class="dev-filters" aria-label="Device type">
-          <.link
-            :for={
-              {kind, label} <- [{"all", "All"}, {"physical", "Physical"}, {"simulated", "Simulated"}]
-            }
-            patch={"/devices?" <> URI.encode_query(%{kind: kind, q: @query})}
-            aria-current={if @kind == kind, do: "page"}
-          >{label}</.link>
-        </nav>
-        <form id="device-search" phx-change="search" phx-submit="search">
-          <input
-            type="search"
-            name="q"
-            value={@query}
-            phx-debounce="200"
-            placeholder="Search devices…"
-            aria-label="Search devices"
-          />
-        </form>
-      </div>
-      <div class="ui-panel dev-table-wrap">
-        <table class="dev-device-table" id="device-directory">
-          <caption class="ui-help">
-            {length(@filtered)} devices · discovery {@discovery.status}
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">Device</th><th scope="col">Type</th><th scope="col">State</th><th scope="col">
-                Target
-              </th><th scope="col">Firmware</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={device <- @filtered} data-device-kind={device.kind}>
-              <td>
-                <.link navigate={device.path} class="ui-text-link">{device.name}</.link><p
-                  :if={device.name != device.address}
-                  class="ui-help"
-                >
-                  {device.address}
-                </p>
-              </td>
-              <td><.device_kind kind={device.kind} /></td>
-              <td>
-                {device.status}
-                <div :if={device[:info_read] && device.info_read.status == :failed}>
-                  <p class="ui-help">{device.info_read.message}</p>
-                  <.button
-                    variant="quiet"
-                    phx-click="retry_info"
-                    phx-value-address={device.address}
-                    disabled={@operation.status == :running}
-                  >Retry information read</.button>
-                </div>
-              </td><td>{device.target || "Unknown"}</td><td>
-                {device.version || "Unknown"}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p :if={@filtered == []} class="dev-empty">
-          No devices match. Add a gateway URL, refresh LAN and tailnet discovery, or set up QEMU.
+      <.panel title="Gateways" icon="network" id="gateways">
+        <p :if={@gateways == []} class="ui-help">
+          No gateways yet. Start simulated devices, or add a physical gateway's address below.
         </p>
-      </div>
-      <.panel title="Add a physical gateway" icon="network" id="network-devices">
-        <form id="add-address" phx-submit="add_address" class="ui-actions">
+        <div :for={gateway <- @gateways} class="ui-setting-row" id={"gateway-#{gateway.node}"}>
+          <div>
+            <.link navigate={"/devices/#{gateway.node}"} class="ui-text-link">{gateway.node}</.link>
+            <p class="ui-help">
+              {gateway.address}
+              <span :if={gateway.identity}>
+                · {gateway.identity.target} · firmware {gateway.identity.firmware} · serial {gateway.identity.serial}
+              </span>
+            </p>
+          </div>
+          <div class="ui-actions">
+            <.device_kind source={gateway.source} />
+            <.connection gateway={gateway} />
+          </div>
+        </div>
+      </.panel>
+      <.panel title="Add a gateway" icon="network">
+        <form id="add-gateway" phx-submit="add" class="ui-actions">
           <input
             type="text"
             name="address"
-            aria-label="Gateway URL, hostname or IPv4 address"
-            placeholder="https://nerves-gate.example.ts.net"
+            aria-label="Gateway hostname or IPv4 address"
+            placeholder="nerves-gate.example.ts.net"
             required
           />
-          <.button type="submit" variant="secondary">Add address</.button>
+          <.button type="submit" variant="secondary">Add</.button>
         </form>
         <p class="ui-help">
-          Discovery reads LAN mDNS and online tailnet peers named nerves-gate (or nerves-gate-*). Candidates are unverified, not proof of gateway identity or HTTPS availability. Other names can be added manually. Use a root HTTPS URL for Tailscale Serve; bare hosts default to HTTP port 4000. No subnet scans or VPN changes. Each new candidate gets one read-only SSH information attempt with verified host keys and public-key authentication. Failed reads require an explicit Retry.
+          LAN mDNS and Tailnet peers named nerves-gate* are found automatically. A gateway joins once its node accepts the development cookie.
         </p>
+        <.link navigate="/provision" class="ui-text-link">Provision a new EC100 over USB</.link>
       </.panel>
     </main>
     """

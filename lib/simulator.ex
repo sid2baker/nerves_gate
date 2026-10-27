@@ -10,11 +10,10 @@ defmodule Simulator do
 
   def script(name), do: Path.join(Workbench.root(), "priv/simulator/#{name}.exs")
   def start_link(config), do: GenServer.start_link(__MODULE__, config, name: __MODULE__)
-  def subscribe(node), do: GenServer.call({__MODULE__, node}, {:subscribe, self()})
-  def lifecycle(node, action), do: GenServer.call({__MODULE__, node}, {:lifecycle, action})
-  def configure(node, change), do: GenServer.call({__MODULE__, node}, {:configure, change})
+  def subscribe, do: GenServer.call(__MODULE__, {:subscribe, self()})
+  def lifecycle(action), do: GenServer.call(__MODULE__, {:lifecycle, action})
+  def configure(change), do: GenServer.call(__MODULE__, {:configure, change})
   def devices, do: GenServer.call(__MODULE__, :devices)
-  def devices(node), do: GenServer.call({__MODULE__, node}, :devices)
 
   def command(%{owner: owner}, command, args \\ []) do
     # Never send cleanup or another command after a call with unknown outcome.
@@ -51,7 +50,8 @@ defmodule Simulator do
       raw: config,
       dir: dir,
       firmware: firmware,
-      firmware_project: project
+      firmware_project: project,
+      management: Workbench.ManagementNetwork.load()
     })
   end
 
@@ -102,6 +102,9 @@ defmodule Simulator do
 
     worker =
       spawn_worker(fn ->
+        for id <- Map.keys(config.devices),
+            do: Workbench.ManagementNetwork.verify!(config[:management], id)
+
         unless prepared, do: build!(config, &send(owner, {:output, token, &1}))
 
         phase =
@@ -411,13 +414,16 @@ defmodule Simulator do
     |> Enum.map(fn {{id, settings}, index} ->
       true = is_atom(id) and index <= 254
       true = Regex.match?(~r/^[a-z][a-z0-9_]*$/, Atom.to_string(id))
-      address = "127.0.0.#{index}"
+      port = get_in(config, [:management, :devices, id])
+      address = port && port.address
 
       Map.merge(settings, %{
         id: id,
-        serial: "qemu-#{index}",
+        serial: if(address, do: "qemu-#{address}", else: "unprepared-#{index}"),
         address: address,
-        node: :"nerves_gate@#{address}",
+        node: if(address, do: String.to_atom("nerves_gate@#{address}")),
+        management: port,
+        management_host: get_in(config, [:management, :host]),
         dir: Path.join(config.dir, Atom.to_string(id)),
         firmware: config.firmware
       })

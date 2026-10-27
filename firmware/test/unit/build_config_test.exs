@@ -46,15 +46,40 @@ defmodule NervesGate.BuildConfigTest do
                  apps_device: "/dev/vdb"
                }
 
-        assert config[:vintage_net][:config] == [
-                 {"usb0", %{type: VintageNetDirect}},
-                 {"eth2",
-                  %{
-                    type: VintageNetEthernet,
-                    ipv4: %{method: :static, address: "192.168.77.2", prefix_length: 24}
-                  }}
-               ]
+        # runtime.exs supplies USB and the real eth2 IP from the virtual disk serial.
+        # There is no shared static management address in the compiled configuration.
+        assert config[:vintage_net][:config] == []
       end
+    end
+  end
+
+  test "QEMU runtime preserves the full dotted kernel hostname for management" do
+    source = File.read!("config/runtime.exs") |> Code.string_to_quoted!()
+
+    for address <- ["10.203.42.2", "172.30.42.3", "192.168.250.254"] do
+      # Supply the kernel file contents, including its trailing newline. A short
+      # hostname lookup would instead turn qemu-10.203.42.2 into qemu-10.
+      runtime =
+        Macro.prewalk(source, fn
+          {{:., _, [{:__aliases__, _, [:File]}, :read!]}, _, ["/proc/sys/kernel/hostname"]} ->
+            "qemu-#{address}\n"
+
+          node ->
+            node
+        end)
+
+      config =
+        Config.Reader.eval!("config/runtime.exs", Macro.to_string(runtime), target: :x86_64)
+
+      assert config[:nerves_gate][:development_node] == String.to_atom("nerves_gate@#{address}")
+
+      {"usb0", usb_config} = List.keyfind(config[:vintage_net][:config], "usb0", 0)
+
+      assert %{vintage_net_direct: %{hostname: "qemu-" <> ^address}} =
+               VintageNetDirect.normalize(usb_config)
+
+      assert {"eth2", %{ipv4: %{address: ^address, prefix_length: 24}}} =
+               List.keyfind(config[:vintage_net][:config], "eth2", 0)
     end
   end
 

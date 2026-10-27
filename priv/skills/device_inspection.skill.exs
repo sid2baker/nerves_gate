@@ -4,19 +4,16 @@ defmodule Workbench.Skill.DeviceInspection do
   skill do
     name("device-inspection")
 
-    description(
-      "Read identity, status, plugins, hardware and recent logs from a running Nerves Gate dev device over Erlang distribution."
-    )
+    description("Inspect physical and simulated gateways connected to the attached Workbench.")
 
     markdown("""
-    # Inspect a development device
+    # Inspect connected development gateways
 
-    Use `Workbench.DeviceInspection` through `elixir_eval` in the project target.
-    This host-only API connects with the fixed development cookie automatically.
-    No Mix task, Workbench session or application startup is needed.
+    First attach using the `dev-environment` skill. Run these calls in
+    `elixir_eval` with target `runtime`, not project:
 
     ```elixir
-    target = :\"nerves_gate@100.120.69.127\"
+    Workbench.DeviceInspection.devices()
     Workbench.DeviceInspection.identity(target)
     Workbench.DeviceInspection.plugins(target)
     Workbench.DeviceInspection.hardware(target)
@@ -24,42 +21,24 @@ defmodule Workbench.Skill.DeviceInspection do
     Workbench.DeviceInspection.logs(target, limit: 50, level: :warning)
     ```
 
-    Every call returns `{:ok, value}` or `{:error, reason}`. Strings such as
-    `"nerves_gate@100.120.69.127"` work too. Connection attempts wait up to three
-    seconds; each RPC waits up to five seconds. An existing distribution node is
-    reused; otherwise a local inspection node is started. `connect/1` is available
-    for checking connectivity explicitly.
-
-    Read identity first and confirm the intended device. These are trusted dev
-    devices, not a production authentication mechanism. Never print cookies.
-    Read `plugins/1` separately: administrative status does not include the full
-    plugin lifecycle state. `hardware/1` reads public inventory/assignments, not
-    caller-owned SDK resources; it never opens equipment handles.
-
-    Logs return the latest `limit` entries (1–100), filtered by minimum `level`.
-    Default level is `:warning`; use `:info` or `:debug` when necessary. Messages
-    are trimmed to 2 KB each and 16 KB total. Session/parameter lines, credential
-    lines, URLs and crash-state dumps are removed before returning results.
-    Returned metadata is limited to index, timestamp and level. Device timestamps
-    may differ from workstation time. Do not bypass sanitation by dumping raw
-    RingLogger entries or complete process state into model context.
-
-    This skill is read-only. It does not fix software, start/stop plugins, assign
-    hardware, connect equipment, reboot or update firmware. Report errors rather
-    than retrying mutations. Firmware updates remain in the existing reviewed
-    Workbench workflow. Do not expose a generic remote RPC/eval helper.
+    Choose an exact node from devices/0; never choose silently when several are
+    connected. Workbench owns discovery, the dev cookie and reconnects. Inspection
+    does not start its own node, connect arbitrary targets or open hardware.
+    Domain reads return {:ok, value} or {:error, reason} with five-second RPC bounds.
+    Logs are capped at 100 entries, 2 KB per message and 16 KB total, with session,
+    credential and crash-state dumps removed. Do not bypass sanitation with raw
+    RingLogger or process-state dumps. Offline targets return an error.
+    No plugin starts, assignments, equipment connections or firmware updates occur.
     """)
   end
 
-  def apis do
-    [
+  def apis,
+    do: [
       Pi.Plugin.API.new(
         name: :device_inspection,
         module: Workbench.DeviceInspection,
         alias: :DeviceInspection,
-        description: "Read-only dev-device inspection using the fixed development cookie.",
-        examples: ["Workbench.DeviceInspection.logs(\"nerves_gate@100.120.69.127\", limit: 20)"]
+        description: "Semantic read-only inspection from the attached Workbench runtime."
       )
     ]
-  end
 end

@@ -18,7 +18,7 @@ defmodule Scenarios.Cases.SshAccess do
     assert_settings_events(vm)
     {key, line, fingerprint} = ssh_key()
 
-    assert {:error, _} = password(vm, vm.forwards.ssh, ~c"root", ~c"nerves_gate")
+    assert {:error, _} = password(vm, 22, ~c"root", ~c"nerves_gate")
     assert {:error, _} = ssh_public_key(vm, key)
     reject_invalid(vm, line)
     assert :ok = Scenarios.Device.rpc(vm, NervesGate.SSH, :add_key, [line])
@@ -49,12 +49,12 @@ defmodule Scenarios.Cases.SshAccess do
     assert %{type: VintageNetDirect} =
              Scenarios.Device.rpc(vm, VintageNet, :get_configuration, ["usb0"])
 
-    assert {:ok, connection} = password(vm, vm.forwards.usb, ~c"root", ~c"nerves_gate")
+    assert {:ok, connection} = password(vm, vm.usb.port, ~c"root", ~c"nerves_gate")
     :ok = :ssh.close(connection)
-    assert {:error, _} = password(vm, vm.forwards.usb, ~c"root", ~c"wrong")
-    assert {:error, _} = password(vm, vm.forwards.usb, ~c"other", ~c"nerves_gate")
-    assert {:error, _} = password(vm, vm.forwards.ssh, ~c"root", ~c"nerves_gate")
-    assert {:error, _} = password(vm, vm.forwards.usb, ~c"root", ~c"")
+    assert {:error, _} = password(vm, vm.usb.port, ~c"root", ~c"wrong")
+    assert {:error, _} = password(vm, vm.usb.port, ~c"other", ~c"nerves_gate")
+    assert {:error, _} = password(vm, 22, ~c"root", ~c"nerves_gate")
+    assert {:error, _} = password(vm, vm.usb.port, ~c"root", ~c"")
     reject_conflicting_paths(vm)
 
     # Removing the actual kernel path immediately revokes password eligibility.
@@ -117,8 +117,8 @@ defmodule Scenarios.Cases.SshAccess do
 
     for {add, remove} <- [
           {["addr", "add", overlap, "dev", "eth1"], ["addr", "del", overlap, "dev", "eth1"]},
-          {["route", "add", "#{vm.usb.peer}/32", "via", "192.168.77.1", "dev", "eth2"],
-           ["route", "del", "#{vm.usb.peer}/32", "via", "192.168.77.1", "dev", "eth2"]}
+          {["route", "add", "#{vm.usb.peer}/32", "via", vm.management_host, "dev", "eth2"],
+           ["route", "del", "#{vm.usb.peer}/32", "via", vm.management_host, "dev", "eth2"]}
         ] do
       {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["ip", add])
 
@@ -129,7 +129,7 @@ defmodule Scenarios.Cases.SshAccess do
       end
     end
 
-    assert {:ok, connection} = password(vm, vm.forwards.usb, ~c"root", ~c"nerves_gate")
+    assert {:ok, connection} = password(vm, vm.usb.port, ~c"root", ~c"nerves_gate")
     :ok = :ssh.close(connection)
   end
 
@@ -187,7 +187,11 @@ defmodule Scenarios.Cases.SshAccess do
     :ok = :ssh.close(connection)
   end
 
-  defp password(vm, port, user, password),
-    do:
-      Simulator.SSH.connect(vm, port, user: user, password: password, auth_methods: ~c"password")
+  defp password(vm, port, user, password) do
+    options = [user: user, password: password, auth_methods: ~c"password"]
+
+    if port == vm.usb.port,
+      do: Scenarios.Device.ssh(vm, :usb, options),
+      else: Scenarios.Device.ssh(vm, port, options)
+  end
 end

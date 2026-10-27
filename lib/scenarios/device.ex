@@ -55,11 +55,7 @@ defmodule Scenarios.Device do
   def fixture_capabilities(%{fixture: {:qemu, %{owner: owner} = handle}}) when is_pid(owner),
     do: Scenarios.Qemu.capabilities(handle)
 
-  def fixture_capabilities(%{management: :verified_usb, manual_ethernet: true}),
-    do: [:ssh_management, :usb_management, :manual_ethernet]
-
-  def fixture_capabilities(%{management: :verified_usb}), do: [:ssh_management, :usb_management]
-  def fixture_capabilities(%{management: :verified_ssh}), do: [:ssh_management]
+  def fixture_capabilities(%{physical: true}), do: [:physical]
   def fixture_capabilities(_), do: []
 
   def control(device, operation, args \\ []) do
@@ -149,8 +145,15 @@ defmodule Scenarios.Device do
     )
   end
 
+  @doc "SSH to an owned QEMU guest (accepting its disposable host key), or `:usb` recovery."
+  def ssh(vm, :usb, options),
+    do: Workbench.SSH.connect("127.0.0.1", vm.usb.port, [silently_accept_hosts: true] ++ options)
+
+  def ssh(vm, port, options),
+    do: Workbench.SSH.connect(vm.address, port, [silently_accept_hosts: true] ++ options)
+
   def ssh_public_key(vm, key) do
-    Simulator.SSH.connect(vm, vm.forwards.ssh,
+    ssh(vm, 22,
       user: ~c"root",
       key_cb: {__MODULE__, key: key},
       auth_methods: ~c"publickey",
