@@ -4,6 +4,28 @@ The repository root is the host-only developer platform, including the QEMU
 simulator. `sdk/`, `firmware/` and `systems/` are separate projects, not umbrella
 children. App developers use [ordinary app projects](app-development.md).
 
+## Dev-device inspection from Pi
+
+The host-only executable skill `priv/skills/device_inspection.skill.exs` exposes
+`Workbench.DeviceInspection` through pi-elixir. Reload Pi resources after adding
+it. Use `identity/1`, `status/1`, `plugins/1`, `hardware/1` and `logs/2` with a node
+such as `"nerves_gate@100.120.69.127"`. It connects with the fixed development
+cookie automatically; no firmware dependency or running Workbench session is
+required. Calls are read-only and bounded. Logs default to warnings and omit
+session/credential lines and crash-state dumps. This is for trusted dev devices,
+not production authentication. Updates still use the reviewed Workbench workflow.
+
+## Firmware updates from Pi
+
+After explicit operator authorization, the `firmware-update` executable skill calls
+`Workbench.DeviceUpdate.update(host, firmware_path)` in the project runtime. The
+user-owned `mix dev` must be running. The helper reads plugin inventory from the
+actual image, checks saved artifact compatibility, then uses the existing reviewed
+Workbench queue for one upload and verified reboot. It checks plugin management
+and reports active/available versions afterward; it never selects or starts plugins.
+Errors or timeouts require inspection, not automatic replay. It does not build,
+bump versions, erase metadata or bypass SSH host-key verification.
+
 ## Prerequisites
 
 Linux x86_64 or aarch64 with QEMU 8.2+ (`user` and `stream` networking), fwup,
