@@ -61,10 +61,34 @@ defmodule NervesGateSDK.PackageTest do
              Package.validate(package, Map.put(installed, :other, package.main), "0.1.0")
   end
 
+  test "optional UI declarations must name a module in the main application", context do
+    for module <- [String, "Elixir.SomeUI", nil] do
+      file =
+        archive(context, env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_ui: module])
+
+      assert {:error, :invalid_package} = Package.read(file)
+    end
+
+    file =
+      archive(context,
+        env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_ui: context.fixture_module]
+      )
+
+    assert {:ok, _} = Package.read(file)
+  end
+
   test "rejects bundled host platforms even without them installed", context do
     assert {:ok, package} = context |> archive() |> Package.read()
 
-    for app <- [:nerves_gate_workbench, :nerves_gate_dev] do
+    for app <- [
+          :nerves_gate_workbench,
+          :nerves_gate_dev,
+          :phoenix_live_view,
+          :phoenix_html,
+          :req,
+          :finch,
+          :mint
+        ] do
       bundled = %{package | apps: [%{package.main | app: app}]}
       assert {:error, :application_conflict} = Package.validate(bundled, %{}, "0.1.0")
     end

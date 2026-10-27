@@ -1,6 +1,6 @@
 defmodule NervesGate.Apps.Loader do
   @moduledoc "Verified cold OTP activation and one fail-closed unload path."
-  alias NervesGate.Apps.{Artifact, Owner}
+  alias NervesGate.Apps.{Artifact, Owner, UI}
 
   def prepare(app, version, entries, previous) do
     with {:ok, artifact, package} <- Artifact.load(app, version, entries[app].artifacts[version]),
@@ -23,8 +23,13 @@ defmodule NervesGate.Apps.Loader do
     with :ok <- checkpoint.(activation),
          :ok <- paths(activation.artifact.paths),
          :ok <- specs(activation.artifact.apps),
-         :ok <- preload(activation.artifact, package.files) do
-      start_private(%{activation | phase: :starting}, package, checkpoint)
+         :ok <- preload(activation.artifact, package.files),
+         {:ok, component} <- UI.component(activation.artifact) do
+      start_private(
+        Map.merge(activation, %{phase: :starting, ui: component}),
+        package,
+        checkpoint
+      )
     else
       {:error, reason} -> {:error, reason, activation}
     end
@@ -61,7 +66,8 @@ defmodule NervesGate.Apps.Loader do
   def unload(activation) do
     artifact = activation.artifact
 
-    with :ok <- private_specs?(artifact),
+    with :ok <- UI.close(to_string(artifact.app)),
+         :ok <- private_specs?(artifact),
          :ok <- stop_apps(artifact, activation.started),
          :ok <- drain_activation(activation),
          :ok <- unload_specs(artifact.apps),

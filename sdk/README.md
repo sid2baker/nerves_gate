@@ -80,6 +80,17 @@ Other runtime dependencies are included and must not conflict with platform or
 other installed application names/modules. Native code must be built for the
 device architecture; this task does not cross-compile it.
 
+An optional `:nerves_gate_ui` OTP environment entry names a `Phoenix.LiveComponent`
+in the main application's package. Current firmware hosts it at `/apps/<app>` while
+that activation is running. Compile against compatible Phoenix/LiveView dependencies;
+these are shared platform libraries, not bundled copies. The firmware's Req/Finch/Mint
+HTTP libraries are likewise shared when an app depends on them. Packaging pins exact platform
+versions, including transitive UI libraries. The gateway closes app-page processes
+before unloading code. Component callbacks run in a gateway-owned LiveView: call
+commands on your app's supervised process rather than acquiring SDK resources there.
+Custom scripts/assets and dynamic subroutes are not part of this first integration.
+See [app-owned pages](../docs/applications.md#app-owned-pages).
+
 An optional `:nerves_gate_health_check` environment entry contains an MFA that
 must return `:ok` within five seconds after startup. A failed upgrade restarts the
 previous verified artifact with a fresh generation. Uncertain cleanup or rollback

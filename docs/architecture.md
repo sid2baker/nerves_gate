@@ -284,6 +284,18 @@ Upgrades stop/start cold, run bounded health checks and restore the verified pri
 artifact with a fresh generation on failure. Uncertain cleanup blocks reactivation. Ordinary app callbacks still execute in the shared runtime. See
 [applications](applications.md).
 
+### Application pages
+
+`/apps` and `/apps/:app` are fixed gateway routes. Apps may declare an optional
+verified LiveComponent with `:nerves_gate_ui`; it renders inside the gateway shell
+without router recompilation or its own web server. Components call their app's
+supervised command process, never borrow SDK ownership from the gateway LiveView.
+`Apps.UI` tracks local page PIDs with OTP process groups. Admission is bound to a
+running activation; checked unload closes those processes before removing code.
+A controller restart closes surviving sessions before restoration. Shared Phoenix
+libraries are excluded from app archives and exact dependency versions are checked.
+See [app-owned pages](applications.md#app-owned-pages).
+
 ## Persistence and recovery
 
 | Owner/store | Durable state |

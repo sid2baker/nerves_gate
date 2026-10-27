@@ -5,6 +5,40 @@ defmodule NervesGateWeb.HardwarePageTest do
   alias NervesGateWeb.{Endpoint, NetworkForm}
   @endpoint Endpoint
 
+  defmodule AppComponent do
+    use Phoenix.LiveComponent
+    def mount(socket), do: {:ok, assign(socket, :count, 0)}
+
+    def render(assigns) do
+      ~H"""
+      <button id="app-counter" phx-click="count" phx-target={@myself}>App count: {@count}</button>
+      """
+    end
+
+    def handle_event("count", _, socket),
+      do: {:noreply, assign(socket, :count, socket.assigns.count + 1)}
+  end
+
+  # Exercise the actual host renderer and close callback without a hardware backend.
+  defmodule AppHost do
+    use Phoenix.LiveView, layout: false
+
+    def mount(_, _, socket) do
+      if connected?(socket), do: :ok = NervesGate.Apps.UI.join("web_ui_fixture", self())
+
+      {:ok,
+       assign(socket,
+         app: "web_ui_fixture",
+         component: if(connected?(socket), do: AppComponent),
+         connecting?: not connected?(socket),
+         manager_ref: nil
+       )}
+    end
+
+    defdelegate render(assigns), to: NervesGateWeb.AppLive
+    defdelegate handle_info(message, socket), to: NervesGateWeb.AppLive
+  end
+
   setup do
     previous = Application.get_env(:nerves_gate, Endpoint)
 
@@ -97,6 +131,31 @@ defmodule NervesGateWeb.HardwarePageTest do
                storage,
                "nav[aria-label='Main navigation'] a[aria-current=page][href='/settings']"
              )
+  end
+
+  test "application routes use the management shell and fail closed without a running UI" do
+    index = page("/apps")
+    assert [_] = Floki.find(index, "nav a[aria-current=page][href='/apps']")
+    assert Floki.text(index) =~ "Application management is unavailable"
+    {:ok, view, html} = Phoenix.LiveViewTest.live(build_conn(), "/apps/not_installed")
+    assert html =~ "Application page unavailable"
+    refute html =~ "phx-target=\"1\""
+    assert Phoenix.LiveViewTest.has_element?(view, "#app-ui-unavailable")
+  end
+
+  test "host renders an app component and cleanup terminates its LiveView before unloading" do
+    # LiveViewTest links its proxy to the test; shutdown is the behavior under test.
+    Process.flag(:trap_exit, true)
+    unless Process.whereis(NervesGate.Apps.UI), do: start_supervised!(NervesGate.Apps.UI)
+    {:ok, view, html} = Phoenix.LiveViewTest.live_isolated(build_conn(), AppHost)
+    assert html =~ "App count: 0"
+
+    assert view
+           |> Phoenix.LiveViewTest.element("#app-counter")
+           |> Phoenix.LiveViewTest.render_click() =~ "App count: 1"
+
+    assert :ok = NervesGate.Apps.UI.close("web_ui_fixture")
+    refute Process.alive?(view.pid)
   end
 
   test "remote access keeps credentials hidden" do

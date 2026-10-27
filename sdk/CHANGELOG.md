@@ -4,12 +4,15 @@
 
 ### Breaking changes
 
+- Phoenix/LiveView and Req HTTP libraries are shared with firmware, not bundled as private copies. Packaging records exact shared platform versions, including transitive dependencies; align application lockfiles with the target firmware before rebuilding.
+
 - Stateful subscriptions, bus I/O and network leases require a managed activation. The firmware derives generation scope from the actual caller, rejects stale scope, and drains resources before reactivation. Read-only SDK queries remain available outside apps. Resource calls are not maintenance RPCs; no proxy Task becomes owner.
 
 - Removed `Equipment.list/0`, its device struct and the `:equipment` event topic. Applications own equipment identities, discovery and protocols; use `Network.interfaces/0` for platform link observations.
 
 ### Added
 
+- Optional `:nerves_gate_ui` declaration for a verified app-owned LiveComponent hosted by the gateway. Its callbacks call the app's supervised commands rather than borrowing SDK resource ownership from the gateway LiveView.
 - Process-owned isolated Ethernet leases through `Network.claim_local/3`, `local_status/0`, `advertise_local/1` and `release_local/1`. Claiming never changes Internet/USB, creates DNS/default routes or advertises automatically. Unknown cleanup blocks reuse.
 - Typed local lease observations and `Network.Interface.application_enabled?`/`claimed?` flags, without private process or claim handles in public observations.
 

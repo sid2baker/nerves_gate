@@ -182,7 +182,7 @@ defmodule Workbench.ScenariosTest do
     assert ids == Enum.uniq(ids)
 
     portable = ~w(cable_loss invalid_configuration invalid_trial_ids public_status sdk)
-    assert length(scenarios) == 45
+    assert length(scenarios) == 46
 
     for scenario <- scenarios do
       assert Enum.sort(Map.keys(scenario.requires)) == [:device, :fixture]
@@ -203,6 +203,9 @@ defmodule Workbench.ScenariosTest do
     assert [%{module: Scenarios.Cases.Sdk}] = Scenarios.select("sdk")
     assert [%{requires: %{fixture: [:qemu]}}] = Scenarios.select("power_trial")
     assert [%{module: Scenarios.Cases.QemuSdk}] = Scenarios.select("qemu_sdk")
+
+    assert [%{module: Scenarios.Cases.AppUI, fresh_disk: true, requires: %{fixture: [:qemu]}}] =
+             Scenarios.select("app_ui")
   end
 
   test "an uncertain RPC stops the worker before further commands or cleanup" do

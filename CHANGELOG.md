@@ -22,6 +22,8 @@
 
 ### Added
 
+- Gateway Applications page with optional app-owned LiveComponents, explicit Start/Stop controls and reviewed install/upgrade from first-party GitHub releases. The device checks compatibility and archive identity; new installs remain stopped and uncertain commands are never replayed. Subnet-router configuration and sharing controls are supplied by the app.
+
 - Verified retained archives and exact extracted content/modes for every activation, with no same-version replacement. Explicit verified module preload, bounded lifecycle workers, generation-fenced SDK resources and one checked cleanup/rollback path preserve actual-PID ownership and fail closed on uncertain effects.
 
 - Hardware shows Internet and application interfaces, claim/subscriber usage and explicit passive diagnostics. Remote access groups Tailscale with explicitly revealed developer runtime credentials; application storage lives under Settings. Replaced equipment/distribution/storage URLs are removed, not retained as aliases.

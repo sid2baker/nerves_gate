@@ -66,9 +66,63 @@ separately authorized release, update templates and starter to the stable requir
 No runtime
 capability probe substitutes for the device installer's SDK requirement check.
 
-Only the platform, the SDK and the two systems are released. Older firmware,
+The platform, SDK, two systems and explicitly selected first-party apps have
+separate release streams. Older firmware,
 simulator and generator Hex packages remain published; retiring them is a
 separate, explicit action.
+
+## First-party applications
+
+First-party apps are ordinary `.ez` assets on this repository's GitHub Releases,
+not Hex packages or firmware deployments. The initial approved app is
+`tailnet_subrouter`. Its source version and dated `apps/tailnet_subrouter/CHANGELOG.md`
+section define tag `apps/tailnet_subrouter/vX.Y.Z`, title and exact release body.
+The source may use the checkout SDK prerelease; this does **not** publish that SDK
+or claim compatibility with the older Hex SDK. Runtime and exact platform-library
+requirements accompany the app archive.
+
+Plan metadata without publishing:
+
+```sh
+mix app.release plan apps/tailnet_subrouter/v1.1.0
+```
+
+After a separately authorized commit, prepare assets from a **clean committed
+checkout**, using a new output directory outside it:
+
+```sh
+mix app.release prepare apps/tailnet_subrouter/v1.1.0 --output /tmp/subrouter-release-1.1.0
+```
+
+Preparation checks the packaged app/version, pure-BEAM payload, digest/size and
+source revision, and writes exactly the `.ez`, schema-1 `.json` manifest and
+`release-notes.md`. The manifest records supported targets, OTP major, exact
+Elixir, SDK requirement, exact platform versions and source commit. Existing output directories
+and release assets are never overwritten. Dirty source is not stamped with an old
+HEAD or treated as a release snapshot. Keep the app's lockfile aligned with the
+intended firmware's shared libraries. Resolve relevant dependency security
+advisories before publication rather than silently changing the target ABI.
+
+`.github/workflows/app-release.yml` publishes only an authorized `apps/*/v*` tag
+(or an explicitly dispatched existing tag) at a clean commit on main. It requires
+successful routine CI and separate QEMU qualification at **that exact SHA**, tests
+the app, audits its dependencies, refuses existing/partial releases, prepares the assets and creates the
+GitHub Release once using canonical notes, without replacing the repository's
+latest platform release. Verification compares public title,
+body, release state and the downloaded asset bytes to the prepared files. It never
+clobbers assets, moves a tag, publishes Hex or automatically retries publication.
+
+Configure protected GitHub environment `app-release` to permit `apps/*/v*` tags
+and `main` for manual dispatch. It needs only the job's repository token, never a
+Hex or device credential. Preparing this workflow is not permission to create its
+environment, push commits/tags, publish a release or install it on any gateway.
+No app release exists merely because a local archive has been built.
+
+The gateway's Applications page discovers complete first-party releases and owns
+review/download/verification/install/upgrade. New installs remain stopped until
+explicitly started. Runtime deployment is separate from asset publication. A
+private/local artifact with the same version but different bytes is not replaced:
+release a new version rather than defeating immutability.
 
 ## Systems
 

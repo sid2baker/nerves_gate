@@ -2,14 +2,27 @@
 
 An ordinary SDK application, not a built-in gateway service. Install/start it explicitly;
 startup is disabled and never configures a link or advertises a route. No configuration
-or enable intent is replayed after restart. No web server, credentials, packet probes,
+or enable intent is replayed after restart. No separate web server, credentials, packet probes,
 DHCP server, Internet sharing or automatic discovery is included.
+
+## Install a published release from the gateway
+
+On updated firmware, open **Applications → Check GitHub releases**, select the
+subnet router and **Review install / upgrade**, then confirm the displayed version,
+digest and compatibility requirements. The gateway fetches the package itself.
+New installs remain stopped: choose **Start**, then **Open application**. Upgrading
+an existing 1.0.0 installation starts the new version with sharing still disabled.
+No SSH file copy or IEx command is needed for this path.
+
+The release workflow is prepared separately from publication. If no app release
+has been published, the page reports that; a local source/build is not a public
+release. Publication and device installation remain separate explicit operations.
 
 ## Prepare and package
 
-Requires firmware from this checkout implementing `NervesGateSDK.Network.claim_local/3`.
-Older firmware is rejected at app startup even when its SDK version satisfies the package's
-baseline version requirement. No SDK release is implied by this source example.
+Requires firmware from this checkout implementing managed SDK activations and app UI
+mounting. The UI uses the firmware's Phoenix/LiveView libraries; packaging records exact
+platform versions and rejects mismatches. No SDK release is implied by this source example.
 
 From the repository root:
 
@@ -23,7 +36,8 @@ ordinary Test/Package actions. Opening or packaging installs nothing. On the app
 details page, **Install on physical device → Review package and device** builds a
 private snapshot and reads verified identity/storage before a one-use typed-address
 confirmation. Installation leaves the app stopped and disabled; then deliberately
-start it with `NervesGate.Apps.start(:tailnet_subrouter)` in trusted SSH IEx.
+start it with the gateway's **Applications → Start** button, or
+`NervesGate.Apps.start(:tailnet_subrouter)` in trusted SSH IEx.
 Existing installations are rejected, never automatically upgraded. See
 [app development](../../docs/app-development.md) for the full review/start procedure.
 
@@ -33,6 +47,28 @@ Existing installations are rejected, never automatically upgraded. See
    Legacy joined/equipment configurations are rejected, never automatically changed; migrating them remains
    an administrator API operation, not something this app may do.
 4. Choose an unused gateway-side IPv4 address on a non-overlapping local subnet.
+
+## Gateway UI
+
+After explicitly starting the app, open **Applications → tailnet_subrouter → Open
+application** on the gateway, or `/apps/tailnet_subrouter`.
+
+1. Select the application-enabled interface, unused gateway-side IPv4 address and
+   prefix, then **Configure address**. This does not advertise anything.
+2. Connect the local cable and **Refresh status** to confirm the link is ready.
+3. Choose **Enable sharing**, then approve the subnet in the Tailscale admin console
+   and allow it in tailnet policy. Advertisement does not prove approval/reachability.
+4. Choose **Disable and release** to withdraw the app-owned advertisement and remove
+   its temporary address.
+
+No command is retried automatically. After an unknown outcome, refresh and inspect
+status before continuing. Stop/upgrade closes open app pages before unloading code;
+reload once the new activation is ready. This first version uses the gateway's
+existing styles and has no custom JavaScript. Device app code is not loaded by
+host-only `mix dev.ui` previews: use the gateway's own HTTP service for app pages.
+
+The UI adds no automatic configuration or enable intent. Version 1.1.0 is a new
+immutable artifact; do not replace an installed 1.0.0 archive with changed bytes.
 
 ## Explicit application commands
 

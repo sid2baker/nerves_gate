@@ -111,6 +111,7 @@ defmodule NervesGate.MixProject do
       {:ex_doc, "~> 0.40", only: :docs, runtime: false},
       # Gateway host tests and Volt share the same host-only HTML parser.
       {:floki, "~> 0.38", targets: :host},
+      {:lazy_html, "~> 0.1", only: :test, targets: :host},
       # Frontend tooling runs on the host, never in device firmware.
       {:volt, "~> 0.23.0", optional: true, targets: :host},
       {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false},
@@ -121,6 +122,7 @@ defmodule NervesGate.MixProject do
       {:nerves, "~> 2.0.0-pre.4", runtime: false},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
+      {:req, "~> 0.7"},
       {:phoenix, "~> 1.8"},
       {:phoenix_live_view, "~> 1.2.13"},
       {:phoenix_pubsub, "~> 2.4"},

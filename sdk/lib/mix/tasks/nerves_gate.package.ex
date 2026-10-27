@@ -81,12 +81,12 @@ defmodule Mix.Tasks.NervesGate.Package do
     if main.version != version,
       do: Mix.raise("Compiled application version does not match mix.exs")
 
-    shared = bundled |> Enum.flat_map(&Map.fetch!(installed, &1).applications) |> Enum.uniq()
-
+    # Include transitive platform libraries: UI macros compile against Phoenix,
+    # HTML and Plug as well as the app's direct LiveView dependency.
     requirements =
-      for name <- shared,
+      for {name, entry} <- Enum.sort(platform),
           name in Package.common_apps(),
-          do: {name, Map.fetch!(platform, name).version}
+          do: {name, entry.version}
 
     env = Keyword.put(main.env, :nerves_gate_platform, requirements)
     spec = {:application, app, Keyword.put(main.spec, :env, env)}

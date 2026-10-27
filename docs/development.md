@@ -37,6 +37,7 @@ EC100 builds additionally need the published EC100 system artifact.
 | `mix dev [APP_DIRECTORY] [--config PATH] [--port 4000]` | Start the workbench; optionally open an app |
 | `mix dev.status`, `mix dev.stop` | Read or gracefully stop this checkout's session |
 | `mix app.new/test/package/install PATH`, `mix app.console` | [App operations](app-development.md) |
+| `mix app.release plan/prepare TAG` | [First-party GitHub app assets](releases.md#first-party-applications), never publication |
 | `mix test.qemu --only ID [--device ID]` | Run scenarios on the running bench |
 | `mix test.qemu --lifecycle start/stop/reset` | Explicit lifecycle action on that bench |
 | `mix test.qemu --ci --only ID` | Boot and clean up a separate disposable bench |

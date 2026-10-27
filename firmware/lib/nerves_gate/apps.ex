@@ -1,7 +1,7 @@
 defmodule NervesGate.Apps do
   @moduledoc "Serialized cold lifecycle for immutable SD artifacts and generation-fenced, trusted OTP applications. Not a sandbox."
   use GenServer
-  alias NervesGate.Apps.{Artifact, Loader, Metadata, Owner}
+  alias NervesGate.Apps.{Artifact, Loader, Metadata, Owner, Releases, UI}
   alias NervesGate.Storage
   alias NervesGateSDK.Package
   @timeout 190_000
@@ -11,6 +11,11 @@ defmodule NervesGate.Apps do
   def install(path), do: command({:install, path})
   def install_new(path, expected), do: command({:install_new, path, expected})
   def list, do: GenServer.call(__MODULE__, :list)
+  def available_releases, do: Releases.available()
+  def review_release(app, version), do: command({:review_release, app, version})
+  def install_release(token), do: command({:install_release, token})
+  @doc false
+  def mount_ui(app), do: GenServer.call(__MODULE__, {:mount_ui, app})
   def start(app), do: command({:start, app})
   def stop(app), do: command({:stop, app})
   def restart(app), do: command({:restart, app})
@@ -90,6 +95,7 @@ defmodule NervesGate.Apps do
       running: %{},
       errors: %{},
       job: nil,
+      release_review: nil,
       blocked: blocked,
       blocked_app: nil,
       epoch: make_ref(),
@@ -119,12 +125,26 @@ defmodule NervesGate.Apps do
           versions: Enum.sort(Map.keys(entry.artifacts)),
           generation: entry.generation,
           running?: match?(%{phase: :running}, state.running[app]),
+          ui?: state.running[app] != nil and Map.get(state.running[app], :ui) != nil,
           operation: state.running[app] && state.running[app].phase,
           error: state.errors[app] || state.blocked
         }
       end
 
     {:reply, {:ok, Enum.sort_by(entries, & &1.app)}, state}
+  end
+
+  def handle_call({:mount_ui, app}, {pid, _}, state) do
+    with nil <- state.blocked,
+         nil <- state.job,
+         %{phase: :running} = activation <- state.running[app],
+         true <- Owner.valid?(activation.owner),
+         component when not is_nil(component) <- Map.get(activation, :ui),
+         :ok <- UI.join(app, pid) do
+      {:reply, {:ok, component, self()}, state}
+    else
+      _ -> {:reply, {:error, :ui_unavailable}, state}
+    end
   end
 
   def handle_call({:worker, op, request}, {pid, _}, %{job: %{op: op, task: %{pid: pid}}} = state),
@@ -159,14 +179,53 @@ defmodule NervesGate.Apps do
         {:reply, {:error, :applications_not_ready}, state}
 
       true ->
-        {:noreply, begin_work(request, from, state)}
+        admit(request, from, state)
     end
   end
+
+  defp admit({:install_release, token}, from, state) do
+    case state.release_review do
+      %{token: ^token, expires: expires, review: review} when is_reference(token) ->
+        state = %{state | release_review: nil}
+
+        if System.monotonic_time(:millisecond) < expires,
+          do: {:noreply, begin_work({:install_release, review}, from, state)},
+          else: {:reply, {:error, :release_review_expired}, state}
+
+      _ ->
+        {:reply, {:error, :release_review_expired}, state}
+    end
+  end
+
+  defp admit(request, from, state), do: {:noreply, begin_work(request, from, state)}
 
   defp recovery?({:stop, app}, blocked) when is_binary(app) or is_atom(app),
     do: to_string(app) == blocked
 
   defp recovery?(_, _), do: false
+
+  defp worker_call({:release_review, review}, %{blocked: nil} = state) do
+    token = make_ref()
+
+    stored = %{
+      token: token,
+      expires: System.monotonic_time(:millisecond) + 600_000,
+      review: review
+    }
+
+    {:reply,
+     {:ok,
+      %{token: token, release: review.release, action: review.action, selection: review.selection}},
+     %{state | release_review: stored}}
+  end
+
+  defp worker_call({:release_review, _}, state),
+    do: {:reply, {:error, :applications_blocked}, state}
+
+  defp worker_call(:check_storage, %{blocked: nil} = state),
+    do: {:reply, storage_check(state.job), state}
+
+  defp worker_call(:check_storage, state), do: {:reply, {:error, :applications_blocked}, state}
 
   defp worker_call({:storage_identity, identity}, state),
     do: {:reply, :ok, %{state | job: Map.put(state.job, :storage_identity, identity)}}
@@ -174,7 +233,7 @@ defmodule NervesGate.Apps do
   defp worker_call({:bind, artifact}, %{blocked: nil} = state) do
     sequence = state.sequence + 1
     owner = Owner.bind(artifact, {state.epoch, sequence})
-    activation = %{artifact: artifact, owner: owner, started: [], phase: :prepared}
+    activation = %{artifact: artifact, owner: owner, started: [], phase: :prepared, ui: nil}
     app = to_string(artifact.app)
 
     {:reply, {:ok, activation},
@@ -377,11 +436,45 @@ defmodule NervesGate.Apps do
     end
   end
 
+  defp perform({:review_release, app, version}, state, context) do
+    with {:ok, release} <- Releases.review(app, version),
+         :ok <- release_version(app, version, state.entries) do
+      review = %{
+        release: release,
+        action: if(state.entries[app], do: :upgrade, else: :install),
+        selection: release_selection(app, state),
+        storage_identity: state.storage_identity
+      }
+
+      {context.({:release_review, review}), state}
+    else
+      error -> {error, state}
+    end
+  end
+
+  defp perform({:install_release, review}, state, context) do
+    app = review.release["app"]
+
+    with true <-
+           review.storage_identity == state.storage_identity and
+             review.selection == release_selection(app, state),
+         {:ok, package, bytes, sha} <- Releases.download(review.release),
+         :ok <- context.(:check_storage) do
+      install_request(review.action, package, bytes, sha, state, context)
+    else
+      false -> {{:error, :release_review_changed}, state}
+      error -> {error, state}
+    end
+  end
+
   defp perform({:install_new, path, expected}, state, context) do
     with {:ok, package, bytes, sha} <- Artifact.read(path),
          :ok <- Artifact.review(package, sha, expected, state.entries),
          %{ready: true, card_id: card} when card == expected.card_id <- Storage.commissioning() do
-      install(package, bytes, sha, state, context)
+      case context.(:check_storage) do
+        :ok -> install(package, bytes, sha, state, context)
+        error -> {error, state}
+      end
     else
       _ -> {{:error, :review_changed}, state}
     end
@@ -389,7 +482,8 @@ defmodule NervesGate.Apps do
 
   defp perform({operation, path}, state, context) when operation in [:install, :upgrade] do
     with {:ok, _} <- Storage.apps_dir(),
-         {:ok, package, bytes, sha} <- Artifact.read(path) do
+         {:ok, package, bytes, sha} <- Artifact.read(path),
+         :ok <- context.(:check_storage) do
       install_request(operation, package, bytes, sha, state, context)
     else
       error -> {error, state}
@@ -426,7 +520,8 @@ defmodule NervesGate.Apps do
   end
 
   defp perform(:restore, state, context) do
-    with :ok <- Loader.drain(:inactive),
+    with :ok <- UI.close_all(),
+         :ok <- Loader.drain(:inactive),
          :ok <- reconcile(state.entries) do
       next = Enum.reduce_while(state.entries, state, &restore_entry(&1, &2, context))
 
@@ -437,6 +532,32 @@ defmodule NervesGate.Apps do
   end
 
   defp perform(_, state, _), do: {{:error, :invalid_request}, state}
+
+  defp release_version(app, version, entries) do
+    case entries[app] do
+      nil ->
+        :ok
+
+      %{active_version: ^version} ->
+        {:error, :already_active}
+
+      %{active_version: active} ->
+        if Version.compare(version, active) == :gt,
+          do: :ok,
+          else: {:error, :release_downgrade_unsupported}
+    end
+  end
+
+  defp release_selection(app, state) do
+    case state.entries[app] do
+      nil ->
+        nil
+
+      entry ->
+        Map.take(entry, [:active_version, :enabled, :generation])
+        |> Map.put(:running?, match?(%{phase: :running}, state.running[app]))
+    end
+  end
 
   defp install_request(:upgrade, package, bytes, sha, state, context) do
     app = to_string(package.app)

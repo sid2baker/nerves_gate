@@ -10,8 +10,10 @@ defmodule NervesGateSDK.Package do
   @max_entries 10_000
   @shared ~w(kernel stdlib compiler elixir logger crypto asn1 public_key ssl inets
     eex runtime_tools tools syntax_tools xmerl sasl os_mon ssh nerves_gate_sdk
-    jason telemetry phoenix_pubsub)a
-  @common ~w(jason telemetry phoenix_pubsub)a
+    jason telemetry phoenix_pubsub phoenix phoenix_live_view phoenix_html phoenix_template
+    plug plug_crypto mime websock websock_adapter castore req finch mint hpax nimble_pool nimble_options)a
+  @common ~w(jason telemetry phoenix_pubsub phoenix phoenix_live_view phoenix_html phoenix_template
+    plug plug_crypto mime websock websock_adapter castore req finch mint hpax nimble_pool nimble_options)a
 
   def shared_apps, do: @shared
   def common_apps, do: @common
@@ -90,12 +92,20 @@ defmodule NervesGateSDK.Package do
          true <- :nerves_gate_sdk in main.applications,
          {module, args} when is_atom(module) and is_list(args) <- main.spec[:mod],
          true <- module in main.modules,
+         true <- valid_ui?(main),
          :ok <- check_files(files, apps),
          :ok <- unique_modules(apps) do
       {:ok, %{app: main.app, version: main.version, main: main, apps: apps, files: files}}
     else
       {:error, reason} -> {:error, reason}
       _ -> {:error, :invalid_package}
+    end
+  end
+
+  defp valid_ui?(main) do
+    case Keyword.fetch(main.env, :nerves_gate_ui) do
+      :error -> true
+      {:ok, module} -> is_atom(module) and module in main.modules
     end
   end
 

@@ -6,6 +6,86 @@ hot-code upgrade or dependency solver.
 
 For ordinary SDK app projects and packaging, see [App development](app-development.md).
 
+## Install from GitHub
+
+On the gateway's **Applications** page, choose **Check GitHub releases**, then
+**Review install / upgrade** for a first-party app. Review the version, current
+selection, archive size/SHA, source revision and runtime/platform requirements.
+Confirm once. The gateway downloads and verifies the archive itself; no SSH file
+copy or workstation service is involved. New installations remain stopped; choose
+**Start** explicitly. An upgrade stops any running version and starts the new one,
+using the existing checked cleanup/rollback path. **Stop** persists disabled intent.
+Starting a trusted app may perform app-owned actions; the subnet router still needs
+explicit address configuration and sharing enablement.
+
+The initial catalog is restricted to `tailnet_subrouter` in public GitHub Releases
+of `sid2baker/nerves_gate`, with tags `apps/tailnet_subrouter/vX.Y.Z`. Discovery reads
+the most recent 100 repository releases and picks the highest complete app version,
+labeling prereleases. Nothing is checked or updated in the background. If no app
+release has been published, the page says so; local build files are not advertised
+as published releases. There is no arbitrary URL/repository installer or private
+GitHub credential on the device.
+
+`Apps.Releases` bounds manifest/list reads, archive size (16 MiB), redirects and
+transfer time. Only HTTPS GitHub and GitHub asset hosts are allowed, with ordinary
+TLS verification. OTP major, exact Elixir, supported target, SDK and platform requirements
+are checked; the retained archive SHA, parsed package identity and manifest must
+agree. The first release format accepts a single pure-BEAM OTP app, not private
+native dependencies. GitHub/the publishing repository is the trusted distributor;
+a checksum verifies reviewed bytes, not an independent publisher signature.
+
+Apps owns serialized review/confirmation admission. Reviews are private, one-use,
+ten-minute references bound to current selection and storage CID/mount identity.
+Confirmation consumes the reference before download, rechecks prerequisites and
+passes verified bytes to the ordinary immutable installer. Changed selections,
+same-version conflicts and downgrades are rejected rather than silently replaced.
+Requests and writes are never automatically retried. A lost response or timeout is
+not cancellation: inspect **Refresh application state**, and request a fresh review
+only after any blocked/in-flight operation has been resolved.
+
+These controls run on the gateway itself. Host-only `mix dev.ui` previews do not
+proxy device commands. See [app releases](releases.md#first-party-applications) for
+the source/asset preparation and protected publication workflow.
+
+## App-owned pages
+
+The gateway compiles two generic management routes: `/apps` lists installed apps,
+and `/apps/:app` hosts an optional app-owned `Phoenix.LiveComponent` within the
+normal gateway shell, session/CSRF protections and CSP. No router recompilation,
+per-app endpoint or PhoenixMountable dependency is needed.
+
+An app declares `nerves_gate_ui: MyApp.UI` in its OTP environment. That module must
+belong to the main app's verified package and implement a LiveComponent. The loader
+validates it after verified preload; a malformed declaration fails activation.
+Add a compatible `:phoenix_live_view` dependency when compiling the app. Packaging
+excludes shared Phoenix libraries and records exact platform-library versions,
+including transitive compile-time dependencies. Rebuild against the device's
+versions rather than bundling another Phoenix runtime.
+
+The component owns its drafts and presentation and handles its own events. Call
+commands on the app's supervised processes; a gateway-owned LiveView is **not** a
+managed SDK resource owner. Do not subscribe/claim from component callbacks on the
+app's behalf. This first integration uses gateway styles and LiveView's existing
+JavaScript, without app-provided assets or subroutes.
+
+Only an idle, running activation admits UI sessions. Their actual LiveView PIDs
+are recorded in a platform-supervised local OTP process group, surviving an Apps
+controller restart. Quiescing blocks new mounts. Checked unload requests all app
+pages to close and waits for process death before stopping/unloading the app;
+unresponsive pages block cleanup, never justify force-purging code. Restoring the
+manager closes surviving app sessions before reconciling old code. Open pages
+also monitor their admitting controller and close when it exits. Reload after an
+upgrade; stale component sessions are not reused for the new generation.
+
+Stopped/missing apps show a host-owned unavailable page; disconnected/static
+rendering never runs app components. These are trusted same-BEAM extensions, not
+sandboxed web plugins. Host-only `mix dev.ui` previews cannot load device app code;
+use the gateway's own HTTP endpoint for installed app pages.
+
+The [Tailnet subnet-router starter](../apps/tailnet_subrouter/README.md) supplies the
+first page: configure an address, inspect link/sharing state, explicitly enable,
+and disable/release. Nothing is configured or advertised by opening the page.
+
 ## Storage
 
 - `/data/nerves_gate/apps.term` is schema 1: enabled intent, active/previous

@@ -53,6 +53,14 @@
   verified code loading and checked cleanup. Apps owns serialized admission,
   protected generation bindings and schema-1 metadata. Never replace a registered
   version, backfill a digest, import old metadata or bypass blocked cleanup.
+- App pages are optional verified LiveComponents under `/apps/:app`, not dynamically
+  recompiled routers or separate servers. Gateway LiveViews are not SDK resource
+  owners: call the app's supervised command process. Checked unload closes all app
+  UI processes before removing code; never bypass busy-session cleanup.
+- First-party app downloads use the fixed GitHub release origin and bounded HTTPS
+  reads. Apps owns expiring one-use reviews, selection/storage revalidation and
+  confirmation consumption before download. Never accept caller-supplied download
+  URLs, replay an uncertain install or publish assets from an uncommitted checkout.
 - Keep genuine sharing through the firmware path dependency without starting its
   application on the host. Do not add a common library/UI kit without measured need.
 
