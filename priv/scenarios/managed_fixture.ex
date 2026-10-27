@@ -17,7 +17,7 @@ defmodule ManagedFixture.Application do
 
   def stop(_) do
     directory =
-      Application.get_env(:nerves_gate, :apps_metadata, "/data/nerves_gate/apps.term")
+      Application.get_env(:nerves_gate, :plugins_metadata, "/data/nerves_gate/plugins.term")
       |> Path.dirname()
 
     held = directory <> ".held"
@@ -50,7 +50,7 @@ defmodule ManagedFixture.Application do
       :corrupt_previous ->
         # These administrative fault hooks exist only on the real guest firmware,
         # never in this independently compiled SDK fixture project's dependencies.
-        {:ok, entries} = apply(NervesGate.Apps, :list, [])
+        {:ok, entries} = apply(NervesGate.Plugins, :list, [])
         selected = Enum.find(entries, &(&1.app == "managed_fixture"))
         {:ok, root} = apply(NervesGate.Storage, :apps_dir, [])
         archive = Path.join([root, "managed_fixture", selected.active_version, "package.ez"])
@@ -58,7 +58,7 @@ defmodule ManagedFixture.Application do
         {:error, :fixture_corruption}
 
       :commit_failure ->
-        directory = Application.fetch_env!(:nerves_gate, :apps_metadata) |> Path.dirname()
+        directory = Application.fetch_env!(:nerves_gate, :plugins_metadata) |> Path.dirname()
         true = String.starts_with?(directory, "/tmp/lifecycle-metadata-")
         File.rename!(directory, directory <> ".held")
         File.write!(directory, "metadata commit denied by disposable fixture")

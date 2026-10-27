@@ -134,23 +134,23 @@ defmodule WorkbenchWeb.ApplicationsLive do
       </.panel>
       <.panel
         :if={!@app_id}
-        title="Starter app · Tailnet subnet router"
+        title="Firmware plugin sources"
         icon="network"
-        id="starter-tailnet-subrouter"
+        id="firmware-plugin-sources"
       >
         <p>
-          Optional SDK application: use an enabled Ethernet interface to expose one local subnet through the gateway's enrolled tailnet. Starts disabled; opening, testing or packaging never enables routing.
+          Selected firmware plugins: Tailnet subnet router and read-only Modbus TCP. Starts disabled; opening, testing or packaging never connects equipment or enables routing.
         </p>
-        <form phx-submit="open_application">
+        <form :for={plugin <- ["tailnet_subrouter", "modbus"]} phx-submit="open_application">
           <input
             type="hidden"
             name="application[path]"
-            value={Path.join(Workbench.root(), "apps/tailnet_subrouter")}
+            value={Path.join([Workbench.root(), "plugins", plugin])}
           />
-          <.button type="submit" variant="secondary">Open starter app source</.button>
+          <.button type="submit" variant="secondary">Open {plugin} source</.button>
         </form>
         <p class="ui-help">
-          Configure and enable explicitly through the app's API after installation. See apps/tailnet_subrouter/README.md. This is not a built-in gateway service.
+          Change plugins/selection.exs and rebuild firmware to add or update plugins. Configure and connect explicitly on the device's Plugins page.
         </p>
       </.panel>
       <.panel :if={!@app_id} title="Open applications" icon="equipment" id="applications">

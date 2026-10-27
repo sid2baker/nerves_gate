@@ -148,7 +148,7 @@ defmodule NervesGate.Buses do
     next = drain_owners(state, tag)
 
     pending =
-      Enum.any?(next.owners, fn {_, owner} -> NervesGate.Apps.Loader.stale?(owner, tag) end)
+      Enum.any?(next.owners, fn {_, owner} -> NervesGate.Plugins.Loader.stale?(owner, tag) end)
 
     {:reply, if(pending, do: {:error, :generation_cleanup_pending}, else: :ok), next}
   end
@@ -233,7 +233,7 @@ defmodule NervesGate.Buses do
   def handle_info({:circuits_uart, uart, data}, state) when is_binary(data) do
     case Enum.find(state.claims, fn {_, owner} -> owner.uart == uart end) do
       {_claim, owner} ->
-        if NervesGate.Apps.Owner.matches?(owner.pid, state.owners[owner.pid]),
+        if NervesGate.Plugins.Owner.matches?(owner.pid, state.owners[owner.pid]),
           do: send(owner.pid, %Event{topic: {:rs485, owner.port}, value: data})
 
       nil ->
@@ -276,7 +276,7 @@ defmodule NervesGate.Buses do
   defp sdk_request(operation, arguments, pid, state) do
     mode = if operation in [:rs485_release, :can_unsubscribe], do: :release, else: :active
 
-    case NervesGate.Apps.Owner.resolve(pid, mode) do
+    case NervesGate.Plugins.Owner.resolve(pid, mode) do
       {:ok, owner} -> owned_sdk(operation, arguments, pid, owner, state)
       error -> {:reply, error, state}
     end
@@ -298,7 +298,7 @@ defmodule NervesGate.Buses do
 
   defp drain_owners(state, tag) do
     Enum.reduce(state.owners, state, fn {pid, owner}, state ->
-      if NervesGate.Apps.Loader.stale?(owner, tag), do: owner_down(state, pid), else: state
+      if NervesGate.Plugins.Loader.stale?(owner, tag), do: owner_down(state, pid), else: state
     end)
   end
 
@@ -519,7 +519,7 @@ defmodule NervesGate.Buses do
     frame = CAN.decode_frame(packet)
 
     for pid <- Map.get(state.subscribers, id, MapSet.new()),
-        NervesGate.Apps.Owner.matches?(pid, state.owners[pid]),
+        NervesGate.Plugins.Owner.matches?(pid, state.owners[pid]),
         frame,
         do: send(pid, %Event{topic: {:can, id}, value: frame})
 

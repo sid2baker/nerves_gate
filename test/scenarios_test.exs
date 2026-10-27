@@ -204,8 +204,8 @@ defmodule Workbench.ScenariosTest do
     assert [%{requires: %{fixture: [:qemu]}}] = Scenarios.select("power_trial")
     assert [%{module: Scenarios.Cases.QemuSdk}] = Scenarios.select("qemu_sdk")
 
-    assert [%{module: Scenarios.Cases.AppUI, fresh_disk: true, requires: %{fixture: [:qemu]}}] =
-             Scenarios.select("app_ui")
+    assert [%{module: Scenarios.Cases.Plugins, fresh_disk: true, requires: %{fixture: [:qemu]}}] =
+             Scenarios.select("plugins")
   end
 
   test "an uncertain RPC stops the worker before further commands or cleanup" do

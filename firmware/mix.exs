@@ -24,7 +24,7 @@ defmodule NervesGate.MixProject do
         nerves_gate: [
           include_erts: &Nerves.erts/0,
           applications: if(Mix.target() in @targets, do: [nerves_runtime: :transient], else: []),
-          steps: [&Nerves.init_release/1, &gateway_restart_policy/1, :assemble]
+          steps: [&Nerves.init_release/1, &gateway_restart_policy/1, &verify_plugins/1, :assemble]
         ]
       ],
       dialyzer: [
@@ -88,6 +88,33 @@ defmodule NervesGate.MixProject do
     else
       release
     end
+  end
+
+  defp verify_plugins(release) do
+    if Mix.target() in @targets do
+      inventory = Path.join(__DIR__, "priv/plugins/inventory.term")
+
+      unless File.regular?(inventory),
+        do: Mix.raise("Build selected plugins with mix firmware from the repository root first")
+
+      {:ok, entries} = NervesGate.Plugins.Metadata.read(inventory)
+      installed = NervesGateSDK.Package.installed()
+
+      for {app, entry} <- entries, {version, metadata} <- entry.artifacts do
+        {:ok, _, package} =
+          NervesGate.Plugins.Artifact.open(
+            Path.join([__DIR__, "priv/plugins", app, version]),
+            app,
+            version,
+            metadata
+          )
+
+        :ok =
+          NervesGateSDK.Package.validate(package, installed, installed.nerves_gate_sdk.version)
+      end
+    end
+
+    release
   end
 
   defp system_dependency(app, version, target) do

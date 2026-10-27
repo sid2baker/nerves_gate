@@ -7,13 +7,13 @@ defmodule Scenarios.AppLifecycle do
   def run(vm) do
     ManagedApp.prepare_storage(vm)
     token = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    metadata = "/tmp/lifecycle-metadata-#{token}/apps.term"
-    previous = Device.rpc(vm, Application, :get_env, [:nerves_gate, :apps_metadata])
+    metadata = "/tmp/lifecycle-metadata-#{token}/plugins.term"
+    previous = Device.rpc(vm, Application, :get_env, [:nerves_gate, :plugins_metadata])
     directory = Path.join(System.tmp_dir!(), "gate-lifecycle-#{token}")
     paths = Device.rpc(vm, :code, :get_path)
 
     try do
-      Device.rpc(vm, Application, :put_env, [:nerves_gate, :apps_metadata, metadata])
+      Device.rpc(vm, Application, :put_env, [:nerves_gate, :plugins_metadata, metadata])
       restart_manager(vm)
       qualify(vm, directory)
     after
@@ -28,8 +28,8 @@ defmodule Scenarios.AppLifecycle do
       assert_unloaded(vm)
 
       if previous,
-        do: Device.rpc(vm, Application, :put_env, [:nerves_gate, :apps_metadata, previous]),
-        else: Device.rpc(vm, Application, :delete_env, [:nerves_gate, :apps_metadata])
+        do: Device.rpc(vm, Application, :put_env, [:nerves_gate, :plugins_metadata, previous]),
+        else: Device.rpc(vm, Application, :delete_env, [:nerves_gate, :plugins_metadata])
 
       restart_manager(vm)
       Device.rpc(vm, File, :rm_rf!, [Path.dirname(metadata)])
@@ -121,7 +121,7 @@ defmodule Scenarios.AppLifecycle do
     )
 
     client = ManagedApp.main(vm)
-    {:ok, scope} = Device.rpc(vm, NervesGate.Apps.Owner, :resolve, [client])
+    {:ok, scope} = Device.rpc(vm, NervesGate.Plugins.Owner, :resolve, [client])
 
     assert {:ok, ref} =
              ManagedApp.call(vm, client, NervesGateSDK.Network, :claim_local, [
@@ -131,7 +131,7 @@ defmodule Scenarios.AppLifecycle do
              ])
 
     assert :ok = ManagedApp.apps(vm, :restart, [@app])
-    refute Device.rpc(vm, NervesGate.Apps.Owner, :valid?, [scope])
+    refute Device.rpc(vm, NervesGate.Plugins.Owner, :valid?, [scope])
     refute Device.rpc(vm, :erlang, :is_process_alive, [client])
     assert Device.status(vm).network.local == nil
 
@@ -195,7 +195,7 @@ defmodule Scenarios.AppLifecycle do
 
     try do
       assert {:ok, _} = ManagedApp.apps(vm, :install, [package])
-      request = :gen_server.send_request({NervesGate.Apps, vm.node}, {:upgrade, package})
+      request = :gen_server.send_request({NervesGate.Plugins, vm.node}, {:upgrade, package})
 
       Device.await(vm, "candidate health phase before controller interruption", fn _ ->
         is_pid(Device.rpc(vm, Process, :whereis, [ManagedFixture.Health]))
@@ -348,16 +348,22 @@ defmodule Scenarios.AppLifecycle do
 
   defp restart_manager(vm) do
     assert :ok =
-             Device.rpc(vm, Supervisor, :terminate_child, [NervesGate.Supervisor, NervesGate.Apps])
+             Device.rpc(vm, Supervisor, :terminate_child, [
+               NervesGate.Supervisor,
+               NervesGate.Plugins
+             ])
 
     assert {:ok, _} =
-             Device.rpc(vm, Supervisor, :restart_child, [NervesGate.Supervisor, NervesGate.Apps])
+             Device.rpc(vm, Supervisor, :restart_child, [
+               NervesGate.Supervisor,
+               NervesGate.Plugins
+             ])
 
     Device.await(
       vm,
       "application ownership reconciled after manager restart",
       fn _ ->
-        state = Device.rpc(vm, :sys, :get_state, [NervesGate.Apps])
+        state = Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
         state.restored? and state.job == nil and state.blocked == nil
       end,
       90_000

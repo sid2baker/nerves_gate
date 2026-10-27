@@ -19,7 +19,7 @@ enabled application port until application access is disabled.
 Applications request local addressing with `NervesGateSDK.Network.claim_local/3`.
 The actual caller owns one isolated link; a claim never changes Internet/USB or
 persists its IP configuration. The first implementation admits one claim per gateway.
-Use the optional [Tailnet subnet-router app](../apps/tailnet_subrouter/README.md)
+Use the optional [Tailnet subnet-router plugin](../plugins/tailnet_subrouter/README.md)
 for explicit configuration and route advertisement. Unresolved claims block network
 changes until safe cleanup; no app is enabled by visiting Hardware.
 

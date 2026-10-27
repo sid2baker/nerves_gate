@@ -24,7 +24,7 @@ defmodule NervesGateWeb.HardwarePageTest do
     use Phoenix.LiveView, layout: false
 
     def mount(_, _, socket) do
-      if connected?(socket), do: :ok = NervesGate.Apps.UI.join("web_ui_fixture", self())
+      if connected?(socket), do: :ok = NervesGate.Plugins.UI.join("web_ui_fixture", self())
 
       {:ok,
        assign(socket,
@@ -35,8 +35,8 @@ defmodule NervesGateWeb.HardwarePageTest do
        )}
     end
 
-    defdelegate render(assigns), to: NervesGateWeb.AppLive
-    defdelegate handle_info(message, socket), to: NervesGateWeb.AppLive
+    defdelegate render(assigns), to: NervesGateWeb.PluginLive
+    defdelegate handle_info(message, socket), to: NervesGateWeb.PluginLive
   end
 
   setup do
@@ -134,11 +134,11 @@ defmodule NervesGateWeb.HardwarePageTest do
   end
 
   test "application routes use the management shell and fail closed without a running UI" do
-    index = page("/apps")
-    assert [_] = Floki.find(index, "nav a[aria-current=page][href='/apps']")
-    assert Floki.text(index) =~ "Application management is unavailable"
-    {:ok, view, html} = Phoenix.LiveViewTest.live(build_conn(), "/apps/not_installed")
-    assert html =~ "Application page unavailable"
+    index = page("/plugins")
+    assert [_] = Floki.find(index, "nav a[aria-current=page][href='/plugins']")
+    assert Floki.text(index) =~ "Plugin management unavailable"
+    {:ok, view, html} = Phoenix.LiveViewTest.live(build_conn(), "/plugins/not_installed")
+    assert html =~ "Plugin page unavailable"
     refute html =~ "phx-target=\"1\""
     assert Phoenix.LiveViewTest.has_element?(view, "#app-ui-unavailable")
   end
@@ -146,7 +146,7 @@ defmodule NervesGateWeb.HardwarePageTest do
   test "host renders an app component and cleanup terminates its LiveView before unloading" do
     # LiveViewTest links its proxy to the test; shutdown is the behavior under test.
     Process.flag(:trap_exit, true)
-    unless Process.whereis(NervesGate.Apps.UI), do: start_supervised!(NervesGate.Apps.UI)
+    unless Process.whereis(NervesGate.Plugins.UI), do: start_supervised!(NervesGate.Plugins.UI)
     {:ok, view, html} = Phoenix.LiveViewTest.live_isolated(build_conn(), AppHost)
     assert html =~ "App count: 0"
 
@@ -154,7 +154,7 @@ defmodule NervesGateWeb.HardwarePageTest do
            |> Phoenix.LiveViewTest.element("#app-counter")
            |> Phoenix.LiveViewTest.render_click() =~ "App count: 1"
 
-    assert :ok = NervesGate.Apps.UI.close("web_ui_fixture")
+    assert :ok = NervesGate.Plugins.UI.close("web_ui_fixture")
     refute Process.alive?(view.pid)
   end
 

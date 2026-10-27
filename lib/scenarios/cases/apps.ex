@@ -37,7 +37,7 @@ defmodule Scenarios.Cases.Apps do
              Scenarios.Device.rpc(vm, NervesGate.Storage, :status, [], 30_000)
 
     assert {:error, unavailable} =
-             Scenarios.Device.rpc(vm, NervesGate.Apps, :install, ["/missing.ez"], 200_000)
+             Scenarios.Device.rpc(vm, NervesGate.Plugins, :install, ["/missing.ez"], 200_000)
 
     assert unavailable in [:storage_unavailable, :applications_not_ready]
 
@@ -53,7 +53,7 @@ defmodule Scenarios.Cases.Apps do
     assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["mount", ["--bind", backing, mount]])
 
     await(fn ->
-      state = Scenarios.Device.rpc(vm, :sys, :get_state, [NervesGate.Apps])
+      state = Scenarios.Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
       state.available? and state.restored? and state.job == nil
     end)
 
@@ -102,7 +102,7 @@ defmodule Scenarios.Cases.Apps do
                  vm,
                  Supervisor,
                  :terminate_child,
-                 [NervesGate.Supervisor, NervesGate.Apps],
+                 [NervesGate.Supervisor, NervesGate.Plugins],
                  30_000
                )
 
@@ -111,7 +111,7 @@ defmodule Scenarios.Cases.Apps do
                  vm,
                  Supervisor,
                  :restart_child,
-                 [NervesGate.Supervisor, NervesGate.Apps],
+                 [NervesGate.Supervisor, NervesGate.Plugins],
                  30_000
                )
 
@@ -390,8 +390,13 @@ defmodule Scenarios.Cases.Apps do
     path
   end
 
+  defp apps(vm, :list, []) do
+    {:ok, plugins} = Scenarios.Device.rpc(vm, NervesGate.Plugins, :list, [], 200_000)
+    {:ok, Enum.reject(plugins, & &1.bundled?)}
+  end
+
   defp apps(vm, function, args),
-    do: Scenarios.Device.rpc(vm, NervesGate.Apps, function, args, 200_000)
+    do: Scenarios.Device.rpc(vm, NervesGate.Plugins, function, args, 200_000)
 
   defp await(predicate, attempts \\ 30)
   defp await(_, 0), do: flunk("Expected application storage state was not reached")

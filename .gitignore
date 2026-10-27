@@ -17,6 +17,10 @@
 .env
 .env.*
 /firmware/upload.sh
+/firmware/priv/plugins/
+/firmware/priv/plugins.*
+/plugins/*/packages/
+/plugins/*/tmp/
 **/node_modules/
 
 # Local Nerves system build artifacts and device backups.

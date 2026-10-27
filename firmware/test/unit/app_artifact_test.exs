@@ -1,6 +1,6 @@
 defmodule NervesGate.AppArtifactTest do
   use ExUnit.Case, async: false
-  alias NervesGate.Apps.{Artifact, Loader, Metadata}
+  alias NervesGate.Plugins.{Artifact, Bundled, Loader, Metadata}
   alias NervesGateSDK.Package
   @moduletag :tmp_dir
 
@@ -149,6 +149,79 @@ defmodule NervesGate.AppArtifactTest do
 
     assert {:error, :application_conflict} =
              Artifact.validate(package, %{"other_owner" => other}, "artifact_fixture", nil)
+  end
+
+  test "firmware inventory discovers only entry points and opens immutable code without storage",
+       %{artifact: artifact, tmp_dir: dir} do
+    root = Path.join(dir, "firmware")
+    path = Path.join([root, "artifact_fixture", "1.0.0"])
+    File.mkdir_p!(Path.dirname(path))
+    File.cp_r!(artifact.root, path)
+    descriptor = Artifact.descriptor(%{artifact | source: :firmware})
+
+    entry = %{
+      enabled: false,
+      active_version: "1.0.0",
+      previous_version: nil,
+      generation: 0,
+      artifacts: %{"1.0.0" => descriptor}
+    }
+
+    :ok = Metadata.persist(Path.join(root, "inventory.term"), %{"artifact_fixture" => entry})
+    previous = Application.get_env(:nerves_gate, :plugins_directory)
+    Application.put_env(:nerves_gate, :plugins_directory, root)
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:nerves_gate, :plugins_directory, previous),
+        else: Application.delete_env(:nerves_gate, :plugins_directory)
+    end)
+
+    assert {:ok, %{"artifact_fixture" => ^entry}} = Bundled.entries()
+    assert Bundled.member?("artifact_fixture")
+    assert Bundled.version("artifact_fixture") == "1.0.0"
+    assert {:ok, %{source: :firmware}, _} = Artifact.load("artifact_fixture", "1.0.0", descriptor)
+
+    assert {:error, :plugin_not_in_firmware} =
+             Artifact.load("artifact_fixture", "2.0.0", descriptor)
+
+    assert {:error, :plugin_not_in_firmware} = Artifact.load("missing", "1.0.0", descriptor)
+    changed = put_in(entry.artifacts["1.0.0"].sha256, String.duplicate("f", 64))
+
+    assert {:error, :firmware_artifact_conflict} =
+             Bundled.merge(%{"artifact_fixture" => changed}, %{"artifact_fixture" => entry})
+
+    old = %{entry | active_version: "0.9.0", artifacts: %{"0.9.0" => descriptor}}
+
+    assert {:ok, merged} =
+             Bundled.merge(%{"artifact_fixture" => old}, %{"artifact_fixture" => entry})
+
+    assert merged["artifact_fixture"].active_version == "0.9.0"
+    refute Bundled.selected?("artifact_fixture", merged["artifact_fixture"])
+  end
+
+  test "pure-BEAM policy rejects native payloads but permits ordinary priv data", %{
+    package: package
+  } do
+    assert :ok = Package.pure_beam(package)
+
+    for {name, bytes} <- [
+          {"native.so", "binary"},
+          {"hidden", <<127, "ELF", 0>>},
+          {"script", "#!/bin/sh"}
+        ] do
+      assert {:error, :native_plugin_payload} =
+               Package.pure_beam(%{
+                 package
+                 | files: Map.put(package.files, "artifact_fixture-1.0.0/priv/" <> name, bytes)
+               })
+    end
+
+    assert :ok =
+             Package.pure_beam(%{
+               package
+               | files: Map.put(package.files, "artifact_fixture-1.0.0/priv/registers.json", "{}")
+             })
   end
 
   test "metadata has a current-only schema and preserves catalog identity", %{

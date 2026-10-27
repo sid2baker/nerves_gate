@@ -1,0 +1,46 @@
+defmodule ModbusPlugin.Config do
+  @moduledoc "Bounded, volatile read-only TCP configuration. Addresses are zero-based."
+
+  def validate(id, params) when is_binary(id) and is_map(params) do
+    host = params["host"]
+
+    config = %{
+      id: id,
+      host: host,
+      port: integer(params["port"]),
+      unit: integer(params["unit"]),
+      table: table(params["table"]),
+      address: integer(params["address"]),
+      count: integer(params["count"]),
+      interval: integer(params["interval"]),
+      timeout: integer(params["timeout"])
+    }
+
+    if Regex.match?(~r/\A[a-zA-Z0-9_-]{1,32}\z/, id) and
+         is_binary(host) and byte_size(host) in 1..253 and
+         Regex.match?(~r/\A[a-zA-Z0-9.:%_-]+\z/, host) and
+         config.port in 1..65535 and config.unit in 1..247 and
+         config.table in [:holding, :input] and config.address in 0..65535 and
+         config.count in 1..125 and config.address + config.count <= 65536 and
+         config.interval in 100..60_000 and config.timeout in 100..5_000 do
+      {:ok, config}
+    else
+      {:error, :invalid_configuration}
+    end
+  end
+
+  def validate(_, _), do: {:error, :invalid_configuration}
+  defp integer(value) when is_integer(value), do: value
+
+  defp integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {number, ""} -> number
+      _ -> nil
+    end
+  end
+
+  defp integer(_), do: nil
+  defp table("holding"), do: :holding
+  defp table("input"), do: :input
+  defp table(_), do: nil
+end

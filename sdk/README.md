@@ -1,8 +1,10 @@
 # Nerves Gate SDK
 
 A pure Elixir application API. It has no Nerves or Linux dependencies. Gateway
-firmware implements `NervesGateSDK.Backend`; on a workstation, calls return
-`{:error, :backend_not_configured}`. Run applications on real firmware, including
+firmware supplies the fixed `NervesGate.SDKBackend.call/2` runtime entry point,
+which implements the `NervesGateSDK.Backend` callback. Without that firmware module,
+calls return `{:error, :runtime_unavailable}`; firmware code loaded without running
+device services reports `{:error, :unavailable}`. Run applications on real firmware, including
 the QEMU gateways of the Nerves Gate developer workbench.
 
 ```elixir
@@ -29,8 +31,10 @@ SDK structs are the public contract,
 not firmware status maps. Commands return `:ok`, `{:ok, value}` or `{:error, reason}`.
 A timeout means an unknown outcome, not cancellation or permission to retry.
 
-The runtime selects the backend with `config :nerves_gate_sdk, backend: Module`.
-Applications should not select a device backend themselves. SDK APIs do not manage
+Both physical and QEMU firmware supply the same runtime entry point. There is no
+backend configuration or host hardware emulation. The bridge is an ordinary module
+call in the application's process, not a proxy process; the SDK has no compile-time
+Mix dependency on firmware. SDK APIs do not manage
 Internet/USB, Tailscale enrollment or credentials, SSH, apps or firmware, expose
 cookies, or reboot/reset the device.
 
@@ -49,7 +53,7 @@ its address. Owner death schedules cleanup; unresolved cleanup and corrupt owner
 journals block reuse, including after platform restart. Never blindly retry an
 uncertain write. Lease references are private and must not enter logs/projections.
 The first implementation supports one independent Ethernet claim per gateway.
-See `apps/tailnet_subrouter` in the source repository for an optional, disabled-on-start
+See `plugins/tailnet_subrouter` in the source repository for an optional, disabled-on-start
 example. Use the local SDK with requirement `~> 0.2.0-dev`; the published 0.1.0
 package does not contain this API. The device installer enforces the declared range.
 
@@ -77,23 +81,26 @@ the platform, never bundled. The packager records exact versions of referenced
 common libraries in the main application's `:nerves_gate_platform` environment;
 the installer checks them and the SDK requirement against the running platform.
 Other runtime dependencies are included and must not conflict with platform or
-other installed application names/modules. Native code must be built for the
-device architecture; this task does not cross-compile it.
+other plugin application names/modules. Absent optional dependencies are not
+required. Contributed native payloads and direct NIF loaders are rejected; ordinary
+`priv` data is allowed. The selected pure-BEAM plugins ship in firmware.
 
 An optional `:nerves_gate_ui` OTP environment entry names a `Phoenix.LiveComponent`
-in the main application's package. Current firmware hosts it at `/apps/<app>` while
-that activation is running. Compile against compatible Phoenix/LiveView dependencies;
-these are shared platform libraries, not bundled copies. The firmware's Req/Finch/Mint
+in the main application's package. Current firmware hosts it at `/plugins/<app>` while
+that activation is running. UI apps declare their Phoenix/LiveView dependencies
+directly and compile against versions compatible with the gateway. The core SDK
+stays independent of web libraries; it does not wrap LiveView. These dependencies
+are shared platform libraries, not bundled copies. The firmware's Req/Finch/Mint
 HTTP libraries are likewise shared when an app depends on them. Packaging pins exact platform
 versions, including transitive UI libraries. The gateway closes app-page processes
 before unloading code. Component callbacks run in a gateway-owned LiveView: call
 commands on your app's supervised process rather than acquiring SDK resources there.
 Custom scripts/assets and dynamic subroutes are not part of this first integration.
-See [app-owned pages](../docs/applications.md#app-owned-pages).
+See [optional plugin UI](../docs/applications.md#optional-ui).
 
 An optional `:nerves_gate_health_check` environment entry contains an MFA that
 must return `:ok` within five seconds after startup. A failed upgrade restarts the
 previous verified artifact with a fresh generation. Uncertain cleanup or rollback
 failure blocks activation rather than claiming restoration. Versions are immutable:
 bump the app version for changed package bytes. The administrative
-`NervesGate.Apps` lifecycle API belongs to firmware, not the SDK.
+`NervesGate.Plugins` lifecycle API belongs to firmware, not the SDK.

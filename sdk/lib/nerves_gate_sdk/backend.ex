@@ -1,11 +1,14 @@
 defmodule NervesGateSDK.Backend do
   @moduledoc """
-  Implemented by device firmware, including firmware running inside QEMU.
-  The host simulator does not provide an in-memory hardware backend.
+  Fixed runtime bridge to `NervesGate.SDKBackend`, supplied by gateway firmware
+  on both physical and QEMU devices. There is no backend selection or host
+  hardware emulation. Without the firmware module, calls return
+  `{:error, :runtime_unavailable}`.
 
-  `call/2` runs in the caller's process. Implementations must preserve caller
-  ownership when forwarding subscriptions or RS485 claims to another process.
-  Backends return SDK-owned structs and never expose private domain state.
+  `call/2` invokes the firmware entry point in the caller's process. The firmware
+  must preserve caller ownership when forwarding subscriptions or resource claims.
+  Its entry point implements this callback and returns SDK-owned structs, never
+  private domain state.
   """
 
   @type operation ::
@@ -32,9 +35,11 @@ defmodule NervesGateSDK.Backend do
 
   @doc false
   def call(operation, arguments) do
-    case Application.get_env(:nerves_gate_sdk, :backend) do
-      nil -> {:error, :backend_not_configured}
-      backend -> backend.call(operation, arguments)
+    if Code.ensure_loaded?(NervesGate.SDKBackend) do
+      # Runtime-only dependency: the standalone SDK does not compile firmware.
+      apply(NervesGate.SDKBackend, :call, [operation, arguments])
+    else
+      {:error, :runtime_unavailable}
     end
   end
 end

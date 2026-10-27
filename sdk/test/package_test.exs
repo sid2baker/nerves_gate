@@ -61,6 +61,28 @@ defmodule NervesGateSDK.PackageTest do
              Package.validate(package, Map.put(installed, :other, package.main), "0.1.0")
   end
 
+  test "absent optional libraries are not mandatory dependencies", context do
+    file =
+      archive(context,
+        applications: [:kernel, :stdlib, :elixir, :nerves_gate_sdk, :optional_serial],
+        optional_applications: [:optional_serial]
+      )
+
+    assert {:ok, package} = Package.read(file)
+    assert :ok = Package.validate(package, Package.installed(), "0.1.0")
+    required = %{package.main | spec: Keyword.delete(package.main.spec, :optional_applications)}
+
+    assert {:error, :missing_dependency} =
+             Package.validate(
+               %{package | main: required, apps: [required]},
+               Package.installed(),
+               "0.1.0"
+             )
+
+    assert {:error, :invalid_application} =
+             context |> archive(optional_applications: [:not_a_dependency]) |> Package.read()
+  end
+
   test "optional UI declarations must name a module in the main application", context do
     for module <- [String, "Elixir.SomeUI", nil] do
       file =
@@ -142,7 +164,9 @@ defmodule NervesGateSDK.PackageTest do
        [
          vsn: ~c"1.0.0",
          modules: [module],
-         applications: [:kernel, :stdlib, :elixir, :nerves_gate_sdk],
+         applications:
+           Keyword.get(opts, :applications, [:kernel, :stdlib, :elixir, :nerves_gate_sdk]),
+         optional_applications: Keyword.get(opts, :optional_applications, []),
          mod: {module, []},
          env: Keyword.get(opts, :env, nerves_gate_sdk_requirement: "~> 0.1.0")
        ]}

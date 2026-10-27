@@ -159,7 +159,7 @@ defmodule NervesGate.Network do
   def handle_call({:claim_local, interface, address, prefix}, {pid, _} = from, state) do
     state = refresh(state)
 
-    with {:ok, generation} <- NervesGate.Apps.Owner.resolve(pid),
+    with {:ok, generation} <- NervesGate.Plugins.Owner.resolve(pid),
          :ok <- Local.idle(state.local),
          {:ok, scope} <- Local.candidate(public(state), interface, address, prefix) do
       ref = make_ref()
@@ -185,7 +185,7 @@ defmodule NervesGate.Network do
 
     mode = if operation == :release_local, do: :release, else: :active
 
-    with {:ok, generation} <- NervesGate.Apps.Owner.resolve(pid, mode),
+    with {:ok, generation} <- NervesGate.Plugins.Owner.resolve(pid, mode),
          :ok <- Local.owned(state.local, pid, ref),
          :ok <- generation_owned(state.local, generation),
          :ok <- Policy.available(Map.put(public(state), :local, nil)),
@@ -206,7 +206,7 @@ defmodule NervesGate.Network do
   def handle_call({:local_status, remote}, {pid, _}, state) do
     state = refresh(state)
 
-    case NervesGate.Apps.Owner.resolve(pid) do
+    case NervesGate.Plugins.Owner.resolve(pid) do
       {:ok, generation} ->
         local = if state.local && state.local.generation == generation, do: state.local, else: nil
         {:reply, {:ok, Local.observation(local, pid, public(state), remote)}, state}
@@ -219,7 +219,7 @@ defmodule NervesGate.Network do
   def handle_call({:drain_generation, _}, _, %{local: nil} = state), do: {:reply, :ok, state}
 
   def handle_call({:drain_generation, tag}, from, state) do
-    if NervesGate.Apps.Loader.stale?(state.local.generation, tag) do
+    if NervesGate.Plugins.Loader.stale?(state.local.generation, tag) do
       state = orphan_generation(state)
 
       if state.worker == nil and state.trial == nil and state.local.scope != nil and
@@ -464,7 +464,7 @@ defmodule NervesGate.Network do
 
   defp fence_generation(%{local: %{generation: generation}} = state)
        when not is_nil(generation) do
-    if NervesGate.Apps.Owner.valid?(generation, :release),
+    if NervesGate.Plugins.Owner.valid?(generation, :release),
       do: state,
       else: orphan_generation(state)
   end

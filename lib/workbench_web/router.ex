@@ -42,8 +42,6 @@ defmodule WorkbenchWeb.Router do
       live("/test-lab/manual/:id", DeviceLive, :manual)
       live("/test-lab/bench", FirmwareLive, :firmware)
       live("/provision", FactoryLive, :factory)
-      live("/apps", ApplicationsLive, :apps)
-      live("/apps/:id", ApplicationsLive, :apps)
       live("/firmware", FirmwareLive, :firmware)
       live("/factory", FactoryLive, :factory)
       live("/simulator", FirmwareLive, :firmware)

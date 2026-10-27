@@ -1,6 +1,6 @@
 defmodule NervesGate.AppOwnerTest do
   use ExUnit.Case, async: false
-  alias NervesGate.Apps.Owner
+  alias NervesGate.Plugins.Owner
 
   defmodule Child do
     use GenServer

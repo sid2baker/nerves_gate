@@ -14,7 +14,7 @@ defmodule Scenarios do
   @modules [
     Scenarios.Cases.AlarmRecovery,
     Scenarios.Cases.Apps,
-    Scenarios.Cases.AppUI,
+    Scenarios.Cases.Plugins,
     Scenarios.Cases.CableCycles,
     Scenarios.Cases.CableLoss,
     Scenarios.Cases.Churn,

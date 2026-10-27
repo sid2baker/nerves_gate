@@ -42,7 +42,7 @@ defmodule NervesGate.SDKBackend do
     do: available(fn -> local_result(Network.release_local(ref)) end)
 
   def call(:storage_data_dir, [app]) do
-    with {:ok, owner} <- NervesGate.Apps.Owner.resolve(self()),
+    with {:ok, owner} <- NervesGate.Plugins.Owner.resolve(self()),
          true <- to_string(app) == owner.app do
       Storage.data_dir(app)
     else
@@ -82,7 +82,7 @@ defmodule NervesGate.SDKBackend do
 
   @impl GenServer
   def handle_call({:events_subscribe, [topic]}, {pid, _}, state) when topic in @topics do
-    case NervesGate.Apps.Owner.resolve(pid) do
+    case NervesGate.Plugins.Owner.resolve(pid) do
       {:ok, owner} ->
         state =
           if state.owners[pid] && state.owners[pid] != owner,
@@ -110,7 +110,7 @@ defmodule NervesGate.SDKBackend do
   def handle_call({:drain_generation, tag}, _, state) do
     next =
       Enum.reduce(state.owners, state, fn {pid, owner}, state ->
-        if NervesGate.Apps.Loader.stale?(owner, tag), do: remove_owner(state, pid), else: state
+        if NervesGate.Plugins.Loader.stale?(owner, tag), do: remove_owner(state, pid), else: state
       end)
 
     {:reply, :ok, next}
@@ -258,7 +258,7 @@ defmodule NervesGate.SDKBackend do
   defp notify(state, topic, value) do
     if Map.get(state.values, topic) != value do
       for pid <- Map.get(state.subscribers, topic, MapSet.new()),
-          NervesGate.Apps.Owner.matches?(pid, state.owners[pid]),
+          NervesGate.Plugins.Owner.matches?(pid, state.owners[pid]),
           do: send(pid, %Event{topic: topic, value: value})
     end
 

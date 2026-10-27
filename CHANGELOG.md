@@ -4,7 +4,8 @@
 
 ### Breaking changes
 
-- Application metadata is current-only schema 1 with immutable artifact SHA/name/module catalogs. Old records are blocked without migration or reset, while gateway management remains available. Stateful SDK resource access now requires managed activation membership; raw IEx/RPC callers use administrative domain APIs.
+- Trusted plugins are selected at firmware build time and managed by `NervesGate.Plugins` at `/plugins`; the application store, GitHub app-release workflow and old gateway application routes/APIs are removed. Schema-2 plugin metadata records immutable artifact identity and source. Old application metadata blocks activation without automatic migration or erasure. Stateful SDK resource access requires managed activation membership; raw IEx/RPC callers use administrative domain APIs.
+- The SDK uses the fixed firmware runtime bridge rather than configurable backends; absent firmware returns `:runtime_unavailable`. Plugin packages reject contributed native payloads and direct NIF loaders.
 
 - Removed the equipment observation domain and SDK compatibility API; status schema is now 9. Device maintenance requires the current compiled APIs with no old-firmware identity fallback. SSH key initialization no longer imports an old NervesSSH key store: provision current configured keys explicitly before deployment.
 
@@ -22,13 +23,15 @@
 
 ### Added
 
-- Gateway Applications page with optional app-owned LiveComponents, explicit Start/Stop controls and reviewed install/upgrade from first-party GitHub releases. The device checks compatibility and archive identity; new installs remain stopped and uncertain commands are never replayed. Subnet-router configuration and sharing controls are supplied by the app.
+- Gateway Plugins page with explicit Start/Stop and optional plugin-owned LiveComponents. Firmware bundles the selected pure-BEAM dependency closures and a verified inventory; bundled code needs no SD card. Saved unavailable versions require explicit selection, never silent replacement. Uncertain commands are never replayed.
+- Read-only Modbus TCP plugin using yamodbus, with explicit per-device configuration/connection, bounded holding/input-register polling and connection cleanup. No equipment connections occur at startup.
+- Subnet-router interface picker uses gateway observations and disables Internet, claimed, addressed and operator-disabled ports with explanations.
 
 - Verified retained archives and exact extracted content/modes for every activation, with no same-version replacement. Explicit verified module preload, bounded lifecycle workers, generation-fenced SDK resources and one checked cleanup/rollback path preserve actual-PID ownership and fail closed on uncertain effects.
 
 - Hardware shows Internet and application interfaces, claim/subscriber usage and explicit passive diagnostics. Remote access groups Tailscale with explicitly revealed developer runtime credentials; application storage lives under Settings. Replaced equipment/distribution/storage URLs are removed, not retained as aliases.
 - Application-enabled isolated Ethernet can be claimed with transient addressing and explicitly advertised through the existing tailnet. Journaled route ownership, owner-exit cleanup and blocked unknown outcomes prevent unowned route adoption or premature address removal.
-- Optional Tailnet subnet-router starter application, never automatically installed, started or enabled.
+- Firmware-selected Tailnet subnet-router plugin, stopped on first discovery and never automatically configured or sharing-enabled.
 - Reviewed physical application installation over verified SSH: private package snapshot, typed one-use device confirmation, device-side hash/app/version/storage checks, and verified stopped/disabled state. Existing apps are rejected, never silently upgraded or started.
 - Physical read-only hardware readiness/diagnostics and operator-assisted Ethernet/cellular failover with independent USB management. Reboot/reset retain physical-button authority, with bounded identity/new-boot/health observations.
 - Public firmware identity includes the source commit separately from its semantic version; source-archive builds require `SOURCE_REVISION`.

@@ -14,15 +14,13 @@ config :nerves_gate,
     NervesGate.Remote,
     NervesGate.Indicators,
     NervesGate.Buses,
-    {Task.Supervisor, name: NervesGate.AppTasks},
+    {Task.Supervisor, name: NervesGate.PluginTasks},
     NervesGate.Storage,
-    NervesGate.Apps,
+    NervesGate.Plugins,
     NervesGate.ProjectionServer,
     NervesGate.SDKBackend,
     NervesGateWeb.Endpoint
   ]
-
-config :nerves_gate_sdk, :backend, NervesGate.SDKBackend
 
 # Public LAN advertisement only. Discovery does not grant access or advertise
 # distribution cookies, login URLs, credentials or application data.

@@ -1,6 +1,6 @@
 defmodule NervesGate.SDKOwnershipTest do
   use ExUnit.Case, async: false
-  alias NervesGate.{Buses, SDKBackend}
+  alias NervesGate.Buses
 
   setup do
     start_supervised!({PropertyTable, name: NervesGate.Properties})
@@ -42,13 +42,13 @@ defmodule NervesGate.SDKOwnershipTest do
     refute inspect(status) =~ "#Reference"
   end
 
-  test "SDK bus subscriptions and claims reach the owner from the actual caller", %{buses: buses} do
+  test "fixed SDK bridge preserves the caller for bus subscriptions and claims", %{buses: buses} do
     caller = self()
 
     for {operation, args} <- [can_subscribe: ["can0"], rs485_claim: ["rs485_1"]] do
       # The real domain receives the actual caller, but unmanaged callers cannot
       # gain stateful access, independently of whether hardware is available.
-      assert {:error, :application_not_running} = SDKBackend.call(operation, args)
+      assert {:error, :application_not_running} = NervesGateSDK.Backend.call(operation, args)
 
       assert_receive {:trace, ^buses, :receive,
                       {:"$gen_call", {^caller, _}, {:sdk, ^operation, ^args}}}

@@ -47,20 +47,21 @@
 - SDK observations and administrative status/commands are distinct contracts.
   Preserve actual calling-PID ownership of subscriptions, bus claims and network leases; no Tasks
   proxying those calls. Stateful SDK calls require managed activation membership;
-  use the Apps-owned generation bindings without synchronous callbacks into Apps.
+  use the Plugins-owned generation bindings without synchronous callbacks into Plugins.
   Trusted apps share the BEAM; the SDK is not a sandbox.
-- `Apps.Artifact` owns immutable archive/content verification; `Apps.Loader` owns
-  verified code loading and checked cleanup. Apps owns serialized admission,
-  protected generation bindings and schema-1 metadata. Never replace a registered
+- `Plugins.Artifact` owns immutable archive/content verification; `Plugins.Loader` owns
+  verified code loading and checked cleanup. Plugins owns serialized admission,
+  protected generation bindings and schema-2 metadata. Never replace a registered
   version, backfill a digest, import old metadata or bypass blocked cleanup.
-- App pages are optional verified LiveComponents under `/apps/:app`, not dynamically
+- Plugin pages are optional verified LiveComponents under `/plugins/:app`, not dynamically
   recompiled routers or separate servers. Gateway LiveViews are not SDK resource
   owners: call the app's supervised command process. Checked unload closes all app
   UI processes before removing code; never bypass busy-session cleanup.
-- First-party app downloads use the fixed GitHub release origin and bounded HTTPS
-  reads. Apps owns expiring one-use reviews, selection/storage revalidation and
-  confirmation consumption before download. Never accept caller-supplied download
-  URLs, replay an uncertain install or publish assets from an uncommitted checkout.
+- Firmware plugins are explicitly selected in `plugins/selection.exs`, built in
+  isolated host processes and discovered from a verified read-only inventory.
+  No device-side downloads/resolution or store workflow. Private dependency names
+  belong to one plugin; shared library versions are deliberate firmware inputs.
+  Preserve actual-PID resource ownership and never replay an uncertain operation.
 - Keep genuine sharing through the firmware path dependency without starting its
   application on the host. Do not add a common library/UI kit without measured need.
 

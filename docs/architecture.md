@@ -13,7 +13,8 @@ disposable QEMU hardware; it does not run device services.
 | Root | `:nerves_gate_workbench` | Host tooling, workbench and simulator | Root `VERSION` |
 | `firmware/` | `:nerves_gate` | Host-compiled helpers/checks; EC100 or QEMU runtime | Root `VERSION` |
 | `sdk/` | `:nerves_gate_sdk` | Typed app contract and packaging; no application supervisor | `sdk/VERSION` |
-| `apps/tailnet_subrouter/` | `:tailnet_subrouter` | Optional opt-in app, never automatically installed/enabled | App `mix.exs` |
+| `plugins/tailnet_subrouter/` | `:tailnet_subrouter` | Selected, disabled-on-first-boot subnet plugin | Plugin `mix.exs` |
+| `plugins/modbus/` | `:modbus_plugin` | Selected, read-only Modbus TCP plugin with yamodbus | Plugin `mix.exs` |
 | `systems/nerves_system_ec100/` | `:nerves_system_ec100` | ARM Linux, toolchain, boot and board support | System `VERSION` |
 | `systems/nerves_system_ec100_qemu/` | `:nerves_system_ec100_qemu` | x86_64/musl Linux, toolchain and QEMU support | System `VERSION` |
 
@@ -23,6 +24,13 @@ root (always host) ──path──→ sdk
 
 firmware (ec100/x86_64) ──→ selected system source + fingerprinted artifact
 ```
+
+SDK calls use the fixed `NervesGate.SDKBackend.call/2` firmware entry point on both
+EC100 and QEMU. The SDK invokes it in the actual caller's process without a Mix
+dependency on firmware or configurable backend selection. Missing firmware reports
+`:runtime_unavailable`; loaded firmware with unavailable services reports
+`:unavailable`. UI apps declare their shared Phoenix/LiveView dependencies directly;
+the core SDK has no web dependencies.
 
 Each project keeps its own Mix configuration, lockfile and build directory.
 Shared root/firmware dependencies must have matching locks. Device dependencies
@@ -45,7 +53,7 @@ library only when a measured benefit justifies another owner and package.
 | `firmware/lib/nerves_gate/cellular/` | Board profile, SIM/PIN lifecycle, private PAP storage and modem/UART implementation |
 | `firmware/lib/nerves_gate_web/` | Local gateway UI and shared read-only presentation |
 | `firmware/config/` | Board profiles, device services and host-only checks/assets |
-| `sdk/lib/nerves_gate_sdk/` | Typed app API, backend behaviour and archive validation |
+| `sdk/lib/nerves_gate_sdk/` | Typed app API, fixed firmware bridge contract and archive validation |
 | `lib/workbench/` | Sessions, apps, discovery, builds, updates, provisioning and release checks |
 | `lib/workbench_web/`, `config/`, `priv/workbench/` | Workbench UI, Unix-socket CLI API, host config and launch scripts |
 | `lib/simulator.ex`, `lib/simulator/` | Separate simulator BEAM, owned QEMU lifecycle and virtual hardware |
@@ -137,9 +145,14 @@ disks. Stop preserves them; Reset erases them and invalidates the prepared build
 Fresh-disk scenarios use the runner's explicitly owned disposable-state lifecycle.
 See [development](development.md#workbench-and-simulator).
 
-## Platform and application boundary
+## Platform and plugin boundary
 
-Nerves Gate is a managed edge application host with industrial hardware access.
+Nerves Gate is an industrial gateway extended by trusted pure-BEAM plugins.
+`plugins/selection.exs` explicitly selects projects for firmware assembly. Their
+private dependency closures and verified inventory live in firmware `priv/plugins`,
+not a device store. Bundled code starts without SD; plugins using SD data directories
+must handle unavailable storage. Adding/updating/removing code requires firmware.
+There is one namespace per BEAM; incompatible plugin selections fail the build.
 The standard UI exposes Hardware, not an equipment registry: gateway interfaces,
 health, availability, shared configuration and access ownership. Applications own
 equipment identities, Modbus/S7 endpoints, register maps, polling and control.
@@ -149,7 +162,7 @@ applications request isolated addressing using caller-owned SDK leases. Network
 journals route ownership before writes and withdraws owned advertisements before
 removing temporary addresses. Unknown cleanup blocks reuse, including after owner
 or Network restart. No enable intent is restored automatically. The optional
-`apps/tailnet_subrouter` project demonstrates this boundary and starts disabled.
+`plugins/tailnet_subrouter` project demonstrates this boundary and starts disabled.
 Network owns addresses/routes/bridges; Buses arbitrates caller-owned
 serial claims and shared CAN receive subscriptions. Hardware use observations
 contain flags/counts, not private process or claim handles.
@@ -269,7 +282,7 @@ commands. Equipment identities, labels, scans and industrial protocols belong to
 apps. There is no platform equipment domain or SDK compatibility API.
 Buses and Network receive SDK calls from the actual caller. Stateful calls require
 managed activation membership, resolved through OTP and Apps-owned protected ETS,
-not a caller-supplied app name or synchronous Apps call. PID/ref ownership remains;
+not a caller-supplied app name or synchronous Plugins call. PID/ref ownership remains;
 private generations fence revoked activations and in-flight work. No Task becomes
 owner on a caller's behalf. Read-only SDK queries remain available outside apps.
 
@@ -277,24 +290,24 @@ Host packaging/device installation share SDK `.ez` validation. Private OTP
 dependencies can be bundled, platform dependencies cannot. New and obsolete
 platform app/module names remain reserved. Packaging is not cross-compilation,
 a dependency solver or hot-code upgrade. Installation does not start an app.
-`Apps.Artifact` verifies immutable archive/content identity. `Apps.Loader` owns
-verified module loading and one checked unload path; Apps owns admission,
+`Plugins.Artifact` verifies immutable archive/content identity. `Plugins.Loader` owns
+verified module loading and one checked unload path; Plugins owns admission,
 generation bindings and synced selection while linked workers perform effects.
 Upgrades stop/start cold, run bounded health checks and restore the verified prior
 artifact with a fresh generation on failure. Uncertain cleanup blocks reactivation. Ordinary app callbacks still execute in the shared runtime. See
 [applications](applications.md).
 
-### Application pages
+### Plugin pages
 
-`/apps` and `/apps/:app` are fixed gateway routes. Apps may declare an optional
+`/plugins` and `/plugins/:app` are fixed gateway routes. Plugins may declare an optional
 verified LiveComponent with `:nerves_gate_ui`; it renders inside the gateway shell
 without router recompilation or its own web server. Components call their app's
 supervised command process, never borrow SDK ownership from the gateway LiveView.
-`Apps.UI` tracks local page PIDs with OTP process groups. Admission is bound to a
+`Plugins.UI` tracks local page PIDs with OTP process groups. Admission is bound to a
 running activation; checked unload closes those processes before removing code.
 A controller restart closes surviving sessions before restoration. Shared Phoenix
 libraries are excluded from app archives and exact dependency versions are checked.
-See [app-owned pages](applications.md#app-owned-pages).
+See [optional plugin UI](applications.md#optional-ui).
 
 ## Persistence and recovery
 
@@ -305,7 +318,8 @@ See [app-owned pages](applications.md#app-owned-pages).
 | Settings PropertyTable | Small private settings, including SIM-bound PIN and APN-bound PAP |
 | SSH | Authorized public keys |
 | Network.Local: `/data/nerves_gate/local_network.json` | Temporary link/route ownership and incomplete cleanup; never enable intent |
-| Apps: `/data/nerves_gate/apps.term` | Schema 1 artifact SHA/name/module catalog, selection, enabled intent and committed sequence |
+| Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
+| Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
 | Application SD: `/mnt/apps` | App archives and app data |
 
 Both targets require writable ext4 data before data users start. Unreadable saved
@@ -314,7 +328,7 @@ confirmation saves through VintageNet. **Multi-interface saves are not
 transactional**; see [rollback](networking.md#saving-and-rollback). Startup installs
 default-deny IPv4 forwarding before enabling forwarding.
 
-Card insertion never formats media. Storage commissioning is explicit and Apps
+Card insertion never formats media. Storage commissioning is explicit and Plugins
 guards destructive changes. Uninstall preserves app data; application rollback
 does not roll that data back. See [storage](applications.md) and
 [reset safety](indicators.md#recovery).

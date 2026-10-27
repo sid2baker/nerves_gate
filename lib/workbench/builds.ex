@@ -41,6 +41,7 @@ defmodule Workbench.Builds do
   def firmware!(target \\ "x86_64", report \\ fn _ -> :ok end, env \\ :dev)
       when (target == "x86_64" and env == :dev) or (target == "ec100" and env in [:dev, :prod]) do
     assets!(report)
+    Workbench.PluginBuild.build!(report)
 
     status =
       Simulator.BuildOutput.run(

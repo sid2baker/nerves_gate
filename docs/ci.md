@@ -9,7 +9,7 @@ Routine CI never boots a device. Required checks:
 - **firmware-ec100:** separate dev/prod builds using the locked, fingerprinted system;
   no flashing or booting. Only verified downloads are cached, never native ports.
 - **applications:** create, test and package two external apps against the local SDK,
-  plus test/package `apps/tailnet_subrouter`.
+  plus both selected plugin test suites (`plugins/tailnet_subrouter` and `plugins/modbus`).
 
 `qemu.yml` is dispatched manually or runs weekly on Monday at 03:00 UTC on main. It runs `mix setup` and `mix test.qemu --ci` on
 disposable devices with portable TCG (KVM is optional), and keeps logs but never

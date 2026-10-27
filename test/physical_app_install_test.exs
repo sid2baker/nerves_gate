@@ -99,8 +99,8 @@ defmodule Workbench.PhysicalAppInstallTest do
     plan = %{public: %{app: "demo", version: "1.0.0", sha256: "hash"}, device: device()}
     command = Install.install_command(plan, "/tmp/owned/application.ez")
     assert {:ok, _} = Code.string_to_quoted(command)
-    assert length(String.split(command, "NervesGate.Apps.install_reviewed(")) == 2
-    assert review =~ "NervesGate.Apps.install_review("
+    assert length(String.split(command, "NervesGate.Plugins.install_reviewed(")) == 2
+    assert review =~ "NervesGate.Plugins.install_review("
     refute command =~ "Apps.start"
     refute command =~ "Apps.upgrade"
     refute command =~ "Network."

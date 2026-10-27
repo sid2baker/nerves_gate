@@ -2,7 +2,7 @@ defmodule NervesGate.Storage do
   @moduledoc """
   Application-card commissioning, detection and mounting. Insertion never formats
   media. Setup offers use without erasing, skip, or explicitly confirmed ext4
-  formatting. Applications remain owned by `NervesGate.Apps`.
+  formatting. Plugin lifecycle remains owned by `NervesGate.Plugins`.
   """
   use GenServer
   alias NervesGate.{Error, Observations}
@@ -17,11 +17,11 @@ defmodule NervesGate.Storage do
 
   def observe, do: Error.protect(fn -> Observations.subscribe_runtime(__MODULE__) end)
 
-  # Apps checks lifecycle admission before handing setup to this domain. All
+  # Plugins checks lifecycle admission before handing setup to this domain. All
   # storage work then belongs here, not in a UI process or an RPC worker.
   def setup(action, card_id \\ nil, confirmation \\ nil) do
     case Error.protect(fn ->
-           GenServer.call(NervesGate.Apps, {:storage_setup, action, card_id, confirmation})
+           GenServer.call(NervesGate.Plugins, {:storage_setup, action, card_id, confirmation})
          end) do
       {:error, reason} -> {:error, Error.safe(reason)}
       result -> result

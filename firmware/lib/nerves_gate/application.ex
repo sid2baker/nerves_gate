@@ -10,7 +10,7 @@ defmodule NervesGate.Application do
     )
 
     children =
-      [{Phoenix.PubSub, [name: NervesGate.PubSub]}, NervesGate.Apps.UI] ++
+      [{Phoenix.PubSub, [name: NervesGate.PubSub]}, NervesGate.Plugins.UI] ++
         Application.fetch_env!(:nerves_gate, :services)
 
     NervesGate.Distribution.configure_cookie()

@@ -26,15 +26,15 @@ defmodule Scenarios.Apps do
   end
 
   defp activate(vm, app, guest) do
-    with {:ok, installed} <- Device.rpc(vm, NervesGate.Apps, :list, []) do
+    with {:ok, installed} <- Device.rpc(vm, NervesGate.Plugins, :list, []) do
       if Enum.any?(installed, &(&1.app == to_string(app))),
-        do: Device.rpc(vm, NervesGate.Apps, :upgrade, [guest], 200_000),
+        do: Device.rpc(vm, NervesGate.Plugins, :upgrade, [guest], 200_000),
         else: install_and_start(vm, guest)
     end
   end
 
   defp install_and_start(vm, guest) do
-    with {:ok, %{app: app}} <- Device.rpc(vm, NervesGate.Apps, :install, [guest], 200_000),
-         do: Device.rpc(vm, NervesGate.Apps, :start, [app], 200_000)
+    with {:ok, %{app: app}} <- Device.rpc(vm, NervesGate.Plugins, :install, [guest], 200_000),
+         do: Device.rpc(vm, NervesGate.Plugins, :start, [app], 200_000)
   end
 end

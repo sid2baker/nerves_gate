@@ -212,7 +212,7 @@ defmodule Workbench.PhysicalAppInstall do
   @doc false
   def review_command(metadata),
     do:
-      Workbench.DeviceSSH.command(NervesGate.Apps, :install_review, [
+      Workbench.DeviceSSH.command(NervesGate.Plugins, :install_review, [
         Jason.decode!(Jason.encode!(metadata))
       ])
 
@@ -225,7 +225,7 @@ defmodule Workbench.PhysicalAppInstall do
       card_id: plan.device["card_id"]
     }
 
-    Workbench.DeviceSSH.command(NervesGate.Apps, :install_reviewed, [path, expected])
+    Workbench.DeviceSSH.command(NervesGate.Plugins, :install_reviewed, [path, expected])
   end
 
   defp hash!(path),

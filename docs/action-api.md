@@ -28,7 +28,7 @@ status = NervesGate.status()
 ```
 
 Application-owned local addressing and subnet advertisement use the separate typed
-`NervesGateSDK.Network` lease API; see the [starter app](../apps/tailnet_subrouter/README.md).
+`NervesGateSDK.Network` lease API; see the [subnet-router plugin](../plugins/tailnet_subrouter/README.md).
 It requires explicit operator enablement (`%{"role" => "application", "address" => nil}`
 on an independent port), preserves Internet/USB and blocks platform reconfiguration
 until owned resources are released or safely recovered.

@@ -117,5 +117,7 @@ jobs:
           mise exec -- mix app.test "$RUNNER_TEMP/second_app"
           mise exec -- mix app.package "$RUNNER_TEMP/demo"
           mise exec -- mix app.package "$RUNNER_TEMP/second_app"
-          mise exec -- mix app.test apps/tailnet_subrouter
-          mise exec -- mix app.package apps/tailnet_subrouter
+          mise exec -- mix app.test plugins/tailnet_subrouter
+          mise exec -- mix app.package plugins/tailnet_subrouter
+          mise exec -- mix app.test plugins/modbus
+          mise exec -- mix app.package plugins/modbus

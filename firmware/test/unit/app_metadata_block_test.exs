@@ -1,22 +1,22 @@
 defmodule NervesGate.AppMetadataBlockTest do
   use ExUnit.Case, async: false
-  alias NervesGate.Apps
+  alias NervesGate.Plugins
   @moduletag :tmp_dir
 
   setup %{tmp_dir: dir} do
     path = Path.join(dir, "apps.term")
     bytes = :erlang.term_to_binary(%{"old_entry" => %{enabled: true}})
     File.write!(path, bytes)
-    previous = Application.get_env(:nerves_gate, :apps_metadata)
-    Application.put_env(:nerves_gate, :apps_metadata, path)
+    previous = Application.get_env(:nerves_gate, :plugins_metadata)
+    Application.put_env(:nerves_gate, :plugins_metadata, path)
 
     on_exit(fn ->
       if previous,
-        do: Application.put_env(:nerves_gate, :apps_metadata, previous),
-        else: Application.delete_env(:nerves_gate, :apps_metadata)
+        do: Application.put_env(:nerves_gate, :plugins_metadata, previous),
+        else: Application.delete_env(:nerves_gate, :plugins_metadata)
     end)
 
-    pid = start_supervised!(Apps)
+    pid = start_supervised!(Plugins)
     %{pid: pid, path: path, bytes: bytes}
   end
 
@@ -25,9 +25,9 @@ defmodule NervesGate.AppMetadataBlockTest do
     path: path,
     bytes: bytes
   } do
-    assert {:error, :invalid_app_metadata} = Apps.list()
-    assert {:error, :applications_blocked} = Apps.start(:old_entry)
-    assert {:error, :applications_blocked} = Apps.install("/missing.ez")
+    assert {:error, :invalid_app_metadata} = Plugins.list()
+    assert {:error, :applications_blocked} = Plugins.start(:old_entry)
+    assert {:error, :applications_blocked} = Plugins.install("/missing.ez")
     assert Process.alive?(pid)
     assert File.read!(path) == bytes
   end
@@ -40,6 +40,7 @@ defmodule NervesGate.AppMetadataBlockTest do
 
     descriptor = %{
       sha256: String.duplicate("a", 64),
+      source: :development,
       names: ["fixture"],
       modules: Enum.sort(modules)
     }
@@ -56,15 +57,15 @@ defmodule NervesGate.AppMetadataBlockTest do
       }
     }
 
-    assert NervesGate.Apps.Metadata.valid?(entries)
+    assert NervesGate.Plugins.Metadata.valid?(entries)
     assert byte_size(:erlang.term_to_binary(%{schema: 1, entries: entries})) > 4 * 1024 * 1024
-    assert {:error, :invalid_app_metadata} = NervesGate.Apps.Metadata.persist(path, entries)
+    assert {:error, :invalid_app_metadata} = NervesGate.Plugins.Metadata.persist(path, entries)
     assert File.read!(path) == bytes
   end
 
   test "unreadable ownership cannot make formatting safe", %{path: path, bytes: bytes} do
     assert {:error, %{code: "applications_installed"}} =
-             GenServer.call(Apps, {:storage_setup, :format, "card", :erase_all_data})
+             GenServer.call(Plugins, {:storage_setup, :format, "card", :erase_all_data})
 
     assert File.read!(path) == bytes
   end

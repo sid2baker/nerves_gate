@@ -10,8 +10,8 @@ defmodule Mix.Tasks.NervesGate.Package do
   Private runtime dependencies are included as ordinary OTP application
   directories. OTP, Elixir, the SDK and common platform libraries are not bundled.
   The installer checks dependencies and module conflicts against the running
-  platform. Native libraries must already be built for the device architecture;
-  this task does not cross-compile them.
+  platform. Plugins must be pure BEAM: contributed native runtime payloads and
+  direct NIF loaders are rejected. Ordinary priv data is allowed.
   """
   @preferred_cli_env :prod
 
@@ -78,6 +78,8 @@ defmodule Mix.Tasks.NervesGate.Package do
         {String.to_charlist("#{name}-#{entry.version}/#{relative}"), File.read!(path)}
       end
 
+    files = files ++ license_files(bundled, installed)
+
     if main.version != version,
       do: Mix.raise("Compiled application version does not match mix.exs")
 
@@ -102,6 +104,7 @@ defmodule Mix.Tasks.NervesGate.Package do
 
     with {:ok, _} <- :zip.create(String.to_charlist(filename), files),
          {:ok, package} <- Package.read(filename),
+         :ok <- Package.pure_beam(package),
          :ok <-
            Package.validate(package, platform, Map.fetch!(installed, :nerves_gate_sdk).version) do
       Mix.shell().info("Created #{Path.relative_to_cwd(filename)}")
@@ -109,6 +112,19 @@ defmodule Mix.Tasks.NervesGate.Package do
       {:error, reason} ->
         File.rm(filename)
         Mix.raise("Cannot package application: #{inspect(reason)}")
+    end
+  end
+
+  defp license_files(bundled, installed) do
+    sources = Mix.Project.deps_paths()
+
+    for name <- Enum.sort(bundled),
+        source = Map.get(sources, name, File.cwd!()),
+        filename <- ["LICENSE", "LICENSE.md", "LICENSE.txt", "NOTICE", "NOTICE.md", "NOTICE.txt"],
+        path = Path.join(source, filename),
+        File.regular?(path) do
+      entry = Map.fetch!(installed, name)
+      {String.to_charlist("#{name}-#{entry.version}/priv/licenses/#{filename}"), File.read!(path)}
     end
   end
 
@@ -134,7 +150,11 @@ defmodule Mix.Tasks.NervesGate.Package do
       entry = Map.fetch!(installed, app)
 
       Enum.reduce(entry.applications, MapSet.put(seen, app), fn dependency, acc ->
-        if dependency in Package.shared_apps() or otp?(dependency),
+        optional_missing =
+          dependency in (entry.spec[:optional_applications] || []) and
+            not Map.has_key?(installed, dependency)
+
+        if dependency in Package.shared_apps() or otp?(dependency) or optional_missing,
           do: acc,
           else: collect(dependency, installed, acc)
       end)

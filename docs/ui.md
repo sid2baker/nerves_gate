@@ -60,7 +60,7 @@ local addressing through a process-owned SDK claim; active or unresolved claims 
 platform network changes. Disabled independent ports are explicitly held down.
 Saved legacy joined/equipment configurations are rejected and retained for explicitly
 authorized administrator migration, never silently converted or erased.
-The optional [Tailnet subnet-router starter app](../apps/tailnet_subrouter/README.md)
+The optional [Tailnet subnet-router plugin](../plugins/tailnet_subrouter/README.md)
 provides explicit local configuration and advertisement, disabled on every startup. RS485 claims are
 exclusive and exclude diagnostics; CAN receive subscriptions may be shared.
 Active claims/subscription counts are public observations, never PIDs or opaque

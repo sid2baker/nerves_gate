@@ -33,7 +33,7 @@ defmodule NervesGateWeb.Layouts do
       <div class="ui-header-end">
         <nav aria-label="Main navigation" class="ui-navigation">
           <.link navigate="/" aria-current={if @section == :overview, do: "page"}>Overview</.link>
-          <a href="/apps" aria-current={if @section == :apps, do: "page"}>Applications</a>
+          <a href="/plugins" aria-current={if @section == :plugins, do: "page"}>Plugins</a>
           <.link navigate="/hardware" aria-current={if @section == :hardware, do: "page"}>Hardware</.link>
           <.link
             navigate="/settings"
@@ -73,7 +73,7 @@ defmodule NervesGateWeb.Layouts do
     """
   end
 
-  defp section(action) when action in [:apps, :app], do: :apps
+  defp section(action) when action in [:plugins, :plugin], do: :plugins
   defp section(action) when action in [:hardware, :lan, :rs485, :can], do: :hardware
   defp section(action) when action in [:settings, :storage], do: :settings
   defp section(_), do: :overview

@@ -15,6 +15,38 @@ defmodule NervesGateSDK.Package do
   @common ~w(jason telemetry phoenix_pubsub phoenix phoenix_live_view phoenix_html phoenix_template
     plug plug_crypto mime websock websock_adapter castore req finch mint hpax nimble_pool nimble_options)a
 
+  @doc "Reject plugin-contributed native libraries, executables and direct NIF loaders. This is a packaging policy, not a sandbox."
+  def pure_beam(%{files: files}) do
+    if Enum.any?(files, fn {name, bytes} -> native_payload?(name, bytes) end),
+      do: {:error, :native_plugin_payload},
+      else: :ok
+  end
+
+  defp native_payload?(name, bytes) do
+    native_file =
+      Path.extname(name) in [".so", ".dll", ".dylib", ".exe", ".a", ".o"] or
+        match?(<<127, "ELF", _::binary>>, bytes) or match?(<<"MZ", _::binary>>, bytes) or
+        match?(<<"#!", _::binary>>, bytes) or
+        Enum.any?(
+          [
+            <<0xFE, 0xED, 0xFA, 0xCE>>,
+            <<0xFE, 0xED, 0xFA, 0xCF>>,
+            <<0xCF, 0xFA, 0xED, 0xFE>>,
+            <<0xCE, 0xFA, 0xED, 0xFE>>
+          ],
+          &String.starts_with?(bytes, &1)
+        )
+
+    native_file or (Path.extname(name) == ".beam" and nif_loader?(bytes))
+  end
+
+  defp nif_loader?(bytes) do
+    case :beam_lib.chunks(bytes, [:imports]) do
+      {:ok, {_, [imports: imports]}} -> {:erlang, :load_nif, 2} in imports
+      _ -> true
+    end
+  end
+
   def shared_apps, do: @shared
   def common_apps, do: @common
 
@@ -152,7 +184,8 @@ defmodule NervesGateSDK.Package do
       Enum.any?(package.apps, fn app ->
         Enum.any?(
           app.applications,
-          &(not Map.has_key?(installed, &1) and not MapSet.member?(names, &1))
+          &(not Map.has_key?(installed, &1) and not MapSet.member?(names, &1) and
+                &1 not in (app.spec[:optional_applications] || []))
         )
       end) ->
         {:error, :missing_dependency}
@@ -247,12 +280,15 @@ defmodule NervesGateSDK.Package do
   defp application({:application, app, spec}) when is_atom(app) and is_list(spec) do
     modules = spec[:modules]
     applications = (spec[:applications] || []) ++ (spec[:included_applications] || [])
+    optional = spec[:optional_applications] || []
     env = spec[:env] || []
     version = to_string(spec[:vsn])
 
     if valid_name?(app) and version != "" and is_list(modules) and
          Enum.all?(modules, &is_atom/1) and length(Enum.uniq(modules)) == length(modules) and
-         is_list(applications) and Enum.all?(applications, &is_atom/1) and Keyword.keyword?(env) do
+         is_list(applications) and Enum.all?(applications, &is_atom/1) and
+         is_list(optional) and Enum.all?(optional, &(&1 in applications)) and
+         Keyword.keyword?(env) do
       {:ok,
        %{
          app: app,

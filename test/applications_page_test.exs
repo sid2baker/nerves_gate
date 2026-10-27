@@ -18,18 +18,23 @@ defmodule WorkbenchWeb.ApplicationsPageTest do
 
     assert Floki.attribute(
              document,
-             "#starter-tailnet-subrouter input[name='application[path]']",
+             "#firmware-plugin-sources input[name='application[path]']",
              "value"
-           ) == [Path.join(Workbench.root(), "apps/tailnet_subrouter")]
+           ) ==
+             Enum.map(
+               ["tailnet_subrouter", "modbus"],
+               &Path.join([Workbench.root(), "plugins", &1])
+             )
 
-    assert Floki.find(document, "#starter-tailnet-subrouter form[phx-submit=open_application]") !=
-             []
+    assert length(
+             Floki.find(document, "#firmware-plugin-sources form[phx-submit=open_application]")
+           ) == 2
 
-    assert Floki.text(Floki.find(document, "#starter-tailnet-subrouter")) =~ "Starts disabled"
+    assert Floki.text(Floki.find(document, "#firmware-plugin-sources")) =~ "Starts disabled"
 
     assert Floki.find(
              document,
-             "#starter-tailnet-subrouter [phx-submit=operation], #starter-tailnet-subrouter [phx-click=operation]"
+             "#firmware-plugin-sources [phx-submit=operation], #firmware-plugin-sources [phx-click=operation]"
            ) == []
 
     assert Floki.find(document, "button[phx-value-kind=test]") == []

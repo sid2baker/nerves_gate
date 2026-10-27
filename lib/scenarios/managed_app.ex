@@ -34,7 +34,8 @@ defmodule Scenarios.ManagedApp do
   def prepare_storage(%{fixture: {:qemu, handle}} = vm) do
     true = vm.node == handle.node
     Scenarios.Qemu.network_stats(handle)
-    assert {:ok, []} = apps(vm, :list, [])
+    assert {:ok, plugins} = apps(vm, :list, [])
+    assert Enum.all?(plugins, & &1.bundled?)
     storage = Device.rpc(vm, NervesGate.Storage, :commissioning)
     assert storage.present
     assert storage.choice in [:pending, :use]
@@ -45,7 +46,7 @@ defmodule Scenarios.ManagedApp do
 
     Device.await(vm, "disposable application storage and manager ready", fn _ ->
       identity = Device.rpc(vm, NervesGate.Storage, :identity)
-      state = Device.rpc(vm, :sys, :get_state, [NervesGate.Apps])
+      state = Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
       match?({:ok, _}, identity) and state.restored? and state.job == nil and state.blocked == nil
     end)
 
@@ -91,7 +92,7 @@ defmodule Scenarios.ManagedApp do
     guest
   end
 
-  def apps(vm, function, args), do: Device.rpc(vm, NervesGate.Apps, function, args, 200_000)
+  def apps(vm, function, args), do: Device.rpc(vm, NervesGate.Plugins, function, args, 200_000)
   def main(vm), do: Device.rpc(vm, Process, :whereis, [ManagedFixture.Main])
 
   def client(vm) do

@@ -1,7 +1,7 @@
 defmodule NervesGate.AppUITest do
   use ExUnit.Case, async: false
-  alias NervesGate.Apps
-  alias NervesGate.Apps.{Owner, UI}
+  alias NervesGate.Plugins
+  alias NervesGate.Plugins.{Owner, UI}
 
   defmodule Component do
     use Phoenix.LiveComponent
@@ -42,7 +42,7 @@ defmodule NervesGate.AppUITest do
     state: state
   } do
     assert {:reply, {:ok, Component, manager}, ^state} =
-             Apps.handle_call({:mount_ui, "ui_fixture"}, {self(), make_ref()}, state)
+             Plugins.handle_call({:mount_ui, "ui_fixture"}, {self(), make_ref()}, state)
 
     assert manager == self()
     assert :pg.get_local_members(UI, "ui_fixture") == [self()]
@@ -55,13 +55,13 @@ defmodule NervesGate.AppUITest do
           put_in(state.running["ui_fixture"].ui, nil)
         ] do
       assert {:reply, {:error, :ui_unavailable}, ^unavailable} =
-               Apps.handle_call({:mount_ui, "ui_fixture"}, {self(), make_ref()}, unavailable)
+               Plugins.handle_call({:mount_ui, "ui_fixture"}, {self(), make_ref()}, unavailable)
     end
 
     Owner.quiesce(state.running["ui_fixture"].owner)
 
     assert {:reply, {:error, :ui_unavailable}, ^state} =
-             Apps.handle_call({:mount_ui, "ui_fixture"}, {self(), make_ref()}, state)
+             Plugins.handle_call({:mount_ui, "ui_fixture"}, {self(), make_ref()}, state)
   end
 
   test "cleanup waits for all local UI processes to exit, even after the registering controller exits" do
