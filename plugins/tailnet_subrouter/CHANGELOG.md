@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Compatibility
+
+- Version 0.1.3 gives the current bundled artifact a new immutable identity. Saved 0.1.2 remains unchanged; selection and activation are explicit.
+
 ## 0.1.2 - 2026-10-27
 
 ### Compatibility
