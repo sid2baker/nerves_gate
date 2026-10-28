@@ -71,6 +71,17 @@ identity settings are not supported. Use a directly reachable
 address on port 22. Distribution handles inspection and post-update verification;
 SSH is not a generic remote-evaluation or diagnostics protocol.
 
+An explicitly authorized manual OpenSSH upload (after verifying the host key) is:
+
+```sh
+cat firmware/_build/ec100_dev/nerves/images/nerves_gate.fw | ssh -F /dev/null -s nerves_gate@GATEWAY fwup
+```
+
+`-F /dev/null` keeps OpenSSH from sending `SendEnv` variables: the gateway's OTP
+SSH server answers an `env` request by starting its shell handler and then refuses
+the `fwup` subsystem ("subsystem request failed on channel 0"). A successful
+upload reboots into the new slot; verify the new boot before any further update.
+
 ## Initial USB factory provisioning
 
 **Provision** (`/provision`) replaces the EC100 bootloader, partition layout,
