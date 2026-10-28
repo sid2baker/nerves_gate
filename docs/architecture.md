@@ -225,7 +225,7 @@ variation points, as does the published SDK backend contract.
 | Hardware | Allowlisted Ethernet/serial/CAN inventory; Plugins owns exclusive assignment intent |
 | SSH | Public-key validation, persistence and authentication |
 | Storage | SD detection, commissioning, mounting and formatting |
-| IO | Persisted I/O definitions, live plugin bindings, latest input snapshots, coalesced hints and process-owned desired outputs |
+| IO | Persisted I/O definitions, live plugin bindings, latest input snapshots, coalesced hints and process-owned desired outputs; `IO.Manual` is the manual writer |
 | Plugins | Trusted plugin admission, lifecycle, version selection and exclusive hardware assignment; guards destructive storage changes |
 | ProjectionServer | Sanitized UI read model, not command coordination |
 | SDKBackend | Translation into the separate typed plugin contract |
@@ -244,7 +244,8 @@ Dependencies supervise VintageNet, tailscaled and Alarmist. The device's
 ```text
 PubSub → Network.Vintage → workflow PropertyTable → persistent Settings PropertyTable
        → SSH → Network → Remote → Indicators → Hardware → PluginTasks
-       → Storage → IO → Plugins → ProjectionServer → SDKBackend → gateway Endpoint
+       → Storage → IO → IO.Manual → Plugins → ProjectionServer → SDKBackend
+       → gateway Endpoint
 ```
 
 See [`firmware/config/firmware.exs`](../firmware/config/firmware.exs) and
@@ -305,8 +306,11 @@ without requiring a new publication. I/O precedes Plugins in the supervision tre
 so a controller restart also invalidates managed activation bindings.
 
 `NervesGateSDK.IO` calls run in the actual managed caller. The Modbus plugin registers
-mapped registers/coils from its runtime processes. I/O projections/UI and Automation
-are not implemented.
+mapped registers/coils from its runtime processes. The gateway **I/O** page reads
+`IO.snapshot/0` once a second (freshness is time-based) through `IO.Manual`, the
+single manual writer process that owns manual claims independently of browser tabs.
+I/O is not part of the administrative projection or the Workbench device view.
+Automation is not implemented.
 See [I/O domain API](action-api.md#io-state-and-desire).
 
 ### UI projection

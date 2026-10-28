@@ -91,7 +91,8 @@ with a domain-owned atom; controller loss exits the call and requires reconnecti
 | --- | --- |
 | `IO.definitions()` | Map of full IDs to persisted SDK input/output definitions |
 | `IO.input(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., observation: ..., stale?: ...}}` |
-| `IO.output(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., claimed?: ..., desired: ..., reported: ...}}` |
+| `IO.output(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., claimed?: ..., owned?: ..., desired: ..., reported: ...}}` |
+| `IO.snapshot()` | `%{inputs: [...], outputs: [...]}` of every persisted endpoint, sorted by ID; consumes no hints |
 | `IO.subscribe(id)` | `{:ok, controller_pid}`; input subscription belongs to the caller |
 | `IO.unsubscribe(id)` | `:ok`; removes only this caller's input subscription |
 | `IO.claim_output(id)` | `:ok`; exclusive claim for the actual caller, initially no desire |
@@ -101,7 +102,8 @@ with a domain-owned atom; controller loss exits the call and requires reconnecti
 `observation` is nil until published; otherwise it is an SDK `IO.Observation`.
 `reported` is the optionally linked ordinary input snapshot, not a second observation
 store. Unavailable or stale feedback is never proof of current device state.
-`false` is a valid desire; nil means no active target. Owning PIDs stay private.
+`false` is a valid desire; nil means no active target. Owning PIDs stay private:
+`owned?` only says whether the actual caller holds the claim.
 
 Subscribe before reading and monitor the returned controller PID. Each input sends
 `{:nerves_gate_input_changed, full_id}` when first dirtied. Updates coalesce until
@@ -116,6 +118,26 @@ desire. Writer death or release does the same without reverting or stopping equi
 Plugins own reconciliation and shutdown; these APIs provide no hard real-time or
 safety guarantees. They are local process-owned APIs, not remote control RPCs whose
 transient worker would accidentally become the writer.
+
+### Manual control
+
+`NervesGate.IO.Manual` is the gateway's single manual writer process, used by the
+**I/O** page. Its PID owns manual claims, so they outlive the calling browser tab or
+RPC worker and any operator can release them. It keeps no state; ownership is read
+back from `NervesGate.IO` and follows the same exclusive admission as automations.
+Errors are `{:error, %{code: ..., message: ...}}`.
+
+| Function | Success |
+| --- | --- |
+| `IO.Manual.status()` | `IO.snapshot()` as seen by the manual writer (`owned?` means manual control) |
+| `IO.Manual.claim(id)` | `:ok`; free, available output now manually controlled, no desire yet |
+| `IO.Manual.set(id, value)` | `:ok`; typed desired value stored for a manually controlled output |
+| `IO.Manual.release(id)` | `:ok`; manual desire and claim cleared, no device operation |
+
+Codes: `io_unknown_output`, `io_output_unavailable` (plugin not running),
+`io_output_owned` (another writer holds it), `io_not_manual`, `io_invalid_value`,
+plus the shared `unavailable`/`outcome_unknown` call-loss errors. Manual claims end
+with release, binding loss or an I/O restart (the writer restarts with I/O).
 
 ## Cellular
 

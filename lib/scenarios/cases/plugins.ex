@@ -12,10 +12,7 @@ defmodule Scenarios.Cases.Plugins do
   end
 
   def run(%{device: vm}) do
-    Device.await(vm, "firmware plugins discovered without commissioned SD", fn _ ->
-      state = Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
-      state.restored? and state.job == nil and state.blocked == nil
-    end)
+    ManagedPlugin.await_idle(vm, "firmware plugins discovered without commissioned SD")
 
     storage = Device.rpc(vm, NervesGate.Storage, :commissioning)
     refute storage.ready
@@ -162,6 +159,7 @@ defmodule Scenarios.Cases.Plugins do
       await_value(vm, "client observes the local server change", @client_holding, 99)
       Process.sleep(1_000)
       assert {:ok, %{observation: %{value: 99}}} = io(vm, :input, [@server_holding])
+      manual(vm)
 
       # Losing the server is reported as unknown/invalid, never a stale success.
       assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["server1"])
@@ -212,6 +210,31 @@ defmodule Scenarios.Cases.Plugins do
     end
   end
 
+  # The gateway I/O page and its manual writer against the plugin's own writer.
+  defp manual(vm) do
+    page = io_page(vm)
+    assert page =~ ~s(id="io-input-modbus_plugin-server1-holding0")
+    assert page =~ ~s(id="io-claim-modbus_plugin-client1-holding0_set")
+
+    assert :ok = manual(vm, :claim, [@holding_setter])
+    assert {:error, _} = command(vm, :claim, [@holding_setter])
+    assert :ok = manual(vm, :set, [@holding_setter, 11])
+    await_value(vm, "manual desire reaches the server map", @server_holding, 11)
+    page = io_page(vm)
+    assert page =~ "Manual control"
+    assert page =~ "Target: 11"
+    assert :ok = manual(vm, :release, [@holding_setter])
+    assert {:ok, %{claimed?: false, desired: nil}} = io(vm, :output, [@holding_setter])
+    await_value(vm, "release writes nothing back", @server_holding, 11)
+  end
+
+  defp io_page(vm) do
+    response = Req.get!(Scenarios.Qemu.ui_url(vm) <> "/io", retry: false)
+    assert response.status == 200
+    response.body
+  end
+
+  defp manual(vm, function, args), do: Device.rpc(vm, NervesGate.IO.Manual, function, args)
   defp io(vm, function, args), do: Device.rpc(vm, NervesGate.IO, function, args)
   defp command(vm, function, args), do: Device.rpc(vm, ModbusPlugin.Command, function, args)
 

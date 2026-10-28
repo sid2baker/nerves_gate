@@ -17,6 +17,8 @@ config :nerves_gate,
     {Task.Supervisor, name: NervesGate.PluginTasks},
     NervesGate.Storage,
     NervesGate.IO,
+    # Owns manual output claims; restarts with I/O, which clears them anyway.
+    NervesGate.IO.Manual,
     NervesGate.Plugins,
     NervesGate.ProjectionServer,
     NervesGate.SDKBackend,

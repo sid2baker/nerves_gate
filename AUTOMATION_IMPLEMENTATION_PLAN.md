@@ -351,6 +351,13 @@ ownership authority.
 
 **Acceptance:** firmware web tests, rebuilt assets and a QEMU frontend scenario.
 
+**Status:** implemented as the `/io` page backed by `NervesGate.IO.snapshot/0` and
+`NervesGate.IO.Manual`, one supervised manual writer whose PID owns manual claims
+(so they outlive browser tabs and any operator can release them). Firmware unit and
+LiveView tests cover exclusivity against plugin/automation writers, validation,
+drafts, release and binding loss; the QEMU `plugins` scenario renders `/io` on the
+guest and drives a manual Modbus target against the plugin's own writer.
+
 ## 4. Integrate the Modbus plugin
 
 Expose explicitly configured registers and coils:

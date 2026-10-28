@@ -34,6 +34,7 @@
 
 ### Added
 
+- Gateway **I/O** page (`/io`): every plugin input and output with availability, latest value, quality, monotonic freshness, writer, desired target and linked feedback. Manual claim/set/release goes through `NervesGate.IO.Manual`, the single manual writer that owns claims independently of browser tabs and shares the I/O domain's exclusive admission. `NervesGate.IO.snapshot/0` reads all endpoints; output snapshots add caller-relative `owned?`.
 - Read-only Workbench diagnostics and inspection: `mix dev.doctor`, `mix gateway.list/inspect/logs` and `mix dev.job [ID]`. Jobs and Runner expose owner/session-qualified operation IDs and bounded history. Wait timeouts do not cancel work; uncertain outcomes block further maintenance/control instead of authorizing retries.
 - Plugin configuration storage: one opaque, atomically replaced term per running plugin version under the plugin's SD data directory, keyed by the actual managed caller's activation. Older versions' terms are preserved; restores decode safely and never delete corrupt files.
 - Firmware `NervesGate.IO` domain with persisted typed definitions, managed plugin bindings, latest input observations, coalesced dirty notifications and exclusive process-owned desired outputs. Desired values are runtime-only; writer/binding loss clears ownership without an implicit device write. Plugins own reconciliation and shutdown. `NervesGateSDK.IO` calls run in the actual managed caller; the I/O UI remains separate work.

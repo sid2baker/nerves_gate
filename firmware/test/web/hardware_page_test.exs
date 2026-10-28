@@ -40,22 +40,8 @@ defmodule NervesGateWeb.HardwarePageTest do
   end
 
   setup do
-    previous = Application.get_env(:nerves_gate, Endpoint)
-
-    Application.put_env(:nerves_gate, Endpoint,
-      server: false,
-      secret_key_base: Base.encode64(:crypto.strong_rand_bytes(64)),
-      live_view: [signing_salt: "hardware-page-test"]
-    )
-
-    on_exit(fn ->
-      if previous,
-        do: Application.put_env(:nerves_gate, Endpoint, previous),
-        else: Application.delete_env(:nerves_gate, Endpoint)
-    end)
-
     start_supervised!(NervesGate.ProjectionServer)
-    start_supervised!(Endpoint)
+    NervesGate.WebFixture.start_endpoint("hardware-page-test")
     :ok
   end
 

@@ -3,59 +3,14 @@ defmodule NervesGate.IOTest do
   alias NervesGate.IO, as: GateIO
   alias NervesGate.Plugins.Owner
   alias NervesGateSDK.IO.{InputDefinition, OutputDefinition}
-
-  defmodule Child do
-    use GenServer
-    def start_link({name, parent}), do: GenServer.start_link(__MODULE__, parent, name: name)
-    def init(parent), do: {:ok, parent}
-    def handle_call({:run, fun}, _, parent), do: {:reply, fun.(), parent}
-
-    def handle_info(message, parent) do
-      send(parent, {:plugin_hint, self(), message})
-      {:noreply, parent}
-    end
-  end
-
-  defmodule Callback do
-    use Application
-
-    def start(_, parent) do
-      children =
-        for name <- [Publisher, Handler, Other] do
-          Supervisor.child_spec({Child, {name, parent}}, id: name)
-        end
-
-      Supervisor.start_link(children, strategy: :one_for_one, name: FixtureSupervisor)
-    end
-  end
+  import NervesGate.IOFixture
 
   @moduletag :tmp_dir
   setup %{tmp_dir: dir} do
-    Owner.init()
-    artifact = %{app: :io_fixture, version: "1.0.0", apps: [%{app: :io_fixture}]}
-    owner = Owner.bind(artifact, {make_ref(), 1})
-
-    :ok =
-      :application.load(
-        {:application, :io_fixture,
-         [
-           vsn: ~c"1.0.0",
-           modules: [Callback, Child],
-           applications: [:kernel, :stdlib, :elixir],
-           mod: {Callback, self()}
-         ]}
-      )
-
-    :ok = Application.start(:io_fixture)
-
-    on_exit(fn ->
-      Application.stop(:io_fixture)
-      Application.unload(:io_fixture)
-    end)
-
+    fixture = NervesGate.IOFixture.start()
     path = Path.join(dir, "io.term")
     controller = start_supervised!({GateIO, path: path})
-    %{path: path, owner: owner, artifact: artifact, controller: controller}
+    Map.merge(fixture, %{path: path, controller: controller})
   end
 
   test "definitions persist but registration, observations, claims and desire do not", %{
@@ -482,30 +437,95 @@ defmodule NervesGate.IOTest do
     assert {:ok, %{reported: nil}} = GateIO.output("io_fixture.setpoint")
   end
 
-  defp register_pair do
-    assert {:ok, "io_fixture.temperature"} =
-             plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
+  test "snapshot lists every endpoint, reveals ownership only to its writer and consumes no hints" do
+    register_pair()
+    {:ok, _} = plugin(Other, fn -> GateIO.subscribe("io_fixture.temperature") end)
+    {:ok, observation} = publish(21.5)
+    other = Process.whereis(Other)
+    assert_receive {:plugin_hint, ^other, {:nerves_gate_input_changed, "io_fixture.temperature"}}
 
-    handler = Process.whereis(Handler)
+    assert %{
+             inputs: [%{id: "io_fixture.temperature", observation: ^observation, stale?: false}],
+             outputs: [
+               %{id: "io_fixture.setpoint", claimed?: false, owned?: false, desired: nil}
+             ]
+           } = plugin(Other, &GateIO.snapshot/0)
 
-    assert {:ok, "io_fixture.setpoint"} =
-             plugin(Publisher, fn -> GateIO.register_output(output_definition(), handler) end)
+    # The subscriber's hint is still outstanding: a further change sends no second hint.
+    publish(21.6)
+    refute_receive {:plugin_hint, ^other, {:nerves_gate_input_changed, _}}, 50
+
+    :ok = GateIO.claim_output("io_fixture.setpoint")
+    assert %{outputs: [%{claimed?: true, owned?: true}]} = GateIO.snapshot()
+    assert %{outputs: [%{claimed?: true, owned?: false}]} = plugin(Other, &GateIO.snapshot/0)
+    assert {:ok, %{owned?: false}} = plugin(Other, fn -> GateIO.output("io_fixture.setpoint") end)
   end
 
-  defp input_definition, do: %InputDefinition{id: "temperature", type: :float, unit: "celsius"}
+  test "manual control shares exclusive admission and owns claims independently of its callers" do
+    alias NervesGate.IO.Manual
+    start_supervised!(Manual)
+    register_pair()
+    id = "io_fixture.setpoint"
+    handler = Process.whereis(Handler)
 
-  defp output_definition,
-    do: %OutputDefinition{
-      id: "setpoint",
-      type: :float,
-      unit: "celsius",
-      min: 0.0,
-      max: 40.0,
-      feedback_input_id: "temperature"
-    }
+    assert {:error, %{code: "io_not_manual"}} = Manual.set(id, 22.0)
+    assert {:error, %{code: "io_unknown_output"}} = Manual.claim("io_fixture.missing")
 
-  defp publish(value), do: plugin(Publisher, fn -> GateIO.publish_input("temperature", value) end)
-  defp plugin(name, fun), do: GenServer.call(name, {:run, fun})
+    # An automation-style writer holds the output: manual control cannot take or touch it.
+    :ok = plugin(Other, fn -> GateIO.claim_output(id) end)
+    assert {:error, %{code: "io_output_owned"}} = Manual.claim(id)
+    assert {:error, %{code: "io_not_manual"}} = Manual.set(id, 22.0)
+    assert {:error, %{code: "io_not_manual"}} = Manual.release(id)
+    assert %{outputs: [%{claimed?: true, owned?: false}]} = Manual.status()
+    :ok = plugin(Other, fn -> GateIO.release_output(id) end)
+
+    assert :ok = Manual.claim(id)
+    assert {:error, :output_owned} = plugin(Other, fn -> GateIO.claim_output(id) end)
+    assert %{outputs: [%{owned?: true, desired: nil}]} = Manual.status()
+    assert {:error, %{code: "io_invalid_value"}} = Manual.set(id, 100.0)
+    assert {:error, %{code: "io_invalid_value"}} = Manual.set(id, 22)
+
+    # The claim belongs to Manual, not to the (short-lived) caller. The handler's read
+    # clears its outstanding hint, so the next change sends a fresh one.
+    {:ok, nil} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
+    flush_plugin_hints()
+    assert :ok = Task.async(fn -> Manual.set(id, 22.0) end) |> Task.await()
+    assert_receive {:plugin_hint, ^handler, {:nerves_gate_output_changed, "setpoint"}}
+    assert {:ok, 22.0} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
+    assert %{outputs: [%{owned?: true, desired: 22.0}]} = Manual.status()
+
+    assert :ok = Manual.release(id)
+    assert_receive {:plugin_hint, ^handler, {:nerves_gate_output_changed, "setpoint"}}
+    assert {:ok, nil} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
+
+    # Binding loss clears manual ownership and desire like any other writer's.
+    :ok = Manual.claim(id)
+    :ok = Manual.set(id, 22.0)
+    Supervisor.terminate_child(FixtureSupervisor, Handler)
+
+    assert %{outputs: [%{available?: false, claimed?: false, owned?: false, desired: nil}]} =
+             Manual.status()
+
+    assert {:error, %{code: "io_not_manual"}} = Manual.release(id)
+    assert {:error, %{code: "io_output_unavailable"}} = Manual.claim(id)
+  end
+
+  test "manual control survives an unavailable I/O controller", %{controller: controller} do
+    alias NervesGate.IO.Manual
+    manual = start_supervised!(Manual)
+    register_pair()
+    :sys.suspend(controller)
+
+    try do
+      assert {:error, %{code: "outcome_unknown"}} = Manual.claim("io_fixture.setpoint")
+    after
+      :sys.resume(controller)
+    end
+
+    stop_supervised!(GateIO)
+    assert {:error, %{code: "unavailable"}} = Manual.status()
+    assert Process.alive?(manual)
+  end
 
   defp flush_plugin_hints do
     receive do

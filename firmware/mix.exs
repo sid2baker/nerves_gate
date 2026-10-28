@@ -17,7 +17,7 @@ defmodule NervesGate.MixProject do
       # silently putting workstation executables in an otherwise valid image.
       listeners:
         if(Mix.target() == :host and Mix.env() == :dev, do: [Phoenix.CodeReloader], else: []),
-      elixirc_paths: ["lib"],
+      elixirc_paths: if(Mix.env() == :test, do: ["lib", "test/support"], else: ["lib"]),
       deps: deps(),
       nerves: if(Mix.target() in @targets, do: [plan_callback: &firmware_metadata/1], else: []),
       releases: [

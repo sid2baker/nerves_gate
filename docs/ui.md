@@ -5,7 +5,7 @@ Open the device's gateway URL, linked from the developer workbench. Gateway
 Elixir/HEEx changes require rebuilding firmware; use disposable QEMU devices for
 this development loop.
 
-Navigation is **Overview · Plugins · Hardware · Settings**. The gateway is a managed edge
+Navigation is **Overview · Plugins · I/O · Hardware · Settings**. The gateway is a managed edge
 plugin host: it exposes physical resources and owns shared infrastructure;
 plugins own equipment identities, protocol connections and data collection.
 Open a connection or physical port for platform settings and diagnostics. Pages share the device-owned projection;
@@ -23,6 +23,7 @@ on owner loss and obtain a fresh snapshot on resubscription.
 | Remote access | `/remote` | Tailscale enrollment and private sign-in; advanced runtime access with explicit credential reveal |
 | Plugins | `/plugins` | Firmware-bundled plugins: version selection, start/stop and status |
 | Plugin page | `/plugins/:app` | Optional plugin LiveComponent while its activation runs |
+| I/O | `/io` | Plugin inputs and outputs: availability, latest value, quality, freshness, writer, target and linked feedback; manual control |
 | Hardware | `/hardware` | Free non-Internet LANs, RS485 and CAN; exclusive plugin assignments |
 | LAN 1 / 2 | `/hardware/lan/1`, `/hardware/lan/2` | Link observations and reviewed exclusive assignment; Internet/management ports cannot be acquired |
 | RS485 1 / 2 | `/hardware/rs485/1`, `/hardware/rs485/2` | Availability and reviewed exclusive plugin assignment |
@@ -42,6 +43,24 @@ the same checked whole-plugin stop and reviewed assignment as RS485/CAN, not a
 second network enablement form. No advanced topology expander or local addressing/sharing form
 is exposed in Hardware. Disconnected views show unavailable instead of stale actions.
 Opening a page never starts scans, route changes, bus traffic or other I/O.
+
+## I/O and manual control
+
+**I/O** lists every persisted input and output, including ones whose plugin is not
+running. Inputs show the latest value, quality (`Invalid`/`Unknown` never display an
+old good value) and monotonic freshness. Outputs show the writer (**Free**, **Manual
+control**, **Other writer** such as an automation or the plugin's own controls),
+the desired target and optional linked feedback, which is an ordinary input, not a
+write confirmation. The page rereads I/O once a second rather than using the
+administrative projection, because freshness changes without publications.
+
+**Take manual control** claims a free, available output without setting a value.
+**Set target** stores a validated typed value; the plugin decides how and whether
+the equipment follows. **Release** clears the target without reverting or stopping
+the equipment. Manual claims belong to the gateway's manual writer, not the browser
+tab, so closing the page keeps them and any operator can release them. Another
+writer's output offers no manual controls. Drafts survive the periodic reread; the
+I/O domain validates every value regardless of what the form offered.
 
 ## SSH keys
 

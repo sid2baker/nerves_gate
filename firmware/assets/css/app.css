@@ -218,6 +218,14 @@ select { appearance: none; padding-right: 36px; cursor: pointer; background-imag
 .ui-ssh-keys li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--ui-line); }
 .ui-ssh-keys li > div { min-width: 0; overflow-wrap: anywhere; }
 .ui-ssh-keys code { display: block; margin-top: 4px; color: var(--ui-muted); }
+.ui-io-list { list-style: none; margin: 0; padding: 0; }
+.ui-io-list > li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; padding: 14px 0; border-bottom: 1px solid var(--ui-line); }
+.ui-io-list > li > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.ui-io-list code, .ui-io-list .ui-muted { font-size: 13px; color: var(--ui-muted); }
+.ui-io-value { align-items: flex-end; text-align: right; font-variant-numeric: tabular-nums; }
+.ui-io-list > li > .ui-io-controls, .ui-io-controls { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ui-io-controls:empty { display: none; }
+.ui-io-controls label { font-size: 14px; font-weight: 600; }
 .ui-bus-data { max-width: 100%; max-height: 24rem; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
 .ui-bus-data table { width: 100%; border-collapse: collapse; text-align: left; }
 .ui-bus-data th, .ui-bus-data td { padding: 8px; border-bottom: 1px solid var(--ui-line); }
@@ -317,6 +325,8 @@ details[open] > summary { margin-bottom: 16px; }
   input:not([type="checkbox"], [type="radio"]), select, textarea { font-size: 16px; }
   .ui-setting-row { align-items: flex-start; flex-direction: column; gap: 8px; }
   .ui-setting-value { text-align: left; }
+  .ui-io-list > li { grid-template-columns: minmax(0, 1fr); }
+  .ui-io-value { align-items: flex-start; text-align: left; }
 }
 /* Busy indicators move only when motion is allowed; their static forms still read as busy. */
 @media (prefers-reduced-motion: no-preference) {

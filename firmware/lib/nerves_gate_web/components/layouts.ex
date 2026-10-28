@@ -34,6 +34,7 @@ defmodule NervesGateWeb.Layouts do
         <nav aria-label="Main navigation" class="ui-navigation">
           <.link navigate="/" aria-current={if @section == :overview, do: "page"}>Overview</.link>
           <a href="/plugins" aria-current={if @section == :plugins, do: "page"}>Plugins</a>
+          <.link navigate="/io" aria-current={if @section == :io, do: "page"}>I/O</.link>
           <.link navigate="/hardware" aria-current={if @section == :hardware, do: "page"}>Hardware</.link>
           <.link
             navigate="/settings"
@@ -76,5 +77,6 @@ defmodule NervesGateWeb.Layouts do
   defp section(action) when action in [:plugins, :plugin], do: :plugins
   defp section(action) when action in [:hardware, :lan, :rs485, :can], do: :hardware
   defp section(action) when action in [:settings, :storage], do: :settings
+  defp section(:io), do: :io
   defp section(_), do: :overview
 end

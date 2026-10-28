@@ -6,21 +6,7 @@ defmodule NervesGateWeb.GatewaySocketTest do
   setup do
     # Exercise the real transport without a listener or device services. The
     # workbench no longer starts the gateway endpoint just for this assertion.
-    previous = Application.get_env(:nerves_gate, Endpoint)
-
-    Application.put_env(:nerves_gate, Endpoint,
-      server: false,
-      secret_key_base: Base.encode64(:crypto.strong_rand_bytes(64)),
-      live_view: [signing_salt: "gateway-socket-test"]
-    )
-
-    on_exit(fn ->
-      if previous,
-        do: Application.put_env(:nerves_gate, Endpoint, previous),
-        else: Application.delete_env(:nerves_gate, Endpoint)
-    end)
-
-    start_supervised!(Endpoint)
+    NervesGate.WebFixture.start_endpoint("gateway-socket-test")
     :ok
   end
 

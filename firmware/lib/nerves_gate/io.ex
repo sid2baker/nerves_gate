@@ -50,8 +50,17 @@ defmodule NervesGate.IO do
     GenServer.call(__MODULE__, {:input, full_id})
   end
 
-  @doc "Read desire and optional ordinary input feedback, never a write outcome."
+  @doc """
+  Read desire and optional ordinary input feedback, never a write outcome. `owned?`
+  is relative to the actual caller; other writers stay private.
+  """
   def output(full_id), do: GenServer.call(__MODULE__, {:output, full_id})
+
+  @doc """
+  Read every persisted endpoint's current snapshot, sorted by full ID, for display.
+  Consumes no caller hints. Output `owned?` is relative to the actual caller.
+  """
+  def snapshot, do: GenServer.call(__MODULE__, :snapshot)
 
   @doc "Subscribe the actual caller to an input. Returns the controller PID to monitor."
   def subscribe(full_id), do: GenServer.call(__MODULE__, {:subscribe, full_id})
@@ -150,25 +159,20 @@ defmodule NervesGate.IO do
     {:reply, input_snapshot(state, id), clean_input(state, pid, id)}
   end
 
-  def handle_call({:output, id}, _, state) do
+  def handle_call({:output, id}, {pid, _}, state) do
     state = sweep(state)
+    {:reply, output_snapshot(state, id, pid), state}
+  end
 
-    case state.definitions[id] do
-      %OutputDefinition{} = definition ->
-        snapshot = %{
-          id: id,
-          definition: definition,
-          available?: available?(state.bindings[id]),
-          claimed?: Map.has_key?(state.writers, id),
-          desired: state.desires[id],
-          reported: feedback(state, id, definition)
-        }
+  def handle_call(:snapshot, {pid, _}, state) do
+    state = sweep(state)
+    ids = state.definitions |> Map.keys() |> Enum.sort()
 
-        {:reply, {:ok, snapshot}, state}
-
-      _ ->
-        {:reply, {:error, :unknown_output}, state}
-    end
+    {:reply,
+     %{
+       inputs: for(id <- ids, {:ok, input} <- [input_snapshot(state, id)], do: input),
+       outputs: for(id <- ids, {:ok, output} <- [output_snapshot(state, id, pid)], do: output)
+     }, state}
   end
 
   def handle_call({:subscribe, id}, {pid, _}, state) do
@@ -346,6 +350,25 @@ defmodule NervesGate.IO do
 
       _ ->
         {:error, :unknown_input}
+    end
+  end
+
+  defp output_snapshot(state, id, caller) do
+    case state.definitions[id] do
+      %OutputDefinition{} = definition ->
+        {:ok,
+         %{
+           id: id,
+           definition: definition,
+           available?: available?(state.bindings[id]),
+           claimed?: Map.has_key?(state.writers, id),
+           owned?: state.writers[id] == caller,
+           desired: state.desires[id],
+           reported: feedback(state, id, definition)
+         }}
+
+      _ ->
+        {:error, :unknown_output}
     end
   end
 
