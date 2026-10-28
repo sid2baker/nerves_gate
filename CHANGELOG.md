@@ -32,6 +32,7 @@
 
 ### Added
 
+- Firmware `NervesGate.IO` domain with persisted typed definitions, managed plugin bindings, latest input observations, coalesced dirty notifications and exclusive process-owned desired outputs. Desired values are runtime-only; writer/binding loss clears ownership without an implicit device write. Plugins own reconciliation and shutdown. `NervesGateSDK.IO` calls run in the actual managed caller; the I/O UI remains separate work.
 - `mix firmware.update GATEWAY [IMAGE] [--sha256 SHA]` prints read-only gateway state, reviews the image, confirms once (interactively or by exact SHA-256), waits for the verified boot and prints the state again.
 
 - Gateway Plugins page with explicit Start/Stop and optional plugin-owned LiveComponents. Firmware bundles the selected pure-BEAM dependency closures and a verified inventory; bundled code needs no SD card. Saved unavailable versions require explicit selection, never silent replacement. Uncertain commands are never replayed.

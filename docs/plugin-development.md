@@ -71,6 +71,39 @@ requires an exclusively assigned LAN plus a caller-owned network lease. Query as
 bus transport proxies. Local-network addressing still uses platform leases; creating
 a TCP connection does not claim or reconfigure the Internet interface. See [hardware](hardware.md).
 
+## State I/O foundation
+
+The firmware `NervesGate.IO` domain and SDK `NervesGateSDK.IO` expose registration,
+publication, input subscriptions and exclusive desired-state writers using shared
+`IO.InputDefinition`, `IO.OutputDefinition` and `IO.Observation` structs. SDK calls
+preserve managed calling-process ownership. The I/O UI and Modbus integration are
+not available yet.
+These types require the local SDK `~> 0.2.0-dev.1`, not the published 0.1.0 package.
+
+The firmware domain's `register_input/1`, `register_output/2`, `publish_input/3`
+and `read_desired/1` use plugin-local IDs and actual managed caller membership.
+The input registrar publishes its observations; the output's supervised handler
+must belong to the same activation and is the only plugin PID allowed to read desire.
+Registrations must match saved definitions. Bindings and observations are live only.
+
+Handlers receive `{:nerves_gate_output_changed, local_id}` and read the current
+snapshot with `read_desired/1`. Read once after registration too. The read consumes
+that handler's dirty flag; further changes produce another hint. Multiple changes
+before the read coalesce; hints never carry executable work. Monitor the I/O controller
+and discard cached desire after its loss. A nil desire means no active target, not
+an instruction to write zero/false or restore a default.
+
+Only repeatable state-setting operations belong here. Plugins serialize actual
+writes and own polling, reconnection, readback, retries and shutdown policy. Re-read
+desire before reconciliation and after reconnect, rather than replaying old hints.
+Readback uses an ordinary input, optionally named in `feedback_input_id`; setting
+desire never fabricates feedback. Publish invalid/unknown quality with nil when
+there is no usable sample. Inputs are latest state, not reliable press/pulse events.
+
+Clearing ownership or losing a binding causes no implicit physical operation and
+does not cancel work already in flight. Plugin shutdown/fallback and equipment
+watchdogs remain necessary where appropriate. This is not a safety system.
+
 ## Disposable development installs
 
 The workbench's plugin-project tools also support creating/testing/packaging

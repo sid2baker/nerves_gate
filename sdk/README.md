@@ -17,25 +17,27 @@ alias NervesGateSDK.{Events, Hardware, Network, Storage, System}
 {:ok, assigned_ports} = Hardware.resources() # managed plugin caller only
 ```
 
-Subscriptions deliver `%NervesGateSDK.Events.Event{topic: topic, value: value}`
-to the calling process. The backend monitors subscribers. Plugins supervise their
-own serial/CAN libraries and handles; ordinary OTP shutdown must close them. Stateful calls require an installed,
-starting/running managed plugin. The backend derives activation identity from
-the actual PID, never a supplied plugin name. Activation generations fence stale
-subscriptions/claims/in-flight work; restart/rollback requires fresh subscriptions
-and handles. Outside managed plugins, general platform read-only queries remain available,
-but resource calls fail with `plugin_not_running` (network errors use the
-string code). Use administrative domain APIs for IEx/RPC maintenance.
-SDK structs are the public contract,
-not firmware status maps. Commands return `:ok`, `{:ok, value}` or `{:error, reason}`.
-A timeout means an unknown outcome, not cancellation or permission to retry.
+## I/O data contracts (SDK 0.2.0-dev.1 checkout)
 
-Both physical and QEMU firmware supply the same runtime entry point. There is no
-backend configuration or host hardware emulation. The bridge is an ordinary module
-call in the plugin's process, not a proxy process; the SDK has no compile-time
-Mix dependency on firmware. SDK APIs do not manage
-Internet/USB, Tailscale enrollment or credentials, SSH, plugins or firmware, expose
-cookies, or reboot/reset the device.
+`NervesGateSDK.IO` contains three shared data types: `InputDefinition`,
+`OutputDefinition` and `Observation`. Inputs describe latest observable state;
+outputs describe repeatable desired state. Feedback is an ordinary input. Definitions
+persist on firmware; observations, desired values and writer ownership do not.
+
+Managed plugin processes use `register_input/1`, `register_output/2`,
+`publish_input/3` and `read_desired/1` with local IDs. Readers use `input/1`,
+`output/1`, `subscribe/1` and `unsubscribe/1` with full IDs. Writers use
+`claim_output/1`, `set_output/2` and `release_output/1` with full IDs; success stores
+only desired state, not a physical result. Calls preserve actual PID ownership.
+Subscribe before reading and monitor the returned controller PID; re-register and
+resubscribe after controller loss. No old desired value survives that loss.
+The [I/O domain API](../docs/action-api.md#io-state-and-desire) coalesces dirty hints
+until the recipient reads current state; it does not silently drop the final change
+or provide reliable occurrence delivery. Plugins own reconciliation and physical
+writes. There is no command, request-journal or safety contract.
+
+Use the local SDK requirement `~> 0.2.0-dev.1` for these APIs. They are not in the
+published 0.1.0 package.
 
 ## Isolated local-network access (SDK 0.2.0-dev checkout)
 

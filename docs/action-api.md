@@ -79,6 +79,44 @@ server-swapping options or alternate instance arguments.
 sign-in. Only the bounded worker uses it; it is never persisted or published.
 Do not log it or put it in configuration.
 
+## I/O state and desire
+
+`NervesGate.IO` is separate from the administrative status projection. It exposes
+latest input state and exclusive, process-owned desired outputs, not physical
+commands. All IDs in the following functions are fully qualified, for example
+`modbus_plugin.pump.enable`. Validation/admission errors are `{:error, reason}`
+with a domain-owned atom; controller loss exits the call and requires reconnecting.
+
+| Function | Success |
+| --- | --- |
+| `IO.definitions()` | Map of full IDs to persisted SDK input/output definitions |
+| `IO.input(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., observation: ..., stale?: ...}}` |
+| `IO.output(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., claimed?: ..., desired: ..., reported: ...}}` |
+| `IO.subscribe(id)` | `{:ok, controller_pid}`; input subscription belongs to the caller |
+| `IO.unsubscribe(id)` | `:ok`; removes only this caller's input subscription |
+| `IO.claim_output(id)` | `:ok`; exclusive claim for the actual caller, initially no desire |
+| `IO.set_output(id, value)` | `:ok`; typed desired value stored, not device success |
+| `IO.release_output(id)` | `:ok`; caller's desire and claim cleared, no device operation |
+
+`observation` is nil until published; otherwise it is an SDK `IO.Observation`.
+`reported` is the optionally linked ordinary input snapshot, not a second observation
+store. Unavailable or stale feedback is never proof of current device state.
+`false` is a valid desire; nil means no active target. Owning PIDs stay private.
+
+Subscribe before reading and monitor the returned controller PID. Each input sends
+`{:nerves_gate_input_changed, full_id}` when first dirtied. Updates coalesce until
+that same caller reads `IO.input/1`; the read atomically returns latest state and
+clears its dirty flag. The read drains obsolete queued hints in the caller first.
+A racing update can leave a redundant hint, never a lost final state. Another PID's
+read does not consume your notification. Recheck freshness with monotonic timers;
+resubscribe and reread after controller loss.
+
+Definitions persist, but restart or loss of an output binding clears its claim and
+desire. Writer death or release does the same without reverting or stopping equipment.
+Plugins own reconciliation and shutdown; these APIs provide no hard real-time or
+safety guarantees. They are local process-owned APIs, not remote control RPCs whose
+transient worker would accidentally become the writer.
+
 ## Cellular
 
 Network settings add `"internet" => %{"mode" => "cellular", "apn" => ""}` without

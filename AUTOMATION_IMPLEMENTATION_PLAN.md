@@ -38,8 +38,9 @@ output observation store: a displayed `reported` value is that input's snapshot.
 - Toggle, pulse, increment, dispense and other one-time effects are out of scope.
 - Inputs are latest observable state, not reliable event streams. Short-lived
   occurrences and intermediate transitions may be missed.
-- Notifications are hints and may be dropped or coalesced. Consumers read current
-  snapshots rather than interpreting notifications as authoritative values.
+- Notifications are hints that may be duplicated or coalesced, not silently dropped.
+  While the controller and subscriber remain alive, a dirty input eventually causes
+  a hint. Consumers read current snapshots rather than treating hints as values.
 - Definitions persist; bindings, observations, subscriptions, writer ownership
   and desired values do not. Nothing physical happens merely because I/O restarts.
 - Manual and automation writers use the same validation and exclusive ownership.
@@ -79,6 +80,10 @@ work can proceed independently of this evaluation. Do not build a temporary rule
 engine while waiting for Jido.
 
 ## 1. Implement `NervesGate.IO`
+
+The firmware domain, SDK transport wiring, shared data structs and host tests are
+implemented. UI, protocol integration and automation remain later phases;
+this source implementation has not yet been qualified on a rebuilt guest.
 
 Start with one supervised firmware domain, not separate Registry, LatestValues
 and Subscriptions services:
@@ -138,9 +143,9 @@ No per-output write record or executable recovery work is stored.
 
 ### Initial data contracts
 
-These are proposed SDK data contracts, not implemented modules. Keep the three
-structs under `NervesGateSDK.IO`; firmware uses the same types rather than mirroring
-another set. Desired state is a typed value or nil, not a request object.
+The three shared data structs live under `NervesGateSDK.IO`; firmware uses the same
+types rather than mirroring another set. Desired state is a typed value or nil,
+not a request object. SDK transport operations preserve the actual calling PID.
 
 ```elixir
 defmodule NervesGateSDK.IO.InputDefinition do
@@ -218,13 +223,19 @@ physical operation to execute.
   Subscribe before reading the initial snapshot to avoid a read/subscribe race.
 - Consumers monitor the I/O controller and establish fresh subscriptions and reads
   after its loss. Old notifications cannot establish current availability.
-- Input publication and binding changes may notify subscribers. Desired changes,
-  including clearing desire, may notify the bound output handler.
-- Hints may be coalesced or dropped. Consumers must tolerate duplicates and refresh
-  snapshots as needed; there is no acknowledgement, replay or gap protocol.
-- Snapshot reads avoid acting on obsolete message payloads, but do not themselves
-  remove mailbox backlog. Coalesce or rate-limit hints where needed rather than
-  promising one message per publication or allowing unbounded per-sample queues.
+- Input publication and binding changes mark that input dirty for each subscriber.
+  Desired changes, including clearing desire, similarly dirty the bound handler's
+  output. If no hint is outstanding, send one; later changes coalesce behind it.
+- While the controller and recipient remain alive, dirty state eventually produces
+  a hint without requiring another publication. Consumers tolerate duplicate hints,
+  but correctness does not depend on recovering from arbitrary notification loss.
+- The recipient's snapshot read atomically returns current state and clears its
+  dirty flag in the controller. A later update sends another hint. Another PID's
+  read cannot clear the recipient's flag. No explicit acknowledgement, event queue,
+  replay or gap protocol is needed.
+- Read functions drain already-queued hints for that endpoint in the actual caller
+  before reading, so polling does not accumulate obsolete messages. An update racing
+  with a read may leave a redundant hint; the consumer simply reads again.
 - A handler reads its initial desired snapshot after registration; it must not rely
   on receiving an initial notification. Nil means no active target, not a default.
 
@@ -253,8 +264,8 @@ local IDs in the caller's namespace.
 - On plugin/binding loss, clear desire and ownership too. A new binding requires a
   fresh claim and explicit desired value, even if the old writer is still alive.
 
-Keep output snapshots simple: definition, availability, active writer and desired
-value. Feedback is an ordinary input snapshot, optionally linked for display. Never
+Keep output snapshots simple: definition, availability, whether claimed and desired
+value. The owning PID stays private to the controller. Feedback is an ordinary input snapshot, optionally linked for display. Never
 copy a desired value into that input or infer device success from storing desire.
 
 ### Plugin reconciliation and safety
@@ -288,7 +299,9 @@ There are no command/event-delivery guarantees to test in this phase.
 
 ## 2. Publish the SDK contract
 
-Add `NervesGateSDK.IO` using the three structs specified in Phase 1:
+Transport operations are implemented in `NervesGateSDK.IO` using the three Phase 1
+structs. Managed-activation host coverage is in place; rebuilt-guest qualification
+and publication remain pending:
 
 ```elixir
 register_input(input_definition)

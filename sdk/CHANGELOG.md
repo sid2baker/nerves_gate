@@ -17,6 +17,7 @@
 
 ### Added
 
+- `IO` registration, publication, observation, subscription and exclusive desired-state writer APIs with actual calling-process ownership. Shared `IO.InputDefinition`, `IO.OutputDefinition` and `IO.Observation` types describe observable inputs and repeatable desired-state outputs; feedback uses ordinary input observations.
 - Optional `:nerves_gate_ui` declaration for a verified app-owned LiveComponent hosted by the gateway. Its callbacks call the app's supervised commands rather than borrowing SDK resource ownership from the gateway LiveView.
 - Process-owned isolated Ethernet leases through `Network.claim_local/3`, `local_status/0`, `advertise_local/1` and `release_local/1`. Claiming never changes Internet/USB, creates DNS/default routes or advertises automatically. Unknown cleanup blocks reuse.
 - Typed local lease observations and `Network.Interface.plugin_enabled?`/`claimed?` flags, without private process or claim handles in public observations.

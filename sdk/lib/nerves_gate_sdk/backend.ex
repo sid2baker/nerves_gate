@@ -23,6 +23,17 @@ defmodule NervesGateSDK.Backend do
           | :storage_status
           | :storage_data_dir
           | :hardware_resources
+          | :io_register_input
+          | :io_register_output
+          | :io_publish_input
+          | :io_read_desired
+          | :io_input
+          | :io_output
+          | :io_subscribe
+          | :io_unsubscribe
+          | :io_claim_output
+          | :io_set_output
+          | :io_release_output
 
   @callback call(operation(), list()) :: :ok | {:ok, term()} | {:error, term()}
 

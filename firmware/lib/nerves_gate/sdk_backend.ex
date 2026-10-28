@@ -38,8 +38,47 @@ defmodule NervesGate.SDKBackend do
     end
   end
 
+  def call(:io_register_input, [definition]),
+    do: managed_io(:active, fn -> NervesGate.IO.register_input(definition) end)
+
+  def call(:io_register_output, [definition, handler]),
+    do: managed_io(:active, fn -> NervesGate.IO.register_output(definition, handler) end)
+
+  def call(:io_publish_input, [id, value, quality]),
+    do: managed_io(:release, fn -> NervesGate.IO.publish_input(id, value, quality) end)
+
+  def call(:io_read_desired, [id]),
+    do: managed_io(:release, fn -> NervesGate.IO.read_desired(id) end)
+
+  def call(:io_input, [id]),
+    do: managed_io(:release, fn -> NervesGate.IO.input(id) end)
+
+  def call(:io_output, [id]),
+    do: managed_io(:release, fn -> NervesGate.IO.output(id) end)
+
+  def call(:io_subscribe, [id]),
+    do: managed_io(:active, fn -> NervesGate.IO.subscribe(id) end)
+
+  def call(:io_unsubscribe, [id]),
+    do: managed_io(:release, fn -> NervesGate.IO.unsubscribe(id) end)
+
+  def call(:io_claim_output, [id]),
+    do: managed_io(:active, fn -> NervesGate.IO.claim_output(id) end)
+
+  def call(:io_set_output, [id, value]),
+    do: managed_io(:active, fn -> NervesGate.IO.set_output(id, value) end)
+
+  def call(:io_release_output, [id]),
+    do: managed_io(:release, fn -> NervesGate.IO.release_output(id) end)
+
   def call(operation, arguments),
     do: available(fn -> GenServer.call(__MODULE__, {operation, arguments}) end)
+
+  defp managed_io(mode, fun) do
+    available(fn ->
+      with {:ok, _owner} <- NervesGate.Plugins.Owner.resolve(self(), mode), do: fun.()
+    end)
+  end
 
   defp local_result({:error, %{code: code}}), do: {:error, code}
   defp local_result(result), do: result

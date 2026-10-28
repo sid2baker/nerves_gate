@@ -206,6 +206,7 @@ variation points, as does the published SDK backend contract.
 | Hardware | Allowlisted Ethernet/serial/CAN inventory; Plugins owns exclusive assignment intent |
 | SSH | Public-key validation, persistence and authentication |
 | Storage | SD detection, commissioning, mounting and formatting |
+| IO | Persisted I/O definitions, live plugin bindings, latest input snapshots, coalesced hints and process-owned desired outputs |
 | Plugins | Trusted plugin admission, lifecycle, version selection and exclusive hardware assignment; guards destructive storage changes |
 | ProjectionServer | Sanitized UI read model, not command coordination |
 | SDKBackend | Translation into the separate typed plugin contract |
@@ -224,7 +225,7 @@ Dependencies supervise VintageNet, tailscaled and Alarmist. The device's
 ```text
 PubSub → Network.Vintage → workflow PropertyTable → persistent Settings PropertyTable
        → SSH → Network → Remote → Indicators → Hardware → PluginTasks
-       → Storage → Plugins → ProjectionServer → SDKBackend → gateway Endpoint
+       → Storage → IO → Plugins → ProjectionServer → SDKBackend → gateway Endpoint
 ```
 
 See [`firmware/config/firmware.exs`](../firmware/config/firmware.exs) and
@@ -255,6 +256,38 @@ Mix task / Pi → distribution → Workbench.Jobs / Scenarios.Runner / Workbench
 `NervesGate` has only `status/0` and `subscribe/0`, plus its domain API index.
 Status is non-atomic and does not query a projection cache. Commands return their
 result without an implicit follow-up status read. See the [API](action-api.md).
+
+### Observable inputs and desired outputs
+
+`NervesGate.IO` owns one controller for plugin-scoped definitions, live bindings,
+latest input observations, subscriptions, exclusive writer ownership and desired
+values. **Inputs describe what we observe; outputs describe what we want.** Only
+repeatable state-setting operations qualify as outputs. There are no commands,
+reliable event occurrences, write journals or physical completion states.
+
+Definitions persist; all other I/O state is runtime-only. Restart, binding loss and
+writer loss never establish a replacement target or cause a device operation.
+Writers must claim an available output and explicitly set desire. Releasing clears
+it, not the device's physical state. Feedback is an ordinary input, optionally linked
+by an output definition. Availability, observation quality and freshness are distinct.
+UTC timestamps remain nil until clock synchronization; freshness is monotonic.
+
+Input subscribers and bound output handlers receive one outstanding dirty hint per
+endpoint. Updates coalesce until that recipient reads the snapshot; reads by other
+PIDs do not consume its dirty flag. A final change still causes a hint without any
+later publication. The read atomically returns current state and clears the flag.
+Consumers subscribe before reading and monitor the controller to resubscribe after
+loss. Short-lived transitions may be missed; this is not an event-delivery protocol.
+
+Plugins own device reconciliation, readback, retry policy and shutdown. I/O performs
+no protocol writes and cannot guarantee safety. Managed-generation checks and PID
+monitors fence endpoints; a periodic sweep also detects revoked/quiescing generations
+without requiring a new publication. I/O precedes Plugins in the supervision tree,
+so a controller restart also invalidates managed activation bindings.
+
+`NervesGateSDK.IO` calls run in the actual managed caller. I/O projections/UI,
+Modbus integration and Automation are not implemented.
+See [I/O domain API](action-api.md#io-state-and-desire).
 
 ### UI projection
 
@@ -326,6 +359,7 @@ See [optional plugin UI](plugins.md#optional-ui).
 | Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
 | Plugins: `/data/nerves_gate/hardware.term` | Bounded exclusive port assignment and enablement intent |
+| IO: `/data/nerves_gate/io.term` | Schema 1 input/output definitions only; no desired values, observations or ownership |
 | Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data |
 
 Both targets require writable ext4 data before data users start. Unreadable saved
