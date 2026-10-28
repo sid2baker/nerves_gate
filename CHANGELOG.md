@@ -70,6 +70,7 @@
 
 ### Fixed
 
+- A storage owner busy probing or mounting the card no longer crashes the SDK backend or other callers; `NervesGate.Storage.root/0` reports `:storage_unavailable`, as documented for plugin configuration storage.
 - Valid saved I/O definitions no longer prevent firmware startup after a cold boot. The catalogue loads its compiled schema before safe decoding; unknown atoms and malformed files remain rejected without rewriting saved state.
 - Releasing a plugin's local LAN lease without a generation drain no longer crashes `NervesGate.Network` (and, through it, I/O and Plugins).
 - Hardware-resource queries skip unassigned and disabled ports instead of crashing plugin management when opening the Modbus RTU configuration.

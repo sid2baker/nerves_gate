@@ -34,7 +34,15 @@ defmodule NervesGate.Storage do
     do: GenServer.call(__MODULE__, {:setup, action, card_id, confirmation})
 
   def status, do: {:ok, %Status{available?: match?({:ok, _}, root())}}
-  def root, do: GenServer.call(__MODULE__, :root)
+
+  # The owner probes the raw card and runs mount tools; while a card is being
+  # inserted, removed or mounted it may not answer in time. Callers (SDK refresh,
+  # Plugins, managed config) treat that as unavailable storage, never a crash.
+  def root do
+    GenServer.call(__MODULE__, :root)
+  catch
+    :exit, _ -> {:error, :storage_unavailable}
+  end
 
   @doc false
   def identity do

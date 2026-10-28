@@ -92,7 +92,7 @@ defmodule NervesGate.SDKOwnershipTest do
     end)
 
     assert_receive {{:ok, %{app: "config_fixture", version: "2.1.0"} = ^tag},
-                    {:error, :unavailable}, {:error, :unavailable}}
+                    {:error, :storage_unavailable}, {:error, :storage_unavailable}}
 
     Owner.revoke(tag)
     Application.stop(:config_fixture)
