@@ -55,15 +55,14 @@ See [recovery access](networking.md#local-recovery-and-http-exposure).
 
 The standard UI configures gateway interfaces, not connected equipment. Equipment
 names, Modbus units/registers, S7 endpoints and polling belong to plugins.
-There is no equipment-label editor or Modbus register form in Hardware. The
-network observations remain available independently; built-in bus diagnostics are removed.
+Hardware shows network observations, not bus diagnostics.
 
 Ethernet addressing, routes and bridging remain Network-owned. An assigned LAN
 starts without IPv4, DHCP, DNS, a default route or bridge. Its plugin requests isolated
 local addressing through a process-owned SDK claim; active or unresolved claims block
 platform network changes. Disabled independent ports are explicitly held down.
-Saved legacy joined/equipment configurations are rejected and retained for explicitly
-authorized administrator migration, never silently converted or erased.
+Unsupported saved network settings are rejected and kept for an explicitly
+authorized change, never silently converted or erased.
 The optional [Tailnet subnet-router plugin](../plugins/tailnet_subrouter/README.md)
 provides explicit local configuration and advertisement, disabled on every startup.
 Serial/CAN ports have exclusive persistent plugin assignments; Hardware shows the
@@ -72,9 +71,8 @@ may own multiple ports. Reassignment explicitly stops both affected plugins and
 leaves them stopped after checked cleanup. UI controls never replace backend
 admission. EM300/extension-card enumeration is not implemented. See [hardware](hardware.md).
 
-Equipment label/scan/share commands are removed. A passive neighbor-cache read model
-belongs to plugins, not a platform compatibility API. Hardware has no neighbor
-inventory, labels, scan or sharing controls.
+Neighbor discovery belongs to plugins. Hardware has no neighbor inventory, labels,
+scan or sharing controls.
 The first plugin network API supports one isolated Ethernet claim per gateway.
 
 ## Controls

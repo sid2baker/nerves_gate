@@ -238,11 +238,11 @@ defmodule Simulator.Network do
     cond do
       not state.config.cables[port] -> count(state, :discarded)
       state.config.internet == port -> admit(state, port, :internet, frame, :internet)
-      true -> equipment(state, port, frame)
+      true -> plugin_lan(state, port, frame)
     end
   end
 
-  defp equipment(state, port, frame) do
+  defp plugin_lan(state, port, frame) do
     state =
       case frame do
         <<_::96, 2048::16, _::binary>> -> reject(state, port)

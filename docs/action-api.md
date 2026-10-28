@@ -155,8 +155,7 @@ not converted into successful or generic command results.
 
 Use caller-owned SDK network leases for local addressing and advertisement, not
 private Remote/worker helpers. Cellular uses the same Network worker; there is no
-independent cellular process. Legacy Equipment label/scan/share commands and joined
-network settings are removed. See [equipment sharing](networking.md#equipment-sharing).
+independent cellular process. See [plugin subnet sharing](networking.md#plugin-subnet-sharing).
 
 Commands do not authenticate callers. `actions`/`capabilities` are presentation
 metadata, **not authorization**. The gateway currently trusts reachable management

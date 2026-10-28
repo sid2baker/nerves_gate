@@ -93,13 +93,12 @@ defmodule NervesGate.Config do
     else
       _ ->
         {:error,
-         "Use at most one Internet port; other ports must be disabled or application-enabled. Legacy equipment and joined settings require explicit administrator migration; saved state is never rewritten."}
+         "Use at most one Internet port; other ports must be disabled or plugin ports. Saved settings are never rewritten."}
     end
   end
 
   defp validate_ethernet(_) do
-    {:error,
-     "Choose independent Internet/application ports. Legacy equipment and joined networks require explicit administrator migration; saved state is never rewritten."}
+    {:error, "Choose independent Internet or plugin ports. Saved settings are never rewritten."}
   end
 
   defp validate_port(nil), do: {:ok, nil}

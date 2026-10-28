@@ -58,7 +58,7 @@ defmodule WorkbenchWeb.Layouts do
   defp navigation do
     [
       {:overview, "/", "Home", "overview"},
-      {:develop, "/develop/plugins", "Develop", "equipment"},
+      {:develop, "/develop/plugins", "Develop", "display"},
       {:devices, "/devices", "Devices", "network"},
       {:factory, "/provision", "Provision", "usb"}
     ]

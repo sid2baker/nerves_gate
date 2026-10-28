@@ -156,7 +156,7 @@ private dependency closures and verified inventory live in firmware `priv/plugin
 not a device store. Bundled code starts without SD; plugins using SD data directories
 must handle unavailable storage. Adding/updating/removing code requires firmware.
 There is one namespace per BEAM; incompatible plugin selections fail the build.
-The standard UI exposes Hardware, not an equipment registry: gateway interfaces,
+The standard UI exposes Hardware: gateway interfaces,
 health, availability, shared configuration and access ownership. Plugins own
 equipment identities, Modbus/S7 endpoints, register maps, polling and control.
 Shared libraries do not imply device-owned protocol sessions or a universal driver
@@ -284,7 +284,7 @@ Plugins are trusted same-BEAM OTP code, **not a sandbox**. The SDK exposes typed
 observations/events, caller-derived hardware assignments and narrowly scoped local-network leases,
 not administrative maps, arbitrary network configuration, SSH, firmware or recovery
 commands. Equipment identities, labels, scans and industrial protocols belong to
-plugins. There is no platform equipment domain or SDK compatibility API.
+plugins.
 Plugins and Network receive SDK calls from the actual caller. Stateful calls require
 managed activation membership, resolved through OTP and Plugins-owned protected ETS,
 not a caller-supplied plugin name or synchronous Plugins call. PID/ref ownership remains;

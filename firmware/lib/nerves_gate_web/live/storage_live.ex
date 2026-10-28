@@ -48,7 +48,7 @@ defmodule NervesGateWeb.StorageLive do
       title="Plugin storage"
       description="Use an SD card for development plugins and their data, or continue without it."
     />
-    <.panel title="SD card" icon="equipment" id="storage-setup">
+    <.panel title="SD card" icon="display" id="storage-setup">
       <.notice :if={!@storage.available} tone="warning">Storage service is unavailable.</.notice>
       <p id="storage-state">{label(@storage)}</p>
       <p :if={@storage.present} class="ui-help" id="storage-filesystem">
@@ -103,7 +103,7 @@ defmodule NervesGateWeb.StorageLive do
     <.panel
       :if={@format_card}
       title="Erase this SD card?"
-      icon="equipment"
+      icon="display"
       id="storage-format-confirmation"
     >
       <.notice tone="warning">

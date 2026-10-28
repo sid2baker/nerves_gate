@@ -7,7 +7,7 @@ defmodule Scenarios.Cases.Topology do
 
   def spec,
     do: %{
-      name: "Internet moves between stable LAN ports; equipment and management cannot forward",
+      name: "Internet moves between stable LAN ports; plugin LANs and management cannot forward",
       fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
@@ -30,8 +30,8 @@ defmodule Scenarios.Cases.Topology do
     assert Scenarios.Device.status(vm).network.desired == factory
     assert identities(vm) == original
 
-    # Supply a deliberately tempting gateway on the equipment LAN. Even a
-    # manually injected route must not turn equipment into a second uplink.
+    # Supply a deliberately tempting gateway on the plugin LAN. Even a
+    # manually injected route must not turn it into a second uplink.
     configured =
       Map.put(settings("eth1"), "eth0", %{"role" => "plugin", "address" => nil})
 

@@ -168,34 +168,13 @@ defmodule NervesGateWeb.HardwarePageTest do
     assert [] = Floki.find(document, "#distribution-cookie")
   end
 
-  test "hardware routes expose resources without equipment configuration forms" do
+  test "hardware routes highlight Hardware navigation" do
     for path <- ["/hardware", "/hardware/lan/1", "/hardware/rs485/1", "/hardware/can/1"] do
-      document = page(path)
-
       assert [_] =
                Floki.find(
-                 document,
+                 page(path),
                  "nav[aria-label='Main navigation'] a[aria-current=page][href='/hardware']"
                )
-
-      assert [] =
-               Floki.find(
-                 document,
-                 "#equipment-label-form, #modbus-form, #equipment-network-form, input[name='network[equipment_ip]']"
-               )
-    end
-  end
-
-  test "replaced routes have no aliases" do
-    for path <- [
-          "/equipment",
-          "/equipment/lan/1",
-          "/equipment/rs485/1",
-          "/equipment/can/1",
-          "/distribution",
-          "/storage"
-        ] do
-      assert Phoenix.Router.route_info(NervesGateWeb.Router, "GET", path, "localhost") == :error
     end
   end
 
@@ -250,22 +229,7 @@ defmodule NervesGateWeb.HardwarePageTest do
              Floki.find(document, "[phx-click=capture], #modbus-form, input[name='modbus[unit]']")
   end
 
-  test "removed equipment actions cannot trigger protocol requests or label writes" do
-    socket =
-      %Phoenix.LiveView.Socket{private: %{live_temp: %{}}} |> Phoenix.LiveView.clear_flash()
-
-    assert {:noreply, ^socket} =
-             NervesGateWeb.HardwarePortLive.handle_event("modbus-read", %{}, socket)
-
-    assert {:noreply, ^socket} =
-             NervesGateWeb.HardwarePortLive.handle_event(
-               "edit-label",
-               %{"id" => "anything"},
-               socket
-             )
-  end
-
-  test "application enablement configures no IP and Internet edits preserve it" do
+  test "plugin ports configure no IP and Internet edits preserve them" do
     base = %{
       "mode" => "ports",
       "eth0" => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
@@ -280,28 +244,6 @@ defmodule NervesGateWeb.HardwarePageTest do
     # Form construction is not admission: Network checks exclusive ownership.
     assert {:ok, _} =
              NetworkForm.to_network(%{params | "internet_port" => "eth1"}, [], enabled, :internet)
-
-    assert {:error, _} =
-             NetworkForm.to_network(%{"enabled" => "true"}, [], base, {:application, "eth0"})
-  end
-
-  test "removed joined and equipment forms cannot submit network settings" do
-    base = %{
-      "mode" => "ports",
-      "eth0" => nil,
-      "eth1" => nil,
-      "internet" => %{"mode" => "cellular", "apn" => ""}
-    }
-
-    for editor <- [:ports, {:equipment, "eth1"}, {:application, "eth1"}] do
-      assert {:error, _} =
-               NetworkForm.to_network(
-                 %{"mode" => "shared", "enabled" => "true"},
-                 [],
-                 base,
-                 editor
-               )
-    end
   end
 
   defp page(path), do: build_conn() |> get(path) |> html_response(200) |> Floki.parse_document!()

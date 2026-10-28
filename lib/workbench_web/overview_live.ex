@@ -48,7 +48,7 @@ defmodule WorkbenchWeb.OverviewLive do
           <.link navigate={"/devices/#{gateway.node}"} class="ui-text-link">Open</.link>
         </.setting_row>
       </.panel>
-      <.panel title="Resume work" icon="equipment" id="resume-work">
+      <.panel title="Resume work" icon="display" id="resume-work">
         <.setting_row :for={plugin <- @plugins} label={plugin.name}>
           <.link
             navigate={"/develop/plugins/#{Base.url_encode64(plugin.path, padding: false)}"}

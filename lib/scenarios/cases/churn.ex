@@ -34,8 +34,8 @@ defmodule Scenarios.Cases.Churn do
   end
 
   defp assert_port_arrangements(vm, saved) do
-    legacy = %{"mode" => "shared", "equipment" => saved["eth0"]["address"]}
-    assert {:error, _} = Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [legacy])
+    unsupported = %{"mode" => "shared", "equipment" => saved["eth0"]["address"]}
+    assert {:error, _} = Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [unsupported])
     assert Scenarios.Device.status(vm).network.desired == saved
     enabled = Map.put(saved, "eth1", %{"role" => "plugin", "address" => nil})
     trial = propose(vm, enabled)
@@ -43,7 +43,7 @@ defmodule Scenarios.Cases.Churn do
 
     Scenarios.Device.await(
       vm,
-      "application enablement cancelled",
+      "plugin port trial cancelled",
       &(&1.network.pending == nil and &1.network.desired == saved and not &1.network.recovering)
     )
 

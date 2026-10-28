@@ -93,7 +93,7 @@ defmodule WorkbenchWeb.PluginsLive do
       <.notice :if={@plugin_id && !@plugin} tone="warning">
         Plugin is not open in this session.
       </.notice>
-      <.panel :if={!@plugin_id} title="Create or open a plugin" icon="equipment">
+      <.panel :if={!@plugin_id} title="Create or open a plugin" icon="display">
         <form id="create-plugin" phx-submit="create_plugin" class="ui-actions">
           <input
             type="text"
@@ -131,7 +131,7 @@ defmodule WorkbenchWeb.PluginsLive do
         </form>
         <p class="ui-help">Change plugins/selection.exs and rebuild firmware to bundle plugins.</p>
       </.panel>
-      <.panel :if={!@plugin_id} title="Open plugins" icon="equipment" id="plugins">
+      <.panel :if={!@plugin_id} title="Open plugins" icon="display" id="plugins">
         <p :if={@plugins == []} class="ui-help">No plugins open.</p>
         <div :for={plugin <- @plugins} class="ui-setting-row">
           <.link navigate={"/develop/plugins/#{id(plugin.path)}"} class="ui-text-link">{plugin.name}</.link>

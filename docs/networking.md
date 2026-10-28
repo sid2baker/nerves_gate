@@ -13,8 +13,8 @@ and exclusively assign a free, non-Internet port to one plugin. This uses the sa
 reviewed, checked-stop assignment as RS485/CAN. Assignment sets no IPv4 address and
 starts no DHCP client, DNS, default route, bridge or advertisement. Disabling holds
 the independent link down. Existing local addresses are removed only by an explicitly
-saved change. Legacy equipment/joined configurations are rejected with migration
-guidance, never automatically converted or erased. An assigned LAN must be disabled
+saved change. Unsupported saved settings are rejected, never automatically
+converted or erased. An assigned LAN must be disabled
 and unassigned before it can become Internet.
 
 The assigned plugin requests local addressing with `NervesGateSDK.Network.claim_local/3`.
@@ -26,10 +26,10 @@ changes until safe cleanup; no plugin is enabled by visiting Hardware.
 
 The administrative API accepts independent ports only: at most one Internet port
 (DHCP or static IPv4), plugin-role ports without saved addresses, and
-disabled ports. The plugin role alone grants no plugin access. Hardware has no local-addressing or topology editor. Saved legacy
-`equipment` roles or `shared` mode make Network unavailable with migration guidance;
-they are never rewritten. VintageNet/daemon state may survive independently: inspect
-it using recovery SSH before a separately authorized migration. Keep USB available.
+disabled ports. The plugin role alone grants no plugin access. Hardware has no local-addressing or topology editor. Saved settings with other
+roles or modes make Network unavailable; they are never rewritten. VintageNet/daemon
+state may survive independently: inspect it using recovery SSH before a separately
+authorized change. Keep USB available.
 
 Manual Internet addressing supports contiguous IPv4 masks (/1–/30) and up to three
 DNS servers. Suggestions use observed addressing or `192.168.1.2/24` via
@@ -377,7 +377,7 @@ checks, so dynamic LAN/USB/tailnet hosts and HTTPS termination work without prox
 headers. HTTP CSRF protection and Strict session cookies stay enabled. Forwarded
 headers are not trusted. HTTPS adds no sign-in; restrict tailnet access.
 
-### Equipment sharing
+### Plugin subnet sharing
 
 For plugin-owned access, use the optional Tailnet subnet-router plugin and its
 process-owned SDK lease. It journals ownership before advertisement, refuses a
@@ -386,13 +386,13 @@ local address. Owner loss schedules cleanup; failed/uncertain cleanup retains th
 journal and blocks reuse. No write is replayed automatically. Approval remains
 unknown until verified externally; advertised does not mean approved or reachable.
 
-`NervesGate.Equipment.scan/label/share/unshare` are removed. Plugins own
-equipment discovery/identity and explicit route requests through their leases.
+Plugins own equipment discovery/identity and explicit route requests through their
+leases.
 Approve the advertised route in Tailscale and restrict it in tailnet policy.
 Linux clients need `tailscale set --accept-routes`. This is routed access, not
 an Ethernet bridge or broadcast discovery.
 
-**Overlapping networks are unsupported.** Equipment subnets must not overlap other
+**Overlapping networks are unsupported.** Plugin subnets must not overlap other
 sites, the client's LAN or another VPN's routes. The gateway checks only its own
 observed conflicts.
 

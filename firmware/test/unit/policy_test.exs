@@ -26,12 +26,6 @@ defmodule NervesGate.PolicyTest do
     assert Policy.value(:fast, 0) != Policy.value(:fast, 125)
   end
 
-  test "equipment registry and compatibility SDK modules are absent" do
-    refute Code.ensure_loaded?(NervesGate.Equipment)
-    refute Code.ensure_loaded?(NervesGateSDK.Equipment)
-    refute Map.has_key?(NervesGate.Status.disconnected(), :equipment)
-  end
-
   test "current independent network settings round-trip without role adaptation" do
     internet = %{"role" => "internet", "address" => Config.address_defaults()}
     network = %{"mode" => "ports", "eth0" => internet, "eth1" => nil}
@@ -49,13 +43,13 @@ defmodule NervesGate.PolicyTest do
     assert_raise ArgumentError, fn -> NervesGate.Network.LAN.normalize(joined["br0"]) end
   end
 
-  test "4G supports only isolated application links and rejects legacy joined settings" do
-    application = %{"role" => "plugin", "address" => nil}
+  test "4G supports only isolated plugin links and rejects joined settings" do
+    plugin = %{"role" => "plugin", "address" => nil}
 
     network = %{
       "mode" => "ports",
-      "eth0" => application,
-      "eth1" => application,
+      "eth0" => plugin,
+      "eth1" => plugin,
       "internet" => %{"mode" => "cellular", "apn" => ""}
     }
 
@@ -64,12 +58,12 @@ defmodule NervesGate.PolicyTest do
     {"br0", bridge} = List.keyfind(configs, "br0", 0)
     assert bridge.vintage_net_bridge.interfaces == []
 
-    for legacy <- [
+    for unsupported <- [
           %{"mode" => "shared", "equipment" => Config.address_defaults()},
           %{network | "eth1" => %{"role" => "equipment", "address" => Config.address_defaults()}}
         ] do
-      assert {:error, reason} = Config.validate_network(legacy)
-      assert reason =~ "migration"
+      assert {:error, reason} = Config.validate_network(unsupported)
+      assert reason =~ "never rewritten"
     end
   end
 

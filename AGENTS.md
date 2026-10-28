@@ -130,8 +130,8 @@
   plugin transfer use distribution; firmware upload uses strictly verified
   `Workbench.SSH`. Device maintenance logic is compiled, never shipped as source strings. Older firmware must be updated through an explicitly authorized
   external procedure; do not retain a compatibility fallback.
-- Legacy equipment/joined network settings are rejected, not rewritten. Explicit
-  migration or reset of existing devices still requires separate authorization.
+- Unsupported saved network settings are rejected, not rewritten. Changing or
+  resetting saved settings on existing devices requires separate authorization.
 
 ## Start here
 

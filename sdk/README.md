@@ -83,9 +83,8 @@ binaries are introduced. See [hardware assignments](../docs/hardware.md).
 
 ## Equipment ownership
 
-Plugins own identities, discovery and protocol sessions. The SDK has no
-`Equipment` compatibility module or equipment event topic. Use
-`Network.interfaces/0` for platform link observations.
+Plugins own equipment identities, discovery and protocol sessions. The platform
+reports only its own links, through `Network.interfaces/0`.
 
 ## Plugin packages
 

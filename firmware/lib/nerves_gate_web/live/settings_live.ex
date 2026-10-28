@@ -127,7 +127,7 @@ defmodule NervesGateWeb.SettingsLive do
         </.button>
       </.form>
     </.panel>
-    <.panel title="Plugin storage" icon="equipment" id="storage-settings">
+    <.panel title="Plugin storage" icon="display" id="storage-settings">
       <p>{NervesGateWeb.StorageLive.label(@projection.storage)}</p>
       <.link navigate="/settings/storage" class="ui-text-link">Set up or manage the SD card →</.link>
     </.panel>

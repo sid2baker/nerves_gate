@@ -1,4 +1,4 @@
-defmodule Scenarios.Cases.Equipment do
+defmodule Scenarios.Cases.PluginLan do
   @moduledoc false
   import ExUnit.Assertions
   import Scenarios.Device
@@ -6,7 +6,7 @@ defmodule Scenarios.Cases.Equipment do
 
   def spec,
     do: %{
-      :name => "equipment cable failure leaves Internet and management available",
+      :name => "plugin LAN cable failure leaves Internet and management available",
       fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
@@ -28,7 +28,7 @@ defmodule Scenarios.Cases.Equipment do
 
     Scenarios.Device.await(
       vm,
-      "Internet reachable before equipment failure",
+      "Internet reachable before plugin LAN failure",
       &internet?/1,
       60_000
     )
@@ -37,8 +37,8 @@ defmodule Scenarios.Cases.Equipment do
       Qemu.network(vm, %{cables: %{lan2: false}})
 
       failed =
-        Scenarios.Device.await(vm, "equipment cable disconnected", fn status ->
-          assert internet?(status), "Equipment failure must not take down the Internet port"
+        Scenarios.Device.await(vm, "plugin LAN cable disconnected", fn status ->
+          assert internet?(status), "Plugin LAN failure must not take down the Internet port"
           Enum.any?(status.connections.ports, &match?(%{name: "eth1", link: false}, &1))
         end)
 

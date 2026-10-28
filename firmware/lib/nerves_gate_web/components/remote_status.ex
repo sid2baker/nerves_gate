@@ -57,7 +57,7 @@ defmodule NervesGateWeb.RemoteStatus do
 
   defp operation(operation)
        when operation in ["sharing_enable", "sharing_disable", "sharing_sync"],
-       do: "Checking equipment routes…"
+       do: "Checking plugin routes…"
 
   defp operation(_), do: "Saving device name…"
 end

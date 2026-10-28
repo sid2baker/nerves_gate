@@ -53,7 +53,7 @@ defmodule NervesGate.Network.Policy do
        %{
          code: "invalid_saved_config",
          message:
-           "Saved settings could not be used. Legacy equipment/joined networks require explicitly authorized migration; use recovery SSH or serial. No saved settings were rewritten."
+           "Saved settings could not be used. Inspect them with recovery SSH or serial; an explicitly authorized change is required. No saved settings were rewritten."
        }}
 
   def available(%{recovering: true}),
@@ -163,7 +163,7 @@ defmodule NervesGate.Network.Policy do
     if pairs == [],
       do: [],
       else: [
-        "Network addresses overlap. Use different Ethernet, cellular, equipment and USB subnets before continuing."
+        "Network addresses overlap. Use different Ethernet, cellular, plugin LAN and USB subnets before continuing."
       ]
   end
 

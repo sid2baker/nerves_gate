@@ -5,7 +5,7 @@ defmodule NervesGateWeb.CoreComponents do
 
   @icons %{
     "overview" => "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
-    "equipment" => "M3 4h18v12H3z M8 21h8 M12 16v5 M7 8h2 M7 12h6",
+    "display" => "M3 4h18v12H3z M8 21h8 M12 16v5 M7 8h2 M7 12h6",
     "internet" =>
       "M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0 M3 12h18 M12 3c5 5 5 13 0 18-5-5-5-13 0-18",
     "shield" => "m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z m-4 9 3 3 5-6",
