@@ -608,7 +608,7 @@ defmodule NervesGate.Network do
     {local, response} = Local.complete(state.local, action, result)
 
     response =
-      if Map.get(worker, :drain?) and local != nil,
+      if Map.get(worker, :drain?, false) and local != nil,
         do: {:error, :generation_cleanup_pending},
         else: response
 
