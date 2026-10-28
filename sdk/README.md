@@ -66,7 +66,6 @@ environment. `Hardware.resources/0` returns enabled allowlisted assignments for 
 actual managed caller, as `%Hardware.Port{id: ..., kind: ..., present?: ..., path: ...}`.
 It opens nothing and accepts no plugin name or arbitrary operator-supplied path. One
 port belongs to one plugin; a plugin may own several ports with supervised workers.
-The former CAN/RS485 SDK claim, subscription and byte-I/O APIs are removed.
 
 The plugin uses its ordinary transport library directly. Hardware assignment and
 enablement changes require checked whole-plugin stop before mutation, including

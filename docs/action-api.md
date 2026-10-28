@@ -195,7 +195,6 @@ Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v11**:
   `other_routes` untouched by the control.
 - `indicators`: availability, button state, LED patterns, identify/recovery state.
 - `hardware`: port inventory, support, assignment/enablement observations and errors.
-  Legacy diagnostic operation/result fields and bus action entries are removed.
 - `ssh`: public-key fingerprints/types/comments and persistence errors.
 - `storage`: detected card, commissioning choice, readiness, operation and error.
 - `capabilities`, `actions`: presentation-only availability, labels and safe reasons.

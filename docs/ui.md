@@ -132,9 +132,8 @@ fallback is retained. See [firmware updates](firmware-updates.md) and
 [button recovery](indicators.md).
 
 The main navigation has four destinations: **Home · Develop · Devices · Provision**.
-Develop switches between plugins and firmware. Replaced routes are removed,
-not retained as aliases. The **Simulated · QEMU** badge comes only from the
-simulator's owned inventory, never advertisements or node names.
+Develop switches between plugins and firmware. The **Simulated · QEMU** badge
+comes only from the simulator's owned inventory, never advertisements or node names.
 
 `Workbench.Gateways` owns discovery, connection and verified identity. All pages
 subscribe to its changes; gateway observations come directly from the device-owned
