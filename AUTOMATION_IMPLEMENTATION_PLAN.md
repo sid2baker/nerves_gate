@@ -6,39 +6,57 @@ Make automation a first-class Nerves Gate subsystem. Plugins own device protocol
 and equipment semantics; the platform owns shared I/O and automation infrastructure.
 
 ```text
-hardware → plugin → observation → automation → output → plugin → hardware
+hardware → plugin → input observation → automation → desired output → plugin → hardware
 ```
 
-- `NervesGate.IO` owns definitions, live bindings, observations, subscriptions and
-  output ownership.
+**Inputs describe what we observe. Outputs describe what we want.**
+
+- `NervesGate.IO` owns definitions, live plugin bindings, latest observations,
+  subscriptions, exclusive output ownership and live desired values.
 - `NervesGate.Automation` owns automation persistence and execution.
 - Jido is a candidate internal execution dependency, not part of the public contract.
 - LiveFlow is a candidate native gateway editor, not an execution engine.
-- Plugins keep protocol connections and physical effects in their supervised processes.
+- Plugins keep protocol connections, reconciliation, retries, readback and physical
+  effects in their supervised processes.
 
 Automation is not hard real-time and is not a safety controller.
 
-## Agreed decisions
+## Agreed v1 contract
 
-- IDs are plugin-scoped strings, such as `modbus_plugin.pump.enable`. The platform
-  derives the plugin namespace from the actual calling process.
-- Initial value types: boolean, integer, float and string.
-- Definitions persist across reboot; live registrations do not. Saved endpoints
-  remain unavailable until their owning plugin registers again.
-- Persist minimal output request intent before dispatch and its outcome afterward.
-  Unfinished requests recover as unknown, never as executable work to replay.
-- State/measurement inputs have latest values; event inputs deliver occurrences,
-  not durable current state.
-- Desired output values, reported values and write-request outcomes are separate.
-- Every output declares a safe value; configuring one does not guarantee safety.
-- Manual output control is supported through the same validation and command path.
-  It is rejected while an automation owns that output.
-- Automations wait for the platform clock to be synchronized. Deadlines and
-  freshness use monotonic time.
+```text
+Input  = persisted definition + latest live Observation
+Output = persisted definition + live Desired Value
+```
+
+An output may reference an ordinary input for feedback. There is no separate
+output observation store: a displayed `reported` value is that input's snapshot.
+
+- Outputs are repeatable desired-state setters, not one-time commands. Examples:
+  `relay = true`, `setpoint = 22.0`, `speed = 1400`, `mode = "auto"`.
+- Idempotence must hold for the equipment operation, not just the API spelling.
+  Setting a register that retriggers a pulse is not a supported output.
+- Toggle, pulse, increment, dispense and other one-time effects are out of scope.
+- Inputs are latest observable state, not reliable event streams. Short-lived
+  occurrences and intermediate transitions may be missed.
+- Notifications are hints and may be dropped or coalesced. Consumers read current
+  snapshots rather than interpreting notifications as authoritative values.
+- Definitions persist; bindings, observations, subscriptions, writer ownership
+  and desired values do not. Nothing physical happens merely because I/O restarts.
+- Manual and automation writers use the same validation and exclusive ownership.
+- Writer loss clears its desired values and releases ownership without an implicit
+  device operation. Clearing desire does not undo the device's existing state.
+- Reconciliation, retry, shutdown, fallback and watchdog behaviour belong to the
+  plugin or equipment, not a platform safe-state protocol.
+- Only wall-clock scheduled automation requires synchronized UTC. I/O, manual
+  control and state-driven automation use monotonic freshness without that gate.
+- No write journals, request state machines, acknowledgements, event history,
+  command recovery or cross-component safe-value transactions.
 - No models, beliefs, generic engine-adapter framework, distributed execution,
-  historical replay or priority-based output arbitration in the first release.
-- Keep the implementation small: start with one I/O domain rather than separate
-  Registry, LatestValues and Subscriptions services.
+  historical replay or priority-based output arbitration.
+
+If true commands or reliable occurrences are needed later, design distinct
+`Command` or `Event` concepts. Do not weaken the meaning of Input or Output, or
+include dormant machinery for those future concepts in v1.
 
 ## 0. Evaluate Jido and LiveFlow
 
@@ -48,13 +66,13 @@ Before integrating either dependency, verify:
 - Compatibility with shared firmware dependencies and locked versions.
 - Supervised execution, bounded work and mailbox behaviour.
 - Dynamic flow definitions without arbitrary code loading or atom creation.
-- Restart, checkpoint and durable wait/resume semantics.
-- Side-effect handling that does not automatically retry uncertain output writes.
+- Restart behaviour that preserves explicit enablement and reacquisition of outputs,
+  rather than restoring executable device work or old desired values.
+- Clean separation between flow evaluation and plugin-owned device reconciliation.
 - Compatibility with the current Phoenix/LiveView and gateway asset pipeline.
 - License, maintenance and release maturity.
 
-Inspect the actual Jido/Runic integration rather than assuming the proposed APIs
-or durability guarantees exist.
+Inspect the actual Jido/Runic integration rather than assuming proposed APIs exist.
 
 **Deliverable:** a short use/defer/reject decision for each dependency. The I/O
 work can proceed independently of this evaluation. Do not build a temporary rule
@@ -62,93 +80,82 @@ engine while waiting for Jido.
 
 ## 1. Implement `NervesGate.IO`
 
-Add a supervised firmware domain owning:
+Start with one supervised firmware domain, not separate Registry, LatestValues
+and Subscriptions services:
 
-- Persisted input and output definitions.
-- Live registrations bound to the actual plugin activation generation.
-- Latest observations and subscriptions.
-- Output request state and exclusive writer ownership.
+```text
+NervesGate.IO
+├── definitions
+├── live plugin bindings
+├── latest observations
+├── subscriptions
+├── output ownership
+└── desired values
+```
 
-Keep the controller responsive while plugin commands execute. Deliver effects to
-plugin-supervised handler processes, never through a blocking device operation in
-the I/O controller.
+The controller never performs device operations. It updates in-memory state and
+notifies plugin-supervised handlers, remaining responsive during protocol delays.
 
-### Persistence
+### Persistence and restart
 
-Use the existing persistence approach under `/data`. Evaluate PropertyTable's
-persistence support before choosing it; do not assume an in-memory table is durable.
+Persist only validated input and output definitions under `/data`, using the
+existing durable file persistence approach. Registration succeeds only after a
+new definition has been saved successfully.
 
-- Persist definitions and a bounded per-output request record, not PIDs, writer
-  leases, activation references, observation references or monotonic timestamps.
-- Before dispatching a request, durably record its ID, output ID, requested value,
-  stable requester identity and pending status. The requested value records intent,
-  not a job to execute on restart. No successful durable write means no dispatch.
-- Durably record a terminal outcome before acknowledging it or admitting another
-  write. A persistence failure leaves the output blocked; no physical write is retried.
-- Keep only the current/unresolved or most recent request per output. This is not
-  an event log or a general durable workflow system.
-- Reject unsupported, corrupt or unreadable saved data explicitly. Never replace
-  it with an empty registry or clear uncertainty to make startup succeed.
-- Latest observations and reported values are unknown after a reboot. A saved
-  desired value is historical intent only; it never drives automatic reconciliation.
+- Do not persist PIDs, generation bindings, subscriptions, observations, timestamps,
+  writer ownership or desired values.
+- Reject unsupported, corrupt or unreadable saved definitions explicitly. Never
+  rewrite or erase saved data merely to make it compatible.
+- Re-registration must match the saved definition or fail explicitly.
+- After an I/O-controller or gateway restart, definitions remain present, bindings
+  are unavailable, observations are absent and desired values are nil.
+- Plugins register again and publish fresh observations. Writers must reacquire
+  outputs and explicitly establish new desired values.
+- Registration, rebinding and restoring definitions never establish a desired
+  value or initiate a physical write.
 
-On an I/O-controller or gateway restart, restore pending/accepted requests as
-`unknown` and retain existing unknown requests. Endpoints remain unavailable until
-rebound. New bindings do not clear output uncertainty. An old terminal outcome is
-history, not evidence of the device's current state.
-
-Recovery must cover these crash windows:
-
-| Crash point | Recovery |
-| --- | --- |
-| Before durable intent | No request was dispatched |
-| After durable intent, before delivery | Unknown; delivery cannot be inferred |
-| After delivery or acceptance | Unknown; never resend |
-| After device evidence, before durable outcome | Unknown; fresh read-only verification is needed |
-| After durable terminal outcome | Keep the historical outcome; require fresh observations |
-
-PropertyTable may hold live values or notifications, but it is suitable for request
-intent only if its actual persistence guarantees satisfy this ordering.
+No per-output write record or executable recovery work is stored.
 
 ### Registration and lifecycle
 
-- Only managed plugin activations may register endpoints within their own namespace.
-- Derive membership from the actual caller using Plugins-owned generation bindings.
-- A re-registration must match the saved definition or be rejected explicitly.
-- Endpoints become unavailable when their live owner or activation disappears.
-- A new activation cannot complete requests belonging to an older generation.
+- Only managed plugin activations may register endpoints in their own namespace.
+  Derive membership from the actual caller using Plugins-owned generation bindings.
 - Validate output handler membership as well as the registering caller. Both must
-  belong to the same activation; only the bound handler may report request outcomes.
-- During checked stop, fence new registrations and normal commands. Allow only
-  completion/feedback for admitted work and the owned safe-value cleanup while the
-  generation is quiescing; revoke it only after checked cleanup.
+  belong to the same activation; the handler remains plugin-supervised.
+- Only the live registered input owner may publish its observations. Only the bound
+  output handler may read desired values through the plugin handler API.
+- Monitor live owners and handlers. Loss of an endpoint owner, output handler or
+  activation makes the affected endpoint unavailable and clears its live state.
+  For outputs, also release writer ownership and clear desire.
+- Old activation processes cannot publish into or read desired values from a new
+  activation's bindings. Rebinding does not restore old observations or desires.
+- During checked stop, fence new registrations, claims and desired updates. Existing
+  plugin processes may read and publish observations while quiescing; plugin-owned
+  shutdown runs through its normal lifecycle while protocol processes are alive.
+- I/O does not coordinate a shutdown write or wait for device convergence. Existing
+  checked plugin resource cleanup remains in force.
 - Stable IDs in saved automations remain independent of live PIDs and generations.
 
-### Initial structs
+### Initial data contracts
 
-These are proposed SDK data contracts, not implemented modules. Keep the four
-structs under `NervesGateSDK.IO`; firmware uses the same data rather than mirroring
-it with another set of types.
+These are proposed SDK data contracts, not implemented modules. Keep the three
+structs under `NervesGateSDK.IO`; firmware uses the same types rather than mirroring
+another set. Desired state is a typed value or nil, not a request object.
 
 ```elixir
 defmodule NervesGateSDK.IO.InputDefinition do
-  @enforce_keys [:id, :type, :kind]
-  defstruct [:id, :type, :kind, :unit, :expected_interval_ms]
+  @enforce_keys [:id, :type]
+  defstruct [:id, :type, :unit, :expected_interval_ms]
 end
 
 defmodule NervesGateSDK.IO.OutputDefinition do
-  @enforce_keys [:id, :type, :safe_value]
-  defstruct [:id, :type, :safe_value, :unit, :min, :max, :feedback_input_id]
+  @enforce_keys [:id, :type]
+  defstruct [:id, :type, :unit, :min, :max, :feedback_input_id]
 end
 
 defmodule NervesGateSDK.IO.Observation do
-  @enforce_keys [:ref, :input_id, :value, :quality, :received_at_ms]
-  defstruct [:ref, :input_id, :value, :quality, :received_at_ms, :received_at_utc]
-end
-
-defmodule NervesGateSDK.IO.OutputRequest do
-  @enforce_keys [:id, :output_id, :value, :deadline_ms]
-  defstruct [:id, :output_id, :value, :deadline_ms, :reason, status: :pending]
+  @enforce_keys [:input_id, :value, :quality, :received_at_ms]
+  defstruct [:input_id, :value, :quality, :received_at_ms, :received_at_utc]
 end
 ```
 
@@ -158,215 +165,176 @@ end
   lowercase letter-led segments containing lowercase letters, digits or underscores,
   separated by dots, with a total length of 1–128 bytes. Never convert IDs to atoms.
 - Catalogues and saved automations use the full ID, formed from the caller-derived
-  plugin name and local ID. Registration returns that full ID. Definitions retain
-  their local IDs and are persisted under their full catalogue keys.
+  plugin name and local ID, such as `modbus_plugin.pump.enable`. Registration returns
+  that full ID. Definitions retain their local IDs under their full catalogue keys.
 - Inputs and outputs share the plugin namespace. Reject conflicting definitions,
-  duplicate live owners or reuse of an input ID for an output. Identical registration
-  by the current owner is idempotent; rebinding an unavailable endpoint follows the
-  saved-definition and generation checks above.
+  duplicate live owners and reuse of an input ID for an output. Identical registration
+  by the current owner with the same handler is idempotent.
 - `type` is exactly `:boolean | :integer | :float | :string`, without implicit
   string parsing or numeric coercion. Limit string values to 1 KiB of valid UTF-8.
-- `unit` is nil or a 1–32-byte UTF-8 string, such as `"kW"` or `"celsius"`, not a
-  dynamic atom or a unit-conversion framework.
-- Input `kind` is `:measurement | :state | :event`.
-- `expected_interval_ms` is nil or a positive integer for measurements/states;
-  it must be nil for events. No expected interval means no age-based stale threshold.
+- `unit` is nil or a 1–32-byte UTF-8 string, not a dynamic atom or a unit-conversion
+  framework.
+- `expected_interval_ms` is nil or a positive integer. No expected interval means
+  no age-based stale threshold. All inputs represent current observable state;
+  there is no event kind.
 - `min` and `max` are optional inclusive bounds of the output's numeric type, with
   `min <= max` when both are given. They must be nil for boolean/string outputs.
-  Validate safe values and requested values identically.
-- `feedback_input_id` is an optional plugin-local state/measurement input with the
-  same type and unit. Registration order may differ, but confirmation requires a
-  matching live input from the same plugin activation.
+- `feedback_input_id` is an optional plugin-local input with the same type and unit.
+  Registration order may differ; an absent, unavailable or incompatible input gives
+  no usable reported value. This association is for reading/display, not confirmation.
+- There is no platform `safe_value`, `on_stop` or confirmation tolerance field.
+  Plugin-specific fallback and reconciliation policies belong to plugin configuration.
 
-The first output contract sets typed values. Do not infer pulse, toggle or
-one-shot command semantics from a value; those require an explicit later contract.
+#### Observations and freshness
 
-#### Observation fields and input semantics
-
-- `input_id` is the full ID. The platform supplies `ref`, `input_id` and timestamps;
-  plugins supply only the local ID, value and quality when publishing.
-- `ref` is an opaque reference for this observation in this I/O-controller lifetime.
-  It is not persisted, exposed in UI projections or supplied by a publisher.
+- The plugin supplies a local ID, value and quality. The platform supplies the full
+  `input_id` and receipt timestamps.
 - `quality` is `:good | :invalid | :unknown`. Good values must match the input's
-  type. Invalid/unknown observations carry nil, not a fabricated usable value.
-- `received_at_ms` is platform monotonic time in milliseconds. It measures receipt,
-  not necessarily sensor sampling time. It is never compared across VM boots.
-- `received_at_utc` is a UTC `DateTime` or nil until clock synchronization; it is
-  informational and never used for deadlines or freshness.
-- Measurements/states replace the latest observation even when the new quality is
-  invalid/unknown. Keep freshness, quality and endpoint availability distinct;
-  never fall back silently to an older good value.
-- Events are individual occurrences delivered to current subscribers. Repeated
-  equal values are distinct events; do not coalesce them as unchanged state.
-- An event has no current value, age-based stale state or subscription snapshot.
-  Events during downtime are not replayed, and loss of events is possible. A device
-  requiring recoverable state should also expose a state input.
+  type. Invalid/unknown observations carry nil, never a fabricated usable value.
+- `received_at_ms` is monotonic platform receive time in milliseconds, not necessarily
+  sensor sampling time. It is never compared across VM boots.
+- `received_at_utc` is a UTC `DateTime` or nil until clock synchronization. It is
+  informational and never used for freshness.
+- Every publication replaces the latest observation, including invalid/unknown
+  samples and equal values with refreshed timestamps. Never fall back to an older
+  good value when the newest observation is unusable.
+- Availability, quality and freshness are separate read-model fields. An endpoint
+  may be registered while its latest observation is stale or unknown.
+- Freshness is computed when reading. Consumers that depend on freshness must also
+  recheck with monotonic timers; a lack of new notifications does not prove freshness.
 
-Subscriptions belong to the actual subscriber PID. Bound delivery and make
-subscription loss/overflow explicit rather than silently discarding events or
-allowing unbounded mailboxes. Dependent automations become blocked on a detected
-subscription gap; a fresh subscription does not reconstruct missed events.
+### Snapshots and notification hints
 
-### Output values and request lifecycle
+```elixir
+{:nerves_gate_input_changed, full_id}
+{:nerves_gate_output_changed, local_id}
+```
 
-Keep three separate pieces of information in the output read model:
+Input subscribers read the current input snapshot. Output handlers read the current
+live desired value. Neither notification contains an authoritative value or a
+physical operation to execute.
 
-- `desired`: the latest admitted request's ID and requested value, or nil.
-- `reported`: the latest linked feedback observation, or nil, with its own quality
-  and freshness. Never copy desired values into reported values.
-- `request`: the most recent `OutputRequest`, or nil, describing an individual write.
+- Subscriptions belong to the actual subscriber PID and are removed on its death.
+  Subscribe before reading the initial snapshot to avoid a read/subscribe race.
+- Consumers monitor the I/O controller and establish fresh subscriptions and reads
+  after its loss. Old notifications cannot establish current availability.
+- Input publication and binding changes may notify subscribers. Desired changes,
+  including clearing desire, may notify the bound output handler.
+- Hints may be coalesced or dropped. Consumers must tolerate duplicates and refresh
+  snapshots as needed; there is no acknowledgement, replay or gap protocol.
+- Snapshot reads avoid acting on obsolete message payloads, but do not themselves
+  remove mailbox backlog. Coalesce or rate-limit hints where needed rather than
+  promising one message per publication or allowing unbounded per-sample queues.
+- A handler reads its initial desired snapshot after registration; it must not rely
+  on receiving an initial notification. Nil means no active target, not a default.
 
-A failed write can leave desired and reported different. Neither changing a
-reported value nor reading a saved desired value creates a new request.
+Ten changes may lead a consumer directly to the newest state. This is intentional.
+A short button press can be missed; counting presses or running once per occurrence
+requires a different future contract.
 
-`OutputRequest` fields have these meanings:
+### Desired values and exclusive writers
 
-- `id`: a platform-generated unique string, persisted before dispatch.
-- `output_id`: the full output ID; `value`: this request's immutable target value.
-- `deadline_ms`: a platform-owned absolute monotonic deadline for this VM lifetime;
-  nil in a recovered historical/unknown request. Timeout does not cancel an effect.
-- `status`: `:pending | :accepted | :confirmed | :failed | :unknown`.
-- `reason`: nil or a safe bounded explanation owned by the domain, not raw device
-  payloads or arbitrary exception terms.
+Expose named domain operations to claim an output, set its desired value and release
+it. Administrative calls use full IDs; plugin registration and handler calls use
+local IDs in the caller's namespace.
 
-The controller privately retains requester/writer ownership, handler PID and plugin
-generation bindings; these are not SDK request fields. Only the stable requester
-identity is journalled, never an executable caller or a live authority token.
-`idle` means there is no request; it is not a request status.
+- A claim belongs to the actual calling PID. Only that writer may set or release
+  its desired value. Manual controls and automations use the same admission path.
+- Claims and desired updates require an available output with an active binding.
+  Reject competing writers and values outside the definition's type or bounds.
+- Claiming an output alone leaves desired nil. A successful set means only that
+  I/O stored the desired value, not that the device received or reached it.
+- Setting an identical value is harmless; no one-notification-per-set guarantee is
+  needed. A plugin must keep reconciling as appropriate even without another hint.
+- Release or writer death clears desire and ownership. Notify a still-bound handler
+  that its snapshot changed, but do not issue an implicit replacement value.
+- Clearing desire stops it being an active target. It does not cancel an already
+  started device operation, restore a previous value or prove physical safety.
+- On plugin/binding loss, clear desire and ownership too. A new binding requires a
+  fresh claim and explicit desired value, even if the old writer is still alive.
 
-| Current state | Allowed next state | Evidence |
-| --- | --- | --- |
-| No request | pending | Validated request and durable intent, before delivery |
-| pending | accepted | Bound handler accepted this request; no proof of device state |
-| pending or accepted | confirmed | Correlated, fresh device feedback meeting the rule below |
-| pending or accepted | failed | Known unsuccessful outcome, with no ambiguous effect still in flight |
-| pending or accepted | unknown | Ambiguous timeout, handler/generation loss or interrupted recovery |
-| unknown | confirmed or failed | Explicit resolution after fencing in-flight work and read-only verification |
+Keep output snapshots simple: definition, availability, active writer and desired
+value. Feedback is an ordinary input snapshot, optionally linked for display. Never
+copy a desired value into that input or infer device success from storing desire.
 
-`confirmed` and `failed` are terminal for a request. New writes get new IDs.
-Unknown is blocked, not a retryable failure. A late ordinary report cannot clear
-unknown, regress a terminal outcome or update a different generation's request.
-Exact duplicate reports are harmless and never cause another effect.
+### Plugin reconciliation and safety
 
-Before issuing a physical effect, the handler checks the request's live binding
-and deadline. An expired request known not to have started may fail without an
-ambiguous effect; once execution may have started, elapsed time alone is not proof
-of failure or cancellation.
+The plugin reads current desire and decides how to converge the device toward it.
+It owns serialization of its physical writes, polling, reconnects, retry timing and
+protocol errors. It must not treat each notification as a mandatory separate write.
 
-#### Confirmation and explicit resolution
+A new desired value may arrive during an older physical operation. The plugin
+coordinates its own in-flight work and subsequent reconciliation; I/O does not
+promise instantaneous convergence or cancellation. Repeat only operations whose
+actual equipment semantics allow it.
 
-Reserve confirmation for evidence of the requested endpoint state, not a transport
-acknowledgement. The handler reports `{:confirmed, observation_ref}`. I/O verifies
-that the reference identifies the current good, non-stale linked feedback sample,
-from the same live generation, received after dispatch and exactly matching the
-requested typed value. The handler is responsible for correlating the sample with
-post-write device feedback, not a cached pre-write value.
+Publish readback through an ordinary input, such as `pump.enabled`, and expose
+communication failure through that input's quality or freshness. Reading a coil
+proves its declared value, not that a pump is physically running; expose a separate
+running input when that is the condition consumers need.
 
-If the output has no feedback input, acceptance cannot be promoted to confirmation.
-An accepted request without sufficient evidence becomes unknown at its deadline.
+Shutdown/fallback behaviour is plugin-owned. Do not advertise a platform-enforced
+stop policy. Device watchdogs and hardware interlocks are required where physical
+safe-state guarantees are necessary.
 
-Confirmation proves only the endpoint's declared meaning: reading back a Modbus
-coil proves that coil's value, not that a pump is physically running. Expose a
-separate running-feedback input if that is what an automation needs to establish.
-
-Resolution of unknown outcomes is a separate explicit administrative action, bound
-to the output and request ID. It must fence any old work that could still complete
-and obtain fresh device evidence before recording confirmed or failed durably. A
-current value different from the target does not by itself prove that the earlier
-write never took effect. Resolution is not an unchecked acknowledgement or a replay
-of the original command. If the outcome cannot be established, leave the output blocked. A new plugin generation
-may provide fresh observations for resolution, but cannot finish the old request
-through its ordinary SDK report path.
-
-Start with one exclusive writer per output. Manual and automation requests use
-the same admission rules; ownership changes do not clear uncertainty.
-
-### Safe values
-
-Request the safe value when an automation is disabled or its writer is lost. On
-checked plugin stop, apply safe values before releasing protocol connections.
-
-Keep ownership fenced while safe-value application is pending or uncertain;
-releasing a writer must not admit another write that races with cleanup. A safe
-value is a new request through the same durable-intent and confirmation path,
-not an exemption from the unknown-outcome block. Do not race it against an earlier
-in-flight write; fence/resolve that write first. A definite safe-value failure also
-keeps cleanup blocked until an explicitly authorized action succeeds.
-
-**A configured safe value is not a physical safety guarantee.** A crashed plugin
-or disconnected device cannot guarantee physical safety. Report failure or
-uncertainty honestly. Device watchdogs and hardware interlocks are required where
-physical safe-state guarantees are necessary. Make this distinction prominent in
-SDK, plugin and operator documentation.
-
-**Acceptance:** firmware unit tests cover the four data contracts, persistence,
-namespace and PID ownership, generation fencing, duplicate registrations,
-freshness, repeated equal events, subscription loss, late/duplicate reports,
-writer exclusivity, every crash window in the table above, stop/crash behaviour,
-confirmation evidence, explicit resolution, safe-value outcomes and controller
-responsiveness. Define these contracts and transitions before implementing the
-controller.
+**Acceptance:** firmware unit tests cover the three data contracts, definition
+persistence and rejection of invalid saved data, namespace/PID ownership, generation
+fencing, duplicate registrations, latest-value replacement, freshness without UTC,
+subscribe-then-read, duplicate/coalesced notification hints, controller resubscription,
+writer exclusivity, desired clearing on release/death/binding loss, fresh registration
+and claims after restart, linked feedback and controller responsiveness during slow
+plugin work. Verify that restart and writer loss cause no implicit physical write.
+There are no command/event-delivery guarantees to test in this phase.
 
 ## 2. Publish the SDK contract
 
-Add `NervesGateSDK.IO` using the four structs specified in Phase 1:
+Add `NervesGateSDK.IO` using the three structs specified in Phase 1:
 
 ```elixir
 register_input(input_definition)
-publish(local_id, value, quality \\ :good)
+publish_input(local_id, value, quality \\ :good)
 
 register_output(output_definition, handler_pid)
-report_output(request_id, result)
+read_desired(local_id)
 ```
 
 Registration returns `{:ok, full_id}`; publication returns `{:ok, observation}`.
-Reports return `:ok` after the state transition is checked and any required outcome
-persistence succeeds. Validation/admission failures return `{:error, reason}`.
-Publishing and reporting run in the actual managed caller, not a proxy Task.
+The bound handler reads `{:ok, value}` or `{:ok, nil}` when no desire is active.
+Validation, membership and availability failures return `{:error, reason}`.
+Do not conflate a false desired value with nil.
 
-Plugin-supervised output handlers receive the typed request:
-
-```elixir
-{:nerves_gate_output, %NervesGateSDK.IO.OutputRequest{} = request}
-```
-
-Result vocabulary for ordinary handler reports:
-
-```elixir
-:accepted | {:confirmed, observation_ref} | {:failed, reason} | :unknown
-```
-
-There is no bare `:confirmed`: acceptance and device feedback are distinct.
-Explicit resolution of an unknown request belongs to the administrative domain
-API, not `report_output/2`.
+Plugin-supervised output handlers receive `{:nerves_gate_output_changed, local_id}`
+and read current desire in their own PID. Feedback uses `publish_input/3`, not a
+separate output-reporting API. Input snapshot/subscription and administrative
+claim/set/release operations belong to the I/O domain; do not duplicate administrative
+control as plugin SDK commands.
 
 - Extend `NervesGateSDK.Backend` and `NervesGate.SDKBackend`.
-- Preserve actual-caller membership and resource ownership.
+- Preserve actual-caller membership and resource ownership; no proxy Tasks.
 - Expose typed SDK data, not private domain maps or Jido/Runic/LiveFlow types.
 - Bump the independent SDK version and update its changelog and README.
 
 **Acceptance:** SDK contract tests, firmware backend tests using managed activation
-fixtures, and a real QEMU SDK scenario for registration, publishing, output
-delivery and lifecycle cleanup. Do not introduce a fake SDK backend.
+fixtures, and a real QEMU SDK scenario for registration, publishing, reading live
+desire, ordinary input feedback and lifecycle cleanup. Do not introduce a fake SDK
+backend.
 
 ## 3. Add manual I/O controls
 
 Add a native gateway I/O page showing:
 
-- Inputs: definition, owning plugin, availability, latest measurement/state and
-  freshness. Event inputs show live occurrences, not a latched current value.
-- Outputs: definition, availability, safe value, active writer, desired value,
-  reported feedback and the separate request outcome.
+- Inputs: definition, owning plugin, availability, latest observation, quality and
+  freshness.
+- Outputs: definition, availability, active writer, live desired value and optional
+  linked feedback, with its independent quality and freshness.
 
-Support:
-
-- Validated manual output requests.
-- Clear rejection while automation owns an output.
-- Evidence-based explicit resolution of unknown outcomes without replaying the
-  original request or merely clearing a blocked flag.
+Support validated manual claim/set/release operations. Reject manual writes while
+an automation owns the output. Make it explicit that setting desire is not device
+success and releasing ownership does not revert or stop the equipment.
 
 UI controls call domain APIs, not plugin internals. Drafts stay separate from
-projections, and backend validation remains authoritative.
+projections, backend validation remains authoritative and projections never carry
+ownership authority.
 
 **Acceptance:** firmware web tests, rebuilt assets and a QEMU frontend scenario.
 
@@ -376,23 +344,27 @@ Expose explicitly configured registers and coils:
 
 - Register measurements as integer/float inputs.
 - Discrete inputs/coils as boolean inputs.
-- Coils or holding registers as outputs.
+- Only repeatable state-setting coils or holding registers as outputs. Exclude
+  pulse, increment and command-trigger registers even when their wire type fits.
 
-Keep polling, reconnects, register mapping and writes inside the plugin's
-supervised protocol processes.
+Keep polling, reconnects, register mapping, serialization and writes inside the
+plugin's supervised protocol processes.
 
-- Publish state/measurement observations on change, configured deadband crossing
-  or heartbeat; event occurrences must not be coalesced by value.
-- Link output feedback inputs and report confirmation with a fresh post-write
-  observation reference, not merely a write acknowledgement. State explicitly
-  whether feedback proves a register/coil value or a physical equipment condition.
-- A write timeout produces an unknown outcome and is never automatically replayed.
-- Checked stop applies safe values before releasing connections.
+- Publish observations on change, configured deadband crossing or heartbeat.
+- Read current desired state after notification, before reconciliation and after
+  reconnect; do not replay queued hints as individual writes.
+- Link ordinary feedback inputs where useful. State explicitly whether feedback
+  describes a register/coil value or a physical equipment condition.
+- Choose retry and readback policy based on the actual equipment's idempotent
+  semantics. A transport timeout is a plugin concern, not an I/O request record.
+- Keep shutdown/fallback policy in the plugin. Clearing desire does not write a
+  fallback value on the plugin's behalf.
 - Changed plugin artifacts require a new immutable plugin version.
 
 **Acceptance:** existing plugin RTU/TCP tests and real QEMU scenarios covering an
-input, an output with feedback, uncertainty and safe stop. Physical qualification
-requires separate authorization.
+input, desired-state reconciliation with feedback, reconnects, changed desire during
+slow device I/O, loss of communication and plugin-owned shutdown. Physical
+qualification requires separate authorization.
 
 ## 5. Implement `NervesGate.Automation`
 
@@ -402,23 +374,28 @@ framework or expose engine types in the public contract.
 - Persist versioned automation documents referencing stable I/O IDs.
 - Reject unsupported documents without automatic migration.
 - Create automations disabled and require explicit enablement after reboot.
-- Gate execution on synchronized platform time.
-- Enabling an automation claims exclusive ownership of its outputs.
-- Missing, invalid, unknown or stale required state/measurement inputs block execution.
-- Event inputs trigger occurrences, not persistent conditions; no events are replayed
-  after a restart. A detected subscription gap blocks dependent automations.
-- Missing outputs, unresolved requests and writer conflicts block enablement.
-- Route every output request through `NervesGate.IO`.
-- Disabling releases ownership only after checked safe-value handling. If an enabled
-  automation becomes blocked by lost input availability, freshness or subscription,
-  stop normal actions and use the same safe-value cleanup rules without bypassing
-  unresolved requests.
-- Restart or recovery never replays an uncertain physical operation. Engine-level
-  retries and durable flow resumption cannot bypass I/O's unresolved-request fence.
+- Gate wall-clock scheduled execution on synchronized platform time. State-driven
+  flows do not need UTC; use monotonic timers for freshness checks.
+- Enabling an automation claims exclusive ownership of its outputs. Handle partial
+  claim failure without leaving orphaned ownership.
+- Subscribe before reading current input snapshots. Notifications trigger evaluation
+  of current state, not once-per-transition execution or historical replay.
+- Missing, invalid, unknown or stale required inputs block evaluation. Recheck
+  freshness even when no notifications arrive.
+- Missing outputs and writer conflicts block enablement.
+- Establish every desired output through `NervesGate.IO`. The engine does not
+  perform protocol writes or manage device retries.
+- Disabling, blocking or losing the automation writer releases its claims and clears
+  its desires. This does not request a fallback value or stop the equipment.
+- Controller/binding loss blocks affected automations. Explicit re-enablement must
+  reacquire outputs and evaluate fresh snapshots; do not restore old desired values.
+- Engine recovery must not resurrect old ownership or treat stored flow progress as
+  authority to drive outputs. A stopped instance cannot continue setting desire.
 
-**Acceptance:** tests cover persistence, clock gating, restart, missing/stale
-endpoints, event occurrence/loss semantics, conflicts, disabling, writer loss and
-uncertain output outcomes, including engine recovery across an in-flight write.
+**Acceptance:** tests cover document persistence, scheduled-only clock gating,
+restart and explicit re-enablement, missing/stale endpoints, missed intermediate
+transitions, notification coalescing, ownership conflicts and partial claims,
+disabling/blocking, writer loss and desired values remaining absent after recovery.
 
 ## 6. Integrate the LiveFlow editor
 
@@ -427,7 +404,8 @@ Proceed only if Phase 0 approves LiveFlow.
 - Integrate it into the native gateway Automation UI.
 - Edit the platform automation document format, not arbitrary Elixir modules.
 - Offer I/O nodes from persisted definitions, displaying live availability separately.
-- Keep the available logic operators deliberately small.
+- Keep the available logic operators deliberately small and state-based. Do not offer
+  pulse, toggle, occurrence counting or once-per-event actions under an Output node.
 - Validate every save in the backend.
 - Show enabled/disabled/blocked execution status and actionable reasons.
 
@@ -439,9 +417,10 @@ endpoints, web tests, rebuilt assets and real QEMU frontend coverage.
 Update as the implementation lands:
 
 - `docs/architecture.md`: I/O, Automation, supervision and safety boundaries.
-- `docs/action-api.md`: administrative controls and outcomes.
-- `sdk/README.md`: typed plugin I/O contract.
-- `docs/plugin-development.md`: registration, observations, output handling and cleanup.
+- `docs/action-api.md`: administrative ownership and desired-state controls.
+- `sdk/README.md`: typed plugin I/O contract and notification-as-hint semantics.
+- `docs/plugin-development.md`: registration, observations, reconciliation and
+  plugin-owned shutdown.
 - Modbus plugin README.
 - `docs/ui.md`: I/O controls and Automation editor.
 - Root, SDK and affected plugin changelogs/versions as appropriate.
@@ -450,6 +429,7 @@ Run focused tests while developing and root `mix check` plus `git diff --check`
 before commits. Gateway source/UI changes require rebuilt firmware and assets.
 Run focused QEMU scenarios only against the user-owned, verified Workbench session.
 Report source checks, artifact builds and runtime qualification separately.
+Documentation-only changes need no QEMU checks.
 
 No part of this plan authorizes physical flashing, card formatting, equipment
 writes, plugin activation, workstation network changes or a new bench lifecycle.
