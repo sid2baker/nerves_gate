@@ -8,7 +8,7 @@ defmodule Workbench.FirmwareUpdate do
   Uncertain outcomes are never retried.
   """
   @ttl 600_000
-  @ssh_hint "The presented host key must match the one the gateway reports, and one of your SSH agent's or ~/.ssh keys must be authorized under gateway Settings → SSH keys."
+  @ssh_hint "The presented host key must match the one the gateway reports, and one of your SSH agent's or ~/.ssh keys must be authorized under gateway Settings → SSH keys"
   @keys ["target", "product", "version", "source_revision", "serial", "boot_id"]
 
   def review!(node, firmware, report \\ fn _ -> :ok end) do
@@ -119,7 +119,7 @@ defmodule Workbench.FirmwareUpdate do
         end
 
       {:error, reason} ->
-        raise "SSH connection failed (#{ssh_reason(reason)}). #{@ssh_hint} No firmware sent."
+        raise "SSH connection failed (#{ssh_reason(reason)}). #{@ssh_hint}. No firmware sent."
     end
 
     report.(
@@ -136,11 +136,11 @@ defmodule Workbench.FirmwareUpdate do
   defp host_keys!(node) do
     case :erpc.call(node, NervesGate.SSH, :host_key_fingerprints, [], 5_000) do
       {:ok, [_ | _] = fingerprints} -> fingerprints
-      _ -> raise "The gateway did not report its SSH host keys. Inspect its SSH service."
+      _ -> raise "The gateway did not report its SSH host keys. Inspect its SSH service"
     end
   catch
     :error, {:exception, :undef, _} ->
-      reraise "This gateway's firmware does not report its SSH host keys. Update it once through an explicitly authorized external procedure.",
+      reraise "This gateway's firmware does not report its SSH host keys. Update it once through an explicitly authorized external procedure",
               __STACKTRACE__
   end
 
