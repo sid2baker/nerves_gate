@@ -202,7 +202,7 @@ defmodule WorkbenchWeb.GatewayLive do
           id="firmware-update"
         >
           <p class="ui-help">
-            Review reads identity, health and plugin artifacts over distribution and checks the exact image. Confirming uploads once over verified SSH (known host key, your key) and waits for a healthy new boot. Uncertain outcomes are never retried.
+            Review reads identity, health and plugin artifacts over distribution and checks the exact image. Confirming uploads once over SSH pinned to the host key the gateway reports (your key must be authorized) and waits for a healthy new boot. Uncertain outcomes are never retried.
           </p>
           <form id="review-firmware" phx-submit="review_firmware" class="ui-actions">
             <select

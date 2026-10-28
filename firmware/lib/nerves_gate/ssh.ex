@@ -34,6 +34,29 @@ defmodule NervesGate.SSH do
   @impl :ssh_server_key_api
   defdelegate host_key(algorithm, options), to: :ssh_file
 
+  @doc """
+  SHA-256 fingerprints of the host keys the SSH daemon serves. Workbench reads them
+  over authenticated distribution and pins them for firmware upload. Key material
+  never leaves this function.
+  """
+  def host_key_fingerprints do
+    options = [system_dir: String.to_charlist(Application.fetch_env!(:nerves_ssh, :system_dir))]
+
+    fingerprints =
+      for algorithm <- :ssh.default_algorithms()[:public_key],
+          {:ok, private} <- [host_key(algorithm, options)],
+          uniq: true,
+          do: private |> :ssh_file.extract_public_key() |> fingerprint()
+
+    if fingerprints == [], do: {:error, :host_key_unavailable}, else: {:ok, fingerprints}
+  rescue
+    _ -> {:error, :host_key_unavailable}
+  catch
+    _, _ -> {:error, :host_key_unavailable}
+  end
+
+  defp fingerprint(public), do: to_string(:ssh.hostkey_fingerprint(:sha256, public))
+
   @impl :ssh_server_key_api
   def is_auth_key(key, _user, _options) do
     GenServer.call(__MODULE__, {:authorized?, key})

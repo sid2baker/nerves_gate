@@ -57,14 +57,35 @@ defmodule Workbench.FirmwareUpdateTest do
     end
   end
 
-  test "SSH never accepts unknown host keys or prompts for passwords" do
-    options = Workbench.SSH.verified("ec100.example.ts.net")
+  @tag :tmp_dir
+  test "SSH accepts only the reported host keys and never prompts for passwords", %{
+    tmp_dir: dir
+  } do
+    [reported, other] =
+      for name <- ["reported", "other"] do
+        path = Path.join(dir, name)
+        {_, 0} = System.cmd("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", path])
+        [{key, _}] = :ssh_file.decode(File.read!(path <> ".pub"), :openssh_key)
+        {key, to_string(:ssh.hostkey_fingerprint(:sha256, key))}
+      end
+
+    assert_raise FunctionClauseError, fn -> Workbench.SSH.verified([]) end
+    options = Workbench.SSH.verified([elem(reported, 1)])
     assert options[:silently_accept_hosts] == false
     assert options[:auth_methods] == ~c"publickey"
     assert options[:user] == ~c"nerves_gate"
     assert {Workbench.SSHHostKeys, callback} = options[:key_cb]
-    assert callback[:host] == ~c"ec100.example.ts.net"
     assert callback[:agent] == not is_nil(System.get_env("SSH_AUTH_SOCK"))
+
+    accepts? = fn {key, _} ->
+      Workbench.SSHHostKeys.is_host_key(key, ~c"peer", 22, :"ssh-ed25519",
+        key_cb_private: callback
+      )
+    end
+
+    assert accepts?.(reported)
+    refute accepts?.(other)
+    assert {:error, _} = Workbench.SSHHostKeys.add_host_key(~c"h", 22, elem(other, 0), [])
   end
 
   test "a new healthy boot of the same serial with the reviewed build verifies the update" do

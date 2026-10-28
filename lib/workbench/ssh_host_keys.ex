@@ -1,11 +1,14 @@
 defmodule Workbench.SSHHostKeys do
-  @moduledoc "Verify the requested hostname, not OTP's resolved peer address, against known_hosts."
+  @moduledoc """
+  Accept only a host key whose SHA-256 fingerprint the gateway reported over
+  authenticated distribution. `known_hosts` is neither read nor written.
+  """
   @behaviour :ssh_client_key_api
 
   @impl true
-  def is_host_key(key, _resolved_peer, port, algorithm, options) do
-    host = options |> Keyword.fetch!(:key_cb_private) |> Keyword.fetch!(:host)
-    :ssh_file.is_host_key(key, host, port, algorithm, options)
+  def is_host_key(key, _peer, _port, _algorithm, options) do
+    pinned = options |> Keyword.fetch!(:key_cb_private) |> Keyword.fetch!(:fingerprints)
+    to_string(:ssh.hostkey_fingerprint(:sha256, key)) in pinned
   end
 
   @impl true

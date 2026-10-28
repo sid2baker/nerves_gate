@@ -56,14 +56,18 @@ never replays network configuration, enrollment, credentials or writes.
 
 ## SSH access
 
-Firmware uploads authenticate as `nerves_gate` with a public key and require the
-host's key in `~/.ssh/known_hosts` under the exact reviewed address. Unknown or
-changed keys are rejected, never saved automatically. With `SSH_AUTH_SOCK`, OTP
-uses that agent; otherwise it uses standard key files in `~/.ssh`. Interactive
-passphrase/password prompts are unsupported.
+Firmware uploads authenticate as `nerves_gate` with a public key authorized in the
+gateway's **Settings → SSH keys**. Review reads the SHA-256 fingerprints of the
+host keys the gateway's SSH daemon serves over the already authenticated
+distribution connection and pins them for that review; any other presented host
+key is rejected. `~/.ssh/known_hosts` is neither read nor written, so a factory
+reset's new host key needs no manual trust step. Firmware that cannot report its
+host keys is rejected; update it once through an explicitly authorized external
+procedure. With `SSH_AUTH_SOCK`, OTP uses that agent; otherwise it uses standard
+key files in `~/.ssh`. Interactive passphrase/password prompts are unsupported.
 
-This is OTP SSH, not OpenSSH: `~/.ssh/config`, proxies, jump hosts, per-host identity
-settings and hashed known-host entries are not supported. Use a directly reachable
+This is OTP SSH, not OpenSSH: `~/.ssh/config`, proxies, jump hosts and per-host
+identity settings are not supported. Use a directly reachable
 address on port 22. Distribution handles inspection and post-update verification;
 SSH is not a generic remote-evaluation or diagnostics protocol.
 

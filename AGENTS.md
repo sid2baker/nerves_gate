@@ -77,7 +77,8 @@
   physical reprovisioning/reset is a separately authorized procedure.
 - Keep login URLs, cookies, CSRF tokens, PINs/PAP credentials, private keys, SIM
   identifiers and VM identity disks out of projections, logs and uploaded artifacts.
-- Physical SSH verifies known hosts; permissive owned-QEMU trust stays separate.
+- Physical SSH pins the host-key fingerprints the gateway reports over authenticated
+  distribution; permissive owned-QEMU trust stays separate.
 - Acceptance is not completion. A timeout does not cancel work. Never blindly retry
   writes, PIN attempts, firmware uploads or uncertain controls.
 

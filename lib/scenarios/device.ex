@@ -165,7 +165,11 @@ defmodule Scenarios.Device do
 
   def user_key(_, _), do: {:error, :not_found}
 
-  def is_host_key(_, _, _, _, _), do: true
+  # Owned QEMU guests are trusted unless a scenario pins reported fingerprints.
+  def is_host_key(key, peer, port, algorithm, options) do
+    options[:key_cb_private][:fingerprints] == nil or
+      Workbench.SSHHostKeys.is_host_key(key, peer, port, algorithm, options)
+  end
 
   def add_host_key(_, _, _, _), do: :ok
 

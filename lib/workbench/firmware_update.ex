@@ -1,11 +1,14 @@
 defmodule Workbench.FirmwareUpdate do
   @moduledoc """
   Reviewed physical EC100 firmware update. Identity, health and plugin-artifact
-  preflight use distribution; the image is uploaded once over strictly verified
-  SSH (`fwup` subsystem); success is a new healthy boot of the same gateway.
+  preflight use distribution; the image is uploaded once over SSH (`fwup`
+  subsystem) pinned to the host-key fingerprints the gateway reported over that
+  authenticated distribution connection; success is a new healthy boot of the
+  same gateway.
   Uncertain outcomes are never retried.
   """
   @ttl 600_000
+  @ssh_hint "The presented host key must match the one the gateway reports, and one of your SSH agent's or ~/.ssh keys must be authorized under gateway Settings → SSH keys."
   @keys ["target", "product", "version", "source_revision", "serial", "boot_id"]
 
   def review!(node, firmware, report \\ fn _ -> :ok end) do
@@ -33,7 +36,8 @@ defmodule Workbench.FirmwareUpdate do
       compatible!(image, before)
       healthy!(before)
 
-      verify_ssh!(gateway.address)
+      host_keys = host_keys!(gateway.node)
+      verify_ssh!(gateway.address, host_keys)
       saved = saved_plugins!(gateway.node)
       catalog = catalog!(snapshot)
 
@@ -62,6 +66,7 @@ defmodule Workbench.FirmwareUpdate do
         snapshot: snapshot,
         dir: dir,
         before: before,
+        host_keys: host_keys,
         saved_plugins: saved,
         expires: System.monotonic_time(:millisecond) + @ttl
       }
@@ -99,7 +104,7 @@ defmodule Workbench.FirmwareUpdate do
 
     address = plan.public.address
 
-    case Workbench.SSH.connect(address, 22, Workbench.SSH.verified(address)) do
+    case Workbench.SSH.connect(address, 22, Workbench.SSH.verified(plan.host_keys)) do
       {:ok, connection} ->
         try do
           unless same_boot?(plan.before, observe!(plan.public.node)) and
@@ -114,7 +119,7 @@ defmodule Workbench.FirmwareUpdate do
         end
 
       {:error, reason} ->
-        raise "SSH connection failed (#{inspect(reason)}). Verify the host key in ~/.ssh/known_hosts and your authorized key. No firmware sent."
+        raise "SSH connection failed (#{ssh_reason(reason)}). #{@ssh_hint} No firmware sent."
     end
 
     report.(
@@ -126,12 +131,28 @@ defmodule Workbench.FirmwareUpdate do
     cleanup(plan)
   end
 
-  defp verify_ssh!(address) do
-    case Workbench.SSH.connect(address, 22, Workbench.SSH.verified(address)) do
+  # Distribution is already authenticated with full authority over the gateway, so
+  # its report of its own host keys is the trust anchor; no first-use prompt.
+  defp host_keys!(node) do
+    case :erpc.call(node, NervesGate.SSH, :host_key_fingerprints, [], 5_000) do
+      {:ok, [_ | _] = fingerprints} -> fingerprints
+      _ -> raise "The gateway did not report its SSH host keys. Inspect its SSH service."
+    end
+  catch
+    :error, {:exception, :undef, _} ->
+      reraise "This gateway's firmware does not report its SSH host keys. Update it once through an explicitly authorized external procedure.",
+              __STACKTRACE__
+  end
+
+  defp verify_ssh!(address, host_keys) do
+    case Workbench.SSH.connect(address, 22, Workbench.SSH.verified(host_keys)) do
       {:ok, connection} -> :ssh.close(connection)
-      {:error, _} -> raise "Verify the gateway's SSH host key and authorized key before reviewing"
+      {:error, reason} -> raise "SSH check failed (#{ssh_reason(reason)}). #{@ssh_hint}"
     end
   end
+
+  defp ssh_reason(reason) when is_list(reason), do: to_string(reason)
+  defp ssh_reason(reason), do: inspect(reason)
 
   def cleanup(%{dir: dir}), do: File.rm_rf!(dir)
   def cleanup(_), do: :ok

@@ -30,6 +30,7 @@ defmodule Scenarios.Cases.SshAccess do
 
     assert Enum.count(Scenarios.Device.status(vm).ssh.keys, &(&1.fingerprint == fingerprint)) == 1
     assert_key_works(vm, key)
+    assert_reported_host_key(vm, key)
 
     Qemu.reboot(vm)
     await_ssh(vm)
@@ -180,6 +181,29 @@ defmodule Scenarios.Cases.SshAccess do
     after
       :ok = Scenarios.Device.rpc(vm, File, :rmdir, [path])
     end
+  end
+
+  # Physical firmware upload pins the fingerprints a gateway reports over
+  # distribution; they must match the key its SSH daemon actually presents.
+  defp assert_reported_host_key(vm, key) do
+    assert {:ok, [_ | _] = reported} =
+             Scenarios.Device.rpc(vm, NervesGate.SSH, :host_key_fingerprints, [])
+
+    {_, _, other} = ssh_key()
+
+    pinned = fn fingerprints ->
+      Workbench.SSH.connect(vm.address, 22,
+        user: ~c"root",
+        key_cb: {Scenarios.Device, key: key, fingerprints: fingerprints},
+        auth_methods: ~c"publickey",
+        silently_accept_hosts: false,
+        preferred_algorithms: [public_key: [:"ssh-ed25519"]]
+      )
+    end
+
+    assert {:ok, connection} = pinned.(reported)
+    :ok = :ssh.close(connection)
+    assert {:error, _} = pinned.([other])
   end
 
   defp assert_key_works(vm, key) do

@@ -4,12 +4,16 @@ defmodule Workbench.SSH do
   SSH scenarios. Everything else talks to gateways over distribution.
   """
 
-  @doc "Strict physical-gateway options: known host key, public key, never a password prompt."
-  def verified(host) do
+  @doc """
+  Strict physical-gateway options: only a host key with one of the given
+  fingerprints (reported by the gateway over distribution), public-key user
+  authentication, never a password prompt.
+  """
+  def verified([_ | _] = fingerprints) do
     [
       key_cb:
         {Workbench.SSHHostKeys,
-         [host: to_charlist(host), agent: not is_nil(System.get_env("SSH_AUTH_SOCK"))]},
+         [fingerprints: fingerprints, agent: not is_nil(System.get_env("SSH_AUTH_SOCK"))]},
       user: ~c"nerves_gate",
       auth_methods: ~c"publickey",
       silently_accept_hosts: false

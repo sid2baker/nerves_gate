@@ -129,6 +129,8 @@ config :nerves_gate,
 # Password recovery is restricted to the kernel-verified direct USB peer.
 # Ethernet, VPN and QEMU management remain key-only.
 config :nerves_ssh,
+  # Read by the daemon and by NervesGate.SSH.host_key_fingerprints/0.
+  system_dir: "/data/nerves_ssh",
   iex_opts: [dot_iex: "/etc/iex.exs"],
   daemon_option_overrides: [
     auth_methods: ~c"publickey,password",
