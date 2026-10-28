@@ -32,7 +32,7 @@ defmodule NervesGate.BuildConfigTest do
                  indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"},
                  recovery_adapter: {NervesGate.Recovery.EC100, nil},
                  data_partition: "/sys/class/block/mmcblk0p3/dev",
-                 apps_device: "/dev/mmcblk1p1"
+                 plugins_device: "/dev/mmcblk1p1"
                }
 
         assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
@@ -43,7 +43,7 @@ defmodule NervesGate.BuildConfigTest do
                  indicators_adapter: nil,
                  recovery_adapter: nil,
                  data_partition: "/sys/class/block/vda4/dev",
-                 apps_device: "/dev/vdb"
+                 plugins_device: "/dev/vdb"
                }
 
         # runtime.exs supplies USB and the real eth2 IP from the virtual disk serial.

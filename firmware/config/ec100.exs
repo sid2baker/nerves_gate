@@ -5,7 +5,7 @@ import_config "firmware.exs"
 config :nerves_gate, :board, %{
   data_partition: "/sys/class/block/mmcblk0p3/dev",
   # Removable SPI SD card; provision its first partition as ext4 separately.
-  apps_device: "/dev/mmcblk1p1",
+  plugins_device: "/dev/mmcblk1p1",
   cellular: %{
     interface: "wwan0",
     # SIM slot insertion is active-high.

@@ -11,7 +11,7 @@ defmodule NervesGateSDK.Network do
       :state,
       addresses: [],
       internet?: false,
-      application_enabled?: false,
+      plugin_enabled?: false,
       assigned_plugin: nil,
       claimed?: false
     ]
@@ -22,7 +22,7 @@ defmodule NervesGateSDK.Network do
             state: :up | :down | :unknown,
             addresses: [String.t()],
             internet?: boolean(),
-            application_enabled?: boolean(),
+            plugin_enabled?: boolean(),
             assigned_plugin: String.t() | nil,
             claimed?: boolean()
           }

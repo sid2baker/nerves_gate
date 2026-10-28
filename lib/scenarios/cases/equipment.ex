@@ -15,7 +15,7 @@ defmodule Scenarios.Cases.Equipment do
     before = Scenarios.Device.status(vm).network.desired
 
     network =
-      Map.put(settings("eth0"), "eth1", %{"role" => "application", "address" => nil})
+      Map.put(settings("eth0"), "eth1", %{"role" => "plugin", "address" => nil})
 
     save(vm, network)
 
@@ -52,20 +52,20 @@ defmodule Scenarios.Cases.Equipment do
       internet?(status) && Enum.any?(status.connections.ports, &(&1.name == "eth1" and &1.link))
     end)
 
-    assert_application_link(vm, network)
+    assert_plugin_link(vm, network)
   end
 
-  defp assert_application_link(vm, previous) do
-    enabled = Map.put(previous, "eth1", %{"role" => "application", "address" => nil})
+  defp assert_plugin_link(vm, previous) do
+    enabled = Map.put(previous, "eth1", %{"role" => "plugin", "address" => nil})
     save(vm, enabled)
 
-    Scenarios.ManagedApp.with_app(
+    Scenarios.ManagedPlugin.with_plugin(
       vm,
       fn other ->
-        owner = Scenarios.ManagedApp.client(vm)
+        owner = Scenarios.ManagedPlugin.client(vm)
 
         assert {:ok, ref} =
-                 Scenarios.ManagedApp.call(vm, owner, NervesGateSDK.Network, :claim_local, [
+                 Scenarios.ManagedPlugin.call(vm, owner, NervesGateSDK.Network, :claim_local, [
                    "eth1",
                    "10.44.0.2",
                    24
@@ -81,12 +81,14 @@ defmodule Scenarios.Cases.Equipment do
         )
 
         assert {:error, "not_owner"} =
-                 Scenarios.ManagedApp.call(vm, other, NervesGateSDK.Network, :release_local, [ref])
+                 Scenarios.ManagedPlugin.call(vm, other, NervesGateSDK.Network, :release_local, [
+                   ref
+                 ])
 
         assert {:error, %{code: "local_in_use"}} =
                  Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [previous])
 
-        assert :ok = Scenarios.ManagedApp.stop_client(vm, owner)
+        assert :ok = Scenarios.ManagedPlugin.stop_client(vm, owner)
 
         Scenarios.Device.await(
           vm,

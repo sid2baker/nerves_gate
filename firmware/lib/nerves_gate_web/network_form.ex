@@ -34,7 +34,7 @@ defmodule NervesGateWeb.NetworkForm do
       true ->
         with {:ok, _} <- Config.validate_network(base) do
           base
-          |> application_ports()
+          |> plugin_ports()
           |> assign_port(internet, "internet", address(params, "internet"))
           |> validate(params)
         end
@@ -52,11 +52,11 @@ defmodule NervesGateWeb.NetworkForm do
       else: params
   end
 
-  defp application_ports(base) do
+  defp plugin_ports(base) do
     Enum.reduce(Config.ports(base), %{"mode" => "ports", "eth0" => nil, "eth1" => nil}, fn {name,
                                                                                             port},
                                                                                            acc ->
-      if port && port["role"] == "application", do: Map.put(acc, name, port), else: acc
+      if port && port["role"] == "plugin", do: Map.put(acc, name, port), else: acc
     end)
   end
 

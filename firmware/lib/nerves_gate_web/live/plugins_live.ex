@@ -32,23 +32,23 @@ defmodule NervesGateWeb.PluginsLive do
 
   def handle_event(
         "select-version",
-        %{"app" => app, "version" => version},
+        %{"plugin" => plugin, "version" => version},
         %{assigns: %{unknown?: false}} = socket
       ) do
     {:noreply,
      socket
      |> assign(busy: true, outcome: nil)
-     |> start_async(:plugin_command, fn -> NervesGate.Plugins.select(app, version) end)}
+     |> start_async(:plugin_command, fn -> NervesGate.Plugins.select(plugin, version) end)}
   end
 
-  def handle_event(action, %{"app" => app}, %{assigns: %{unknown?: false}} = socket)
+  def handle_event(action, %{"plugin" => plugin}, %{assigns: %{unknown?: false}} = socket)
       when action in ["start-plugin", "stop-plugin"] do
     operation = if action == "start-plugin", do: :start, else: :stop
 
     {:noreply,
      socket
      |> assign(busy: true, outcome: nil)
-     |> start_async(:plugin_command, fn -> apply(NervesGate.Plugins, operation, [app]) end)}
+     |> start_async(:plugin_command, fn -> apply(NervesGate.Plugins, operation, [plugin]) end)}
   end
 
   def handle_event(_, _, socket), do: {:noreply, socket}
@@ -105,7 +105,7 @@ defmodule NervesGateWeb.PluginsLive do
               }
               class="ui-button ui-button--secondary"
               phx-click="select-version"
-              phx-value-app={plugin.app}
+              phx-value-plugin={plugin.app}
               phx-value-version={plugin.available_version}
               disabled={@busy or @unknown?}
             >Select firmware version {plugin.available_version} · leave stopped</button>
@@ -118,14 +118,14 @@ defmodule NervesGateWeb.PluginsLive do
               :if={!plugin.running?}
               class="ui-button ui-button--secondary"
               phx-click="start-plugin"
-              phx-value-app={plugin.app}
+              phx-value-plugin={plugin.app}
               disabled={@busy or @unknown?}
             >Start</button>
             <button
               :if={plugin.running? or plugin.operation != nil or plugin.error != nil}
               class="ui-button ui-button--secondary"
               phx-click="stop-plugin"
-              phx-value-app={plugin.app}
+              phx-value-plugin={plugin.app}
               disabled={@busy or @unknown?}
             >Stop</button>
           </div>

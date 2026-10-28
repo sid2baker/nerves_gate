@@ -2,7 +2,7 @@
 
 Device commands belong to named domain modules. [`NervesGate`](../firmware/lib/nerves_gate.ex)
 provides only `status/0`, caller-owned `subscribe/0` and a domain API index. The
-administrative API is separate from the typed [application SDK](../sdk/README.md).
+administrative API is separate from the typed [plugin SDK](../sdk/README.md).
 There is no client object, command dispatcher or configurable server routing.
 
 ## Read, act, read again
@@ -27,11 +27,12 @@ settings = %{
 status = NervesGate.status()
 ```
 
-Application-owned local addressing and subnet advertisement use the separate typed
+Plugin-owned local addressing and subnet advertisement use the separate typed
 `NervesGateSDK.Network` lease API; see the [subnet-router plugin](../plugins/tailnet_subrouter/README.md).
-It requires explicit operator enablement (`%{"role" => "application", "address" => nil}`
-on an independent port), preserves Internet/USB and blocks platform reconfiguration
-until owned resources are released or safely recovered.
+It requires an enabled exclusive assignment of a free LAN to the calling plugin
+(`Plugins.assign_port("eth1", true, "tailnet_subrouter", true)`), preserves
+Internet/USB and blocks platform reconfiguration until owned resources are released
+or safely recovered.
 
 The names below are under `NervesGate`. Configuration uses validated string keys;
 hostname/trial IDs are plain strings. Failures return
@@ -137,7 +138,7 @@ waits for auto-save; otherwise it returns a pending trial. See
 
 | Command family | When the call succeeds |
 | --- | --- |
-| Network trial, app lease and SSH keys | After the requested bounded effect/readback or persistence |
+| Network trial, plugin lease and SSH keys | After the requested bounded effect/readback or persistence |
 | Cellular, Remote and Storage | After admission; observe `operation`, `error` and applicable `result`/readiness |
 | Identify | After starting the bounded identification period |
 
@@ -145,7 +146,7 @@ Remote completion is in `status.remote`, not a private URL. Bus completion is in
 `status.hardware`. Private `Remote.login_url/0` and `Distribution.cookie/0` results
 belong only in the requesting view; never log, broadcast or put them in status.
 
-Trial calls allow 15 seconds; application leases allow 70. Other calls are
+Trial calls allow 15 seconds; plugin leases allow 70. Other calls are
 bounded too. Missing owners return unavailable; a lost process-call reply returns
 `outcome_unknown`. A caller timeout does not cancel admitted work. **Read state
 before considering a retry**; never blindly replay writes or PIN attempts.
@@ -174,7 +175,7 @@ ports/connections. Changes persist only after checked cleanup, and plugins remai
 stopped. The optional expected old setting binds UI confirmation to reviewed intent.
 Hardware never captures traffic or issues protocol reads. Plugins own direct I/O;
 `NervesGateSDK.Hardware.resources/0` queries the actual managed caller's assignments.
-See [hardware and Modbus](hardware.md) and [storage](applications.md#storage-and-state).
+See [hardware and Modbus](hardware.md) and [storage](plugins.md#storage-and-state).
 
 ## Status
 
@@ -191,7 +192,7 @@ Pure [`Status`](../firmware/lib/nerves_gate/status.ex) builds schema **v11**:
   binding hash. Auto-unlock is `ready`, `blocked`, `different_sim`,
   `identity_unknown`, `off` or `unknown`.
 - `remote`: sanitized daemon observations, routes, operation and error.
-- `sharing`: application-lease `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
+- `sharing`: plugin-lease `subnet`, `enabled` (`true`, `false` or unknown `nil`) and
   `other_routes` untouched by the control.
 - `indicators`: availability, button state, LED patterns, identify/recovery state.
 - `hardware`: port inventory, support, assignment/enablement observations and errors.

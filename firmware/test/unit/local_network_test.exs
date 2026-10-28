@@ -56,7 +56,7 @@ defmodule NervesGate.Network.LocalTest do
         Config.from_network(%{
           "mode" => "ports",
           "eth0" => %{"role" => "internet", "address" => Config.address_defaults()},
-          "eth1" => %{"role" => "application", "address" => nil}
+          "eth1" => %{"role" => "plugin", "address" => nil}
         }),
       trial: nil,
       recovering: false,
@@ -268,7 +268,7 @@ defmodule NervesGate.Network.LocalTest do
     assert configs["eth1"].ipv4 == %{method: :disabled}
     refute configs["eth1"].nerves_gate_disabled
     assert {:ok, reconstructed} = Vintage.from_configurations(configs)
-    assert reconstructed["eth1"] == %{"role" => "application", "address" => nil}
+    assert reconstructed["eth1"] == %{"role" => "plugin", "address" => nil}
     disabled = Vintage.configurations(%{network | "eth1" => nil}) |> Map.new()
     assert disabled["eth1"].nerves_gate_disabled
   end

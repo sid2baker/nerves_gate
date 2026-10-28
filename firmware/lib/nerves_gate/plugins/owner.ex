@@ -23,10 +23,10 @@ defmodule NervesGate.Plugins.Owner do
          true <- valid?(tag, mode) do
       {:ok, tag}
     else
-      _ -> {:error, :application_not_running}
+      _ -> {:error, :plugin_not_running}
     end
   rescue
-    ArgumentError -> {:error, :application_not_running}
+    ArgumentError -> {:error, :plugin_not_running}
   end
 
   def valid?(owner, mode \\ :active)

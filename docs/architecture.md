@@ -1,7 +1,7 @@
 # Architecture
 
-Nerves Gate has three core application projects, optional ordinary starter apps and
-two Nerves system projects, not an umbrella. Device domains hide commands, admission, deadlines and persistence behind
+Nerves Gate has three core projects (root, firmware and SDK), firmware-selected
+plugin projects and two Nerves system projects, not an umbrella. Device domains hide commands, admission, deadlines and persistence behind
 named APIs. EC100 and owned QEMU devices run the same application with different
 board profiles and target binaries. The workstation runs the workbench and owns
 disposable QEMU hardware; it does not run device services.
@@ -12,9 +12,9 @@ disposable QEMU hardware; it does not run device services.
 | --- | --- | --- | --- |
 | Root | `:nerves_gate_workbench` | Host tooling, workbench and simulator | Root `VERSION` |
 | `firmware/` | `:nerves_gate` | Host-compiled helpers/checks; EC100 or QEMU runtime | Root `VERSION` |
-| `sdk/` | `:nerves_gate_sdk` | Typed app contract and packaging; no application supervisor | `sdk/VERSION` |
+| `sdk/` | `:nerves_gate_sdk` | Typed plugin contract and packaging; no application supervisor | `sdk/VERSION` |
 | `plugins/tailnet_subrouter/` | `:tailnet_subrouter` | Selected, disabled-on-first-boot subnet plugin | Plugin `mix.exs` |
-| `plugins/modbus/` | `:modbus_plugin` | Selected, read-only Modbus TCP plugin with yamodbus | Plugin `mix.exs` |
+| `plugins/modbus/` | `:modbus_plugin` | Selected, read-only Modbus TCP/RTU plugin with yamodbus | Plugin `mix.exs` |
 | `systems/nerves_system_ec100/` | `:nerves_system_ec100` | ARM Linux, toolchain, boot and board support | System `VERSION` |
 | `systems/nerves_system_ec100_qemu/` | `:nerves_system_ec100_qemu` | x86_64/musl Linux, toolchain and QEMU support | System `VERSION` |
 
@@ -29,7 +29,7 @@ SDK calls use the fixed `NervesGate.SDKBackend.call/2` firmware entry point on b
 EC100 and QEMU. The SDK invokes it in the actual caller's process without a Mix
 dependency on firmware or configurable backend selection. Missing firmware reports
 `:runtime_unavailable`; loaded firmware with unavailable services reports
-`:unavailable`. UI apps declare their shared Phoenix/LiveView dependencies directly;
+`:unavailable`. UI plugins declare their shared Phoenix/LiveView dependencies directly;
 the core SDK has no web dependencies.
 
 Each project keeps its own Mix configuration, lockfile and build directory.
@@ -39,7 +39,7 @@ system sources. Only the SDK is published on Hex; see [releases](releases.md).
 
 `runtime: false` prevents automatic firmware application startup, **not compilation
 or host code reuse**. The workbench shares firmware components/layouts, projection
-subscriptions, status derivation and netlink helpers for USB factory reconnection.
+subscriptions and status derivation.
 It never starts the firmware application to obtain them. Another shared project or
 an umbrella would not remove target/toolchain or release isolation; extract a
 library only when a measured benefit justifies another owner and package.
@@ -53,14 +53,14 @@ library only when a measured benefit justifies another owner and package.
 | `firmware/lib/nerves_gate/cellular/` | Board profile, SIM/PIN lifecycle, private PAP storage and modem/UART implementation |
 | `firmware/lib/nerves_gate_web/` | Local gateway UI and shared read-only presentation |
 | `firmware/config/` | Board profiles, device services and host-only checks/assets |
-| `sdk/lib/nerves_gate_sdk/` | Typed app API, fixed firmware bridge contract and archive validation |
-| `lib/workbench/` | Sessions, apps, discovery, builds, updates, provisioning and release checks |
+| `sdk/lib/nerves_gate_sdk/` | Typed plugin API, fixed firmware bridge contract and archive validation |
+| `lib/workbench/` | Sessions, gateway directory, plugin projects, builds, updates, provisioning and release checks |
 | `lib/workbench_web/`, `config/`, `priv/workbench/` | Workbench browser UI, host config and session script |
 | `lib/simulator.ex`, `lib/simulator/` | Locally supervised owned QEMU lifecycle and virtual hardware |
 | `lib/scenarios.ex`, `lib/scenarios/` | One catalogue, reservations/runner, bounded device access, owned QEMU fixture and cases |
-| `priv/simulator/`, `priv/templates/` | Trusted bench configs/scripts and ordinary SDK app scaffolding |
+| `priv/simulator/`, `priv/templates/` | Trusted bench configs/scripts and ordinary SDK plugin scaffolding |
 | `test/`, `firmware/test/{unit,web}/`, `sdk/test/` | Host tooling/shared UI integration, firmware policy/web checks and SDK tests |
-| `apps/` | Independently packaged/tested optional first-party applications |
+| `plugins/` | Firmware selection and independently tested first-party plugin projects |
 | `systems/` | Independently versioned Nerves system artifact inputs |
 
 ## Host mode and the simulator
@@ -75,7 +75,7 @@ inbound listener for local Pi attachment. It supervises the simulator locally.
 ```text
 Workbench.Supervisor (:nerves_gate_workbench, one_for_one)
 ├─ Workbench.Tasks
-└─ Workbench.Applications
+└─ Workbench.Plugins
 
 session supervisor
 ├─ Simulator → per-device owners → QEMU, disks, QMP and Ethernet relays
@@ -121,7 +121,7 @@ authorize stopping an old session, resetting disks or erasing saved settings.
 
 ### Admission and hardware ownership
 
-`Workbench.Jobs` serializes builds, app commands, reviewed firmware/application
+`Workbench.Jobs` serializes builds, plugin commands, reviewed firmware/plugin
 installation, factory provisioning and operator-assisted physical scenarios. Private
 reviews carry their owner and immutable snapshot; public metadata never does.
 `Scenarios.Runner` owns lifecycle, manual control and per-device reservations for
@@ -143,7 +143,7 @@ Virtual LANs are real Ethernet over private Unix sockets with libslirp Internet
 access. A separate, explicitly prepared bridge/TAP management path bypasses injected
 LAN faults. It has no physical uplink, NAT, global forwarding or VPN changes. The
 checkout-owned network persists until explicit cleanup; QEMU stays unprivileged.
-Guest firmware owns EPMD at its actual management IP, without management port forwards. QEMU has separate system and app-SD
+Guest firmware owns EPMD at its actual management IP, without management port forwards. QEMU has separate system and plugin-SD
 disks. Stop preserves them; Reset erases them and invalidates the prepared build.
 Fresh-disk scenarios use the runner's explicitly owned disposable-state lifecycle.
 See [development](development.md#workbench-and-simulator).
@@ -157,11 +157,11 @@ not a device store. Bundled code starts without SD; plugins using SD data direct
 must handle unavailable storage. Adding/updating/removing code requires firmware.
 There is one namespace per BEAM; incompatible plugin selections fail the build.
 The standard UI exposes Hardware, not an equipment registry: gateway interfaces,
-health, availability, shared configuration and access ownership. Applications own
+health, availability, shared configuration and access ownership. Plugins own
 equipment identities, Modbus/S7 endpoints, register maps, polling and control.
 Shared libraries do not imply device-owned protocol sessions or a universal driver
-framework. Hardware enables independent links without IP configuration; optional
-applications request isolated addressing using caller-owned SDK leases. Network
+framework. An exclusive Hardware assignment lets one plugin use a free LAN without
+IP configuration; that plugin requests isolated addressing using caller-owned SDK leases. Network
 journals route ownership before writes and withdraws owned advertisements before
 removing temporary addresses. Unknown cleanup blocks reuse, including after owner
 or Network restart. No enable intent is restored automatically. The optional
@@ -174,7 +174,7 @@ not protocol controls. A plugin may own multiple ports.
 
 Overview keeps Internet and Remote access together as operational entry points.
 Remote access groups Tailscale enrollment and advanced Erlang distribution without
-combining their credentials. Application storage administration belongs to Settings.
+combining their credentials. Plugin storage administration belongs to Settings.
 
 ## Board configuration
 
@@ -182,7 +182,7 @@ Each device target declares wiring in `:nerves_gate, :board`:
 `firmware/config/ec100.exs` for EC100 and `x86_64.exs` for owned QEMU, not arbitrary
 PCs. `NervesGate.Board` supplies modem, bus, indicator, recovery and storage
 configuration. QEMU leaves unsupported EC100 peripherals unavailable rather than
-providing fake application backends.
+providing fake plugin backends.
 
 The BSP owns drivers, device trees, boot and Linux device naming. Board config
 selects actual hardware; domains own policy. The network model currently has two
@@ -198,7 +198,7 @@ variation points, as does the published SDK backend contract.
 | --- | --- |
 | VintageNet | Interfaces, saved network settings, connectivity, DNS and routes |
 | Tailscale | Identity, preferences, enrollment and VPN routes |
-| Network | Single admission/worker for trials, cellular and application leases; USB auto-save/rollback |
+| Network | Single admission/worker for trials, cellular and plugin leases; USB auto-save/rollback |
 | Network.Local | Lease transitions, overlap/readiness policy, route journal and owned cleanup |
 | Cellular | Named SIM/PIN/PAP operations and eligibility; uses Network's worker, no separate GenServer |
 | Remote | Serialized bounded daemon operations and sanitized metadata |
@@ -206,9 +206,9 @@ variation points, as does the published SDK backend contract.
 | Hardware | Allowlisted Ethernet/serial/CAN inventory; Plugins owns exclusive assignment intent |
 | SSH | Public-key validation, persistence and authentication |
 | Storage | SD detection, commissioning, mounting and formatting |
-| Apps | Trusted OTP app admission, lifecycle and version selection; guards destructive storage changes |
+| Plugins | Trusted plugin admission, lifecycle, version selection and exclusive hardware assignment; guards destructive storage changes |
 | ProjectionServer | Sanitized UI read model, not command coordination |
-| SDKBackend | Translation into the separate typed application contract |
+| SDKBackend | Translation into the separate typed plugin contract |
 | LiveView | Drafts, presentation, subscriptions and command submission |
 
 Before networking/data users, `nerves_runtime` verifies writable data, validates
@@ -224,7 +224,7 @@ Dependencies supervise VintageNet, tailscaled and Alarmist. The device's
 ```text
 PubSub → Network.Vintage → workflow PropertyTable → persistent Settings PropertyTable
        → SSH → Network → Remote → Indicators → Hardware → PluginTasks
-       → Storage → Apps → ProjectionServer → SDKBackend → gateway Endpoint
+       → Storage → Plugins → ProjectionServer → SDKBackend → gateway Endpoint
 ```
 
 See [`firmware/config/firmware.exs`](../firmware/config/firmware.exs) and
@@ -234,7 +234,7 @@ its restart limit stops the BEAM and erlinit reboots the device. This is not the
 host session's supervision tree.
 
 Workers are linked and bounded; owners stop/join workers before restoration or new
-work. Trials and application lease commands reply after completion. Cellular, Remote, bus and
+work. Trials and plugin lease commands reply after completion. Cellular, Remote and
 storage operations acknowledge acceptance and publish completion. A caller timeout
 does not cancel admitted work or permit replay. Safe errors originate where their
 meaning is known; `Error` only defines the safe shape and `GenServer.call` failure
@@ -278,41 +278,41 @@ explicit reads cached only in the requesting gateway view, never projections or
 notifications. Workbench gateway pages consume the same read-only projection
 stream; hardware ownership remains separate from connectivity.
 
-### Applications and SDK
+### Plugins and SDK
 
-Apps are trusted same-BEAM OTP code, **not a sandbox**. The SDK exposes typed
+Plugins are trusted same-BEAM OTP code, **not a sandbox**. The SDK exposes typed
 observations/events, caller-derived hardware assignments and narrowly scoped local-network leases,
 not administrative maps, arbitrary network configuration, SSH, firmware or recovery
 commands. Equipment identities, labels, scans and industrial protocols belong to
-apps. There is no platform equipment domain or SDK compatibility API.
+plugins. There is no platform equipment domain or SDK compatibility API.
 Plugins and Network receive SDK calls from the actual caller. Stateful calls require
-managed activation membership, resolved through OTP and Apps-owned protected ETS,
-not a caller-supplied app name or synchronous Plugins call. PID/ref ownership remains;
+managed activation membership, resolved through OTP and Plugins-owned protected ETS,
+not a caller-supplied plugin name or synchronous Plugins call. PID/ref ownership remains;
 private generations fence revoked activations and in-flight work. No Task becomes
-owner on a caller's behalf. Read-only SDK queries remain available outside apps.
+owner on a caller's behalf. Read-only SDK queries remain available outside plugins.
 
 Host packaging/device installation share SDK `.ez` validation. Private OTP
 dependencies can be bundled, platform dependencies cannot. New and obsolete
-platform app/module names remain reserved. Packaging is not cross-compilation,
-a dependency solver or hot-code upgrade. Installation does not start an app.
+platform application/module names remain reserved. Packaging is not cross-compilation,
+a dependency solver or hot-code upgrade. Installation does not start a plugin.
 `Plugins.Artifact` verifies immutable archive/content identity. `Plugins.Loader` owns
 verified module loading and one checked unload path; Plugins owns admission,
 generation bindings and synced selection while linked workers perform effects.
 Upgrades stop/start cold, run bounded health checks and restore the verified prior
-artifact with a fresh generation on failure. Uncertain cleanup blocks reactivation. Ordinary app callbacks still execute in the shared runtime. See
-[applications](applications.md).
+artifact with a fresh generation on failure. Uncertain cleanup blocks reactivation. Ordinary plugin callbacks still execute in the shared runtime. See
+[plugins](plugins.md).
 
 ### Plugin pages
 
 `/plugins` and `/plugins/:app` are fixed gateway routes. Plugins may declare an optional
 verified LiveComponent with `:nerves_gate_ui`; it renders inside the gateway shell
-without router recompilation or its own web server. Components call their app's
+without router recompilation or its own web server. Components call their plugin's
 supervised command process, never borrow SDK ownership from the gateway LiveView.
 `Plugins.UI` tracks local page PIDs with OTP process groups. Admission is bound to a
 running activation; checked unload closes those processes before removing code.
 A controller restart closes surviving sessions before restoration. Shared Phoenix
-libraries are excluded from app archives and exact dependency versions are checked.
-See [optional plugin UI](applications.md#optional-ui).
+libraries are excluded from plugin archives and exact dependency versions are checked.
+See [optional plugin UI](plugins.md#optional-ui).
 
 ## Persistence and recovery
 
@@ -326,7 +326,7 @@ See [optional plugin UI](applications.md#optional-ui).
 | Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
 | Plugins: `/data/nerves_gate/hardware.term` | Bounded exclusive port assignment and enablement intent |
-| Application SD: `/mnt/apps` | App archives and app data |
+| Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data |
 
 Both targets require writable ext4 data before data users start. Unreadable saved
 network settings fail closed. Trials and monotonic deadlines live in RAM;
@@ -335,8 +335,8 @@ transactional**; see [rollback](networking.md#saving-and-rollback). Startup inst
 default-deny IPv4 forwarding before enabling forwarding.
 
 Card insertion never formats media. Storage commissioning is explicit and Plugins
-guards destructive changes. Uninstall preserves app data; application rollback
-does not roll that data back. See [storage](applications.md) and
+guards destructive changes. Uninstall preserves plugin data; plugin rollback
+does not roll that data back. See [storage](plugins.md) and
 [reset safety](indicators.md#recovery).
 
 Domains publish fixed sanitized conditions through SASL to Alarmist. Restore and
@@ -359,7 +359,7 @@ artifacts and host tools. It does not build firmware or boot devices. Limited
 native target entries fetch dependencies/initialize Nerves, never compile target
 application code in the host VM.
 
-Device and external user-app builds use isolated supervised OS processes.
+Device and external plugin builds use isolated supervised OS processes.
 [`Workbench.Builds`](../lib/workbench/builds.ex) builds shared Volt assets on the
 host **before** target packaging. Both UIs share one definition and tracked output;
 devices only serve it. Host/target native ports must not mix. See
@@ -380,10 +380,10 @@ public UI/domain boundaries and pure policies/read models; they are not a comple
 root dependency policy. Pure checks/builds do not prove guest callback, restart,
 Internet or physical behavior: those need explicitly authorized runtime checks.
 
-Root `mix check` runs host tests, SDK/starter tests and all firmware quality gates
-except dialyzer. Root `mix ci` additionally runs dialyzer. Neither starts devices.
-Routine CI also builds EC100 dev/prod and QEMU firmware and packages external and
-starter apps, but boots no devices. QEMU integration and publishing are explicit workflows with
+Root `mix check` runs host tests, SDK/generated-plugin/plugin tests and all firmware
+quality gates except dialyzer. Root `mix ci` additionally runs dialyzer. Neither
+starts devices. Routine CI also builds EC100 dev/prod and QEMU firmware and packages
+generated plugins and both bundled plugins, but boots no devices. QEMU integration and publishing are explicit workflows with
 independent version rules. Publishing credentials never belong in the workbench;
 see [CI](ci.md) and [releases](releases.md).
 
@@ -399,9 +399,9 @@ checks, not a general USB-only management rule.
 Discovery is unverified metadata, never authentication or permission to update.
 Physical SSH uses known-host verification separate from disposable-QEMU trust.
 `Workbench.SSH` owns strict host-key/authentication policy and a single firmware
-upload. Identity, health and application transfer use distribution. Permissive
+upload. Identity, health and plugin transfer use distribution. Permissive
 owned-QEMU SSH is reserved for explicit SSH scenarios. `System.maintenance_info/0`, `System.hardware_info/0` and
-`Apps.install_review/1`/`install_reviewed/2` are compiled device APIs. Unsupported
+`Plugins.install_review/1`/`install_reviewed/2` are compiled device APIs. Unsupported
 firmware is rejected; there is no alternate identity protocol or verification downgrade.
 Firmware stores the build commit in Nerves VCS metadata and exposes it as
 `System.info().source_revision`, independently of its semantic version.
@@ -412,6 +412,6 @@ USB provisioning has separate review/confirmation and verified writes; RAM
 transport review is not a disk write. Reconnection is read-only and never replays
 flashing. See [firmware updates](firmware-updates.md).
 
-Workstations and trusted apps are privileged. Keep credentials, private URLs,
+Workstations and trusted plugins are privileged. Keep credentials, private URLs,
 cookies and VM identity disks out of read models, diagnostics and uploaded
 artifacts. Never attach simulator controls to arbitrary VMs or physical gateways.

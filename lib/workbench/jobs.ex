@@ -1,6 +1,6 @@
 defmodule Workbench.Jobs do
   @moduledoc """
-  One serialized long-running job at a time: firmware builds, application
+  One serialized long-running job at a time: firmware builds, plugin
   test/package/install, reviewed physical firmware updates and factory provisioning.
   A review is consumed once by its confirmation. Every change is published.
   """
@@ -14,9 +14,9 @@ defmodule Workbench.Jobs do
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
 
   def build(target), do: GenServer.call(__MODULE__, {:build, target})
-  def test_app(path), do: GenServer.call(__MODULE__, {:app, :test, path})
-  def package_app(path), do: GenServer.call(__MODULE__, {:app, :package, path})
-  def install_app(path, device), do: GenServer.call(__MODULE__, {:install, path, device})
+  def test_plugin(path), do: GenServer.call(__MODULE__, {:plugin, :test, path})
+  def package_plugin(path), do: GenServer.call(__MODULE__, {:plugin, :package, path})
+  def install_plugin(path, device), do: GenServer.call(__MODULE__, {:install, path, device})
 
   def review_firmware(node, firmware),
     do: GenServer.call(__MODULE__, {:review_firmware, node, firmware})
@@ -24,8 +24,8 @@ defmodule Workbench.Jobs do
   def confirm_firmware(token, address),
     do: GenServer.call(__MODULE__, {:confirm, :firmware, token, [address]})
 
-  def confirm_app(token, address),
-    do: GenServer.call(__MODULE__, {:confirm, :app_install, token, [address]})
+  def confirm_plugin(token, address),
+    do: GenServer.call(__MODULE__, {:confirm, :plugin_install, token, [address]})
 
   def review_factory(params), do: GenServer.call(__MODULE__, {:review_factory, params})
   def check(node, scenario), do: GenServer.call(__MODULE__, {:check, node, scenario})
@@ -57,17 +57,17 @@ defmodule Workbench.Jobs do
 
   def handle_call({:build, _}, _, state), do: {:reply, {:error, "Choose EC100 or x86_64"}, state}
 
-  def handle_call({:app, kind, path}, _, state) do
+  def handle_call({:plugin, kind, path}, _, state) do
     run =
       case kind do
         :test ->
           fn report ->
-            :ok = Workbench.Applications.test!(path, report)
+            :ok = Workbench.Plugins.test!(path, report)
             {:ok, "Tests passed"}
           end
 
         :package ->
-          &{:ok, Workbench.Applications.package!(path, &1)}
+          &{:ok, Workbench.Plugins.package!(path, &1)}
       end
 
     start(state, Atom.to_string(kind), path, run)
@@ -80,11 +80,11 @@ defmodule Workbench.Jobs do
           state,
           "install",
           path,
-          &{:review, Workbench.AppInstall.review!(path, gateway.node, &1)}
+          &{:review, Workbench.PluginInstall.review!(path, gateway.node, &1)}
         )
 
       _ ->
-        start(state, "install", path, &{:ok, Workbench.Applications.install!(path, device, &1)})
+        start(state, "install", path, &{:ok, Workbench.Plugins.install!(path, device, &1)})
     end
   end
 
@@ -135,8 +135,8 @@ defmodule Workbench.Jobs do
         :firmware ->
           {"firmware_update", &Workbench.FirmwareUpdate.update!(plan, token, hd(args), &1)}
 
-        :app_install ->
-          {"install", &Workbench.AppInstall.install!(plan, token, hd(args), &1)}
+        :plugin_install ->
+          {"install", &Workbench.PluginInstall.install!(plan, token, hd(args), &1)}
 
         :factory ->
           {"factory_provision", &{:ok, Workbench.FactoryProvisioning.provision!(plan, &1)}}

@@ -25,24 +25,24 @@ defmodule Scenarios.Cases.Sdk do
 
     assert Enum.all?(
              interfaces,
-             &(is_boolean(&1.application_enabled?) and is_boolean(&1.claimed?))
+             &(is_boolean(&1.plugin_enabled?) and is_boolean(&1.claimed?))
            )
 
-    assert {:error, "application_not_running"} = Device.rpc(device, Network, :local_status)
+    assert {:error, "plugin_not_running"} = Device.rpc(device, Network, :local_status)
 
     assert {:error, :invalid_local_network} =
              Device.rpc(device, Network, :claim_local, ["usb0", "192.168.50.2", 24])
 
-    assert {:error, "application_not_running"} =
+    assert {:error, "plugin_not_running"} =
              Device.rpc(device, Network, :release_local, [make_ref()])
 
     assert {:ok, %Storage.Status{}} = Device.rpc(device, Storage, :status)
 
-    assert {:error, :application_not_running} =
+    assert {:error, :plugin_not_running} =
              Device.rpc(device, Storage, :data_dir, [:sdk_fixture])
 
-    assert {:error, :application_not_running} = Device.rpc(device, Hardware, :resources)
-    assert {:error, :application_not_running} = Device.rpc(device, Events, :subscribe, [:system])
+    assert {:error, :plugin_not_running} = Device.rpc(device, Hardware, :resources)
+    assert {:error, :plugin_not_running} = Device.rpc(device, Events, :subscribe, [:system])
     assert {:error, :invalid_topic} = Device.rpc(device, Events, :subscribe, [:remote])
 
     assert {:error, :invalid_request} =

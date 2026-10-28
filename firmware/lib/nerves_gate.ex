@@ -6,7 +6,7 @@ defmodule NervesGate do
   `NervesGate.Remote`, `NervesGate.Hardware`,
   `NervesGate.Indicators`, `NervesGate.SSH` and `NervesGate.Storage`.
   Read build/runtime identity with `NervesGate.System.info/0`.
-  Equipment identities and discovery belong to applications.
+  Equipment identities and discovery belong to plugins.
 
   Subscribe before reading, and subscribe afresh after reconnecting. Notifications
   are hints to reread, not atomic snapshots. Commands acknowledge acceptance, not

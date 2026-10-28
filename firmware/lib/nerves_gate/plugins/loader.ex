@@ -40,7 +40,7 @@ defmodule NervesGate.Plugins.Loader do
          {:ok, started} <- Application.ensure_all_started(activation.artifact.app) do
       verify(%{activation | started: started, phase: :verifying}, package, checkpoint)
     else
-      _ -> {:error, :application_start_failed, activation}
+      _ -> {:error, :plugin_start_failed, activation}
     end
   end
 
@@ -154,7 +154,7 @@ defmodule NervesGate.Plugins.Loader do
          Application.spec(app.app) == nil or
            (to_string(Application.spec(app.app, :vsn)) == app.version and
               Enum.sort(Application.spec(app.app, :modules) || []) == Enum.sort(app.modules))
-       end), do: :ok, else: {:error, :application_conflict}
+       end), do: :ok, else: {:error, :plugin_conflict}
   end
 
   defp stop_apps(artifact, started) do
@@ -167,7 +167,7 @@ defmodule NervesGate.Plugins.Loader do
       case Application.stop(name) do
         :ok -> :ok
         {:error, {:not_started, ^name}} -> :ok
-        _ -> {:error, :application_stop_failed}
+        _ -> {:error, :plugin_stop_failed}
       end
     end)
   end
@@ -193,7 +193,7 @@ defmodule NervesGate.Plugins.Loader do
       case Application.unload(app.app) do
         :ok -> :ok
         {:error, {:not_loaded, _}} -> :ok
-        _ -> {:error, :application_unload_failed}
+        _ -> {:error, :plugin_unload_failed}
       end
     end)
   end

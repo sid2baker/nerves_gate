@@ -9,7 +9,7 @@ defmodule NervesGate.Network.Local do
          %{"network" => %{"mode" => "ports"} = network} <- status.config,
          true <-
            network[interface] == nil or
-             network[interface] == %{"role" => "application", "address" => nil},
+             network[interface] == %{"role" => "plugin", "address" => nil},
          true <- interface in ["eth0", "eth1"] and is_integer(prefix) and prefix in 1..30,
          {:ok, address} <-
            Config.validate_address(%{

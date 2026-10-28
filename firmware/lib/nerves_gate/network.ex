@@ -525,7 +525,7 @@ defmodule NervesGate.Network do
   end
 
   defp generation_owned(%{generation: generation}, generation), do: :ok
-  defp generation_owned(_, _), do: {:error, :application_not_running}
+  defp generation_owned(_, _), do: {:error, :plugin_not_running}
 
   defp fence_generation(%{local: %{generation: generation}} = state)
        when not is_nil(generation) do
@@ -912,10 +912,10 @@ defmodule NervesGate.Network do
         "Enable and exclusively assign this LAN to the plugin under Hardware first."
       )
 
-  defp error(:application_not_running),
+  defp error(:plugin_not_running),
     do:
       NervesGate.Error.new(
-        "application_not_running",
+        "plugin_not_running",
         "Stateful SDK access requires a managed activation."
       )
 

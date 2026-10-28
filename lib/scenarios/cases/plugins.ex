@@ -1,7 +1,7 @@
 defmodule Scenarios.Cases.Plugins do
   @moduledoc false
   import ExUnit.Assertions
-  alias Scenarios.{Device, ManagedApp}
+  alias Scenarios.{Device, ManagedPlugin}
 
   def spec do
     %{
@@ -19,37 +19,40 @@ defmodule Scenarios.Cases.Plugins do
 
     storage = Device.rpc(vm, NervesGate.Storage, :commissioning)
     refute storage.ready
-    {:ok, plugins} = ManagedApp.apps(vm, :list, [])
+    {:ok, plugins} = ManagedPlugin.plugins(vm, :list, [])
     assert Enum.map(plugins, & &1.app) == ["modbus_plugin", "tailnet_subrouter"]
     assert Enum.all?(plugins, &(&1.bundled? and not &1.enabled and not &1.running?))
 
     Device.save(vm, Device.settings("eth0"))
 
     try do
-      assert :ok = ManagedApp.apps(vm, :start, [:tailnet_subrouter])
+      assert :ok = ManagedPlugin.plugins(vm, :start, [:tailnet_subrouter])
       assert Device.rpc(vm, TailnetSubrouter, :status) == %{state: :disabled}
       ethernet(vm)
-      assert :ok = ManagedApp.apps(vm, :start, [:tailnet_subrouter])
-      assert :ok = ManagedApp.apps(vm, :start, [:modbus_plugin])
+      assert :ok = ManagedPlugin.plugins(vm, :start, [:tailnet_subrouter])
+      assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
       assert Device.rpc(vm, ModbusPlugin, :status) == []
-      assert {:error, :firmware_owned_plugin} = ManagedApp.apps(vm, :uninstall, [:modbus_plugin])
+
+      assert {:error, :firmware_owned_plugin} =
+               ManagedPlugin.plugins(vm, :uninstall, [:modbus_plugin])
+
       response = Req.get!(Scenarios.Qemu.ui_url(vm) <> "/plugins", retry: false)
       assert response.status == 200
       assert response.body =~ "/plugins/tailnet_subrouter"
       assert response.body =~ "/plugins/modbus_plugin"
     after
-      assert :ok = ManagedApp.apps(vm, :stop, [:tailnet_subrouter])
-      assert :ok = ManagedApp.apps(vm, :stop, [:modbus_plugin])
+      assert :ok = ManagedPlugin.plugins(vm, :stop, [:tailnet_subrouter])
+      assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
     end
 
-    ManagedApp.with_app(vm, fn _main ->
-      assert :ok = ManagedApp.apps(vm, :start, [:tailnet_subrouter])
-      client = ManagedApp.client(vm)
+    ManagedPlugin.with_plugin(vm, fn _main ->
+      assert :ok = ManagedPlugin.plugins(vm, :start, [:tailnet_subrouter])
+      client = ManagedPlugin.client(vm)
 
       assert {:ok, TailnetSubrouter.UI, _} =
-               ManagedApp.call(vm, client, NervesGate.Plugins, :mount_ui, ["tailnet_subrouter"])
+               ManagedPlugin.call(vm, client, NervesGate.Plugins, :mount_ui, ["tailnet_subrouter"])
 
-      assert :ok = ManagedApp.apps(vm, :stop, [:tailnet_subrouter])
+      assert :ok = ManagedPlugin.plugins(vm, :stop, [:tailnet_subrouter])
       refute Device.rpc(vm, :erlang, :is_process_alive, [client])
       assert Device.rpc(vm, :code, :is_loaded, [TailnetSubrouter.UI]) == false
       modbus(vm)
@@ -61,10 +64,12 @@ defmodule Scenarios.Cases.Plugins do
              Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
 
     assert {:error, %{code: "hardware_reserved"}} =
-             ManagedApp.apps(vm, :assign_port, ["eth0", true, "tailnet_subrouter", true])
+             ManagedPlugin.plugins(vm, :assign_port, ["eth0", true, "tailnet_subrouter", true])
 
-    assert :ok = ManagedApp.apps(vm, :assign_port, ["eth1", true, "tailnet_subrouter", true])
-    assert :ok = ManagedApp.apps(vm, :start, [:tailnet_subrouter])
+    assert :ok =
+             ManagedPlugin.plugins(vm, :assign_port, ["eth1", true, "tailnet_subrouter", true])
+
+    assert :ok = ManagedPlugin.plugins(vm, :start, [:tailnet_subrouter])
     assert :ok = Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
 
     Device.await(vm, "assigned LAN is configured without changing Internet", fn status ->
@@ -79,19 +84,19 @@ defmodule Scenarios.Cases.Plugins do
              Device.rpc(vm, NervesGate.Network, :propose, [changed])
 
     assert :ok = Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
-    assert :ok = ManagedApp.apps(vm, :assign_port, ["eth1", false, nil, true])
+    assert :ok = ManagedPlugin.plugins(vm, :assign_port, ["eth1", false, nil, true])
 
     Device.await(vm, "reassignment drains the owning plugin's LAN lease", fn status ->
       status.network.local == nil and
         Enum.any?(status.connections.ports, &(&1.name == "eth1" and &1.addresses == []))
     end)
 
-    {:ok, plugins} = ManagedApp.apps(vm, :list, [])
+    {:ok, plugins} = ManagedPlugin.plugins(vm, :list, [])
     refute Enum.find(plugins, &(&1.app == "tailnet_subrouter")).running?
   end
 
   defp modbus(vm) do
-    assert :ok = ManagedApp.apps(vm, :start, [:modbus_plugin])
+    assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
 
     {:ok, memory} =
       Device.rpc(vm, DynamicSupervisor, :start_child, [
@@ -142,7 +147,7 @@ defmodule Scenarios.Cases.Plugins do
                  memory
                ])
 
-      assert :ok = ManagedApp.apps(vm, :stop, [:modbus_plugin])
+      assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
     end
 
     assert Device.rpc(vm, :code, :is_loaded, [Modbus.Client]) == false

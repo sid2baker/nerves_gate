@@ -37,7 +37,7 @@ defmodule Scenarios.Cases.Churn do
     legacy = %{"mode" => "shared", "equipment" => saved["eth0"]["address"]}
     assert {:error, _} = Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [legacy])
     assert Scenarios.Device.status(vm).network.desired == saved
-    enabled = Map.put(saved, "eth1", %{"role" => "application", "address" => nil})
+    enabled = Map.put(saved, "eth1", %{"role" => "plugin", "address" => nil})
     trial = propose(vm, enabled)
     assert :ok = Scenarios.Device.rpc(vm, NervesGate.Network, :cancel, [trial])
 

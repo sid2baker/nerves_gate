@@ -55,26 +55,26 @@ defmodule Workbench.CLI do
     end
   end
 
-  def app(command, args) do
+  def plugin(command, args) do
     {options, paths} = OptionParser.parse!(args, strict: [device: :string, local_sdk: :boolean])
 
     path =
       case paths do
         [path] -> Path.expand(path)
-        _ -> Mix.raise("Usage: mix app.#{command} APP_DIRECTORY [--device ID]")
+        _ -> Mix.raise("Usage: mix plugin.#{command} PLUGIN_DIRECTORY [--device ID]")
       end
 
     case command do
       :new ->
-        app = Workbench.Applications.scaffold!(path, local_sdk: options[:local_sdk] || false)
-        if Session.info(), do: call(Workbench.Applications, :open, [app.path])
-        IO.puts("Created #{app.path}")
+        plugin = Workbench.Plugins.scaffold!(path, local_sdk: options[:local_sdk] || false)
+        if Session.info(), do: call(Workbench.Plugins, :open, [plugin.path])
+        IO.puts("Created #{plugin.path}")
 
       :test ->
-        Workbench.Applications.test!(path)
+        Workbench.Plugins.test!(path)
 
       :package ->
-        IO.puts(Workbench.Applications.package!(path))
+        IO.puts(Workbench.Plugins.package!(path))
 
       :install ->
         monitor = watch()
@@ -87,7 +87,7 @@ defmodule Workbench.CLI do
               _ -> Mix.raise("Select --device")
             end
 
-        package = Workbench.Applications.package!(path, fn _ -> :ok end, :temporary)
+        package = Workbench.Plugins.package!(path, fn _ -> :ok end, :temporary)
 
         try do
           {:ok, id} = ok!(call(Scenarios.Runner, :install, [device, package]))

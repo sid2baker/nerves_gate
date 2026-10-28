@@ -13,7 +13,7 @@ defmodule Workbench.PluginBuild do
     try do
       entries =
         Enum.reduce(projects, %{}, fn project, entries ->
-          output = Workbench.Applications.package!(Path.expand(project, root), report, :temporary)
+          output = Workbench.Plugins.package!(Path.expand(project, root), report, :temporary)
 
           try do
             add!(output, stage, entries)

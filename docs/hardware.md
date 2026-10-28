@@ -20,7 +20,7 @@ the assignment is committed. Plugins remain stopped; starting and connecting are
 explicit separate operations. Busy/unknown cleanup or persistence outcomes block
 reuse. No forced takeover, automatic restart or command replay.
 
-Protected console, USB-management and Internet resources are not bus assignment
+Protected console, USB-management and Internet resources are not assignment
 candidates. Unsupported or absent ports cannot be assigned/enabled. A missing port's
 saved assignment remains visible; an operator may disable/unassign it without
 opening it. Missing plugin intent is retained, never silently reassigned.
@@ -42,7 +42,7 @@ intent is performed.
 ## Plugin-owned transport
 
 `NervesGateSDK.Hardware.resources/0` returns typed assigned/enabled allowlisted ports
-for the actual managed calling process. It accepts no app name or arbitrary path and
+for the actual managed calling process. It accepts no plugin name or arbitrary path and
 opens no handles. Presence and assignment do not imply connected equipment. Plugins
 supervise their own libraries and transport workers, not SDK claim/byte-I/O proxies.
 The former CAN/RS485 SDK transport APIs are removed without compatibility shims.
@@ -63,7 +63,7 @@ a pending network trial prevents assignment. No assignment starts traffic or sha
 
 ## Modbus TCP and RTU
 
-`modbus_plugin` 0.2.0 uses yamodbus for read-only holding/input register polling over
+`modbus_plugin` uses yamodbus for read-only holding/input register polling over
 TCP or RTU. Its page owns unit/register configuration, not Hardware. Startup and
 saving configuration open no connection. Connect/poll and disconnect are explicit.
 

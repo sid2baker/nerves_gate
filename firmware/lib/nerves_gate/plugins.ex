@@ -31,10 +31,10 @@ defmodule NervesGate.Plugins do
   def uninstall(app), do: command({:uninstall, app})
   defp command(request), do: GenServer.call(__MODULE__, request, @timeout)
 
-  @doc "Read-only current device prerequisites for a reviewed new-app install."
-  def install_review(%{"app" => app, "platform" => platform}) do
+  @doc "Read-only current device prerequisites for a reviewed new-plugin install."
+  def install_review(%{"plugin" => plugin, "platform" => platform}) do
     storage = Storage.commissioning()
-    {:ok, apps} = list()
+    {:ok, plugins} = list()
     info = NervesGate.System.maintenance_info()
 
     installed =
@@ -52,7 +52,7 @@ defmodule NervesGate.Plugins do
       sdk_version: to_string(Application.spec(:nerves_gate_sdk, :vsn)),
       storage_ready: storage.ready,
       card_id: storage.card_id,
-      installed: Enum.any?(apps, &(&1.app == app)),
+      installed: Enum.any?(plugins, &(&1.app == plugin)),
       platform_compatible:
         Enum.all?(platform, fn [name, version] -> installed[name] == version end)
     }
@@ -65,7 +65,7 @@ defmodule NervesGate.Plugins do
     _, _ -> %{outcome: "unknown"}
   after
     if is_binary(path) and
-         Regex.match?(~r|\A/tmp/nerves-gate-app-[a-f0-9]{32}/application\.ez\z|, path) do
+         Regex.match?(~r|\A/tmp/nerves-gate-plugin-[a-f0-9]{32}/plugin\.ez\z|, path) do
       File.rm(path)
       File.rmdir(Path.dirname(path))
     end
@@ -76,7 +76,7 @@ defmodule NervesGate.Plugins do
 
     if Enum.any?(
          apps,
-         &(&1.app == expected.app and &1.active_version == expected.version and
+         &(&1.app == expected.plugin and &1.active_version == expected.version and
              &1.sha256 == expected.sha256 and not &1.enabled and not &1.running?)
        ), do: "installed_stopped", else: "unknown"
   end
@@ -251,7 +251,7 @@ defmodule NervesGate.Plugins do
       {:reply,
        {:error,
         %{
-          code: "applications_installed",
+          code: "plugins_installed",
           message:
             "Application ownership is present or unresolved. Do not format or skip storage."
         }}, state}
@@ -266,10 +266,10 @@ defmodule NervesGate.Plugins do
   def handle_call(request, from, state) do
     cond do
       state.blocked && not recovery?(request, state.blocked_app) ->
-        {:reply, {:error, :applications_blocked}, state}
+        {:reply, {:error, :plugins_blocked}, state}
 
       not (state.restored? and state.available?) and not match?({:stop, _}, request) ->
-        {:reply, {:error, :applications_not_ready}, state}
+        {:reply, {:error, :plugins_not_ready}, state}
 
       true ->
         admit(request, from, state)
@@ -307,7 +307,7 @@ defmodule NervesGate.Plugins do
   defp worker_call(:check_storage, %{blocked: nil} = state),
     do: {:reply, storage_check(state.job), state}
 
-  defp worker_call(:check_storage, state), do: {:reply, {:error, :applications_blocked}, state}
+  defp worker_call(:check_storage, state), do: {:reply, {:error, :plugins_blocked}, state}
 
   defp worker_call({:storage_identity, identity}, state),
     do: {:reply, :ok, %{state | job: Map.put(state.job, :storage_identity, identity)}}
@@ -327,10 +327,10 @@ defmodule NervesGate.Plugins do
      }}
   end
 
-  defp worker_call({:bind, _}, state), do: {:reply, {:error, :applications_blocked}, state}
+  defp worker_call({:bind, _}, state), do: {:reply, {:error, :plugins_blocked}, state}
 
   defp worker_call({:checkpoint, _, _}, %{blocked: blocked} = state) when not is_nil(blocked),
-    do: {:reply, {:error, :applications_blocked}, state}
+    do: {:reply, {:error, :plugins_blocked}, state}
 
   defp worker_call({:checkpoint, app, activation}, state) do
     case storage_check(state.job) do
@@ -371,7 +371,7 @@ defmodule NervesGate.Plugins do
     end
   end
 
-  defp worker_call({:persist, _}, state), do: {:reply, {:error, :applications_blocked}, state}
+  defp worker_call({:persist, _}, state), do: {:reply, {:error, :plugins_blocked}, state}
 
   defp begin_work(request, from, state) do
     parent = self()
@@ -669,7 +669,7 @@ defmodule NervesGate.Plugins do
   end
 
   defp perform({operation, path}, state, context) when operation in [:install, :upgrade] do
-    with {:ok, _} <- Storage.apps_dir(),
+    with {:ok, _} <- Storage.plugins_dir(),
          {:ok, package, bytes, sha} <- Artifact.read(path),
          :ok <- context.(:check_storage) do
       install_request(operation, package, bytes, sha, state, context)
@@ -690,8 +690,7 @@ defmodule NervesGate.Plugins do
   defp perform({:unexpected_stop, app}, state, context) do
     case halt(app, state, context) do
       {:ok, next} ->
-        {{:error, :application_stopped},
-         %{next | errors: Map.put(next.errors, app, :application_stopped)}}
+        {{:error, :plugin_stopped}, %{next | errors: Map.put(next.errors, app, :plugin_stopped)}}
 
       {:error, reason, next} ->
         {{:error, reason}, next}
@@ -880,7 +879,7 @@ defmodule NervesGate.Plugins do
   defp uninstall_development(app, state, context) do
     case lifecycle(:stop, app, state, context) do
       {:ok, next} ->
-        with {:ok, root} <- Storage.apps_dir(),
+        with {:ok, root} <- Storage.plugins_dir(),
              :ok <- remove_artifacts(root, app, next.entries[app]),
              :ok <- context.({:persist, Map.delete(next.entries, app)}) do
           {:ok,
@@ -1053,12 +1052,12 @@ defmodule NervesGate.Plugins do
   defp reconcile(entries) do
     Enum.reduce_while(entries, :ok, fn {app, entry}, :ok ->
       if firmware_entry?(entry) or match?({:ok, _}, Storage.root()),
-        do: continue(reconcile_app(app, entry)),
+        do: continue(reconcile_plugin(app, entry)),
         else: {:cont, :ok}
     end)
   end
 
-  defp reconcile_app(app, entry) do
+  defp reconcile_plugin(app, entry) do
     Enum.reduce_while(entry.artifacts, :ok, fn {version, metadata}, :ok ->
       continue(reconcile_artifact(app, version, metadata))
     end)

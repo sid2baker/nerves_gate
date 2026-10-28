@@ -2,7 +2,7 @@
 
 Nerves Gate runtime and shared gateway UI for EC100 and owned x86_64 QEMU devices.
 Domains own named commands, admission, persistence and deadlines. `NervesGate`
-provides direct `status/0` and caller-owned `subscribe/0`; applications use the
+provides direct `status/0` and caller-owned `subscribe/0`; plugins use the
 separate typed SDK. Workstation tooling never substitutes fake hardware services.
 
 This is an independent Nerves project inside the workbench checkout. It reads the
@@ -32,4 +32,4 @@ rebuilt guests and an explicitly authorized runtime cutover.
 
 See the [domain API index](lib/nerves_gate.ex), [administrative API](../docs/action-api.md),
 [architecture](../docs/architecture.md), [development](../docs/development.md),
-[applications](../docs/applications.md) and [changelog](../CHANGELOG.md).
+[plugins](../docs/plugins.md) and [changelog](../CHANGELOG.md).

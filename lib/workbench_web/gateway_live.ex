@@ -383,7 +383,7 @@ defmodule WorkbenchWeb.GatewayLive do
     do: device.blocked or device.manual_action != nil or device.owner not in [nil, :manual]
 
   defp network_label(:internet), do: "Internet router"
-  defp network_label(:application), do: "Isolated application network"
+  defp network_label(:plugin), do: "Isolated plugin network"
   defp network_label(_), do: "Unknown"
 
   defp owner_label(%{blocked: true}), do: "Control blocked · Reset required"

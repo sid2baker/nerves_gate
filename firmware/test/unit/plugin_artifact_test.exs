@@ -1,4 +1,4 @@
-defmodule NervesGate.AppArtifactTest do
+defmodule NervesGate.PluginArtifactTest do
   use ExUnit.Case, async: false
   alias NervesGate.Plugins.{Artifact, Bundled, Loader, Metadata}
   alias NervesGateSDK.Package
@@ -147,7 +147,7 @@ defmodule NervesGate.AppArtifactTest do
     descriptor = Artifact.descriptor(artifact)
     other = %{active_version: "1.0.0", artifacts: %{"1.0.0" => descriptor}}
 
-    assert {:error, :application_conflict} =
+    assert {:error, :plugin_conflict} =
              Artifact.validate(package, %{"other_owner" => other}, "artifact_fixture", nil)
   end
 

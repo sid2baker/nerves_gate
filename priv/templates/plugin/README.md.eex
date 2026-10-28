@@ -1,12 +1,12 @@
 # <%= module %>
 
-An ordinary Nerves Gate SDK application. Open this directory in the developer
-platform's Applications panel, or run `mix dev /path/to/<%= app %>` from the
+An ordinary Nerves Gate SDK plugin. Open this directory in the developer
+workbench under Develop → Plugins, or run `mix dev /path/to/<%= app %>` from the
 platform checkout. The workbench can test, package and install it on an owned
 simulated device. No solution manifest is required.
 
 From this directory, run `mix test` for host unit tests and
-`MIX_ENV=prod mix nerves_gate.package` to package directly. Apps use the real
+`MIX_ENV=prod mix nerves_gate.package` to package directly. Plugins use the real
 firmware SDK backend; no fake hardware backend is included. SDK and platform
 libraries are never bundled.
 

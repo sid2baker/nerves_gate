@@ -53,7 +53,7 @@ defmodule NervesGate.Plugins.UI do
 
   defp await_closed(members) do
     monitors = Enum.map(members, &{&1, Process.monitor(&1)})
-    Enum.each(members, &send(&1, :app_ui_close))
+    Enum.each(members, &send(&1, :plugin_ui_close))
     deadline = System.monotonic_time(:millisecond) + 5_000
 
     result =

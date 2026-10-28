@@ -12,7 +12,7 @@ defmodule TailnetSubrouter do
   @doc "Explicitly advertise the configured, physically ready local subnet once."
   def enable, do: GenServer.call(__MODULE__, :enable, 75_000)
 
-  @doc "Withdraw the app's advertisement and release its interface. Incomplete cleanup is an error, not success."
+  @doc "Withdraw the plugin's advertisement and release its interface. Incomplete cleanup is an error, not success."
   def disable, do: GenServer.call(__MODULE__, :disable, 75_000)
   def status, do: GenServer.call(__MODULE__, :status)
   def interfaces, do: GenServer.call(__MODULE__, :interfaces)

@@ -88,7 +88,7 @@ defmodule NervesGate.Config do
          {:ok, right} <- validate_port(right),
          true <-
            is_nil(left) or is_nil(right) or left["role"] != right["role"] or
-             left["role"] == "application" do
+             left["role"] == "plugin" do
       {:ok, %{network | "eth0" => left, "eth1" => right}}
     else
       _ ->
@@ -104,7 +104,7 @@ defmodule NervesGate.Config do
 
   defp validate_port(nil), do: {:ok, nil}
 
-  defp validate_port(%{"role" => "application", "address" => nil} = port)
+  defp validate_port(%{"role" => "plugin", "address" => nil} = port)
        when map_size(port) == 2,
        do: {:ok, port}
 

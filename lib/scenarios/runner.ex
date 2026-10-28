@@ -2,7 +2,7 @@ defmodule Scenarios.Runner do
   @moduledoc """
   One admission owner for the multi-device simulator, shared by the site, CLI and CI.
 
-  A scenario run, application install or manual control holds its devices. Runs on different devices proceed in
+  A scenario run, plugin install or manual control holds its devices. Runs on different devices proceed in
   parallel; a scenario with `devices: :all` holds every device for its run.
   """
   use GenServer
@@ -20,7 +20,7 @@ defmodule Scenarios.Runner do
   def run(device, selection \\ "all"), do: GenServer.call(__MODULE__, {:run, device, selection})
   def mode(device, mode), do: GenServer.call(__MODULE__, {:mode, device, mode})
   def manual(device, action), do: GenServer.call(__MODULE__, {:manual, device, action})
-  # Application installs use the same exclusive admission and progress as scenarios.
+  # Plugin installs use the same exclusive admission and progress as scenarios.
   def install(device, path) do
     GenServer.call(__MODULE__, {:install, device, path})
   end
@@ -99,10 +99,10 @@ defmodule Scenarios.Runner do
          true <- is_binary(path) and Path.type(path) == :absolute and Path.extname(path) == ".ez" do
       owner = self()
       vm = state.handles[id]
-      row = %{id: "install", name: "Install application"}
+      row = %{id: "install", name: "Install plugin"}
 
       start_run(state, id, [id], "install", [row], fn run_id ->
-        install_application(owner, run_id, vm, path)
+        install_plugin(owner, run_id, vm, path)
       end)
     else
       false -> {:reply, {:error, "Expected an absolute path to an .ez package"}, state}
@@ -479,15 +479,15 @@ defmodule Scenarios.Runner do
     {:reply, {:ok, run_id}, publish(state)}
   end
 
-  defp install_application(owner, run_id, vm, path) do
+  defp install_plugin(owner, run_id, vm, path) do
     send(owner, {:progress, run_id, "install", %{status: :running}})
-    send(owner, {:phase, run_id, "Installing application"})
+    send(owner, {:phase, run_id, "Installing plugin"})
     started = System.monotonic_time(:millisecond)
 
     result =
-      case Scenarios.Apps.install(vm, path) do
+      case Scenarios.PluginInstall.install(vm, path) do
         {:ok, installed} -> %{status: :passed, detail: "Running #{installed}"}
-        {:error, _} -> %{status: :failed, detail: "Device rejected the application package"}
+        {:error, _} -> %{status: :failed, detail: "Device rejected the plugin package"}
       end
 
     result = Map.put(result, :milliseconds, System.monotonic_time(:millisecond) - started)
@@ -496,7 +496,7 @@ defmodule Scenarios.Runner do
   catch
     # A disconnected device or timed-out lifecycle call can still be running.
     # Preserve the reservation until this worker exits, then block the device.
-    _, _ -> exit(:application_install_uncertain)
+    _, _ -> exit(:plugin_install_uncertain)
   end
 
   defp device_view(vm) do

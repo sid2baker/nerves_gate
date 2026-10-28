@@ -76,7 +76,7 @@ credentials, Tailscale identity, network settings and shell history. It does not
 change GPT, firmware slots, U-Boot, its environment or hardware identity. Network
 access may disappear, so keep serial recovery.
 
-The adapter blocks SSH firmware uploads; stops application writers, Tailscale,
+The adapter blocks SSH firmware uploads; stops plugin writers, Tailscale,
 VintageNet, SSH, time persistence and RingLogger persistence; closes shell history;
 and unmounts every mount of the data partition. A busy mount aborts the reset; there
 is no lazy or forced unmount. After **any** admitted SSH upload, even a failed one,

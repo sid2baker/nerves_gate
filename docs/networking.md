@@ -2,30 +2,31 @@
 
 ## Port roles
 
-LAN 1 is `eth0`; LAN 2 is `eth1`. Hardware shows both, including the Internet uplink. On
+LAN 1 is `eth0`; LAN 2 is `eth1`. Hardware lists only free, non-Internet LANs. On
 a fresh gateway both try DHCP. A single verified Internet port is suggested first,
 otherwise a single linked, addressed port; ambiguous connections require a choice.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change when a cable disappears or moves. Use
 **Overview → Internet** for the uplink and **Hardware → LAN 1 / LAN 2** to enable
-or disable application access on independent, non-Internet ports. Enabling assigns
-no IPv4 address and starts no DHCP client, DNS, default route, bridge or advertisement.
-Disabling holds the independent link down. Existing local addresses are removed only
-by an explicitly saved change. Legacy equipment/joined configurations are rejected
-with migration guidance, never automatically converted or erased. Internet cannot take an
-enabled application port until application access is disabled.
+and exclusively assign a free, non-Internet port to one plugin. This uses the same
+reviewed, checked-stop assignment as RS485/CAN. Assignment sets no IPv4 address and
+starts no DHCP client, DNS, default route, bridge or advertisement. Disabling holds
+the independent link down. Existing local addresses are removed only by an explicitly
+saved change. Legacy equipment/joined configurations are rejected with migration
+guidance, never automatically converted or erased. An assigned LAN must be disabled
+and unassigned before it can become Internet.
 
-Applications request local addressing with `NervesGateSDK.Network.claim_local/3`.
+The assigned plugin requests local addressing with `NervesGateSDK.Network.claim_local/3`.
 The actual caller owns one isolated link; a claim never changes Internet/USB or
 persists its IP configuration. The first implementation admits one claim per gateway.
 Use the optional [Tailnet subnet-router plugin](../plugins/tailnet_subrouter/README.md)
 for explicit configuration and route advertisement. Unresolved claims block network
-changes until safe cleanup; no app is enabled by visiting Hardware.
+changes until safe cleanup; no plugin is enabled by visiting Hardware.
 
 The administrative API accepts independent ports only: at most one Internet port
-(DHCP or static IPv4), application-enabled ports without saved addresses, and
-disabled ports. Hardware has no local-addressing or topology editor. Saved legacy
+(DHCP or static IPv4), plugin-role ports without saved addresses, and
+disabled ports. The plugin role alone grants no plugin access. Hardware has no local-addressing or topology editor. Saved legacy
 `equipment` roles or `shared` mode make Network unavailable with migration guidance;
 they are never rewritten. VintageNet/daemon state may survive independently: inspect
 it using recovery SSH before a separately authorized migration. Keep USB available.
@@ -33,7 +34,7 @@ it using recovery SSH before a separately authorized migration. Keep USB availab
 Manual Internet addressing supports contiguous IPv4 masks (/1–/30) and up to three
 DNS servers. Suggestions use observed addressing or `192.168.1.2/24` via
 `192.168.1.1`, avoiding known other-port/USB subnets. They cannot prove an address
-is unused. Application addresses are requested transiently through leases, never
+is unused. Plugin addresses are requested transiently through leases, never
 saved as a second gateway-owned local network. No Ethernet DHCP server or Internet
 sharing is provided; USB is never part of Ethernet changes.
 
@@ -41,9 +42,9 @@ sharing is provided; USB is never part of Ethernet changes.
 
 **Overview → Internet** offers Ethernet, 4G, or Ethernet with 4G backup; settings
 without a source are Ethernet-only. 4G-only has no Ethernet Internet assignment;
-backup requires one. Other Ethernet interfaces may be enabled for applications,
-but only one application lease is admitted per gateway. Ethernet and USB never
-bridge to the modem, and application leases create no default routes or DNS.
+backup requires one. Other Ethernet interfaces may be assigned to plugins,
+but only one plugin lease is admitted per gateway. Ethernet and USB never
+bridge to the modem, and plugin leases create no default routes or DNS.
 
 VintageNet owns connectivity checks, route metrics, DNS and failover: working
 Ethernet beats working cellular, which beats Ethernet that only reaches its LAN.
@@ -101,7 +102,7 @@ configuration and its modem callback module. An unavailable/incompatible saved
 driver fails startup visibly, before opening the UART; it is not aliased, silently
 migrated or erased. Deployments with incompatible saved settings need a separately
 authorized reprovision/reset procedure. A build alone is not permission to erase
-network settings, app data or credentials.
+network settings, plugin data or credentials.
 
 The qualified EC100 driver keeps its existing AT controller available for SIM
 setup even while the Internet source is LAN. This control-only configuration has
@@ -276,8 +277,8 @@ RS485/CAN. All pages show the same active Internet trial and timer. Saving
 checks the draft's original configuration inside Network; stale drafts are rejected
 and must be reloaded.
 
-The administrative `Network.propose/2` API accepts independent Internet/application
-ports only. Network application-role metadata grants no access by itself: an enabled
+The administrative `Network.propose/2` API accepts independent Internet/plugin
+ports only. Network plugin-role metadata grants no access by itself: an enabled
 exclusive assignment is required before the actual managed plugin can claim a LAN.
 Assignment changes reserve Network admission while affected plugins stop and drain;
 an assigned LAN must be disabled and unassigned before becoming Internet. Network
@@ -297,7 +298,7 @@ Every other change, including first setup over Ethernet, has a 60-second window:
 **Keep changes**, **Restore previous settings**, or let the timer restore them.
 
 Readiness means the intended configuration, topology and manual addresses are in
-place; it needs no cable, DHCP lease or Internet. Observed Internet/application/USB
+place; it needs no cable, DHCP lease or Internet. Observed Internet/plugin/USB
 subnet overlaps block confirmation; later DHCP overlaps are shown as warnings.
 
 Cancellation, expiry or failed application restores the previous configuration.
@@ -378,14 +379,14 @@ headers are not trusted. HTTPS adds no sign-in; restrict tailnet access.
 
 ### Equipment sharing
 
-For application-owned access, use the optional Tailnet subnet-router app and its
+For plugin-owned access, use the optional Tailnet subnet-router plugin and its
 process-owned SDK lease. It journals ownership before advertisement, refuses a
 pre-existing advertisement and withdraws only its own route before removing the
 local address. Owner loss schedules cleanup; failed/uncertain cleanup retains the
 journal and blocks reuse. No write is replayed automatically. Approval remains
 unknown until verified externally; advertised does not mean approved or reachable.
 
-`NervesGate.Equipment.scan/label/share/unshare` are removed. Applications own
+`NervesGate.Equipment.scan/label/share/unshare` are removed. Plugins own
 equipment discovery/identity and explicit route requests through their leases.
 Approve the advertised route in Tailscale and restrict it in tailnet policy.
 Linux clients need `tailscale set --accept-routes`. This is routed access, not
@@ -397,7 +398,7 @@ observed conflicts.
 
 On merges the subnet into the advertisement list; Off removes only that subnet,
 even offline. Other routes, preferences, Serve settings, enrollment and running
-intent are preserved. Read/merge/write is serialized only within this application,
+intent are preserved. Read/merge/write is serialized only within this plugin,
 so do not edit routes concurrently through another LocalAPI client.
 
 Route operations hold Network's guard. Any advertised route, including external
@@ -443,12 +444,12 @@ explicitly with `Node.connect(:"nerves_gate@100.64.0.2")`.
 Run Livebook on another computer as an **Attached node** with the shown name and
 cookie, using the same Elixir minor and a compatible OTP (Elixir 1.20 / OTP 29).
 Attached runtimes cannot install dependencies, so add libraries to firmware.
-Permanent equipment sessions belong in their owning application's supervision tree, not a notebook.
+Permanent equipment sessions belong in their owning plugin's supervision tree, not a notebook.
 
 ## Observations
 
 Internet status comes only from permitted interfaces, never USB or the global best
-connection. Unconfigured or application-only networking does not require Internet.
+connection. Unconfigured or plugin-only networking does not require Internet.
 Unknown observations are not healthy, and Tailscale Running does not prove Internet.
 
 The [UI projection](architecture.md#ui-projection) only distributes sanitized

@@ -22,7 +22,7 @@ defmodule TailnetSubrouter.UITest do
           {:ok,
            [
              port("eth0", internet?: true, addresses: ["192.168.1.2"]),
-             port("eth1", application_enabled?: true)
+             port("eth1", plugin_enabled?: true)
            ]}
       )
 
@@ -35,11 +35,11 @@ defmodule TailnetSubrouter.UITest do
 
   test "claimed, addressed and operator-disabled ports cannot be selected" do
     for {attributes, reason} <- [
-          {[claimed?: true, application_enabled?: true], "Already claimed"},
-          {[application_enabled?: true, addresses: ["192.168.50.2"]], "Already has an address"},
+          {[claimed?: true, plugin_enabled?: true], "Already claimed"},
+          {[plugin_enabled?: true, addresses: ["192.168.50.2"]], "Already has an address"},
           {[], "Disabled under Hardware"},
-          {[application_enabled?: true, assigned_plugin: nil], "Not assigned to this plugin"},
-          {[application_enabled?: true, assigned_plugin: "another_plugin"],
+          {[plugin_enabled?: true, assigned_plugin: nil], "Not assigned to this plugin"},
+          {[plugin_enabled?: true, assigned_plugin: "another_plugin"],
            "Not assigned to this plugin"}
         ] do
       html = render_component(UI, id: "subrouter", interfaces: {:ok, [port("eth1", attributes)]})
@@ -59,7 +59,7 @@ defmodule TailnetSubrouter.UITest do
   end
 
   test "editing a selection updates eligibility without configuring the interface" do
-    interfaces = {:ok, [port("eth0", internet?: true), port("eth1", application_enabled?: true)]}
+    interfaces = {:ok, [port("eth0", internet?: true), port("eth1", plugin_enabled?: true)]}
 
     {:ok, socket} =
       UI.update(%{id: "subrouter", interfaces: interfaces}, %Phoenix.LiveView.Socket{})

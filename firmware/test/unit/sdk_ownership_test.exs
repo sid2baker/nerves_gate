@@ -135,7 +135,7 @@ defmodule NervesGate.SDKOwnershipTest do
     manager = start_supervised!(NervesGate.Plugins)
     :erlang.trace(manager, true, [:receive])
     caller = self()
-    assert {:error, :application_not_running} = NervesGateSDK.Hardware.resources()
+    assert {:error, :plugin_not_running} = NervesGateSDK.Hardware.resources()
     assert_receive {:trace, ^manager, :receive, {:"$gen_call", {^caller, _}, :resources}}
   end
 
@@ -143,14 +143,14 @@ defmodule NervesGate.SDKOwnershipTest do
     Owner.init()
     state = %{assignment_error: nil, blocked: nil}
 
-    assert {:reply, {:error, :application_not_running}, ^state} =
+    assert {:reply, {:error, :plugin_not_running}, ^state} =
              NervesGate.Plugins.handle_call(
                {:authorize_port, self(), "eth1"},
                {self(), make_ref()},
                state
              )
 
-    assert {:reply, {:error, :application_not_running}, ^state} =
+    assert {:reply, {:error, :plugin_not_running}, ^state} =
              NervesGate.Plugins.handle_call(:resources, {self(), make_ref()}, state)
   end
 end

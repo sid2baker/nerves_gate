@@ -21,11 +21,11 @@
   use external tools for actual firmware, networking, QEMU and Git operations.
 - Root is `:nerves_gate_workbench`, not an umbrella. `firmware/`, `sdk/` and
   `systems/*` remain independent projects with distinct targets and releases.
-- `apps/`: optional first-party ordinary Mix applications, independently packaged
-  and tested. Never install, start or enable them automatically. Applications own
+- `plugins/`: firmware-selected first-party plugin projects, independently tested
+  and packaged. Never start, enable or assign them automatically. Plugins own
   equipment identities, addressing requirements, protocol sessions and use cases.
 - `lib/workbench/`, `lib/workbench_web/`, `priv/workbench/`: host sessions, builds,
-  apps, discovery, physical tools and workbench UI. Ordinary tasks start no session.
+  plugin projects, gateway directory, physical tools and workbench UI. Ordinary tasks start no session.
 - `lib/simulator.ex`, `lib/simulator/`: locally supervised simulator and owned disposable
   QEMU processes, disks and private networks. Never attach controls to arbitrary VMs.
 - `lib/scenarios.ex`, `lib/scenarios/`: one catalogue, runner and real scenarios.
@@ -51,14 +51,14 @@
   Membership resolution uses Plugins-owned generation bindings; assignment queries
   run in its responsive controller. Serial/CAN handles belong to plugin supervision,
   not SDK transport proxies. Assignment changes require checked whole-plugin stop.
-  Trusted apps share the BEAM; the SDK is not a sandbox.
+  Trusted plugins share the BEAM; the SDK is not a sandbox.
 - `Plugins.Artifact` owns immutable archive/content verification; `Plugins.Loader` owns
   verified code loading and checked cleanup. Plugins owns serialized admission,
   protected generation bindings and schema-2 metadata. Never replace a registered
   version, backfill a digest, import old metadata or bypass blocked cleanup.
 - Plugin pages are optional verified LiveComponents under `/plugins/:app`, not dynamically
   recompiled routers or separate servers. Gateway LiveViews are not SDK resource
-  owners: call the app's supervised command process. Checked unload closes all app
+  owners: call the plugin's supervised command process. Checked unload closes all plugin
   UI processes before removing code; never bypass busy-session cleanup.
 - Firmware plugins are explicitly selected in `plugins/selection.exs`, built in
   isolated host processes and discovered from a verified read-only inventory.
@@ -84,8 +84,8 @@
 ## Development and validation
 
 - Run commands at the root. `mix setup` prepares tools/artifacts without building
-  device firmware or booting devices. Apps are ordinary external Mix projects.
-- The user owns `mix dev [APP_DIRECTORY]`. Do not launch/stop that session or
+  device firmware or booting devices. Plugins are ordinary external Mix projects.
+- The user owns `mix dev [PLUGIN_DIRECTORY]`. Do not launch/stop that session or
   boot/reset devices without authorization. Ask for an available session if needed.
 - Focused checks use `mix test.qemu --only ID [--device ID]` against that session.
   Never use `--ci` to launch another bench without explicit authorization.
@@ -93,10 +93,10 @@
   `test/web/` own policy/codecs/gateway checks; SDK tests own its typed contract.
   Extend real scenarios instead of adding a hardware-mock suite or fake SDK backend.
 - Repository host checks use native `Mix.Project.in_project/4` with state restoration.
-  Target compilation and external app builds require isolated supervised OS
+  Target compilation and external plugin builds require isolated supervised OS
   processes, never target application compilation in the workbench VM.
 - Run root `mix check` before commits: host tests, compile/format, firmware JS,
-  credo, clone and architecture/smell checks, SDK tests and starter-app tests.
+  credo, clone and architecture/smell checks, SDK tests, generated-plugin and plugin tests.
   It boots no devices and excludes dialyzer and target builds. Also run
   `git diff --check`. Never weaken `--check-locked`, deadlines or fault coverage.
 - Full `mix ci` is expensive and belongs to the user unless separately requested.
@@ -124,10 +124,10 @@
 - Protected CI owns publishing credentials; never put them in the workbench VM.
   Platform publication requires green routine CI and separate QEMU integration on
   the exact tagged main-branch commit. SDK development advances its own version;
-  local starter apps may require that prerelease, never pretend a published SDK
+  locally generated plugins may require that prerelease, never pretend a published SDK
   contains unreleased capabilities. Firmware records its commit in `source_revision`.
 - `Workbench.Gateways` is the sole verified gateway directory. Inspection and
-  application transfer use distribution; firmware upload uses strictly verified
+  plugin transfer use distribution; firmware upload uses strictly verified
   `Workbench.SSH`. Device maintenance logic is compiled, never shipped as source strings. Older firmware must be updated through an explicitly authorized
   external procedure; do not retain a compatibility fallback.
 - Legacy equipment/joined network settings are rejected, not rewritten. Explicit
@@ -137,5 +137,5 @@
 
 - [Architecture](docs/architecture.md)
 - [Development](docs/development.md)
-- [App development](docs/app-development.md)
+- [Plugin development](docs/plugin-development.md)
 - [Domain API index](firmware/lib/nerves_gate.ex)

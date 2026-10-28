@@ -1,4 +1,4 @@
-defmodule NervesGate.AppUITest do
+defmodule NervesGate.PluginUITest do
   use ExUnit.Case, async: false
   alias NervesGate.Plugins
   alias NervesGate.Plugins.{Owner, UI}
@@ -73,7 +73,7 @@ defmodule NervesGate.AppUITest do
           pid =
             spawn(fn ->
               receive do
-                :app_ui_close -> :ok
+                :plugin_ui_close -> :ok
               end
             end)
 

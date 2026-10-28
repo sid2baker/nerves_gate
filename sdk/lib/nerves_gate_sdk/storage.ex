@@ -1,9 +1,9 @@
 defmodule NervesGateSDK.Storage do
-  @moduledoc "SD storage observations and application-owned data directories."
+  @moduledoc "SD storage observations and plugin-owned data directories."
   alias NervesGateSDK.Backend
 
   defmodule Status do
-    @moduledoc "Availability of application storage. Platform state does not require an SD card."
+    @moduledoc "Availability of plugin storage. Platform state does not require an SD card."
     @enforce_keys [:available?]
     defstruct [:available?, :free_bytes]
     @type t :: %__MODULE__{available?: boolean(), free_bytes: non_neg_integer() | nil}

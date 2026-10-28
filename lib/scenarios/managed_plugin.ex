@@ -1,9 +1,9 @@
-defmodule Scenarios.ManagedApp do
-  @moduledoc "Real SDK fixture applications on reserved, disposable QEMU storage. Never a hardware/backend substitute."
+defmodule Scenarios.ManagedPlugin do
+  @moduledoc "Real SDK fixture plugins on reserved, disposable QEMU storage. Never a hardware/backend substitute."
   import ExUnit.Assertions
   alias Scenarios.Device
 
-  def with_app(vm, fun, opts \\ []) do
+  def with_plugin(vm, fun, opts \\ []) do
     ports = Keyword.get(opts, :assigned_ports, [])
     prepare_storage(vm)
     directory = Path.join(System.tmp_dir!(), "gate-managed-#{nonce()}")
@@ -12,27 +12,27 @@ defmodule Scenarios.ManagedApp do
     try do
       path = build!(directory, "1.0.0")
       :ok = Device.rpc(vm, File, :write, [guest, File.read!(path)])
-      assert {:ok, _} = apps(vm, :install, [guest])
+      assert {:ok, _} = plugins(vm, :install, [guest])
 
       for port <- ports,
-          do: assert(:ok == apps(vm, :assign_port, [port, true, "managed_fixture", true]))
+          do: assert(:ok == plugins(vm, :assign_port, [port, true, "managed_fixture", true]))
 
-      assert :ok = apps(vm, :start, [:managed_fixture])
+      assert :ok = plugins(vm, :start, [:managed_fixture])
       client = main(vm)
       fun.(client)
     after
       # Device.rpc prevents cleanup writes when a previous control result was lost.
-      case apps(vm, :list, []) do
+      case plugins(vm, :list, []) do
         {:ok, entries} ->
           if Enum.any?(entries, &(&1.app == "managed_fixture")),
-            do: assert(:ok == apps(vm, :uninstall, [:managed_fixture]))
+            do: assert(:ok == plugins(vm, :uninstall, [:managed_fixture]))
 
         error ->
-          flunk("Fixture cleanup requires known application state: #{inspect(error)}")
+          flunk("Fixture cleanup requires known plugin state: #{inspect(error)}")
       end
 
       for port <- ports,
-          do: assert(:ok == apps(vm, :assign_port, [port, false, nil, true]))
+          do: assert(:ok == plugins(vm, :assign_port, [port, false, nil, true]))
 
       Device.rpc(vm, File, :rm, [guest])
       File.rm_rf!(directory)
@@ -42,7 +42,7 @@ defmodule Scenarios.ManagedApp do
   def prepare_storage(%{fixture: {:qemu, handle}} = vm) do
     true = vm.node == handle.node
     Scenarios.Qemu.network_stats(handle)
-    assert {:ok, plugins} = apps(vm, :list, [])
+    assert {:ok, plugins} = plugins(vm, :list, [])
     assert Enum.all?(plugins, & &1.bundled?)
     storage = Device.rpc(vm, NervesGate.Storage, :commissioning)
     assert storage.present
@@ -52,7 +52,7 @@ defmodule Scenarios.ManagedApp do
       assert :ok = Device.rpc(vm, NervesGate.Storage, :setup, [:use, storage.card_id])
     end
 
-    Device.await(vm, "disposable application storage and manager ready", fn _ ->
+    Device.await(vm, "disposable plugin storage and manager ready", fn _ ->
       identity = Device.rpc(vm, NervesGate.Storage, :identity)
       state = Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
       match?({:ok, _}, identity) and state.restored? and state.job == nil and state.blocked == nil
@@ -91,7 +91,7 @@ defmodule Scenarios.ManagedApp do
       Path.join(project, "lib/managed_fixture.ex")
     )
 
-    Workbench.Applications.package!(project)
+    Workbench.Plugins.package!(project)
   end
 
   def upload(vm, directory, version, options \\ []) do
@@ -101,7 +101,7 @@ defmodule Scenarios.ManagedApp do
     guest
   end
 
-  def apps(vm, function, args), do: Device.rpc(vm, NervesGate.Plugins, function, args, 200_000)
+  def plugins(vm, function, args), do: Device.rpc(vm, NervesGate.Plugins, function, args, 200_000)
   def main(vm), do: Device.rpc(vm, Process, :whereis, [ManagedFixture.Main])
 
   def client(vm) do

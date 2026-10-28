@@ -251,7 +251,7 @@ defmodule NervesGate.Storage do
        %{
          code: "storage_filesystem",
          message:
-           "This card cannot be used as-is. Application storage needs ext4; formatting erases all existing card data."
+           "This card cannot be used as-is. Plugin storage needs ext4; formatting erases all existing card data."
        }}
 
   defp prepare(action, id) do
@@ -289,7 +289,7 @@ defmodule NervesGate.Storage do
          }}
 
       tool ->
-        case MuonTrap.cmd(tool, ["-F", "-t", "ext4", "-L", "apps", device()],
+        case MuonTrap.cmd(tool, ["-F", "-t", "ext4", "-L", "plugins", device()],
                timeout: 120_000,
                stderr_to_stdout: true
              ) do
@@ -442,8 +442,8 @@ defmodule NervesGate.Storage do
          do: File.rename(file <> ".tmp", file)
   end
 
-  defp device, do: NervesGate.Board.get(:apps_device)
-  defp mountpoint, do: Application.get_env(:nerves_gate, :apps_mount, "/mnt/apps")
+  defp device, do: NervesGate.Board.get(:plugins_device)
+  defp mountpoint, do: Application.get_env(:nerves_gate, :plugins_mount, "/mnt/plugins")
 
   defp root_mount, do: Enum.find(mounts(), &(&1.mount_point == mountpoint()))
 
@@ -513,8 +513,8 @@ defmodule NervesGate.Storage do
   end
 
   @doc false
-  def apps_dir do
-    with {:ok, root} <- root(), do: directory(root, "apps")
+  def plugins_dir do
+    with {:ok, root} <- root(), do: directory(root, "plugins")
   end
 
   @doc false

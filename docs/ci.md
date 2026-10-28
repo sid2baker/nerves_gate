@@ -8,7 +8,7 @@ Routine CI never boots a device. Required checks:
   that native ports (`if_monitor`, `uevent`) use the musl loader.
 - **firmware-ec100:** separate dev/prod builds using the locked, fingerprinted system;
   no flashing or booting. Only verified downloads are cached, never native ports.
-- **applications:** create, test and package two external apps against the local SDK,
+- **plugins:** create, test and package two generated plugins against the local SDK,
   plus both selected plugin test suites (`plugins/tailnet_subrouter` and `plugins/modbus`).
 
 `qemu.yml` is dispatched manually or runs weekly on Monday at 03:00 UTC on main. It runs `mix setup` and `mix test.qemu --ci` on
@@ -23,7 +23,7 @@ artifacts have their own workflows. Neither runs from routine CI. See
 ## Local gates and project scope
 
 Run `mix check` at the root before commits. It runs compile/format/tests for root
-and SDK, tests the first-party starter, builds shared assets, and runs firmware
+and SDK, tests a generated plugin and both bundled plugins, builds shared assets, and runs firmware
 compile/format/tests, JS checks, strict credo, zero-clone and architecture/smell
 checks. No session or device starts. `mix ci` adds firmware dialyzer and belongs to
 the operator; target builds are separate CI jobs. Passing `mix check` is not a
@@ -34,7 +34,7 @@ workers, admission and persistence. Root changes are checked by host workflow/UI
 release-policy and native-build contract tests; SDK changes by typed API and
 package-validation tests. Neither currently has a dialyzer/credo gate. This is an
 explicit scope difference, not equal static-analysis coverage; shared firmware
-code is still checked under its owning project. Starter apps are ordinary isolated
+code is still checked under its owning project. Generated plugins are ordinary isolated
 Mix projects, never loaded into the workbench VM to run their tests.
 
 Platform publishing requires successful `ci.yml` and `qemu.yml` main-branch runs on

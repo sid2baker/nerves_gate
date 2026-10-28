@@ -8,7 +8,7 @@ equipment semantics. No custom adapter framework or separate web server is neede
 
 `plugins/selection.exs` selects `plugins/tailnet_subrouter` and `plugins/modbus`.
 Each project declares its dependencies normally. The Modbus plugin declares
-`{:yamodbus, "== 0.1.0"}`; its private library code is bundled with it. Modbus 0.2.0
+`{:yamodbus, "== 0.1.0"}`; its private library code is bundled with it. It
 also declares `circuits_uart` 1.7.0, supplied natively by firmware and never included
 in the pure-BEAM plugin archive. LiveView is a
 direct dependency only of plugins that provide UI. Keep shared library versions
@@ -61,7 +61,7 @@ Use the OTP application callback and supervised workers normally. An optional
 `nerves_gate_health_check` MFA verifies startup, not external device readiness.
 An optional `nerves_gate_ui` module declares a verified LiveComponent. UI commands
 must call the plugin's supervised API; the hosting LiveView cannot own SDK claims.
-See [runtime](applications.md) for dependency ownership and cleanup guarantees.
+See [runtime](plugins.md) for dependency ownership and cleanup guarantees.
 
 Read-only hardware observations can be queried through the SDK. Protocol clients
 should use normal libraries/TCP. Claim exclusive shared resources only where needed:
@@ -73,14 +73,14 @@ a TCP connection does not claim or reconfigure the Internet interface. See [hard
 
 ## Disposable development installs
 
-The workbench's application-project tools also support creating/testing/packaging
+The workbench's plugin-project tools also support creating/testing/packaging
 independent OTP projects and installing development artifacts on commissioned QEMU
-storage. `mix app.new`, `app.test`, `app.package` and `app.install` refer to ordinary
+storage. `mix plugin.new`, `plugin.test`, `plugin.package` and `plugin.install` refer to ordinary
 OTP development projects, not an app store. Build processes remain isolated from
 the workbench VM. Existing immutable output/version conflicts are errors.
 
 Physical development installs require review and typed-address confirmation through
-`Workbench.Jobs` on the application page. Transfer uses distribution:
+`Workbench.Jobs` on the plugin's **Develop → Plugins** page. Transfer uses distribution:
 verify device identity, package hash, boot/storage identity and compatibility; confirm
 once, install stopped, then inspect state. They cannot replace firmware-owned plugins.
 Unknown outcomes are never automatically replayed. Do not use this workflow to bypass

@@ -5,7 +5,7 @@ and Tailscale services; it starts no web server or separate Tailscale daemon.
 
 `plugins/selection.exs` includes this project. Root `mix firmware` builds its pure-BEAM
 artifact and read-only inventory. Add/update/remove plugin code through firmware,
-not a GitHub app release or runtime install. The plugin manager starts it disabled;
+not a separate release or runtime install. The plugin manager starts it disabled;
 no Ethernet configuration or route advertisement occurs on startup or page load.
 
 ## Use
@@ -47,6 +47,6 @@ cd plugins/tailnet_subrouter
 mix test
 ```
 
-See [plugin development](../../docs/app-development.md) and
-[runtime](../../docs/applications.md). Native dependencies and automatic sharing
+See [plugin development](../../docs/plugin-development.md) and
+[runtime](../../docs/plugins.md). Native dependencies and automatic sharing
 restoration are outside this plugin's contract.

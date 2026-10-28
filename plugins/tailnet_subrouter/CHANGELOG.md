@@ -4,6 +4,7 @@
 
 ### Breaking changes
 
+- Version 0.1.5 uses the renamed SDK `plugin_enabled?` interface field and plugin wording.
 - Version 0.1.4 requires exclusive Ethernet assignment under Hardware. The interface picker rejects unassigned and other-plugin LANs; claiming still uses the supervised plugin owner and checked platform cleanup.
 
 ### Compatibility

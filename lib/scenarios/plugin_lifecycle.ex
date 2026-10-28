@@ -1,11 +1,11 @@
-defmodule Scenarios.AppLifecycle do
+defmodule Scenarios.PluginLifecycle do
   @moduledoc "Lifecycle fault qualification using real packages, OTP, SD storage and owned QEMU."
   import ExUnit.Assertions
-  alias Scenarios.{Device, ManagedApp}
+  alias Scenarios.{Device, ManagedPlugin}
   @app :managed_fixture
 
   def run(vm) do
-    ManagedApp.prepare_storage(vm)
+    ManagedPlugin.prepare_storage(vm)
     token = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
     metadata = "/tmp/lifecycle-metadata-#{token}/plugins.term"
     previous = Device.rpc(vm, Application, :get_env, [:nerves_gate, :plugins_metadata])
@@ -17,11 +17,11 @@ defmodule Scenarios.AppLifecycle do
       restart_manager(vm)
       qualify(vm, directory)
     after
-      {:ok, entries} = ManagedApp.apps(vm, :list, [])
+      {:ok, entries} = ManagedPlugin.plugins(vm, :list, [])
 
       if Enum.any?(entries, &(&1.app == "managed_fixture")) do
-        assert :ok = ManagedApp.apps(vm, :stop, [@app])
-        assert :ok = ManagedApp.apps(vm, :uninstall, [@app])
+        assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
+        assert :ok = ManagedPlugin.plugins(vm, :uninstall, [@app])
       end
 
       assert Device.rpc(vm, :code, :get_path) == paths
@@ -50,25 +50,31 @@ defmodule Scenarios.AppLifecycle do
 
     packages =
       Map.new(versions, fn {version, options} ->
-        {version, ManagedApp.upload(vm, directory, version, options)}
+        {version, ManagedPlugin.upload(vm, directory, version, options)}
       end)
 
     try do
-      assert {:ok, _} = ManagedApp.apps(vm, :install, [packages["2.0.0"]])
-      assert :ok = ManagedApp.apps(vm, :start, [@app])
+      assert {:ok, _} = ManagedPlugin.plugins(vm, :install, [packages["2.0.0"]])
+      assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
       assert_events(vm)
       assert_generation_cleanup(vm)
-      assert :ok = ManagedApp.apps(vm, :stop, [@app])
-      assert {:error, {:rolled_back, _}} = ManagedApp.apps(vm, :upgrade, [packages["2.2.0"]])
+      assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
+
+      assert {:error, {:rolled_back, _}} =
+               ManagedPlugin.plugins(vm, :upgrade, [packages["2.2.0"]])
+
       assert %{active_version: "2.0.0", running?: false, enabled: false} = active(vm)
       assert_unloaded(vm)
-      assert :ok = ManagedApp.apps(vm, :start, [@app])
-      assert :ok = ManagedApp.apps(vm, :upgrade, [packages["2.1.0"]])
+      assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
+      assert :ok = ManagedPlugin.plugins(vm, :upgrade, [packages["2.1.0"]])
       assert active(vm).active_version == "2.1.0"
 
       for version <- ~w(2.2.0 2.3.0 2.4.0 2.5.0 2.6.0) do
         generation = active(vm).generation
-        assert {:error, {:rolled_back, _}} = ManagedApp.apps(vm, :upgrade, [packages[version]])
+
+        assert {:error, {:rolled_back, _}} =
+                 ManagedPlugin.plugins(vm, :upgrade, [packages[version]])
+
         assert %{active_version: "2.1.0", running?: true} = active(vm)
         assert active(vm).generation > generation
       end
@@ -79,10 +85,10 @@ defmodule Scenarios.AppLifecycle do
       assert_failed_rollback(vm, directory)
 
       for _ <- 1..3 do
-        assert :ok = ManagedApp.apps(vm, :rollback, [@app])
-        assert :ok = ManagedApp.apps(vm, :stop, [@app])
+        assert :ok = ManagedPlugin.plugins(vm, :rollback, [@app])
+        assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
         assert_unloaded(vm)
-        assert :ok = ManagedApp.apps(vm, :start, [@app])
+        assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
       end
 
       restart_manager(vm)
@@ -95,13 +101,13 @@ defmodule Scenarios.AppLifecycle do
   end
 
   defp assert_events(vm) do
-    client = ManagedApp.main(vm)
+    client = ManagedPlugin.main(vm)
 
     assert {:ok, _} =
-             ManagedApp.call(vm, client, NervesGateSDK.Storage, :data_dir, [:managed_fixture])
+             ManagedPlugin.call(vm, client, NervesGateSDK.Storage, :data_dir, [:managed_fixture])
 
     assert {:error, :not_owner} =
-             ManagedApp.call(vm, client, NervesGateSDK.Storage, :data_dir, [:another_app])
+             ManagedPlugin.call(vm, client, NervesGateSDK.Storage, :data_dir, [:another_app])
 
     Device.await(vm, "managed startup callback receives typed SDK events", fn _ ->
       events = Device.rpc(vm, GenServer, :call, [client, :events])
@@ -115,31 +121,39 @@ defmodule Scenarios.AppLifecycle do
     Scenarios.Device.save(
       vm,
       Map.put(Scenarios.Device.settings("eth0"), "eth1", %{
-        "role" => "application",
+        "role" => "plugin",
         "address" => nil
       })
     )
 
-    client = ManagedApp.main(vm)
+    client = ManagedPlugin.main(vm)
     {:ok, scope} = Device.rpc(vm, NervesGate.Plugins.Owner, :resolve, [client])
 
     assert {:ok, ref} =
-             ManagedApp.call(vm, client, NervesGateSDK.Network, :claim_local, [
+             ManagedPlugin.call(vm, client, NervesGateSDK.Network, :claim_local, [
                "eth1",
                "10.44.0.2",
                24
              ])
 
-    assert :ok = ManagedApp.apps(vm, :restart, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :restart, [@app])
     refute Device.rpc(vm, NervesGate.Plugins.Owner, :valid?, [scope])
     refute Device.rpc(vm, :erlang, :is_process_alive, [client])
     assert Device.status(vm).network.local == nil
 
     assert {:error, "not_owner"} =
-             ManagedApp.call(vm, ManagedApp.main(vm), NervesGateSDK.Network, :release_local, [ref])
+             ManagedPlugin.call(
+               vm,
+               ManagedPlugin.main(vm),
+               NervesGateSDK.Network,
+               :release_local,
+               [ref]
+             )
 
     assert :ok =
-             ManagedApp.call(vm, ManagedApp.main(vm), NervesGateSDK.Events, :subscribe, [:network])
+             ManagedPlugin.call(vm, ManagedPlugin.main(vm), NervesGateSDK.Events, :subscribe, [
+               :network
+             ])
 
     assert_inflight_cleanup(vm)
 
@@ -151,13 +165,13 @@ defmodule Scenarios.AppLifecycle do
 
   defp assert_inflight_cleanup(vm) do
     interface = {:via, Registry, {VintageNet.Interface.Registry, "eth1"}}
-    client = ManagedApp.main(vm)
+    client = ManagedPlugin.main(vm)
     assert :ok = Device.rpc(vm, :sys, :suspend, [interface])
 
     task =
       Task.async(fn ->
         try do
-          ManagedApp.call(vm, client, NervesGateSDK.Network, :claim_local, [
+          ManagedPlugin.call(vm, client, NervesGateSDK.Network, :claim_local, [
             "eth1",
             "10.45.0.2",
             24
@@ -172,8 +186,8 @@ defmodule Scenarios.AppLifecycle do
         status.network.local != nil and status.network.local.phase == :configuring
       end)
 
-      assert {:error, _} = ManagedApp.apps(vm, :stop, [@app])
-      assert {:error, :applications_blocked} = ManagedApp.apps(vm, :start, [@app])
+      assert {:error, _} = ManagedPlugin.plugins(vm, :stop, [@app])
+      assert {:error, :plugins_blocked} = ManagedPlugin.plugins(vm, :start, [@app])
     after
       Device.rpc(vm, :sys, :resume, [interface])
       Task.yield(task, 30_000) || Task.shutdown(task, :brutal_kill)
@@ -186,15 +200,15 @@ defmodule Scenarios.AppLifecycle do
       75_000
     )
 
-    assert :ok = ManagedApp.apps(vm, :stop, [@app])
-    assert :ok = ManagedApp.apps(vm, :start, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
   end
 
   defp assert_controller_interruption(vm, directory) do
-    package = ManagedApp.upload(vm, directory, "2.7.0", health: :hold)
+    package = ManagedPlugin.upload(vm, directory, "2.7.0", health: :hold)
 
     try do
-      assert {:ok, _} = ManagedApp.apps(vm, :install, [package])
+      assert {:ok, _} = ManagedPlugin.plugins(vm, :install, [package])
       request = :gen_server.send_request({NervesGate.Plugins, vm.node}, {:upgrade, package})
 
       Device.await(vm, "candidate health phase before controller interruption", fn _ ->
@@ -214,10 +228,10 @@ defmodule Scenarios.AppLifecycle do
   end
 
   defp assert_immutable(vm, directory) do
-    package = ManagedApp.upload(vm, directory, "2.0.0", health: :fail)
+    package = ManagedPlugin.upload(vm, directory, "2.0.0", health: :fail)
 
     try do
-      assert {:error, :artifact_conflict} = ManagedApp.apps(vm, :install, [package])
+      assert {:error, :artifact_conflict} = ManagedPlugin.plugins(vm, :install, [package])
       assert active(vm).active_version == "2.1.0"
     after
       Device.rpc(vm, File, :rm, [package])
@@ -227,12 +241,12 @@ defmodule Scenarios.AppLifecycle do
   defp assert_corrupt_previous(vm) do
     archive = artifact(vm, "2.0.0", "package.ez")
     {:ok, bytes} = Device.rpc(vm, File, :read, [archive])
-    client = ManagedApp.main(vm)
+    client = ManagedPlugin.main(vm)
 
     try do
       assert :ok = Device.rpc(vm, File, :write, [archive, "modified archive"])
-      assert {:error, :artifact_modified} = ManagedApp.apps(vm, :rollback, [@app])
-      assert ManagedApp.main(vm) == client
+      assert {:error, :artifact_modified} = ManagedPlugin.plugins(vm, :rollback, [@app])
+      assert ManagedPlugin.main(vm) == client
       assert active(vm).running?
     after
       Device.rpc(vm, File, :write, [archive, bytes])
@@ -242,33 +256,33 @@ defmodule Scenarios.AppLifecycle do
   defp assert_failed_rollback(vm, directory) do
     archive = artifact(vm, active(vm).active_version, "package.ez")
     {:ok, bytes} = Device.rpc(vm, File, :read, [archive])
-    package = ManagedApp.upload(vm, directory, "2.8.0", health: :corrupt_previous)
+    package = ManagedPlugin.upload(vm, directory, "2.8.0", health: :corrupt_previous)
 
     try do
       assert {:error, {:rollback_failed, _, :artifact_modified}} =
-               ManagedApp.apps(vm, :upgrade, [package])
+               ManagedPlugin.plugins(vm, :upgrade, [package])
 
-      assert {:error, :applications_blocked} = ManagedApp.apps(vm, :start, [@app])
+      assert {:error, :plugins_blocked} = ManagedPlugin.plugins(vm, :start, [@app])
       refute active(vm).running?
     after
       Device.rpc(vm, File, :write, [archive, bytes])
       Device.rpc(vm, File, :rm, [package])
     end
 
-    assert :ok = ManagedApp.apps(vm, :stop, [@app])
-    assert :ok = ManagedApp.apps(vm, :start, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
     assert active(vm).active_version == "2.1.0"
   end
 
   defp assert_modified_content(vm) do
-    assert :ok = ManagedApp.apps(vm, :stop, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
     version = active(vm).active_version
     archive = artifact(vm, version, "package.ez")
     {:ok, bytes} = Device.rpc(vm, File, :read, [archive])
 
     try do
       Device.rpc(vm, File, :write, [archive, bytes <> "trailing corruption"])
-      assert {:error, :artifact_modified} = ManagedApp.apps(vm, :start, [@app])
+      assert {:error, :artifact_modified} = ManagedPlugin.plugins(vm, :start, [@app])
       assert_unloaded(vm)
     after
       Device.rpc(vm, File, :write, [archive, bytes])
@@ -285,13 +299,13 @@ defmodule Scenarios.AppLifecycle do
 
     try do
       Device.rpc(vm, File, :write, [content, "not the registered BEAM"])
-      assert {:error, :artifact_modified} = ManagedApp.apps(vm, :start, [@app])
+      assert {:error, :artifact_modified} = ManagedPlugin.plugins(vm, :start, [@app])
       assert_unloaded(vm)
     after
       Device.rpc(vm, File, :write, [content, beam])
     end
 
-    assert :ok = ManagedApp.apps(vm, :start, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
   end
 
   defp assert_cleanup_failure(vm) do
@@ -303,9 +317,9 @@ defmodule Scenarios.AppLifecycle do
     end)
 
     try do
-      assert {:error, _} = ManagedApp.apps(vm, :stop, [@app])
+      assert {:error, _} = ManagedPlugin.plugins(vm, :stop, [@app])
       assert Device.rpc(vm, :erlang, :is_process_alive, [pid])
-      assert {:error, :applications_blocked} = ManagedApp.apps(vm, :start, [@app])
+      assert {:error, :plugins_blocked} = ManagedPlugin.plugins(vm, :start, [@app])
     after
       Device.rpc(vm, :erlang, :send, [pid, :release])
     end
@@ -314,18 +328,18 @@ defmodule Scenarios.AppLifecycle do
       not Device.rpc(vm, :erlang, :is_process_alive, [pid])
     end)
 
-    assert :ok = ManagedApp.apps(vm, :stop, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
     assert_unloaded(vm)
-    assert :ok = ManagedApp.apps(vm, :start, [@app])
+    assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
   end
 
   defp artifact(vm, version, relative) do
-    {:ok, root} = Device.rpc(vm, NervesGate.Storage, :apps_dir)
+    {:ok, root} = Device.rpc(vm, NervesGate.Storage, :plugins_dir)
     Path.join([root, "managed_fixture", version, relative])
   end
 
   defp active(vm) do
-    {:ok, entries} = ManagedApp.apps(vm, :list, [])
+    {:ok, entries} = ManagedPlugin.plugins(vm, :list, [])
     Enum.find(entries, &(&1.app == "managed_fixture")) || flunk("Managed fixture is missing")
   end
 

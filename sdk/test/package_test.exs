@@ -54,7 +54,7 @@ defmodule NervesGateSDK.PackageTest do
 
     assert {:error, :missing_dependency} = Package.validate(package, %{}, "0.1.0")
 
-    assert {:error, :application_conflict} =
+    assert {:error, :plugin_conflict} =
              Package.validate(package, Map.put(installed, package.app, package.main), "0.1.0")
 
     assert {:error, :module_conflict} =
@@ -133,7 +133,7 @@ defmodule NervesGateSDK.PackageTest do
           :mint
         ] do
       bundled = %{package | apps: [%{package.main | app: app}]}
-      assert {:error, :application_conflict} = Package.validate(bundled, %{}, "0.1.0")
+      assert {:error, :plugin_conflict} = Package.validate(bundled, %{}, "0.1.0")
     end
   end
 

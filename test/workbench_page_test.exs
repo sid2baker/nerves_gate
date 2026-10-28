@@ -15,7 +15,7 @@ defmodule WorkbenchWeb.WorkbenchPageTest do
 
     assert Floki.find(document, "form") == []
 
-    for path <- ["/devices", "/develop/applications", "/develop/firmware", "/provision"],
+    for path <- ["/devices", "/develop/plugins", "/develop/firmware", "/provision"],
         do: assert(Floki.find(document, "a[href='#{path}']") != [])
 
     text = Floki.text(Floki.find(document, "#home-gateways"))
@@ -30,8 +30,8 @@ defmodule WorkbenchWeb.WorkbenchPageTest do
           devices: "/devices",
           scenarios: "/devices",
           manual: "/devices",
-          apps: "/develop/applications",
-          firmware: "/develop/applications"
+          plugins: "/develop/plugins",
+          firmware: "/develop/plugins"
         ] do
       document =
         render_component(&WorkbenchWeb.Layouts.app/1,
@@ -55,8 +55,8 @@ defmodule WorkbenchWeb.WorkbenchPageTest do
           {"/devices/nerves_gate@10.203.42.2", WorkbenchWeb.GatewayLive, :devices},
           {"/devices/nerves_gate@10.203.42.2/scenarios", WorkbenchWeb.GatewayLive, :scenarios},
           {"/devices/nerves_gate@10.203.42.2/manual", WorkbenchWeb.GatewayLive, :manual},
-          {"/develop/applications", WorkbenchWeb.ApplicationsLive, :apps},
-          {"/develop/applications/demo", WorkbenchWeb.ApplicationsLive, :apps},
+          {"/develop/plugins", WorkbenchWeb.PluginsLive, :plugins},
+          {"/develop/plugins/demo", WorkbenchWeb.PluginsLive, :plugins},
           {"/develop/firmware", WorkbenchWeb.FirmwareLive, :firmware},
           {"/provision", WorkbenchWeb.FactoryLive, :factory}
         ] do

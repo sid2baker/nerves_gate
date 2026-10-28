@@ -1,4 +1,4 @@
-defmodule NervesGate.AppOwnerTest do
+defmodule NervesGate.PluginOwnerTest do
   use ExUnit.Case, async: false
   alias NervesGate.Plugins.Owner
 
@@ -44,7 +44,7 @@ defmodule NervesGate.AppOwnerTest do
     assert :ok = Application.start(:generation_fixture)
     assert {:ok, ^owner} = GenServer.call(Child, :startup_owner)
     assert {:ok, ^owner} = GenServer.call(Child, {:owner, :active})
-    assert {:error, :application_not_running} = Owner.resolve(self())
+    assert {:error, :plugin_not_running} = Owner.resolve(self())
     assert Owner.matches?(Process.whereis(Child), owner)
     refute Owner.matches?(self(), owner)
   end
@@ -56,11 +56,11 @@ defmodule NervesGate.AppOwnerTest do
     old = Owner.bind(artifact, {epoch, 1})
     assert :ok = Application.start(:generation_fixture)
     Owner.quiesce(old)
-    assert {:error, :application_not_running} = GenServer.call(Child, {:owner, :active})
+    assert {:error, :plugin_not_running} = GenServer.call(Child, {:owner, :active})
     assert {:ok, ^old} = GenServer.call(Child, {:owner, :release})
     previous_pid = Process.whereis(Child)
     Owner.revoke(old)
-    assert {:error, :application_not_running} = GenServer.call(Child, {:owner, :active})
+    assert {:error, :plugin_not_running} = GenServer.call(Child, {:owner, :active})
     assert :ok = Application.stop(:generation_fixture)
     refute Process.alive?(previous_pid)
     current = Owner.bind(artifact, {epoch, 2})

@@ -1,10 +1,10 @@
 # Nerves Gate SDK
 
-A pure Elixir application API. It has no Nerves or Linux dependencies. Gateway
+A pure Elixir plugin API. It has no Nerves or Linux dependencies. Gateway
 firmware supplies the fixed `NervesGate.SDKBackend.call/2` runtime entry point,
 which implements the `NervesGateSDK.Backend` callback. Without that firmware module,
 calls return `{:error, :runtime_unavailable}`; firmware code loaded without running
-device services reports `{:error, :unavailable}`. Run applications on real firmware, including
+device services reports `{:error, :unavailable}`. Run plugins on real firmware, including
 the QEMU gateways of the Nerves Gate developer workbench.
 
 ```elixir
@@ -20,11 +20,11 @@ alias NervesGateSDK.{Events, Hardware, Network, Storage, System}
 Subscriptions deliver `%NervesGateSDK.Events.Event{topic: topic, value: value}`
 to the calling process. The backend monitors subscribers. Plugins supervise their
 own serial/CAN libraries and handles; ordinary OTP shutdown must close them. Stateful calls require an installed,
-starting/running managed application. The backend derives activation identity from
-the actual PID, never a supplied app name. Activation generations fence stale
+starting/running managed plugin. The backend derives activation identity from
+the actual PID, never a supplied plugin name. Activation generations fence stale
 subscriptions/claims/in-flight work; restart/rollback requires fresh subscriptions
-and handles. Outside managed applications, general platform read-only queries remain available,
-but resource calls fail with `application_not_running` (network errors use the
+and handles. Outside managed plugins, general platform read-only queries remain available,
+but resource calls fail with `plugin_not_running` (network errors use the
 string code). Use administrative domain APIs for IEx/RPC maintenance.
 SDK structs are the public contract,
 not firmware status maps. Commands return `:ok`, `{:ok, value}` or `{:error, reason}`.
@@ -32,9 +32,9 @@ A timeout means an unknown outcome, not cancellation or permission to retry.
 
 Both physical and QEMU firmware supply the same runtime entry point. There is no
 backend configuration or host hardware emulation. The bridge is an ordinary module
-call in the application's process, not a proxy process; the SDK has no compile-time
+call in the plugin's process, not a proxy process; the SDK has no compile-time
 Mix dependency on firmware. SDK APIs do not manage
-Internet/USB, Tailscale enrollment or credentials, SSH, apps or firmware, expose
+Internet/USB, Tailscale enrollment or credentials, SSH, plugins or firmware, expose
 cookies, or reboot/reset the device.
 
 ## Isolated local-network access (SDK 0.2.0-dev checkout)
@@ -57,14 +57,14 @@ See `plugins/tailnet_subrouter` in the source repository for an optional, disabl
 example. Use the local SDK with requirement `~> 0.2.0-dev`; the published 0.1.0
 package does not contain this API. The device installer enforces the declared range.
 
-Applications on a device are trusted same-BEAM OTP applications, not sandboxed.
+Plugins on a device are trusted same-BEAM OTP applications, not sandboxed.
 
 ## Exclusive hardware assignments
 
 Plugins declare the kinds they use (`:ethernet`, `:serial`, `:can`) in `nerves_gate_hardware` in their main OTP
 environment. `Hardware.resources/0` returns enabled allowlisted assignments for the
 actual managed caller, as `%Hardware.Port{id: ..., kind: ..., present?: ..., path: ...}`.
-It opens nothing and accepts no app name or arbitrary operator-supplied path. One
+It opens nothing and accepts no plugin name or arbitrary operator-supplied path. One
 port belongs to one plugin; a plugin may own several ports with supervised workers.
 The former CAN/RS485 SDK claim, subscription and byte-I/O APIs are removed.
 
@@ -83,11 +83,11 @@ binaries are introduced. See [hardware assignments](../docs/hardware.md).
 
 ## Equipment ownership
 
-Applications own identities, discovery and protocol sessions. The SDK has no
+Plugins own identities, discovery and protocol sessions. The SDK has no
 `Equipment` compatibility module or equipment event topic. Use
 `Network.interfaces/0` for platform link observations.
 
-## Application packages
+## Plugin packages
 
 `mix nerves_gate.package` builds production code into a standard
 `<app>-<version>.ez` OTP archive. Declare
@@ -109,20 +109,20 @@ required. Contributed native payloads and direct NIF loaders are rejected; ordin
 
 An optional `:nerves_gate_ui` OTP environment entry names a `Phoenix.LiveComponent`
 in the main application's package. Current firmware hosts it at `/plugins/<app>` while
-that activation is running. UI apps declare their Phoenix/LiveView dependencies
+that activation is running. UI plugins declare their Phoenix/LiveView dependencies
 directly and compile against versions compatible with the gateway. The core SDK
 stays independent of web libraries; it does not wrap LiveView. These dependencies
 are shared platform libraries, not bundled copies. The firmware's Req/Finch/Mint
-HTTP libraries are likewise shared when an app depends on them. Packaging pins exact platform
-versions, including transitive UI libraries. The gateway closes app-page processes
+HTTP libraries are likewise shared when a plugin depends on them. Packaging pins exact platform
+versions, including transitive UI libraries. The gateway closes plugin-page processes
 before unloading code. Component callbacks run in a gateway-owned LiveView: call
-commands on your app's supervised process rather than acquiring SDK resources there.
+commands on your plugin's supervised process rather than acquiring SDK resources there.
 Custom scripts/assets and dynamic subroutes are not part of this first integration.
-See [optional plugin UI](../docs/applications.md#optional-ui).
+See [optional plugin UI](../docs/plugins.md#optional-ui).
 
 An optional `:nerves_gate_health_check` environment entry contains an MFA that
 must return `:ok` within five seconds after startup. A failed upgrade restarts the
 previous verified artifact with a fresh generation. Uncertain cleanup or rollback
 failure blocks activation rather than claiming restoration. Versions are immutable:
-bump the app version for changed package bytes. The administrative
+bump the plugin version for changed package bytes. The administrative
 `NervesGate.Plugins` lifecycle API belongs to firmware, not the SDK.

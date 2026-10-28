@@ -52,8 +52,8 @@ result =
   try do
     {:ok, _} = Application.ensure_all_started(:nerves_gate_workbench)
 
-    if (path = System.get_env("NERVES_GATE_APP", "")) != "",
-      do: {:ok, _} = Workbench.Applications.open(path)
+    if (path = System.get_env("NERVES_GATE_PLUGIN", "")) != "",
+      do: {:ok, _} = Workbench.Plugins.open(path)
 
     {:ok, _} = Supervisor.start_child(supervisor, Workbench.SessionServices)
     {:ok, {_, listening_port}} = WorkbenchWeb.Endpoint.server_info(:http)

@@ -1,7 +1,7 @@
 defmodule Mix.Tasks.NervesGate.Package do
   use Mix.Task
 
-  @shortdoc "Package a trusted Nerves Gate application as a standard OTP .ez archive"
+  @shortdoc "Package a trusted Nerves Gate plugin as a standard OTP .ez archive"
   @moduledoc """
   Compiles in production mode and writes `<app>-<version>.ez` in the current
   directory, or to `--output path`. Set `:nerves_gate_sdk_requirement` in the

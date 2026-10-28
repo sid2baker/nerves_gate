@@ -22,8 +22,8 @@ defmodule WorkbenchWeb.Router do
       live("/devices/:node", GatewayLive, :devices)
       live("/devices/:node/scenarios", GatewayLive, :scenarios)
       live("/devices/:node/manual", GatewayLive, :manual)
-      live("/develop/applications", ApplicationsLive, :apps)
-      live("/develop/applications/:id", ApplicationsLive, :apps)
+      live("/develop/plugins", PluginsLive, :plugins)
+      live("/develop/plugins/:id", PluginsLive, :plugins)
       live("/develop/firmware", FirmwareLive, :firmware)
       live("/provision", FactoryLive, :factory)
     end

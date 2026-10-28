@@ -34,7 +34,7 @@ defmodule NervesGateWeb.StoragePageTest do
 
     refute html =~ "id=\"storage-use\""
     assert html =~ "The detected card changed"
-    assert html =~ "Format for applications"
+    assert html =~ "Format for plugins"
   end
 
   test "busy state and backend failures are visible" do

@@ -1,5 +1,5 @@
-defmodule Workbench.Applications do
-  @moduledoc "Ordinary SDK application projects opened by the workbench."
+defmodule Workbench.Plugins do
+  @moduledoc "Ordinary SDK plugin projects opened by the workbench."
   use GenServer
 
   @reserved ~w(dev dev_web workbench workbench_web scenarios nerves_gate nerves_gate_dev nerves_gate_workbench nerves_gate_sdk simulator)
@@ -14,8 +14,8 @@ defmodule Workbench.Applications do
     do: {:reply, state |> Map.values() |> Enum.sort_by(& &1.path), state}
 
   def handle_call({:open, path}, _, state) do
-    app = project!(path)
-    {:reply, {:ok, app}, Map.put(state, app.path, app)}
+    plugin = project!(path)
+    {:reply, {:ok, plugin}, Map.put(state, plugin.path, plugin)}
   rescue
     error in [ArgumentError, File.Error] -> {:reply, {:error, Exception.message(error)}, state}
   end
@@ -27,21 +27,21 @@ defmodule Workbench.Applications do
       do: raise(ArgumentError, "No Mix application at #{path}")
 
     if path == Workbench.root(),
-      do: raise(ArgumentError, "Open an application, not the platform project")
+      do: raise(ArgumentError, "Open a plugin, not the platform project")
 
     %{path: path, name: Path.basename(path)}
   end
 
-  def project!(_), do: raise(ArgumentError, "Supply the application directory")
+  def project!(_), do: raise(ArgumentError, "Supply the plugin directory")
 
   def create(path, opts \\ []) do
-    app = scaffold!(path, opts)
-    open(app.path)
+    plugin = scaffold!(path, opts)
+    open(plugin.path)
   rescue
     error in [ArgumentError, File.Error] -> {:error, Exception.message(error)}
   end
 
-  @doc "Scaffold files without requiring a running workbench application."
+  @doc "Scaffold files without requiring a running Workbench session."
   def scaffold!(path, opts \\ []) do
     local_sdk = Keyword.get(opts, :local_sdk, false)
     path = Path.expand(path)
@@ -56,7 +56,7 @@ defmodule Workbench.Applications do
       source: if(local_sdk, do: Workbench.root())
     ]
 
-    templates = Path.join(Workbench.root(), "priv/templates/app")
+    templates = Path.join(Workbench.root(), "priv/templates/plugin")
 
     for template <- Path.wildcard(Path.join(templates, "**/*"), match_dot: true),
         File.regular?(template) do
@@ -94,28 +94,28 @@ defmodule Workbench.Applications do
   end
 
   def test!(path, report \\ fn _ -> :ok end) do
-    app = project!(path)
-    run!(app.path, :test, ["deps.get"], report)
-    run!(app.path, :test, ["deps.compile"], report)
-    run!(app.path, :test, ["test"], report)
+    plugin = project!(path)
+    run!(plugin.path, :test, ["deps.get"], report)
+    run!(plugin.path, :test, ["deps.compile"], report)
+    run!(plugin.path, :test, ["test"], report)
     :ok
   end
 
   def package!(path, report \\ fn _ -> :ok end, destination \\ :release) do
-    app = project!(path)
+    plugin = project!(path)
 
     relative =
       if destination == :temporary,
-        do: "_build/packages/#{app.name}-#{Base.encode16(:crypto.strong_rand_bytes(8))}.ez",
-        else: "packages/#{app.name}.ez"
+        do: "_build/packages/#{plugin.name}-#{Base.encode16(:crypto.strong_rand_bytes(8))}.ez",
+        else: "packages/#{plugin.name}.ez"
 
-    output = Path.join(app.path, relative)
+    output = Path.join(plugin.path, relative)
     File.mkdir_p!(Path.dirname(output))
-    run!(app.path, :prod, ["deps.get"], report)
+    run!(plugin.path, :prod, ["deps.get"], report)
     # Compile path dependencies before loading their packaging task: a changed
     # SDK requirement must not be checked against an older cached .app version.
-    run!(app.path, :prod, ["deps.compile"], report)
-    run!(app.path, :prod, ["nerves_gate.package", "--output", output], report)
+    run!(plugin.path, :prod, ["deps.compile"], report)
+    run!(plugin.path, :prod, ["nerves_gate.package", "--output", output], report)
     output
   end
 
@@ -151,7 +151,7 @@ defmodule Workbench.Applications do
 
     case run do
       %{status: :passed} ->
-        "Application running"
+        "Plugin running"
 
       %{status: status} when status != :running ->
         raise "Installation failed; inspect the device page"

@@ -24,8 +24,8 @@ defmodule NervesGateWeb.DashboardLive do
       Preview mode · simulated connections
     </p>
     <.notice :if={@projection.storage.available && @projection.storage.choice == :pending}>
-      Application storage is not set up yet.
-      <.link navigate="/settings/storage" class="ui-text-link">Set up an SD card or continue without apps →</.link>
+      Plugin storage is not set up yet.
+      <.link navigate="/settings/storage" class="ui-text-link">Set up an SD card or continue without it →</.link>
     </.notice>
     <section class="ui-connections" aria-label="Gateway connections">
       <.navigation_card

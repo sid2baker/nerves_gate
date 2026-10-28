@@ -15,7 +15,7 @@ defmodule WorkbenchWeb.OverviewLive do
      assign(socket,
        bench: Runner.snapshot(),
        gateways: Workbench.Gateways.list(),
-       applications: Workbench.Applications.list()
+       plugins: Workbench.Plugins.list()
      )}
   end
 
@@ -49,25 +49,25 @@ defmodule WorkbenchWeb.OverviewLive do
         </.setting_row>
       </.panel>
       <.panel title="Resume work" icon="equipment" id="resume-work">
-        <.setting_row :for={app <- @applications} label={app.name}>
+        <.setting_row :for={plugin <- @plugins} label={plugin.name}>
           <.link
-            navigate={"/develop/applications/#{Base.url_encode64(app.path, padding: false)}"}
+            navigate={"/develop/plugins/#{Base.url_encode64(plugin.path, padding: false)}"}
             class="ui-text-link"
-          >{app.path}</.link>
+          >{plugin.path}</.link>
         </.setting_row>
         <.link
           :for={run <- @bench.runs}
           navigate="/develop/firmware#lab-runs"
           class="ui-text-link"
         >Run #{run.id} · {run.device} · {run.status}</.link>
-        <.link navigate="/develop/applications" class="ui-text-link">Create or open an application</.link>
+        <.link navigate="/develop/plugins" class="ui-text-link">Create or open a plugin</.link>
       </.panel>
       <div class="dev-summary-grid">
         <.link navigate="/develop/firmware" class="dev-summary-card"><h2>Build and test firmware</h2><p>
           Build an image, run QEMU, test and debug.
         </p></.link>
-        <.link navigate="/develop/applications" class="dev-summary-card"><h2>
-          Develop an application
+        <.link navigate="/develop/plugins" class="dev-summary-card"><h2>
+          Develop a plugin
         </h2><p>Test, package and run on a simulated device.</p></.link>
         <.link navigate="/devices" class="dev-summary-card"><h2>Gateways</h2><p>
           Status, checks and reviewed updates.

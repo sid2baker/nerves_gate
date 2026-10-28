@@ -206,7 +206,7 @@ defmodule NervesGate.SDKBackend do
 
     %{
       interface(port, :ethernet)
-      | application_enabled?: assignments.error == nil and role != "internet" and setting.enabled,
+      | plugin_enabled?: assignments.error == nil and role != "internet" and setting.enabled,
         assigned_plugin: setting.plugin,
         claimed?: local != nil and local.interface == port.name
     }

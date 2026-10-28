@@ -16,7 +16,8 @@ mix setup      # dependencies, tools and prebuilt QEMU system; boots nothing
 mix dev        # workbench at http://localhost:4000
 ```
 
-Simulated devices stay stopped until you start them on the Simulator page.
+Simulated devices stay stopped until you start them under **Develop → Firmware**.
+QEMU devices need a [prepared management network](docs/qemu-management-network.md).
 Nothing flashes physical hardware unless you explicitly confirm it.
 
 ## Plugins
@@ -32,19 +33,19 @@ mix firmware ec100
 
 After an explicitly authorized deployment, use **Plugins** to start/configure them.
 Discovery/startup does not connect equipment or enable sharing. There is no device
-store or dependency download. See [plugin development](docs/app-development.md).
+store or dependency download. See [plugin development](docs/plugin-development.md).
 
 ## Working on the platform
 
 ```sh
 mix format --force
-mix ci                                       # host checks; no devices
+mix check                                    # pre-commit host checks; no devices
 mix test.qemu --only sdk --device gateway_a    # against your running mix dev
 ```
 
 | Path | Contents |
 | --- | --- |
-| `lib/workbench/`, `lib/workbench_web/` | Workbench, app tools, discovery, builds, updates and release checks |
+| `lib/workbench/`, `lib/workbench_web/` | Workbench, gateway directory, plugin tools, builds, updates and release checks |
 | `lib/simulator/` | Owned QEMU devices and private virtual networking |
 | `lib/scenarios/` | One scenario catalogue/runner, device access and owned-QEMU checks |
 | `firmware/` | Device runtime and gateway UI (separate Nerves project) |
@@ -60,7 +61,7 @@ Read [development](docs/development.md), [architecture](docs/architecture.md),
 - [Public API](docs/action-api.md)
 - [Networking and recovery](docs/networking.md)
 - [Firmware builds and updates](docs/firmware-updates.md)
-- [Plugins and storage](docs/applications.md)
+- [Plugin runtime and storage](docs/plugins.md)
 - [CAN and RS485](docs/hardware.md)
 - [LEDs and button](docs/indicators.md)
 - [Gateway and workbench UI](docs/ui.md)

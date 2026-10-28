@@ -19,18 +19,18 @@ defmodule NervesGate.Plugins.Artifact do
   def review(
         package,
         sha,
-        %{app: app, version: version, sha256: expected, card_id: card},
+        %{plugin: plugin, version: version, sha256: expected, card_id: card},
         entries
       )
-      when is_binary(app) and is_binary(version) and is_binary(expected) and is_binary(card) do
-    if to_string(package.app) == app and package.version == version and sha == expected and
-         not Map.has_key?(entries, app), do: :ok, else: {:error, :review_changed}
+      when is_binary(plugin) and is_binary(version) and is_binary(expected) and is_binary(card) do
+    if to_string(package.app) == plugin and package.version == version and sha == expected and
+         not Map.has_key?(entries, plugin), do: :ok, else: {:error, :review_changed}
   end
 
   def review(_, _, _, _), do: {:error, :invalid_review}
 
   def install(package, bytes, sha) do
-    with {:ok, root} <- Storage.apps_dir(),
+    with {:ok, root} <- Storage.plugins_dir(),
          {:ok, parent} <- Storage.directory(root, to_string(package.app)) do
       destination = Path.join(parent, package.version)
       stage = Path.join(parent, ".install-#{Base.encode16(:crypto.strong_rand_bytes(16))}")
@@ -71,7 +71,7 @@ defmodule NervesGate.Plugins.Artifact do
     if metadata.source == :firmware do
       NervesGate.Plugins.Bundled.load(app, version, metadata)
     else
-      with {:ok, root} <- Storage.apps_dir() do
+      with {:ok, root} <- Storage.plugins_dir() do
         open(Path.join([root, app, version]), app, version, metadata)
       end
     end
@@ -146,7 +146,7 @@ defmodule NervesGate.Plugins.Artifact do
          :ok <- loaded_conflicts(package, previous) do
       :ok
     else
-      true -> {:error, :application_conflict}
+      true -> {:error, :plugin_conflict}
       error -> error
     end
   end

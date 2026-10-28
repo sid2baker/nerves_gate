@@ -158,8 +158,8 @@ defmodule NervesGate.Network.Vintage do
     Config.validate_network(network)
   end
 
-  defp saved_port(%{nerves_gate_role: "application", ipv4: %{method: :disabled}}),
-    do: %{"role" => "application", "address" => nil}
+  defp saved_port(%{nerves_gate_role: "plugin", ipv4: %{method: :disabled}}),
+    do: %{"role" => "plugin", "address" => nil}
 
   defp saved_port(%{nerves_gate_role: "internet"} = config),
     do: %{"role" => "internet", "address" => saved_address(config)}
@@ -255,7 +255,7 @@ defmodule NervesGate.Network.Vintage do
   @doc false
   def apply_local(name, address) when name in ["eth0", "eth1"] do
     ipv4 = if address, do: ipv4(address), else: %{method: :disabled}
-    config = port_config(ipv4) |> Map.put(:nerves_gate_role, "application")
+    config = port_config(ipv4) |> Map.put(:nerves_gate_role, "plugin")
     configure(name, config, System.monotonic_time(:millisecond) + 8_000, true)
   end
 

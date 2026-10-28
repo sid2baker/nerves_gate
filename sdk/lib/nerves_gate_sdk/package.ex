@@ -183,7 +183,7 @@ defmodule NervesGateSDK.Package do
                        ]) or
               Map.has_key?(installed, &1.app))
       ) ->
-        {:error, :application_conflict}
+        {:error, :plugin_conflict}
 
       Enum.any?(package.apps, fn app -> Enum.any?(app.modules, &MapSet.member?(modules, &1)) end) ->
         {:error, :module_conflict}

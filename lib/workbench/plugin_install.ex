@@ -1,16 +1,16 @@
-defmodule Workbench.AppInstall do
-  @moduledoc "Reviewed one-shot new application install over distribution; leaves it stopped and disabled."
+defmodule Workbench.PluginInstall do
+  @moduledoc "Reviewed one-shot new plugin install over distribution; leaves it stopped and disabled."
   @ttl 600_000
 
   def review!(project, node, report) do
     {:ok, gateway} = Workbench.Gateways.fetch(node)
-    dir = Path.join(Workbench.root(), "_build/app-installs/#{random()}")
+    dir = Path.join(Workbench.root(), "_build/plugin-installs/#{random()}")
     File.mkdir_p!(dir)
     File.chmod!(dir, 0o700)
-    snapshot = Path.join(dir, "application.ez")
+    snapshot = Path.join(dir, "plugin.ez")
 
     try do
-      built = Workbench.Applications.package!(project, report, :temporary)
+      built = Workbench.Plugins.package!(project, report, :temporary)
 
       try do
         File.cp!(built, snapshot)
@@ -22,7 +22,7 @@ defmodule Workbench.AppInstall do
       {:ok, package, _, sha} = NervesGate.Plugins.Artifact.read(snapshot)
 
       metadata = %{
-        "app" => to_string(package.app),
+        "plugin" => to_string(package.app),
         "platform" =>
           Enum.map(package.main.env[:nerves_gate_platform] || [], fn {app, version} ->
             [to_string(app), version]
@@ -43,17 +43,17 @@ defmodule Workbench.AppInstall do
         device: device,
         expires: System.monotonic_time(:millisecond) + @ttl,
         expected: %{
-          app: metadata["app"],
+          plugin: metadata["plugin"],
           version: package.version,
           sha256: sha,
           card_id: device.card_id
         },
         public: %{
-          kind: :app_install,
+          kind: :plugin_install,
           token: random(),
           node: gateway.node,
           address: gateway.address,
-          app: metadata["app"],
+          plugin: metadata["plugin"],
           version: package.version,
           serial: device.serial,
           sha256: sha,
@@ -70,7 +70,7 @@ defmodule Workbench.AppInstall do
   def confirmation!(plan, token, address) do
     unless is_binary(token) and token == plan.public.token and address == plan.public.address and
              System.monotonic_time(:millisecond) < plan.expires,
-           do: raise(ArgumentError, "Confirm the exact unexpired application review and address")
+           do: raise(ArgumentError, "Confirm the exact unexpired plugin review and address")
 
     :ok
   end
@@ -82,15 +82,15 @@ defmodule Workbench.AppInstall do
       do: raise("Reviewed package changed; no install sent")
 
     if observe!(plan.public.node, plan.metadata) != plan.device,
-      do: raise("Gateway boot, storage or application prerequisites changed; review again")
+      do: raise("Gateway boot, storage or plugin prerequisites changed; review again")
 
     guest =
-      "/tmp/nerves-gate-app-#{Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}/application.ez"
+      "/tmp/nerves-gate-plugin-#{Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}/plugin.ez"
 
     bytes = File.read!(plan.snapshot)
     :ok = :erpc.call(plan.public.node, File, :mkdir, [Path.dirname(guest)], 5_000)
     :ok = :erpc.call(plan.public.node, File, :write, [guest, bytes, [:exclusive]], 30_000)
-    report.("Installing once; application will remain stopped and disabled")
+    report.("Installing once; plugin will remain stopped and disabled")
 
     case :erpc.call(
            plan.public.node,
@@ -125,7 +125,7 @@ defmodule Workbench.AppInstall do
            do:
              raise(
                ArgumentError,
-               "Requires compatible firmware/SDK, prepared storage and a new application"
+               "Requires compatible firmware/SDK, prepared storage and a new plugin"
              )
 
     :ok

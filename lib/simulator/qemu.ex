@@ -44,7 +44,7 @@ defmodule Simulator.Qemu do
         "driver=raw,node-name=disk,file=storage",
         "-device",
         "virtio-blk-pci,drive=disk,werror=report,rerror=report",
-        # Second virtio disk (/dev/vdb): the application SD card.
+        # Second virtio disk (/dev/vdb): the plugin SD card.
         "-blockdev",
         "driver=file,node-name=sd-file,filename=#{sd_path(vm)}",
         "-blockdev",
@@ -336,7 +336,9 @@ defmodule Simulator.Qemu do
       :ok = :file.close(file)
 
       {_, 0} =
-        MuonTrap.cmd("mkfs.ext4", ["-q", "-F", "-L", "apps", temporary], stderr_to_stdout: true)
+        MuonTrap.cmd("mkfs.ext4", ["-q", "-F", "-L", "plugins", temporary],
+          stderr_to_stdout: true
+        )
 
       File.rename!(temporary, path)
     end

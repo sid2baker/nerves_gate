@@ -1,4 +1,4 @@
-defmodule Scenarios.Apps do
+defmodule Scenarios.PluginInstall do
   @moduledoc false
   alias Scenarios.Device
 

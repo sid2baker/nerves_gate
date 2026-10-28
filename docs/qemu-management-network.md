@@ -47,17 +47,14 @@ QEMU starts. With no prepared network, Workbench can still inspect physical
 gateways, but cannot boot QEMU devices.
 
 The network is checkout-owned and reusable across sessions. To change the device
-set or subnet, stop the session, explicitly clean up, then prepare again. Disks
-with the previous loopback-based boot serial are not supported by the new firmware;
-reset disposable QEMU disks explicitly when moving from that firmware. Never reset
-or reprovision physical hardware for this change.
+set or subnet, stop the session, explicitly clean up, then prepare again.
 
 ## What remains isolated
 
 Only protected `eth2` management uses TAP. Existing Unix-socket Ethernet LANs,
 libslirp Internet and injected LAN faults remain owned by the simulator. USB
 recovery retains its distinct loopback SSH forward and guest USB network; it is
-not ordinary gateway discovery. HTTP and regular SSH now use the guest IP directly.
+not ordinary gateway discovery. HTTP and regular SSH use the guest IP directly.
 
 The directory includes verified physical and simulated gateways. Simulator ownership
 is recorded only for this session's running guests. Reachability or knowing a node

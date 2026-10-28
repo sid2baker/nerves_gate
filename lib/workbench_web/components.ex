@@ -8,7 +8,7 @@ defmodule WorkbenchWeb.Components do
   def develop_navigation(assigns) do
     ~H"""
     <nav class="dev-filters" aria-label="Development workspace">
-      <.link navigate="/develop/applications" aria-current={if @section == :apps, do: "page"}>Develop an application</.link>
+      <.link navigate="/develop/plugins" aria-current={if @section == :plugins, do: "page"}>Develop a plugin</.link>
       <.link navigate="/develop/firmware" aria-current={if @section == :firmware, do: "page"}>Build and test firmware</.link>
     </nav>
     """
@@ -66,7 +66,7 @@ defmodule WorkbenchWeb.Components do
 
   def job_path(%{kind: kind, subject: path})
       when kind in ["test", "package", "install"] and is_binary(path),
-      do: "/develop/applications/" <> Base.url_encode64(path, padding: false)
+      do: "/develop/plugins/" <> Base.url_encode64(path, padding: false)
 
   def job_path(_), do: "/develop/firmware"
 

@@ -25,7 +25,7 @@ defmodule Scenarios.Cases.Topology do
              Scenarios.Device.rpc(vm, :inet, :getaddr, [~c"example.com", :inet])
 
     Qemu.network(vm, %{internet: :lan2})
-    assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :internet}
+    assert Scenarios.Qemu.topology(vm) == %{lan1: :plugin, lan2: :internet}
     online(vm, "eth1")
     assert Scenarios.Device.status(vm).network.desired == factory
     assert identities(vm) == original
@@ -33,16 +33,16 @@ defmodule Scenarios.Cases.Topology do
     # Supply a deliberately tempting gateway on the equipment LAN. Even a
     # manually injected route must not turn equipment into a second uplink.
     configured =
-      Map.put(settings("eth1"), "eth0", %{"role" => "application", "address" => nil})
+      Map.put(settings("eth1"), "eth0", %{"role" => "plugin", "address" => nil})
 
     save(vm, configured)
     online(vm, "eth1")
-    refuses_application_forwarding(vm, destination)
+    refuses_plugin_forwarding(vm, destination)
     refuses_forwarding(vm, "eth2", vm.management_host, destination)
     refuses_host_loopback(vm)
 
     Qemu.network(vm, %{internet: :off})
-    assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :application}
+    assert Scenarios.Qemu.topology(vm) == %{lan1: :plugin, lan2: :plugin}
     assert {:error, _} = Qemu.internet_request(vm, 3_000)
     assert Scenarios.Device.status(vm).device.available
     assert Scenarios.Device.status(vm).network.desired == configured
@@ -169,12 +169,12 @@ defmodule Scenarios.Cases.Topology do
     end)
   end
 
-  defp refuses_application_forwarding(vm, destination) do
-    Scenarios.ManagedApp.with_app(
+  defp refuses_plugin_forwarding(vm, destination) do
+    Scenarios.ManagedPlugin.with_plugin(
       vm,
       fn owner ->
         assert {:ok, _} =
-                 Scenarios.ManagedApp.call(vm, owner, NervesGateSDK.Network, :claim_local, [
+                 Scenarios.ManagedPlugin.call(vm, owner, NervesGateSDK.Network, :claim_local, [
                    "eth0",
                    "10.0.3.15",
                    24

@@ -50,7 +50,7 @@ defmodule WorkbenchWeb.Layouts do
     """
   end
 
-  defp current_section(action) when action in [:apps, :firmware], do: :develop
+  defp current_section(action) when action in [:plugins, :firmware], do: :develop
   defp current_section(action) when action in [:scenarios, :manual], do: :devices
 
   defp current_section(action), do: action
@@ -58,7 +58,7 @@ defmodule WorkbenchWeb.Layouts do
   defp navigation do
     [
       {:overview, "/", "Home", "overview"},
-      {:develop, "/develop/applications", "Develop", "equipment"},
+      {:develop, "/develop/plugins", "Develop", "equipment"},
       {:devices, "/devices", "Devices", "network"},
       {:factory, "/provision", "Provision", "usb"}
     ]

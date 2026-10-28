@@ -5,12 +5,12 @@ Open the device's gateway URL, linked from the developer workbench. Gateway
 Elixir/HEEx changes require rebuilding firmware; use disposable QEMU devices for
 this development loop.
 
-Navigation is **Overview · Hardware · Settings**. The gateway is a managed edge
-application host: it exposes physical resources and owns shared infrastructure;
-applications own equipment identities, protocol connections and data collection.
+Navigation is **Overview · Plugins · Hardware · Settings**. The gateway is a managed edge
+plugin host: it exposes physical resources and owns shared infrastructure;
+plugins own equipment identities, protocol connections and data collection.
 Open a connection or physical port for platform settings and diagnostics. Pages share the device-owned projection;
 form drafts stay separate from live observations. The shared read model is schema
-v8 (`device` availability, `remote` observations and domain-qualified actions).
+v11 (`device` availability, `remote` observations and domain-qualified actions).
 Gateway views subscribe to the local source before reading, clear availability
 on owner loss and obtain a fresh snapshot on resubscription.
 
@@ -21,12 +21,14 @@ on owner loss and obtain a fresh snapshot on resubscription.
 | Overview | `/` | Internet and unified Remote access; actionable storage warnings |
 | Internet | `/network` | Internet port/address, detected 4G sources, network-default APN with advanced override, SIM commissioning |
 | Remote access | `/remote` | Tailscale enrollment and private sign-in; advanced runtime access with explicit credential reveal |
+| Plugins | `/plugins` | Firmware-bundled plugins: version selection, start/stop and status |
+| Plugin page | `/plugins/:app` | Optional plugin LiveComponent while its activation runs |
 | Hardware | `/hardware` | Free non-Internet LANs, RS485 and CAN; exclusive plugin assignments |
 | LAN 1 / 2 | `/hardware/lan/1`, `/hardware/lan/2` | Link observations and reviewed exclusive assignment; Internet/management ports cannot be acquired |
 | RS485 1 / 2 | `/hardware/rs485/1`, `/hardware/rs485/2` | Availability and reviewed exclusive plugin assignment |
 | CAN 1 / 2 | `/hardware/can/1`, `/hardware/can/2` | Availability and reviewed exclusive plugin assignment |
-| Settings | `/settings` | SSH keys, application storage, device information and maintenance |
-| Application storage | `/settings/storage` | Card commissioning, readiness and explicit format confirmation |
+| Settings | `/settings` | SSH keys, plugin storage, device information and maintenance |
+| Plugin storage | `/settings/storage` | Card commissioning, readiness and explicit format confirmation |
 
 Hardware excludes Internet uplinks and joined Ethernet links from assignable ports.
 Free LANs and all buses remain visible, including disabled or unavailable ones.
@@ -49,15 +51,15 @@ up to 32. Removal needs confirmation and blocks only **new** logins. Removing th
 last key leaves USB password access. Incoming observations never overwrite a draft.
 See [recovery access](networking.md#local-recovery-and-http-exposure).
 
-## Hardware and application ownership
+## Hardware and plugin ownership
 
 The standard UI configures gateway interfaces, not connected equipment. Equipment
-names, Modbus units/registers, S7 endpoints and polling belong to applications.
+names, Modbus units/registers, S7 endpoints and polling belong to plugins.
 There is no equipment-label editor or Modbus register form in Hardware. The
 network observations remain available independently; built-in bus diagnostics are removed.
 
-Ethernet addressing, routes and bridging remain Network-owned. An enabled application
-port starts without IPv4, DHCP, DNS, a default route or bridge. Apps request isolated
+Ethernet addressing, routes and bridging remain Network-owned. An assigned LAN
+starts without IPv4, DHCP, DNS, a default route or bridge. Its plugin requests isolated
 local addressing through a process-owned SDK claim; active or unresolved claims block
 platform network changes. Disabled independent ports are explicitly held down.
 Saved legacy joined/equipment configurations are rejected and retained for explicitly
@@ -71,9 +73,9 @@ leaves them stopped after checked cleanup. UI controls never replace backend
 admission. EM300/extension-card enumeration is not implemented. See [hardware](hardware.md).
 
 Equipment label/scan/share commands are removed. A passive neighbor-cache read model
-belongs to applications, not a platform compatibility API. Hardware has no neighbor
+belongs to plugins, not a platform compatibility API. Hardware has no neighbor
 inventory, labels, scan or sharing controls.
-The first application network API supports one isolated Ethernet claim per gateway.
+The first plugin network API supports one isolated Ethernet claim per gateway.
 
 ## Controls
 
@@ -81,7 +83,8 @@ The first application network API supports one isolated Ethernet claim per gatew
   preference stays in the browser and follows other tabs. Switching works even
   while LiveView is disconnected or browser storage is unavailable. Theme code
   is bundled in the external JavaScript asset; firmware keeps its strict CSP.
-- **Subnet routing:** configure and explicitly enable the optional starter app.
+- **Subnet routing:** configure and explicitly enable sharing on the subnet-router
+  plugin page.
   Advertisement does not prove tailnet approval or reachability; unknown is not Off.
 - **SIM PIN:** the Internet page offers Unlock and save PIN when required, on
   Ethernet, VPN or USB. PIN commands are explicit, never replayed on reconnect;
@@ -107,10 +110,10 @@ not restricted to USB. QEMU reports EC100 peripherals as unavailable. The UI has
 
 | Page | Route | Purpose |
 | --- | --- | --- |
-| Home | `/` | Resume applications/runs, current job and bench problems |
+| Home | `/` | Resume plugin projects/runs, current job and bench problems |
 | Devices | `/devices` | Verified gateways and disconnected candidates with last-seen time |
 | Gateway | `/devices/:node` | Shared read-only projection, identity and gateway UI link; physical checks and reviewed firmware update |
-| Develop → Applications | `/develop/applications`, `/develop/applications/:id` | Create/open SDK projects; QEMU install/run; reviewed physical install leaving apps stopped |
+| Develop → Plugins | `/develop/plugins`, `/develop/plugins/:id` | Create/open SDK plugin projects; QEMU install/run; reviewed physical install leaving plugins stopped |
 | Develop → Firmware | `/develop/firmware` | Build, owned QEMU lifecycle/wiring, results and action log |
 | Gateway → Scenarios | `/devices/:node/scenarios` | Confirm QEMU runs and inspect results |
 | Gateway → Manual debugging | `/devices/:node/manual` | Acquire owned QEMU control, inject reversible faults and release control |
@@ -131,7 +134,7 @@ fallback is retained. See [firmware updates](firmware-updates.md) and
 [button recovery](indicators.md).
 
 The main navigation has four destinations: **Home · Develop · Devices · Provision**.
-Develop switches between applications and firmware. Replaced routes are removed,
+Develop switches between plugins and firmware. Replaced routes are removed,
 not retained as aliases. The **Simulated · QEMU** badge comes only from the
 simulator's owned inventory, never advertisements or node names.
 
@@ -149,13 +152,13 @@ for Tailnet names and port 4000 otherwise.
 
 Operations belong to the backend: navigating away does not cancel them, and their
 status links back to their owning workspace from every page. Output stays alongside
-that workspace's actions, not in a global expander. Application details include
+that workspace's actions, not in a global expander. Plugin details include
 physical installation: package snapshot and read-only distribution review,
-then a ten-minute, one-use typed-address confirmation. The new app is installed
+then a ten-minute, one-use typed-address confirmation. The new plugin is installed
 stopped/disabled; existing installs are rejected rather than upgraded or started.
-Identity/boot/storage are rechecked, hash validation and new-app admission happen
+Identity/boot/storage are rechecked, hash validation and new-plugin admission happen
 inside the device's Plugins owner, and uncertain writes are never automatically retried.
-Review/results stay with the application, never a firmware confirmation panel.
+Review/results stay with the plugin, never a firmware confirmation panel.
 QEMU installation keeps its separate owned-device reservations and install/run
 behavior. Backend admission is authoritative. See [firmware updates](firmware-updates.md)
 and [development](development.md).

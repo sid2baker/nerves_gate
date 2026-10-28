@@ -10,9 +10,9 @@ defmodule NervesGateWeb.HardwareLive do
     assigns = assign(assigns, ports: ports)
 
     ~H"""
-    <.page_header title="Hardware" description="Physical interfaces available to applications." />
+    <.page_header title="Hardware" description="Physical interfaces available to plugins." />
     <p class="ui-help">
-      Assign free interfaces exclusively to plugins. Applications configure connected equipment,
+      Assign free interfaces exclusively to plugins. Plugins configure connected equipment,
       protocols and data collection. Internet uplinks belong under Internet, not Hardware. Opening this page never scans a network or opens a bus.
     </p>
     <section class="ui-stack" aria-labelledby="lan-heading">

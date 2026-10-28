@@ -5,7 +5,7 @@ defmodule NervesGateWeb.HardwarePageTest do
   alias NervesGateWeb.{Endpoint, NetworkForm}
   @endpoint Endpoint
 
-  defmodule AppComponent do
+  defmodule PluginComponent do
     use Phoenix.LiveComponent
     def mount(socket), do: {:ok, assign(socket, :count, 0)}
 
@@ -20,7 +20,7 @@ defmodule NervesGateWeb.HardwarePageTest do
   end
 
   # Exercise the actual host renderer and close callback without a hardware backend.
-  defmodule AppHost do
+  defmodule PluginHost do
     use Phoenix.LiveView, layout: false
 
     def mount(_, _, socket) do
@@ -28,8 +28,8 @@ defmodule NervesGateWeb.HardwarePageTest do
 
       {:ok,
        assign(socket,
-         app: "web_ui_fixture",
-         component: if(connected?(socket), do: AppComponent),
+         plugin: "web_ui_fixture",
+         component: if(connected?(socket), do: PluginComponent),
          connecting?: not connected?(socket),
          manager_ref: nil
        )}
@@ -61,7 +61,7 @@ defmodule NervesGateWeb.HardwarePageTest do
 
   test "Hardware keeps all fixed ports visible without topology or local address editors" do
     document = page("/hardware")
-    assert Floki.text(document) =~ "Applications configure connected equipment"
+    assert Floki.text(document) =~ "Plugins configure connected equipment"
 
     for path <- ["/hardware/lan/1", "/hardware/lan/2", "/hardware/rs485/1", "/hardware/can/2"],
         do: assert(Floki.find(document, "a[href='#{path}']") != [])
@@ -143,14 +143,14 @@ defmodule NervesGateWeb.HardwarePageTest do
     {:ok, view, html} = Phoenix.LiveViewTest.live(build_conn(), "/plugins/not_installed")
     assert html =~ "Plugin page unavailable"
     refute html =~ "phx-target=\"1\""
-    assert Phoenix.LiveViewTest.has_element?(view, "#app-ui-unavailable")
+    assert Phoenix.LiveViewTest.has_element?(view, "#plugin-ui-unavailable")
   end
 
-  test "host renders an app component and cleanup terminates its LiveView before unloading" do
+  test "host renders a plugin component and cleanup terminates its LiveView before unloading" do
     # LiveViewTest links its proxy to the test; shutdown is the behavior under test.
     Process.flag(:trap_exit, true)
     unless Process.whereis(NervesGate.Plugins.UI), do: start_supervised!(NervesGate.Plugins.UI)
-    {:ok, view, html} = Phoenix.LiveViewTest.live_isolated(build_conn(), AppHost)
+    {:ok, view, html} = Phoenix.LiveViewTest.live_isolated(build_conn(), PluginHost)
     assert html =~ "App count: 0"
 
     assert view
@@ -272,7 +272,7 @@ defmodule NervesGateWeb.HardwarePageTest do
       "eth1" => nil
     }
 
-    enabled = Map.put(base, "eth1", %{"role" => "application", "address" => nil})
+    enabled = Map.put(base, "eth1", %{"role" => "plugin", "address" => nil})
     params = NetworkForm.from_settings(enabled, :internet)
     assert {:ok, preserved} = NetworkForm.to_network(params, [], enabled, :internet)
     assert preserved["eth1"] == enabled["eth1"]

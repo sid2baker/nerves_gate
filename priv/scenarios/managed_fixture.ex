@@ -52,7 +52,7 @@ defmodule ManagedFixture.Application do
         # never in this independently compiled SDK fixture project's dependencies.
         {:ok, entries} = apply(NervesGate.Plugins, :list, [])
         selected = Enum.find(entries, &(&1.app == "managed_fixture"))
-        {:ok, root} = apply(NervesGate.Storage, :apps_dir, [])
+        {:ok, root} = apply(NervesGate.Storage, :plugins_dir, [])
         archive = Path.join([root, "managed_fixture", selected.active_version, "package.ez"])
         File.write!(archive, "deliberately corrupted disposable rollback archive")
         {:error, :fixture_corruption}

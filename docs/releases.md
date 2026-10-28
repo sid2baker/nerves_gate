@@ -16,12 +16,12 @@ The platform is used from a supported checkout. Firmware is built locally from
 that checkout. Deploy a tagged or explicitly SHA-identified build: semantic
 `firmware` and full `source_revision` are separate public identity fields. Nerves
 VCS metadata includes a `-dirty` suffix for modified tracked files. Source-archive
-builds must supply both `SOURCE_DATE_EPOCH` and full `SOURCE_REVISION`. Apps declare their required SDK version. No generator archive or
+builds must supply both `SOURCE_DATE_EPOCH` and full `SOURCE_REVISION`. Plugins declare their required SDK version. No generator archive or
 firmware/simulator Hex release is required.
 
 1. Update the relevant version and roll its `Unreleased` changelog into one dated
    `## X.Y.Z - YYYY-MM-DD` section. Firmware and simulator read the root version.
-2. Run `mix check`, operator-owned `mix ci`, external/starter application packaging,
+2. Run `mix check`, operator-owned `mix ci`, generated-plugin and plugin packaging,
    EC100 dev/prod and QEMU target builds. Run appropriate focused QEMU checks on
    the owned bench; before platform publication dispatch the full separate
    integration workflow for the exact main commit to be tagged.
@@ -59,10 +59,10 @@ elixir -r lib/workbench/release.ex -r lib/mix/tasks/release.check.ex -S mix rele
 ```
 
 The current SDK checkout is `0.2.0-dev`, distinct from published `0.1.0`. Local
-app templates and the optional subnet-router require `~> 0.2.0-dev`, which
+plugin templates and the optional subnet-router require `~> 0.2.0-dev`, which
 admits this prerelease and future stable 0.2 releases. Use `--local-sdk` until
 0.2 is actually published: scaffolding does not fall back to SDK 0.1. At that
-separately authorized release, update templates and starter to the stable requirement.
+separately authorized release, update templates and plugins to the stable requirement.
 No runtime
 capability probe substitutes for the device installer's SDK requirement check.
 
@@ -76,10 +76,10 @@ separate, explicit action.
 `plugins/selection.exs` selects independent pure-BEAM plugin projects. Firmware
 assembly builds their dependency closures, validates compatibility/conflicts and
 includes a verified read-only inventory. Plugins and their libraries are delivered
-and updated through firmware, not separate GitHub app releases or a device store.
+and updated through firmware, not separate GitHub releases or a device store.
 Keep plugin versions and lockfiles aligned with the selected firmware. Changed
 bytes require a new plugin version; saved immutable identities are not overwritten.
-See [plugin runtime](applications.md) and [development](app-development.md).
+See [plugin runtime](plugins.md) and [development](plugin-development.md).
 
 ## Systems
 

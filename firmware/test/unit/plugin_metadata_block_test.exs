@@ -1,4 +1,4 @@
-defmodule NervesGate.AppMetadataBlockTest do
+defmodule NervesGate.PluginMetadataBlockTest do
   use ExUnit.Case, async: false
   alias NervesGate.Plugins
   @moduletag :tmp_dir
@@ -26,8 +26,8 @@ defmodule NervesGate.AppMetadataBlockTest do
     bytes: bytes
   } do
     assert {:error, :invalid_app_metadata} = Plugins.list()
-    assert {:error, :applications_blocked} = Plugins.start(:old_entry)
-    assert {:error, :applications_blocked} = Plugins.install("/missing.ez")
+    assert {:error, :plugins_blocked} = Plugins.start(:old_entry)
+    assert {:error, :plugins_blocked} = Plugins.install("/missing.ez")
     assert Process.alive?(pid)
     assert File.read!(path) == bytes
   end
@@ -64,7 +64,7 @@ defmodule NervesGate.AppMetadataBlockTest do
   end
 
   test "unreadable ownership cannot make formatting safe", %{path: path, bytes: bytes} do
-    assert {:error, %{code: "applications_installed"}} =
+    assert {:error, %{code: "plugins_installed"}} =
              GenServer.call(Plugins, {:storage_setup, :format, "card", :erase_all_data})
 
     assert File.read!(path) == bytes

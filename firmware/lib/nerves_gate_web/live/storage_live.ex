@@ -45,14 +45,14 @@ defmodule NervesGateWeb.StorageLive do
     <.back_link navigate="/settings">Settings</.back_link>
     <.page_header
       eyebrow="Commissioning · optional"
-      title="Application storage"
-      description="Use an SD card for applications and their data, or continue without apps."
+      title="Plugin storage"
+      description="Use an SD card for development plugins and their data, or continue without it."
     />
     <.panel title="SD card" icon="equipment" id="storage-setup">
       <.notice :if={!@storage.available} tone="warning">Storage service is unavailable.</.notice>
       <p id="storage-state">{label(@storage)}</p>
       <p :if={@storage.present} class="ui-help" id="storage-filesystem">
-        Detected filesystem: {@storage.filesystem}. Using a prepared card preserves its applications and data.
+        Detected filesystem: {@storage.filesystem}. Using a prepared card preserves its plugins and data.
       </p>
       <p :if={!@storage.present} class="ui-help">
         Insert an SD card to set it up. No card is needed for networking or gateway administration.
@@ -80,13 +80,13 @@ defmodule NervesGateWeb.StorageLive do
           phx-click="review-format"
           phx-value-card={@storage.card_id}
           disabled={!@storage.available || @storage.operation != nil}
-        >Format for applications…</.button>
+        >Format for plugins…</.button>
         <.button
           id="storage-skip"
           variant="secondary"
           phx-click="skip"
           disabled={!@storage.available || @storage.operation != nil}
-        >Continue without apps</.button>
+        >Continue without SD storage</.button>
       </div>
       <p class="ui-help">
         You can return here from Settings. Inserting a card never formats it automatically.
@@ -107,7 +107,7 @@ defmodule NervesGateWeb.StorageLive do
       id="storage-format-confirmation"
     >
       <.notice tone="warning">
-        All files, applications and application data on the card's application partition will be permanently erased.
+        All files, plugins and plugin data on the card's plugin partition will be permanently erased.
         Back up anything you need first. This creates ext4 storage; it does not format internal system storage.
       </.notice>
       <p :if={@format_card != @storage.card_id} role="alert">
@@ -133,11 +133,11 @@ defmodule NervesGateWeb.StorageLive do
     """
   end
 
-  def label(%{ready: true}), do: "Ready for applications"
+  def label(%{ready: true}), do: "Ready for plugins"
   def label(%{operation: :format}), do: "Formatting SD card"
   def label(%{operation: :use}), do: "Setting up SD card"
-  def label(%{choice: :skip}), do: "Continuing without applications"
+  def label(%{choice: :skip}), do: "Continuing without SD storage"
   def label(%{present: false}), do: "No readable SD card detected"
   def label(%{filesystem: "ext4"}), do: "Prepared card — ready to set up"
-  def label(_), do: "Card needs preparation for applications"
+  def label(_), do: "Card needs preparation for plugins"
 end

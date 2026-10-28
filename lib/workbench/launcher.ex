@@ -27,7 +27,7 @@ defmodule Workbench.Launcher do
       {"WORKBENCH_CI", to_string(ci?)},
       {"WORKBENCH_SCENARIO", options[:only] || "all"},
       {"QEMU_SIM_CONFIG", config_path!(options, dir)},
-      {"NERVES_GATE_APP", options[:app] || ""},
+      {"NERVES_GATE_PLUGIN", options[:plugin] || ""},
       {"ERL_EPMD_PORT", false},
       {"NERVES_GATE_DEVICE_NODE", false}
     ]
@@ -82,7 +82,7 @@ defmodule Workbench.Launcher do
   end
 
   defp options!(args) do
-    {options, applications} =
+    {options, plugins} =
       OptionParser.parse!(args,
         strict: [port: :integer, ci: :boolean, only: :string, config: :string, firmware: :string]
       )
@@ -93,10 +93,10 @@ defmodule Workbench.Launcher do
     if options[:port] && options[:port] not in 1..65_535,
       do: Mix.raise("Expected --port in 1..65535")
 
-    case applications do
+    case plugins do
       [] -> options
-      [path] -> Keyword.put(options, :app, Workbench.Applications.project!(path).path)
-      _ -> Mix.raise("Usage: mix dev [APP_DIRECTORY] [--port PORT]")
+      [path] -> Keyword.put(options, :plugin, Workbench.Plugins.project!(path).path)
+      _ -> Mix.raise("Usage: mix dev [PLUGIN_DIRECTORY] [--port PORT]")
     end
   end
 

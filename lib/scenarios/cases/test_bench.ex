@@ -201,7 +201,7 @@ defmodule Scenarios.Cases.TestBench do
   defp faults(pid, vm) do
     action(pid, "lan1_down")
     action(pid, "connect_lan2")
-    assert Scenarios.Qemu.topology(vm) == %{lan1: :application, lan2: :internet}
+    assert Scenarios.Qemu.topology(vm) == %{lan1: :plugin, lan2: :internet}
     assert device(vm).faults["lan1"]
 
     for action <- ~w(lan1_down lan2_down latency_on latency_on internet_loss internet_down),

@@ -4,7 +4,7 @@ defmodule WorkbenchWeb.PageFixtures do
       Keyword.merge(
         [
           bench: bench(),
-          applications: [],
+          plugins: [],
           gateways: [],
           targets: [],
           images: [],

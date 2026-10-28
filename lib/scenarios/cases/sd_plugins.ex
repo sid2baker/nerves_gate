@@ -1,10 +1,10 @@
-defmodule Scenarios.Cases.Apps do
+defmodule Scenarios.Cases.SdPlugins do
   @moduledoc false
   import ExUnit.Assertions
 
   def spec do
     %{
-      name: "SD application install, cold upgrade, rollback and removal",
+      name: "SD plugin install, cold upgrade, rollback and removal",
       fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
@@ -12,14 +12,14 @@ defmodule Scenarios.Cases.Apps do
 
   def run(%{device: vm}) do
     commission_storage(vm)
-    Scenarios.ManagedApp.prepare_storage(vm)
-    install_generated_app(vm)
-    Scenarios.AppLifecycle.run(vm)
+    Scenarios.ManagedPlugin.prepare_storage(vm)
+    install_generated_plugin(vm)
+    Scenarios.PluginLifecycle.run(vm)
 
     # Card removal uses a disposable Linux mount inside the supervised guest. No
     # host mounts, arbitrary VMs, hardware adapters or physical cards are involved.
-    mount = "/tmp/nerves-gate-apps"
-    backing = "/tmp/nerves-gate-app-backing"
+    mount = "/tmp/nerves-gate-plugins"
+    backing = "/tmp/nerves-gate-plugin-backing"
     for path <- [mount, backing], do: Scenarios.Device.rpc(vm, File, :mkdir_p!, [path], 30_000)
     board = Scenarios.Device.rpc(vm, Application, :fetch_env!, [:nerves_gate, :board], 30_000)
 
@@ -27,11 +27,11 @@ defmodule Scenarios.Cases.Apps do
       vm,
       Application,
       :put_env,
-      [:nerves_gate, :board, %{board | apps_device: nil}],
+      [:nerves_gate, :board, %{board | plugins_device: nil}],
       30_000
     )
 
-    Scenarios.Device.rpc(vm, Application, :put_env, [:nerves_gate, :apps_mount, mount], 30_000)
+    Scenarios.Device.rpc(vm, Application, :put_env, [:nerves_gate, :plugins_mount, mount], 30_000)
 
     assert {:ok, %{available?: false}} =
              Scenarios.Device.rpc(vm, NervesGate.Storage, :status, [], 30_000)
@@ -39,7 +39,7 @@ defmodule Scenarios.Cases.Apps do
     assert {:error, unavailable} =
              Scenarios.Device.rpc(vm, NervesGate.Plugins, :install, ["/missing.ez"], 200_000)
 
-    assert unavailable in [:storage_unavailable, :applications_not_ready]
+    assert unavailable in [:storage_unavailable, :plugins_not_ready]
 
     {_, 0} =
       Scenarios.Device.rpc(
@@ -61,10 +61,10 @@ defmodule Scenarios.Cases.Apps do
       first = upload(vm, "1.0.0", true)
       second = upload(vm, "1.1.0", true)
       broken = upload(vm, "1.2.0", false)
-      assert {:ok, %{app: :gate_fixture, version: "1.0.0"}} = apps(vm, :install, [first])
+      assert {:ok, %{app: :gate_fixture, version: "1.0.0"}} = plugins(vm, :install, [first])
       assert [{:gate_fixture, "1.0.0", false}] == selection(vm)
 
-      assert {{:error, %{code: "applications_installed"}}} =
+      assert {{:error, %{code: "plugins_installed"}}} =
                Scenarios.Device.rpc(
                  vm,
                  NervesGate.Storage,
@@ -73,7 +73,7 @@ defmodule Scenarios.Cases.Apps do
                  30_000
                )
 
-      assert :ok = apps(vm, :start, [:gate_fixture])
+      assert :ok = plugins(vm, :start, [:gate_fixture])
       assert [{:gate_fixture, "1.0.0", true}] == selection(vm)
 
       assert {:ok, data} =
@@ -88,13 +88,13 @@ defmodule Scenarios.Cases.Apps do
                  30_000
                )
 
-      assert :ok = apps(vm, :upgrade, [second])
+      assert :ok = plugins(vm, :upgrade, [second])
       assert [{:gate_fixture, "1.1.0", true}] == selection(vm)
-      assert {:error, {:rolled_back, _}} = apps(vm, :upgrade, [broken])
+      assert {:error, {:rolled_back, _}} = plugins(vm, :upgrade, [broken])
       assert [{:gate_fixture, "1.1.0", true}] == selection(vm)
-      assert :ok = apps(vm, :rollback, [:gate_fixture])
+      assert :ok = plugins(vm, :rollback, [:gate_fixture])
       assert [{:gate_fixture, "1.0.0", true}] == selection(vm)
-      assert :ok = apps(vm, :restart, [:gate_fixture])
+      assert :ok = plugins(vm, :restart, [:gate_fixture])
       assert_storage_removal(vm, backing, mount)
 
       assert :ok =
@@ -117,7 +117,7 @@ defmodule Scenarios.Cases.Apps do
 
       await(fn -> selection(vm) == [{:gate_fixture, "1.0.0", true}] end)
 
-      assert :ok = apps(vm, :stop, [:gate_fixture])
+      assert :ok = plugins(vm, :stop, [:gate_fixture])
       assert [{:gate_fixture, "1.0.0", false}] == selection(vm)
 
       refute :gate_fixture in Enum.map(
@@ -125,8 +125,8 @@ defmodule Scenarios.Cases.Apps do
                &elem(&1, 0)
              )
 
-      assert :ok = apps(vm, :start, [:gate_fixture])
-      assert :ok = apps(vm, :uninstall, [:gate_fixture])
+      assert :ok = plugins(vm, :start, [:gate_fixture])
+      assert :ok = plugins(vm, :uninstall, [:gate_fixture])
       assert [] == selection(vm)
 
       assert "preserved" =
@@ -140,10 +140,10 @@ defmodule Scenarios.Cases.Apps do
       assert {:error, :storage_unavailable} =
                Scenarios.Device.rpc(vm, NervesGate.Storage, :data_dir, [:gate_fixture], 30_000)
     after
-      apps(vm, :uninstall, [:gate_fixture])
+      plugins(vm, :uninstall, [:gate_fixture])
       Scenarios.Device.rpc(vm, System, :cmd, ["umount", [mount]], 30_000)
       Scenarios.Device.rpc(vm, System, :cmd, ["umount", [backing]], 30_000)
-      Scenarios.Device.rpc(vm, Application, :delete_env, [:nerves_gate, :apps_mount], 30_000)
+      Scenarios.Device.rpc(vm, Application, :delete_env, [:nerves_gate, :plugins_mount], 30_000)
       Scenarios.Device.rpc(vm, Application, :put_env, [:nerves_gate, :board, board], 30_000)
 
       for version <- ~w(1.0.0 1.1.0 1.2.0),
@@ -152,7 +152,7 @@ defmodule Scenarios.Cases.Apps do
   end
 
   defp assert_storage_removal(vm, backing, mount) do
-    {:ok, [before]} = apps(vm, :list, [])
+    {:ok, [before]} = plugins(vm, :list, [])
     assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["umount", [mount]])
     await(fn -> selection(vm) == [{:gate_fixture, "1.0.0", false}] end)
 
@@ -163,22 +163,22 @@ defmodule Scenarios.Cases.Apps do
 
     assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["mount", ["--bind", backing, mount]])
     await(fn -> selection(vm) == [{:gate_fixture, "1.0.0", true}] end)
-    {:ok, [after_return]} = apps(vm, :list, [])
+    {:ok, [after_return]} = plugins(vm, :list, [])
     assert after_return.generation > before.generation
   end
 
-  defp install_generated_app(vm) do
+  defp install_generated_plugin(vm) do
     dir = Path.join(System.tmp_dir!(), "gate_app_#{System.unique_integer([:positive])}")
 
     try do
-      app = Workbench.Applications.scaffold!(Path.join(dir, "generated_fixture"), local_sdk: true)
-      package = Workbench.Applications.package!(app.path)
+      app = Workbench.Plugins.scaffold!(Path.join(dir, "generated_fixture"), local_sdk: true)
+      package = Workbench.Plugins.package!(app.path)
       bytes = File.read!(package)
-      remote = "/tmp/reviewed-generated-app.ez"
+      remote = "/tmp/reviewed-generated-plugin.ez"
       storage = Scenarios.Device.rpc(vm, NervesGate.Storage, :commissioning)
 
       expected = %{
-        app: "generated_fixture",
+        plugin: "generated_fixture",
         version: "1.0.0",
         sha256: Base.encode16(:crypto.hash(:sha256, bytes), case: :lower),
         card_id: storage.card_id
@@ -187,26 +187,26 @@ defmodule Scenarios.Cases.Apps do
       assert :ok = Scenarios.Device.rpc(vm, File, :write, [remote, bytes])
 
       assert {:error, :review_changed} =
-               apps(vm, :install_new, [remote, %{expected | card_id: "changed-card"}])
+               plugins(vm, :install_new, [remote, %{expected | card_id: "changed-card"}])
 
-      assert {:ok, _} = apps(vm, :install_new, [remote, expected])
-      assert {:ok, stopped} = apps(vm, :list, [])
+      assert {:ok, _} = plugins(vm, :install_new, [remote, expected])
+      assert {:ok, stopped} = plugins(vm, :list, [])
 
       assert Enum.any?(
                stopped,
                &(&1.app == "generated_fixture" and &1.enabled == false and &1.running? == false)
              )
 
-      assert {:error, :review_changed} = apps(vm, :install_new, [remote, expected])
-      assert :ok = apps(vm, :uninstall, [:generated_fixture])
+      assert {:error, :review_changed} = plugins(vm, :install_new, [remote, expected])
+      assert :ok = plugins(vm, :uninstall, [:generated_fixture])
       assert :ok = Scenarios.Device.rpc(vm, File, :rm, [remote])
-      assert {:ok, _} = Scenarios.Apps.install(vm, package)
-      assert {:ok, entries} = apps(vm, :list, [])
+      assert {:ok, _} = Scenarios.PluginInstall.install(vm, package)
+      assert {:ok, entries} = plugins(vm, :list, [])
       assert Enum.any?(entries, &(&1.app == "generated_fixture" and &1.running?))
-      assert :ok = apps(vm, :uninstall, [:generated_fixture])
+      assert :ok = plugins(vm, :uninstall, [:generated_fixture])
     after
-      apps(vm, :uninstall, [:generated_fixture])
-      Scenarios.Device.rpc(vm, File, :rm, ["/tmp/reviewed-generated-app.ez"])
+      plugins(vm, :uninstall, [:generated_fixture])
+      Scenarios.Device.rpc(vm, File, :rm, ["/tmp/reviewed-generated-plugin.ez"])
       File.rm_rf!(dir)
     end
   end
@@ -279,7 +279,7 @@ defmodule Scenarios.Cases.Apps do
       vm,
       Application,
       :put_env,
-      [:nerves_gate, :board, %{board | apps_device: "/dev/vda"}],
+      [:nerves_gate, :board, %{board | plugins_device: "/dev/vda"}],
       30_000
     )
 
@@ -342,7 +342,7 @@ defmodule Scenarios.Cases.Apps do
   end
 
   defp selection(vm) do
-    {:ok, entries} = apps(vm, :list, [])
+    {:ok, entries} = plugins(vm, :list, [])
     Enum.map(entries, &{String.to_existing_atom(&1.app), &1.active_version, &1.running?})
   end
 
@@ -390,16 +390,16 @@ defmodule Scenarios.Cases.Apps do
     path
   end
 
-  defp apps(vm, :list, []) do
+  defp plugins(vm, :list, []) do
     {:ok, plugins} = Scenarios.Device.rpc(vm, NervesGate.Plugins, :list, [], 200_000)
     {:ok, Enum.reject(plugins, & &1.bundled?)}
   end
 
-  defp apps(vm, function, args),
+  defp plugins(vm, function, args),
     do: Scenarios.Device.rpc(vm, NervesGate.Plugins, function, args, 200_000)
 
   defp await(predicate, attempts \\ 30)
-  defp await(_, 0), do: flunk("Expected application storage state was not reached")
+  defp await(_, 0), do: flunk("Expected plugin storage state was not reached")
 
   defp await(predicate, attempts) do
     unless predicate.() do

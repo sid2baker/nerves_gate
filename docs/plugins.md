@@ -21,8 +21,8 @@ artifacts cannot be overwritten or uninstalled from the running device.
 
 The initial selection contains:
 
-- `tailnet_subrouter`: explicitly claims an eligible local Ethernet interface and
-  optionally advertises its subnet through the platform's existing Tailscale.
+- `tailnet_subrouter`: claims a free LAN exclusively assigned to it under Hardware
+  and optionally advertises its subnet through the platform's existing Tailscale.
 - `modbus_plugin`: uses [yamodbus](https://github.com/tallakt/yamodbus) for read-only
   Modbus TCP/RTU holding/input register polling. RTU requires enabled exclusive RS485
   assignment and explicit operator approval; no register writes or automatic discovery.
@@ -97,7 +97,7 @@ is rejected intact, never migrated/reset automatically. Existing application-era
 `/data/nerves_gate/apps.term` blocks the cutover until a separately authorized
 operator decision; it is not silently adopted or deleted.
 
-Application storage remains a separately commissioned ext4 SD mount at `/mnt/apps`.
+Plugin storage remains a separately commissioned ext4 SD mount at `/mnt/plugins`.
 `Storage.data_dir/1` requires available storage and a real managed calling process;
 there is no silent `/data` fallback. Plugins using files must handle storage errors
 and removal. The two bundled plugins keep their own configuration volatile and do
@@ -131,4 +131,4 @@ lifecycle qualification, not product distribution. These immutable SD-backed
 artifacts use the same manager, loader and ownership rules; they cannot replace a
 firmware-selected plugin. SD identity is checked across installation/activation.
 Removal stops development activations; reattachment can restore enabled intent
-only after prerequisites and integrity are verified. See [development](app-development.md).
+only after prerequisites and integrity are verified. See [development](plugin-development.md).

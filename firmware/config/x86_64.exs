@@ -7,7 +7,7 @@ import_config "firmware.exs"
 config :nerves_gate, :board, %{
   data_partition: "/sys/class/block/vda4/dev",
   # The simulator's prepared ext4 virtual SD card.
-  apps_device: "/dev/vdb",
+  plugins_device: "/dev/vdb",
   cellular: nil,
   hardware_adapter: nil,
   recovery_adapter: nil,

@@ -2,7 +2,7 @@
 
 Firmware-selected read-only Modbus polling using
 [yamodbus 0.1.0](https://github.com/tallakt/yamodbus), Apache-2.0 licensed.
-The plugin version is 0.2.0. Private pure-Elixir yamodbus code is bundled with it.
+Private pure-Elixir yamodbus code is bundled with it.
 Native `circuits_uart` 1.7.0 is supplied by firmware, not bundled in the plugin;
 SDK/LiveView are shared platform libraries too.
 
@@ -66,4 +66,4 @@ Run `mix test` here. TCP tests use a disposable supervised loopback peer. RTU te
 require `socat` and use disposable PTYs with the actual yamodbus/circuits_uart code,
 checking wire CRCs, exception/timeout handling and close/reopen. No test attaches to
 physical ports. See [hardware](../../docs/hardware.md) and
-[development](../../docs/app-development.md).
+[development](../../docs/plugin-development.md).

@@ -4,7 +4,7 @@ defmodule Workbench.Application do
 
   def start(_, _) do
     Supervisor.start_link(
-      [{Task.Supervisor, name: Workbench.Tasks}, Workbench.Applications],
+      [{Task.Supervisor, name: Workbench.Tasks}, Workbench.Plugins],
       strategy: :one_for_one,
       name: Workbench.Supervisor
     )

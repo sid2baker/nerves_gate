@@ -60,7 +60,7 @@ defmodule NervesGateWeb.SettingsLive do
         navigate="/hardware"
         class="ui-text-link"
       >Hardware</.link>;
-      connected equipment and protocols belong to applications.
+      connected equipment and protocols belong to plugins.
     </p>
     <.panel id="ssh-settings" title="SSH access" icon="lock">
       <p class="ui-help">
@@ -127,7 +127,7 @@ defmodule NervesGateWeb.SettingsLive do
         </.button>
       </.form>
     </.panel>
-    <.panel title="Application storage" icon="equipment" id="storage-settings">
+    <.panel title="Plugin storage" icon="equipment" id="storage-settings">
       <p>{NervesGateWeb.StorageLive.label(@projection.storage)}</p>
       <.link navigate="/settings/storage" class="ui-text-link">Set up or manage the SD card →</.link>
     </.panel>

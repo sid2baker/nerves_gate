@@ -50,7 +50,7 @@ defmodule NervesGate.PolicyTest do
   end
 
   test "4G supports only isolated application links and rejects legacy joined settings" do
-    application = %{"role" => "application", "address" => nil}
+    application = %{"role" => "plugin", "address" => nil}
 
     network = %{
       "mode" => "ports",

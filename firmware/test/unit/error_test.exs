@@ -46,8 +46,8 @@ defmodule NervesGate.ErrorTest do
 
   test "the boundary does not hide programming errors, throws or unrelated exits" do
     assert_raise ArgumentError, fn -> Error.protect(fn -> raise ArgumentError end) end
-    assert catch_throw(Error.protect(fn -> throw(:application_bug) end)) == :application_bug
-    assert catch_exit(Error.protect(fn -> exit(:application_bug) end)) == :application_bug
+    assert catch_throw(Error.protect(fn -> throw(:plugin_bug) end)) == :plugin_bug
+    assert catch_exit(Error.protect(fn -> exit(:plugin_bug) end)) == :plugin_bug
   end
 
   test "safe errors discard additional fields and never stringify unknown terms" do

@@ -27,7 +27,7 @@ defmodule NervesGateWeb.Router do
       live("/network/details", NetworkLive, :details)
       live("/remote", RemoteLive, :remote)
       live("/plugins", PluginsLive, :plugins)
-      live("/plugins/:app", PluginLive, :plugin)
+      live("/plugins/:plugin", PluginLive, :plugin)
       live("/hardware", HardwareLive, :hardware)
       live("/hardware/lan/:id", HardwarePortLive, :lan)
       live("/hardware/rs485/:id", HardwarePortLive, :rs485)

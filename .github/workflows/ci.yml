@@ -100,7 +100,7 @@ jobs:
       - name: Build EC100 firmware without flashing or booting
         run: mise exec -- mix firmware ec100 --env ${{ matrix.env }}
 
-  applications:
+  plugins:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -109,15 +109,15 @@ jobs:
       - uses: ./.github/actions/host-tools
       - name: Prepare host dependencies
         run: mise exec -- mix deps.get --check-locked
-      - name: Exercise ordinary application commands (no devices)
+      - name: Exercise ordinary plugin commands (no devices)
         run: |
-          mise exec -- mix app.new "$RUNNER_TEMP/demo" --local-sdk
-          mise exec -- mix app.new "$RUNNER_TEMP/second_app" --local-sdk
-          mise exec -- mix app.test "$RUNNER_TEMP/demo"
-          mise exec -- mix app.test "$RUNNER_TEMP/second_app"
-          mise exec -- mix app.package "$RUNNER_TEMP/demo"
-          mise exec -- mix app.package "$RUNNER_TEMP/second_app"
-          mise exec -- mix app.test plugins/tailnet_subrouter
-          mise exec -- mix app.package plugins/tailnet_subrouter
-          mise exec -- mix app.test plugins/modbus
-          mise exec -- mix app.package plugins/modbus
+          mise exec -- mix plugin.new "$RUNNER_TEMP/demo" --local-sdk
+          mise exec -- mix plugin.new "$RUNNER_TEMP/second_app" --local-sdk
+          mise exec -- mix plugin.test "$RUNNER_TEMP/demo"
+          mise exec -- mix plugin.test "$RUNNER_TEMP/second_app"
+          mise exec -- mix plugin.package "$RUNNER_TEMP/demo"
+          mise exec -- mix plugin.package "$RUNNER_TEMP/second_app"
+          mise exec -- mix plugin.test plugins/tailnet_subrouter
+          mise exec -- mix plugin.package plugins/tailnet_subrouter
+          mise exec -- mix plugin.test plugins/modbus
+          mise exec -- mix plugin.package plugins/modbus

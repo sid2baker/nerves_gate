@@ -1,5 +1,5 @@
 defmodule TailnetSubrouter.UI do
-  @moduledoc "App-owned subnet-sharing controls. Commands run in the supervised TailnetSubrouter owner, not this LiveComponent."
+  @moduledoc "Plugin-owned subnet-sharing controls. Commands run in the supervised TailnetSubrouter owner, not this LiveComponent."
   use Phoenix.LiveComponent
 
   def update(assigns, socket) do
@@ -43,7 +43,7 @@ defmodule TailnetSubrouter.UI do
         <p :if={@message} role="alert">{@message}</p>
         <p :if={@status[:error]} role="alert">{error_message(@status.error)}</p>
         <.form for={@form} id="subrouter-config" class="ui-stack" phx-change="edit_config" phx-submit="configure" phx-target={@myself}>
-          <label for="subrouter-interface">Application interface</label>
+          <label for="subrouter-interface">Plugin interface</label>
           <select id="subrouter-interface" name="config[interface]" disabled={@uncertain? or @status.state != :disabled}>
             <option value="" selected={@form[:interface].value == ""}>Select an available interface</option>
             <option :for={port <- ports(@interfaces)} value={port.id} selected={@form[:interface].value == port.id} disabled={unavailable_reason(port) != nil}>{port.id}{if reason = unavailable_reason(port), do: " — #{reason}"}</option>
@@ -95,7 +95,7 @@ defmodule TailnetSubrouter.UI do
            assign(
              socket,
              :message,
-             "Select an available application interface. Refresh status if settings changed."
+             "Select an available plugin interface. Refresh status if settings changed."
            )}
         end
 
@@ -160,7 +160,7 @@ defmodule TailnetSubrouter.UI do
       port.internet? -> "Used for Internet"
       port.claimed? -> "Already claimed"
       port.assigned_plugin != "tailnet_subrouter" -> "Not assigned to this plugin"
-      not port.application_enabled? -> "Disabled under Hardware"
+      not port.plugin_enabled? -> "Disabled under Hardware"
       port.addresses != [] -> "Already has an address"
       true -> nil
     end
