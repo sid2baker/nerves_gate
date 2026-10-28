@@ -26,7 +26,9 @@ defmodule Workbench.Skill.DevEnvironment do
     ```
 
     Mix tasks and Pi use the same attachment: distribution with cookie `mycookie`.
-    Reattach after Workbench restarts. An error means stop and inspect; do not create
+    Resolve this checkout's current session before device operations and reattach
+    after Workbench restarts or node changes; no Pi restart is needed. An error means
+    stop and inspect; do not create
     a second device-connection loop or load project source into Pi's bridge.
     Keep project target for source work, runtime for Workbench/device inspection.
     """)
@@ -38,12 +40,6 @@ defmodule Workbench.Skill.DevEnvironment do
   def attach(root) do
     %{"node" => name, "id" => id} =
       root |> Path.join("_build/workbench/session.json") |> File.read!() |> JSON.decode!()
-
-    if System.get_env("PI_ELIXIR_NODE") not in [nil, name],
-      do:
-        raise(
-          "Restart Pi to attach to a different checkout/runtime; the installed bridge pins its runtime identity"
-        )
 
     unless Node.alive?() do
       epmd =
@@ -62,13 +58,17 @@ defmodule Workbench.Skill.DevEnvironment do
         )
     end
 
-    node = String.to_atom(name)
-    result = Pi.Target.Attached.status(node: node, cookie: :mycookie)
+    result = Pi.Target.Attached.status(node: name, cookie: :mycookie)
 
     case result do
-      %{connected: true, project_root: cwd} ->
+      %{connected: true, node: node, project_root: cwd} ->
         true = Path.expand(cwd) == Path.expand(root)
         ^id = :erpc.call(node, System, :get_env, ["WORKBENCH_SESSION_ID"], 5_000)
+        # A replacement during verification requires a fresh attachment, not a
+        # successful response for a session that is no longer current.
+        %{"node" => ^name, "id" => ^id} =
+          root |> Path.join("_build/workbench/session.json") |> File.read!() |> JSON.decode!()
+
         System.put_env("PI_ELIXIR_NODE", name)
         System.put_env("PI_ELIXIR_COOKIE", "mycookie")
         {:ok, %{node: node, root: cwd}}

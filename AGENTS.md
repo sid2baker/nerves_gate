@@ -108,7 +108,15 @@
   isolated target compilation. Include changed `firmware/priv/static/assets/` with
   sources. Gateway Elixir/HEEx changes require rebuilt guests.
 - QEMU management uses explicit checkout-owned bridge/TAP preparation with `mix dev.network setup --subnet <private-/24>` and cleanup after the session stops. These change host networking and need explicit authorization; ordinary startup must not create/delete interfaces. Physical inspection needs no QEMU setup.
-- Pi attaches to the unique hidden Workbench node with the `dev-environment` skill; inspect its verified directory from the runtime target, not a standalone device-connection loop.
+- Pi must use `dev-environment` to attach to the latest running Workbench for this
+  checkout. Before device operations, reread `_build/workbench/session.json` and
+  verify the remote project root and session ID. Never retain a stale target or
+  choose another checkout's node merely because it started more recently.
+- Reattach when the Workbench session or node changes; restarting Pi must not be
+  the normal workflow. If the installed bridge refuses retargeting, report that
+  tooling limitation explicitly rather than silently bypassing the skill or
+  claiming a restart is an Erlang requirement. Inspect the verified directory
+  from the runtime target, not a standalone device-connection loop.
 - Documentation-only changes need no QEMU checks. Do not claim unperformed checks.
 - Root/firmware share `VERSION` and `CHANGELOG.md`; SDK/systems keep independent
   versions. System inputs require a system version bump. Only SDK goes to Hex.
