@@ -11,10 +11,18 @@ defmodule Scenarios.Cases.QemuSdk do
     }
 
   def run(%{device: vm}) do
+    # Plugin discovery runs after boot; assignment answers operation_in_progress until then.
+    ManagedPlugin.await_idle(vm)
     assert {:ok, info} = Device.rpc(vm, NervesGateSDK.System, :info)
     assert info.model == "x86_64"
     assert {:error, :plugin_not_running} = Device.rpc(vm, NervesGateSDK.Hardware, :resources)
-    assert [] = Device.rpc(vm, NervesGate.Hardware, :inventory)
+    # QEMU exposes only virtual Ethernet ports, never RS485/CAN resources.
+    inventory = Device.rpc(vm, NervesGate.Hardware, :inventory)
+
+    assert Enum.map(inventory, &{&1.name, &1.transport}) == [
+             {"eth0", "ethernet"},
+             {"eth1", "ethernet"}
+           ]
 
     assert {:error, :hardware_missing} =
              Device.rpc(vm, NervesGate.Plugins, :assign_port, ["ttyS3", true, "modbus_plugin"])

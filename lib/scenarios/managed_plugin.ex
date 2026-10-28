@@ -53,9 +53,7 @@ defmodule Scenarios.ManagedPlugin do
     end
 
     Device.await(vm, "disposable plugin storage and manager ready", fn _ ->
-      identity = Device.rpc(vm, NervesGate.Storage, :identity)
-      state = Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
-      match?({:ok, _}, identity) and state.restored? and state.job == nil and state.blocked == nil
+      match?({:ok, _}, Device.rpc(vm, NervesGate.Storage, :identity)) and idle?(vm)
     end)
 
     :ok
@@ -63,6 +61,15 @@ defmodule Scenarios.ManagedPlugin do
 
   def prepare_storage(_),
     do: raise(ArgumentError, "Managed SDK fixtures require owned disposable QEMU")
+
+  @doc "Wait until a booted device's plugin manager restored firmware plugins and is idle."
+  def await_idle(vm), do: await_idle(vm, "firmware plugins discovered and manager idle")
+  def await_idle(vm, phase), do: Device.await(vm, phase, fn _ -> idle?(vm) end)
+
+  defp idle?(vm) do
+    state = Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
+    state.restored? and state.job == nil and state.blocked == nil
+  end
 
   def build!(directory, version, options \\ []) do
     project = Path.join(directory, "fixture-#{version}-#{nonce()}")
