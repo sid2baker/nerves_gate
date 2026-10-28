@@ -23,10 +23,11 @@ The initial selection contains:
 
 - `tailnet_subrouter`: claims a free LAN exclusively assigned to it under Hardware
   and optionally advertises its subnet through the platform's existing Tailscale.
-- `modbus_plugin`: uses [yamodbus](https://github.com/tallakt/yamodbus) for read-only
-  Modbus TCP/RTU holding/input register polling. RTU requires enabled exclusive RS485
-  assignment and explicit operator approval; no register writes or automatic discovery.
-  Configuration and connection are explicit, separate actions.
+- `modbus_plugin`: uses [yamodbus](https://github.com/tallakt/yamodbus) for saved
+  Modbus TCP/RTU clients and servers whose mapped holding registers and coils become
+  platform inputs and repeatable outputs. Definitions use plugin configuration storage.
+  RTU requires enabled exclusive RS485 assignment and explicit operator approval; no
+  automatic discovery. Saving and starting are explicit, separate actions.
 
 New plugins are stopped/disabled. Starting them starts their supervision trees;
 it does not configure Ethernet, advertise routes or connect to equipment. Saved
@@ -112,9 +113,9 @@ plugin starts from no configuration; older versions' terms are kept until explic
 deleted. Stopping, disabling, updating or uninstalling never deletes them. There is
 no migration, merging or schema: the plugin owns the term.
 
-The two bundled plugins keep their own configuration volatile and do
-not require SD for operation. The platform retains durable subnet cleanup ownership
-independently of the subnet plugin's volatile state.
+The Modbus plugin saves its definitions this way and so requires commissioned SD to
+save. The subnet-router plugin keeps its configuration volatile; the platform
+retains durable subnet cleanup ownership independently of that volatile state.
 
 Storage commissioning lives at `/settings/storage`. Use existing ext4 media without
 formatting, explicitly authorize formatting, or continue without storage. Formatting

@@ -40,15 +40,16 @@ mix test
 MIX_ENV=prod mix nerves_gate.package --output /tmp/modbus-plugin.ez
 ```
 
-The Modbus tests use the real yamodbus client against a disposable, supervised
-loopback TCP peer and real circuits_uart/yamodbus RTU over disposable PTYs. Install
-`socat` for the RTU test suite; missing tools fail explicitly. No equipment is contacted. Pure policy/component tests run on
+The Modbus host tests cover validation, SD configuration storage, admission and
+fail-closed Start without the platform; no socket or port opens. Its real platform
+and protocol flow runs in the QEMU `plugins` scenario. No equipment is contacted. Pure policy/component tests run on
 the host; device lifecycle and SDK ownership qualification use owned QEMU scenarios.
 Host success is not runtime/vendor-equipment qualification.
 
 `mix check` includes SDK/firmware/root checks and both plugin test suites. It never
 starts QEMU. The `plugins` scenario covers firmware discovery without commissioned
-SD, explicit activation, UI cleanup and real Modbus TCP on a disposable QEMU device.
+SD, explicit activation, UI cleanup and a real Modbus TCP server/client state-I/O
+roundtrip (desire, write, feedback, reconciliation, loss) on a disposable QEMU device.
 The user owns `mix dev` and device starts; do not launch/reset a bench implicitly.
 
 ## Plugin contracts
@@ -76,8 +77,8 @@ a TCP connection does not claim or reconfigure the Internet interface. See [hard
 The firmware `NervesGate.IO` domain and SDK `NervesGateSDK.IO` expose registration,
 publication, input subscriptions and exclusive desired-state writers using shared
 `IO.InputDefinition`, `IO.OutputDefinition` and `IO.Observation` structs. SDK calls
-preserve managed calling-process ownership. The I/O UI and Modbus integration are
-not available yet.
+preserve managed calling-process ownership. The Modbus plugin is the reference
+integration; the I/O UI is not available yet.
 These types require the local SDK `~> 0.2.0-dev.1`, not the published 0.1.0 package.
 
 For persistent settings, `NervesGateSDK.Storage.save_config/1`, `restore_config/0`

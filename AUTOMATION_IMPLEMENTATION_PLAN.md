@@ -379,6 +379,12 @@ input, desired-state reconciliation with feedback, reconnects, changed desire du
 slow device I/O, loss of communication and plugin-owned shutdown. Physical
 qualification requires separate authorization.
 
+**Status:** implemented in plugin 0.3.0 as client/server definitions saved through
+plugin configuration storage, with explicit Start/Stop. Plugin host tests cover validation,
+storage and fail-closed admission; the QEMU `plugins` scenario covers the TCP
+server/client roundtrip. QEMU has no RS485, so RTU between the EC100
+ports awaits separately authorized physical testing.
+
 ## 5. Implement `NervesGate.Automation`
 
 Use Jido only if Phase 0 approves it. Do not build a generic interchangeable-engine

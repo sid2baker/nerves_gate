@@ -5,7 +5,7 @@ defmodule Scenarios.Cases.Plugins do
 
   def spec do
     %{
-      name: "Bundled plugins: no-SD activation, UI cleanup and real Modbus TCP",
+      name: "Bundled plugins: no-SD activation, UI cleanup and real Modbus TCP state I/O",
       fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
@@ -31,7 +31,12 @@ defmodule Scenarios.Cases.Plugins do
       ethernet(vm)
       assert :ok = ManagedPlugin.plugins(vm, :start, [:tailnet_subrouter])
       assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
-      assert Device.rpc(vm, ModbusPlugin, :status) == []
+      # Without SD, saved definitions are blocked, never defaulted or moved to /data.
+      assert %{storage: {:storage_unavailable, _}, connections: []} =
+               Device.rpc(vm, ModbusPlugin, :status)
+
+      assert {:error, {:storage_unavailable, _}} =
+               Device.rpc(vm, ModbusPlugin, :save, ["server1", modbus_server()])
 
       assert {:error, :firmware_owned_plugin} =
                ManagedPlugin.plugins(vm, :uninstall, [:modbus_plugin])
@@ -95,61 +100,168 @@ defmodule Scenarios.Cases.Plugins do
     refute Enum.find(plugins, &(&1.app == "tailnet_subrouter")).running?
   end
 
+  @modbus_port 15_020
+  @server_holding "modbus_plugin.server1.holding0"
+  @server_coil "modbus_plugin.server1.coil0"
+  @client_holding "modbus_plugin.client1.holding0"
+  @holding_setter "modbus_plugin.client1.holding0_set"
+  @coil_setter "modbus_plugin.client1.coil0_set"
+
+  # Saved server + client in one plugin over real loopback TCP and the real I/O domain:
+  # desired -> client write -> server map -> client poll -> linked feedback.
   defp modbus(vm) do
     assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
 
-    {:ok, memory} =
-      Device.rpc(vm, DynamicSupervisor, :start_child, [
-        ManagedFixture.Clients,
-        {Modbus.Memory, [holding_registers: 100]}
-      ])
-
-    {:ok, server} =
-      Device.rpc(vm, DynamicSupervisor, :start_child, [
-        ManagedFixture.Clients,
-        {Modbus.Server, [port: 0, handler: {Modbus.Memory, memory}]}
-      ])
-
     try do
-      :ok = Device.rpc(vm, Modbus.Memory, :put, [memory, :holding_register, 10, [42, 43]])
-      port = Device.rpc(vm, Modbus.Server, :port, [server])
+      assert %{storage: nil, connections: []} = Device.rpc(vm, ModbusPlugin, :status)
+      assert :ok = Device.rpc(vm, ModbusPlugin, :save, ["server1", modbus_server()])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :save, ["client1", modbus_client()])
 
-      params = %{
-        "host" => "127.0.0.1",
-        "port" => port,
-        "unit" => 1,
-        "table" => "holding",
-        "address" => 10,
-        "count" => 2,
-        "interval" => 100,
-        "timeout" => 1000
-      }
+      # Platform configuration storage keys the term by the running plugin version.
+      config = "/mnt/plugins/data/modbus_plugin/.nerves_gate/config/0.3.0.term"
 
-      assert :ok = Device.rpc(vm, ModbusPlugin, :configure, ["peer", params])
-      assert [%{state: :disconnected}] = Device.rpc(vm, ModbusPlugin, :status)
-      assert :ok = Device.rpc(vm, ModbusPlugin, :connect, ["peer"])
+      assert %{"client1" => _, "server1" => _} =
+               config |> then(&Device.rpc(vm, File, :read!, [&1])) |> :erlang.binary_to_term()
 
-      Device.await(vm, "yamodbus returns real TCP register values", fn _ ->
-        match?([%{values: [42, 43], error: nil}], Device.rpc(vm, ModbusPlugin, :status))
+      # Save registers nothing: endpoints appear only once a runtime starts.
+      assert {:error, :unknown_input} = io(vm, :input, [@server_holding])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["server1"])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["client1"])
+      await_value(vm, "server publishes its initial map", @server_holding, 7)
+      await_value(vm, "client polls the server map", @client_holding, 7)
+      await_value(vm, "client polls the server coil", "modbus_plugin.client1.coil0", true)
+
+      # A claim alone sets no desire and causes no write.
+      assert :ok = command(vm, :claim, [@holding_setter])
+      assert {:ok, %{claimed?: true, desired: nil}} = io(vm, :output, [@holding_setter])
+      assert :ok = command(vm, :set, [@holding_setter, 42])
+      await_value(vm, "desired register reaches the server map", @server_holding, 42)
+
+      Device.await(vm, "linked feedback reports the written register", fn _ ->
+        match?(
+          {:ok, %{desired: 42, reported: %{observation: %{value: 42, quality: :good}}}},
+          io(vm, :output, [@holding_setter])
+        )
       end)
 
-      assert :ok = Device.rpc(vm, ModbusPlugin, :disconnect, ["peer"])
+      assert :ok = command(vm, :claim, [@coil_setter])
+      assert :ok = command(vm, :set, [@coil_setter, false])
+      await_value(vm, "desired coil reaches the server map", @server_coil, false)
+
+      for value <- 1..5, do: assert(:ok = command(vm, :set, [@holding_setter, value]))
+      await_value(vm, "rapid desires converge on the latest", @server_holding, 5)
+
+      # A local server change contradicting a held desire is reconciled back.
+      assert :ok = Device.rpc(vm, ModbusPlugin.Server, :put, ["server1", "holding0", 99])
+      await_value(vm, "client restores held desire after feedback mismatch", @server_holding, 5)
+
+      # Release drops the desire without writing; later local changes stand.
+      assert :ok = command(vm, :release, [@holding_setter])
+      assert {:ok, %{claimed?: false, desired: nil}} = io(vm, :output, [@holding_setter])
+      assert :ok = Device.rpc(vm, ModbusPlugin.Server, :put, ["server1", "holding0", 99])
+      await_value(vm, "client observes the local server change", @client_holding, 99)
+      Process.sleep(1_000)
+      assert {:ok, %{observation: %{value: 99}}} = io(vm, :input, [@server_holding])
+
+      # Losing the server is reported as unknown/invalid, never a stale success.
+      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["server1"])
+      assert {:ok, %{available?: false}} = io(vm, :input, [@server_holding])
+
+      Device.await(vm, "client reports lost server without fabricated values", fn _ ->
+        match?(
+          {:ok, %{observation: %{value: nil, quality: quality}}} when quality != :good,
+          io(vm, :input, [@client_holding])
+        )
+      end)
+
+      # Stopping the client clears its binding, claims and desire, not definitions.
+      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
+
+      assert {:ok, %{available?: false, claimed?: false, desired: nil}} =
+               io(vm, :output, [@coil_setter])
+
+      assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["client1"])
+
+      assert {:error, :stop_first} =
+               Device.rpc(vm, ModbusPlugin, :save, ["client1", modbus_client()])
+
+      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
     after
-      assert :ok =
-               Device.rpc(vm, DynamicSupervisor, :terminate_child, [
-                 ManagedFixture.Clients,
-                 server
-               ])
-
-      assert :ok =
-               Device.rpc(vm, DynamicSupervisor, :terminate_child, [
-                 ManagedFixture.Clients,
-                 memory
-               ])
-
       assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
     end
 
     assert Device.rpc(vm, :code, :is_loaded, [Modbus.Client]) == false
+    definitions = Device.rpc(vm, NervesGate.IO, :definitions)
+    assert Map.has_key?(definitions, @holding_setter)
+
+    # Saved definitions return after restart; nothing starts or communicates.
+    assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
+
+    try do
+      assert %{
+               storage: nil,
+               connections: [%{id: "client1", state: :stopped}, %{id: "server1", state: :stopped}]
+             } =
+               Device.rpc(vm, ModbusPlugin, :status)
+
+      assert {:ok, %{available?: false, observation: nil}} = io(vm, :input, [@server_holding])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :delete, ["client1"])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :delete, ["server1"])
+    after
+      assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
+    end
+  end
+
+  defp io(vm, function, args), do: Device.rpc(vm, NervesGate.IO, function, args)
+  defp command(vm, function, args), do: Device.rpc(vm, ModbusPlugin.Command, function, args)
+
+  defp await_value(vm, phase, id, value) do
+    Device.await(vm, phase, fn _ ->
+      match?({:ok, %{observation: %{value: ^value, quality: :good}}}, io(vm, :input, [id]))
+    end)
+  end
+
+  defp modbus_server do
+    %{
+      "role" => "server",
+      "transport" => "tcp",
+      "port" => @modbus_port,
+      "unit" => 1,
+      "timeout" => 1000,
+      "mappings" => [
+        %{"id" => "holding0", "table" => "holding", "address" => 0, "initial" => 7},
+        %{"id" => "coil0", "table" => "coil", "address" => 0, "initial" => true}
+      ]
+    }
+  end
+
+  defp modbus_client do
+    %{
+      "role" => "client",
+      "transport" => "tcp",
+      "host" => "127.0.0.1",
+      "port" => @modbus_port,
+      "unit" => 1,
+      "interval" => 200,
+      "timeout" => 500,
+      "mappings" => [
+        %{"id" => "holding0", "table" => "holding", "address" => 0, "direction" => "input"},
+        %{
+          "id" => "holding0_set",
+          "table" => "holding",
+          "address" => 0,
+          "direction" => "output",
+          "feedback" => "holding0"
+        },
+        %{"id" => "coil0", "table" => "coil", "address" => 0, "direction" => "input"},
+        %{
+          "id" => "coil0_set",
+          "table" => "coil",
+          "address" => 0,
+          "direction" => "output",
+          "feedback" => "coil0"
+        }
+      ]
+    }
   end
 end

@@ -47,13 +47,13 @@ bump versions, erase metadata or bypass SSH host-key verification.
 
 Linux x86_64 or aarch64 with QEMU 8.2+ (`user` and `stream` networking), fwup,
 flock, mkfs.ext4, a C compiler, make, pkg-config, inotify-tools, squashfs-tools,
-socat (disposable RTU test PTYs), GNU coreutils and the libmnl/libnl headers needed by VintageNet.
+GNU coreutils and the libmnl/libnl headers needed by VintageNet.
 
 ```sh
 # Ubuntu/Debian
-sudo apt install build-essential git pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools e2fsprogs squashfs-tools socat
+sudo apt install build-essential git pkg-config libmnl-dev libnl-genl-3-dev qemu-system-x86 util-linux inotify-tools e2fsprogs squashfs-tools
 # Fedora
-sudo dnf install gcc make git pkgconf-pkg-config libmnl-devel libnl3-devel qemu-system-x86 util-linux inotify-tools e2fsprogs squashfs-tools socat
+sudo dnf install gcc make git pkgconf-pkg-config libmnl-devel libnl3-devel qemu-system-x86 util-linux inotify-tools e2fsprogs squashfs-tools
 ```
 
 Install fwup from its [releases](https://github.com/fwup-home/fwup/releases). On

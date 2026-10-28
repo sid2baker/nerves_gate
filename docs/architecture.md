@@ -14,7 +14,7 @@ disposable QEMU hardware; it does not run device services.
 | `firmware/` | `:nerves_gate` | Host-compiled helpers/checks; EC100 or QEMU runtime | Root `VERSION` |
 | `sdk/` | `:nerves_gate_sdk` | Typed plugin contract and packaging; no application supervisor | `sdk/VERSION` |
 | `plugins/tailnet_subrouter/` | `:tailnet_subrouter` | Selected, disabled-on-first-boot subnet plugin | Plugin `mix.exs` |
-| `plugins/modbus/` | `:modbus_plugin` | Selected, read-only Modbus TCP/RTU plugin with yamodbus | Plugin `mix.exs` |
+| `plugins/modbus/` | `:modbus_plugin` | Selected Modbus TCP/RTU client/server plugin with yamodbus | Plugin `mix.exs` |
 | `systems/nerves_system_ec100/` | `:nerves_system_ec100` | ARM Linux, toolchain, boot and board support | System `VERSION` |
 | `systems/nerves_system_ec100_qemu/` | `:nerves_system_ec100_qemu` | x86_64/musl Linux, toolchain and QEMU support | System `VERSION` |
 
@@ -285,8 +285,9 @@ monitors fence endpoints; a periodic sweep also detects revoked/quiescing genera
 without requiring a new publication. I/O precedes Plugins in the supervision tree,
 so a controller restart also invalidates managed activation bindings.
 
-`NervesGateSDK.IO` calls run in the actual managed caller. I/O projections/UI,
-Modbus integration and Automation are not implemented.
+`NervesGateSDK.IO` calls run in the actual managed caller. The Modbus plugin registers
+mapped registers/coils from its runtime processes. I/O projections/UI and Automation
+are not implemented.
 See [I/O domain API](action-api.md#io-state-and-desire).
 
 ### UI projection

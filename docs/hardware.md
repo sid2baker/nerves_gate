@@ -63,34 +63,32 @@ a pending network trial prevents assignment. No assignment starts traffic or sha
 
 ## Modbus TCP and RTU
 
-`modbus_plugin` uses yamodbus for read-only holding/input register polling over
-TCP or RTU. Its page owns unit/register configuration, not Hardware. Startup and
-saving configuration open no connection. Connect/poll and disconnect are explicit.
+`modbus_plugin` uses yamodbus for saved Modbus clients and servers over TCP or RTU.
+Its page owns roles, unit IDs and register/coil mappings, not Hardware. Definitions
+are saved through plugin configuration storage on SD. Startup and saving open no connection;
+Start and Stop are explicit, and a running connection must be stopped before saving.
+Mapped holding registers and coils become platform inputs and repeatable outputs.
+See the [plugin README](../plugins/modbus/README.md).
 
 RTU requires an enabled RS485 assignment, detected device, and confirmation that the
-operator is authorized and no other master is active. One connection per serial
-port is allowed; assign both ports to supervise independent connections concurrently.
-The initial EC100 profile is automatic direction, **9600 baud, 8 data bits, no parity,
-1 stop bit**. No unqualified speed/parity/DE/RTS modes are offered.
+operator is authorized to use the bus. One running connection per serial port; assign
+both ports to run a server and a client against each other. The EC100 uses automatic
+direction control with configurable speed, parity and stop bits (8 data bits). No
+DE/RTS modes are offered.
 
 The plugin declares `circuits_uart` as a dependency, but the native 1.7.0 driver is
 provided by target-built firmware and excluded from plugin archives. Packages remain
 pure BEAM and pin the exact platform library version. No device library downloads.
 
-TCP and RTU reads use FC3/FC4, units 1–247, zero-based addresses and bounded counts,
-timeouts and polling. No register writes, broadcasts, scans or ASCII transport are
-exposed. The library may reconnect an explicitly started transport; subsequent
-polls are reads only. Disconnect/plugin stop terminates clients. Restart clears
-configuration and never connects automatically. Check wiring/termination and use
-only networks/buses you are authorized to access.
+Clients write only repeatable setters for a held desire and never write when no desire
+exists. The library may reconnect an explicitly started transport; Stop or plugin stop
+terminates it. Check wiring/termination and use only networks/buses you are authorized
+to access.
 
 ## Validation limits
 
-Host tests use the real yamodbus/circuits_uart implementation against disposable
-loopback TCP and supervised `socat` pseudo-terminals, including RTU CRCs, exceptions,
-timeouts and close/reopen. Tests never attach to physical ports. Host tests require
-`socat`; failure to provide it fails the RTU suite rather than silently skipping it.
-PTY tests are protocol/cleanup evidence, not electrical, RS485 direction-control,
-PLC or CAN qualification. QEMU runtime and physical qualification are separate,
-authorized activities. No real bus traffic or device deployment is implied by
-implementation or firmware builds.
+Modbus host tests cover validation, storage and admission without opening ports.
+The QEMU `plugins` scenario runs the real platform and plugin over loopback TCP.
+QEMU guests have no RS485 ports: RTU between the EC100 ports, electrical, direction
+control, PLC and CAN qualification are separate, authorized physical activities. No
+real bus traffic or device deployment is implied by implementation or firmware builds.

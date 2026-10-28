@@ -1,98 +1,115 @@
 defmodule ModbusPlugin do
-  @moduledoc "Explicitly configured, read-only Modbus TCP/RTU devices using yamodbus. Startup opens no connections."
+  @moduledoc """
+  Explicitly started Modbus TCP/RTU clients and servers using yamodbus, with
+  mapped registers/coils exposed as platform inputs and outputs.
+
+  Definitions are this plugin version's `NervesGateSDK.Storage` configuration
+  term, restored at startup; startup never opens a transport. Save and Start are separate: a running
+  connection must be stopped before it is saved again, and Start resolves
+  assigned serial ports at that moment. An unexpectedly dead RTU worker keeps
+  its port reserved until the whole plugin is restarted, because a missing
+  worker is no proof its native handle drained.
+  """
   use GenServer
-  alias ModbusPlugin.{Config, Connection}
+  alias ModbusPlugin.{Connection, Server, Store}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
-  def configure(id, params), do: GenServer.call(__MODULE__, {:configure, id, params})
-  def connect(id), do: GenServer.call(__MODULE__, {:connect, id})
-  def disconnect(id), do: GenServer.call(__MODULE__, {:disconnect, id})
+  def save(id, params), do: GenServer.call(__MODULE__, {:save, id, params})
+  def delete(id), do: GenServer.call(__MODULE__, {:delete, id})
+  def start(id), do: GenServer.call(__MODULE__, {:start, id})
+  def stop(id), do: GenServer.call(__MODULE__, {:stop, id})
   def status, do: GenServer.call(__MODULE__, :status)
   def ports, do: GenServer.call(__MODULE__, :ports)
   def health_check, do: if(Process.whereis(__MODULE__), do: :ok, else: {:error, :not_running})
 
-  def init(_), do: {:ok, %{}}
-
-  def handle_call(:ports, _, configs), do: {:reply, NervesGateSDK.Hardware.resources(), configs}
-
-  def handle_call({:configure, id, params}, _, configs) do
-    with {:ok, config} <- Config.validate(id, params),
-         true <- Map.has_key?(configs, id) or map_size(configs) < 16,
-         false <- Map.has_key?(Map.get(configs, id, %{}), :serial_monitor),
-         nil <- Connection.pid(id) do
-      {:reply, :ok, Map.put(configs, id, config)}
-    else
-      false -> {:reply, {:error, :device_limit}, configs}
-      true -> {:reply, {:error, :connection_cleanup_required}, configs}
-      pid when is_pid(pid) -> {:reply, {:error, :disconnect_first}, configs}
-      error -> {:reply, error, configs}
+  @impl true
+  def init(_) do
+    case Store.restore() do
+      {:ok, configs} -> {:ok, %{configs: configs, error: nil, monitors: %{}}}
+      {:error, reason} -> {:ok, %{configs: %{}, error: reason, monitors: %{}}}
     end
   end
 
-  def handle_call({:connect, id}, _, configs) do
-    result =
-      case {configs[id], Connection.pid(id)} do
-        {nil, _} ->
-          {:error, :configure_first}
+  @impl true
+  def handle_call(:ports, _, state), do: {:reply, NervesGateSDK.Hardware.resources(), state}
 
-        {_, pid} when is_pid(pid) ->
+  def handle_call({:save, id, params}, _, state) do
+    with :ok <- writable(state, id),
+         {:ok, configs} <- Store.put(state.configs, id, params) do
+      persist(state, configs)
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:delete, id}, _, state) do
+    with :ok <- writable(state, id),
+         true <- Map.has_key?(state.configs, id) || {:error, :unknown_connection} do
+      persist(state, Map.delete(state.configs, id))
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:start, id}, _, state) do
+    result =
+      case {state.configs[id], Connection.pid(id), state.monitors[id]} do
+        {nil, _, _} ->
+          {:error, :save_first}
+
+        {_, pid, _} when is_pid(pid) ->
           {:error, :already_started}
 
-        {%{serial_monitor: _}, nil} ->
+        {_, nil, monitor} when monitor != nil ->
           {:error, :connection_cleanup_required}
 
-        {config, nil} ->
-          with :ok <- serial_exclusive(config, configs),
+        {config, nil, nil} ->
+          with :ok <- serial_exclusive(config, state),
                {:ok, config} <- assigned_transport(config) do
-            case DynamicSupervisor.start_child(ModbusPlugin.Connections, {Connection, config}) do
-              {:ok, pid} -> {:ok, pid}
-              {:error, _} -> {:error, :connection_start_failed}
-            end
+            start_runtime(config)
           end
       end
 
     case result do
       {:ok, pid} ->
-        configs =
-          if configs[id].transport == "rtu",
-            do: put_in(configs[id][:serial_monitor], Process.monitor(pid)),
-            else: configs
+        monitors =
+          if state.configs[id].transport == "rtu",
+            do: Map.put(state.monitors, id, Process.monitor(pid)),
+            else: state.monitors
 
-        {:reply, :ok, configs}
+        {:reply, :ok, %{state | monitors: monitors}}
 
       error ->
-        {:reply, error, configs}
+        {:reply, error, state}
     end
   end
 
-  def handle_call({:disconnect, id}, _, configs) do
+  def handle_call({:stop, id}, _, state) do
     result =
       case Connection.pid(id) do
         nil ->
-          if get_in(configs, [id, :serial_monitor]),
-            do: {:error, :connection_cleanup_required},
-            else: :ok
+          if state.monitors[id], do: {:error, :connection_cleanup_required}, else: :ok
 
         pid ->
           DynamicSupervisor.terminate_child(ModbusPlugin.Connections, pid)
       end
 
-    configs =
-      if result == :ok and get_in(configs, [id, :serial_monitor]) do
-        Process.demonitor(configs[id].serial_monitor, [:flush])
-        Map.update!(configs, id, &Map.delete(&1, :serial_monitor))
+    monitors =
+      if result == :ok and state.monitors[id] do
+        Process.demonitor(state.monitors[id], [:flush])
+        Map.delete(state.monitors, id)
       else
-        configs
+        state.monitors
       end
 
-    {:reply, result, configs}
+    {:reply, result, %{state | monitors: monitors}}
   end
 
-  def handle_call(:status, _, configs) do
-    devices =
-      for {id, config} <- Enum.sort(configs) do
+  def handle_call(:status, _, state) do
+    connections =
+      for {id, config} <- Enum.sort(state.configs) do
         status =
-          if config[:serial_monitor] && Connection.pid(id) == nil,
+          if state.monitors[id] && Connection.pid(id) == nil,
             do: %{
               state: :cleanup_required,
               values: nil,
@@ -101,21 +118,52 @@ defmodule ModbusPlugin do
             },
             else: Connection.status(id)
 
-        Map.merge(Map.delete(config, :serial_monitor), status)
+        Map.merge(config, status)
       end
 
-    {:reply, devices, configs}
+    {:reply, %{storage: state.error, connections: connections}, state}
   end
 
   # Retain the serial marker after unexpected death: a missing worker is not
-  # proof its native handle drained. Only checked disconnect or plugin stop clears it.
-  def handle_info({:DOWN, _, :process, _, _}, configs), do: {:noreply, configs}
+  # proof its native handle drained. Only checked stop or plugin restart clears it.
+  @impl true
+  def handle_info({:DOWN, _, :process, _, _}, state), do: {:noreply, state}
 
-  defp serial_exclusive(%{transport: "rtu", serial_port: port}, configs) do
+  # A failed or uncertain earlier save or restore blocks saving until the plugin
+  # is restarted and reloads what storage actually holds.
+  defp writable(%{error: error}, _) when error != nil, do: {:error, error}
+  defp writable(state, id), do: idle(state, id)
+
+  defp persist(state, configs) do
+    case Store.persist(configs) do
+      :ok -> {:reply, :ok, %{state | configs: configs}}
+      {:error, :commit_unknown} = error -> {:reply, error, %{state | error: :commit_unknown}}
+      error -> {:reply, error, state}
+    end
+  end
+
+  defp idle(state, id) do
+    cond do
+      state.monitors[id] != nil -> {:error, :connection_cleanup_required}
+      Connection.pid(id) != nil -> {:error, :stop_first}
+      true -> :ok
+    end
+  end
+
+  defp start_runtime(config) do
+    module = if config.role == :server, do: Server, else: Connection
+
+    case DynamicSupervisor.start_child(ModbusPlugin.Connections, {module, config}) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, reason} -> {:error, {:start_failed, reason}}
+    end
+  end
+
+  defp serial_exclusive(%{transport: "rtu", serial_port: port}, state) do
     busy =
-      Enum.any?(configs, fn {id, config} ->
+      Enum.any?(state.configs, fn {id, config} ->
         config.transport == "rtu" and config.serial_port == port and
-          (Connection.pid(id) != nil or Map.has_key?(config, :serial_monitor))
+          (Connection.pid(id) != nil or Map.has_key?(state.monitors, id))
       end)
 
     if busy, do: {:error, :serial_port_in_use}, else: :ok
