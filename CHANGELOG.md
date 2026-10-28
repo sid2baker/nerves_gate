@@ -70,6 +70,7 @@
 
 ### Fixed
 
+- Valid saved I/O definitions no longer prevent firmware startup after a cold boot. The catalogue loads its compiled schema before safe decoding; unknown atoms and malformed files remain rejected without rewriting saved state.
 - Releasing a plugin's local LAN lease without a generation drain no longer crashes `NervesGate.Network` (and, through it, I/O and Plugins).
 - Hardware-resource queries skip unassigned and disabled ports instead of crashing plugin management when opening the Modbus RTU configuration.
 - Physical firmware uploads use verified SSH; identity, health and plugin-artifact checks use distribution before upload and new-boot verification.

@@ -31,6 +31,11 @@ defmodule NervesGate.IO.Catalog do
   end
 
   defp decode(bytes) do
+    # On cold boot the validator (and its supported struct/type atoms) may not
+    # have been loaded yet. Intern only this compiled schema before safe decode;
+    # never create atoms from the file or depend on a plugin having run first.
+    Code.ensure_loaded!(Definition)
+
     case :erlang.binary_to_term(bytes, [:safe, :used]) do
       {%{schema: 1, definitions: definitions} = document, used}
       when map_size(document) == 2 and used == byte_size(bytes) ->

@@ -68,6 +68,65 @@ defmodule NervesGate.IODefinitionTest do
     refute Definition.stale?(input, nil, 1_000_000)
   end
 
+  test "persisted definitions start on a cold VM without plugin/schema modules already loaded",
+       %{tmp_dir: dir} do
+    path = Path.join(dir, "cold-io.term")
+
+    definitions = %{
+      "test.temperature" => %InputDefinition{
+        id: "temperature",
+        type: :integer,
+        expected_interval_ms: 1000
+      },
+      "test.setpoint" => %OutputDefinition{
+        id: "setpoint",
+        type: :integer,
+        min: 0,
+        max: 100,
+        feedback_input_id: "temperature"
+      }
+    }
+
+    assert :ok = Catalog.save(path, definitions)
+    bytes = File.read!(path)
+    {:ok, peer, _} = :peer.start_link(%{connection: :standard_io, args: [~c"+S", ~c"2:2"]})
+
+    try do
+      :ok = :peer.call(peer, :code, :add_paths, [:code.get_path()])
+      :peer.call(peer, Code, :ensure_loaded!, [NervesGate.IO])
+      assert false == :peer.call(peer, :code, :is_loaded, [Definition])
+
+      assert {:ok, _} =
+               :peer.call(peer, GenServer, :start, [
+                 NervesGate.IO,
+                 [path: path],
+                 [name: NervesGate.IO]
+               ])
+
+      assert ^definitions = :peer.call(peer, NervesGate.IO, :definitions, [])
+      assert File.read!(path) == bytes
+
+      # Loading the supported schema must not permit new atoms from saved bytes.
+      unknown = "unknown_io_catalog_atom_#{System.unique_integer([:positive])}"
+
+      assert_raise ArgumentError, fn ->
+        :peer.call(peer, :erlang, :binary_to_existing_atom, [unknown, :utf8])
+      end
+
+      hostile = <<131, 119, byte_size(unknown), unknown::binary>>
+      File.write!(path, hostile)
+      assert {:error, :invalid_io_catalog} = :peer.call(peer, Catalog, :load, [path])
+
+      assert_raise ArgumentError, fn ->
+        :peer.call(peer, :erlang, :binary_to_existing_atom, [unknown, :utf8])
+      end
+
+      assert File.read!(path) == hostile
+    after
+      :peer.stop(peer)
+    end
+  end
+
   test "catalog rejects corrupt, trailing, compressed, unsupported and malformed data without rewriting",
        %{tmp_dir: dir} do
     path = Path.join(dir, "io.term")
