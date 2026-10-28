@@ -175,7 +175,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
       if path == "/hardware/lan/2" do
         page = Floki.parse_document!(response.body)
-        assert [_] = Floki.find(page, "#application-port-eth1")
+        assert [_] = Floki.find(page, "#hardware-assignment-form")
 
         assert [] =
                  Floki.find(
@@ -196,7 +196,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
       if path == "/hardware" do
         page = Floki.parse_document!(response.body)
-        assert [_] = Floki.find(page, "#hardware-lan-1")
+        assert [] = Floki.find(page, "#hardware-lan-1")
         assert [_] = Floki.find(page, "#hardware-lan-2")
         assert [] = Floki.find(page, "details#ethernet-arrangement, #lan-ports-form")
       end
@@ -246,7 +246,8 @@ defmodule Scenarios.Cases.ProjectionStream do
 
     refresh =
       case editor do
-        editor when editor in [:network, :lan] -> &NetworkEditor.refresh_observations/2
+        :network -> &NetworkEditor.refresh_observations/2
+        :lan -> &Phoenix.Component.assign(&1, :projection, &2)
         :remote -> &RemoteLive.refresh_observations/2
         :settings -> &Phoenix.Component.assign(&1, :projection, &2)
       end
@@ -259,7 +260,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
   # An unrelated operation queued before a command reply must not complete or
   # abandon the editor's pending save against an unchanged domain snapshot.
-  defp assert_pending_reply(socket, editor) when editor in [:network, :lan] do
+  defp assert_pending_reply(socket, :network) do
     socket = Phoenix.Component.assign(socket, own_save: true, saving_network: socket.assigns.base)
     updated = NetworkEditor.refresh_observations(socket, socket.assigns.projection)
     assert updated.assigns.own_save
@@ -273,7 +274,7 @@ defmodule Scenarios.Cases.ProjectionStream do
     assert updated.assigns.dirty
   end
 
-  defp assert_pending_reply(_, :settings), do: :ok
+  defp assert_pending_reply(_, editor) when editor in [:settings, :lan], do: :ok
 
   defp draft(socket, :settings) do
     {:ok, socket} = SettingsLive.mount(%{}, %{}, socket)
@@ -288,14 +289,28 @@ defmodule Scenarios.Cases.ProjectionStream do
     Phoenix.Component.assign(socket, :dirty, true)
   end
 
-  defp draft(socket, editor) when editor in [:network, :lan] do
-    settings = socket.assigns.projection.network.desired
+  defp draft(socket, :lan) do
+    ports =
+      Map.new(socket.assigns.projection.hardware.ports, fn port ->
+        {port.name, %{enabled: port.enabled, plugin: port.assigned_plugin}}
+      end)
 
-    {editor, field, value} =
-      case editor do
-        :network -> {:internet, "internet_ip", "192.0.2.123"}
-        :lan -> {{:application, "eth1"}, "enabled", "true"}
-      end
+    socket =
+      Phoenix.Component.assign(socket, hardware: %{ports: ports}, port_name: "eth1", dirty: true)
+
+    {:noreply, socket} =
+      NervesGateWeb.HardwarePortLive.handle_event(
+        "review",
+        %{"assignment" => %{"enabled" => "true", "plugin" => "tailnet_subrouter"}},
+        socket
+      )
+
+    socket
+  end
+
+  defp draft(socket, :network) do
+    settings = socket.assigns.projection.network.desired
+    {editor, field, value} = {:internet, "internet_ip", "192.0.2.123"}
 
     params = NetworkForm.from_settings(settings, editor) |> Map.put(field, value)
 
@@ -336,8 +351,12 @@ defmodule Scenarios.Cases.ProjectionStream do
           settings: "public_key"
         }
 
-        form = if editor == :settings, do: socket.assigns.key_form, else: socket.assigns.form
-        draft = form.params[Map.fetch!(fields, editor)]
+        draft =
+          case editor do
+            :lan -> socket.assigns.draft["enabled"]
+            :settings -> socket.assigns.key_form.params[Map.fetch!(fields, editor)]
+            _ -> socket.assigns.form.params[Map.fetch!(fields, editor)]
+          end
 
         send(
           from,

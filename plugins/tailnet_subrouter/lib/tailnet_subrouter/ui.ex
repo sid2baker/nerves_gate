@@ -31,7 +31,7 @@ defmodule TailnetSubrouter.UI do
     <section class="ui-panel" id="tailnet-subrouter">
       <div class="ui-panel-body">
         <h2>Share a local subnet</h2>
-        <p class="ui-help">Use a dedicated, application-enabled Ethernet interface. Keep USB management available. Configuration adds a temporary address; sharing requires a separate explicit action.</p>
+        <p class="ui-help">Use a dedicated Ethernet interface assigned to this plugin under Hardware. Keep USB management available. Configuration adds a temporary address; sharing requires a separate explicit action.</p>
         <p role="status" id="subrouter-state">State: {@status.state}</p>
         <dl :if={@status[:interface]}>
           <dt>Interface</dt><dd>{@status.interface}</dd>
@@ -49,7 +49,7 @@ defmodule TailnetSubrouter.UI do
             <option :for={port <- ports(@interfaces)} value={port.id} selected={@form[:interface].value == port.id} disabled={unavailable_reason(port) != nil}>{port.id}{if reason = unavailable_reason(port), do: " — #{reason}"}</option>
           </select>
           <p :if={match?({:error, _}, @interfaces)} class="ui-help">Interface status is unavailable. Refresh status before configuring.</p>
-          <p :if={match?({:ok, _}, @interfaces) and not Enum.any?(ports(@interfaces), &(unavailable_reason(&1) == nil)) and @status.state == :disabled} class="ui-help">No application interface is available. In gateway network settings, enable a dedicated Ethernet port for applications; keep the Internet port unchanged. Then refresh status.</p>
+          <p :if={match?({:ok, _}, @interfaces) and not Enum.any?(ports(@interfaces), &(unavailable_reason(&1) == nil)) and @status.state == :disabled} class="ui-help">No application interface is available. Under Hardware, enable and assign a dedicated Ethernet port to tailnet_subrouter; keep the Internet port unchanged. Then refresh status.</p>
           <label for="subrouter-address">Unused gateway-side IPv4 address</label>
           <input id="subrouter-address" name="config[address]" value={@form[:address].value} required placeholder="192.168.50.2" disabled={@uncertain? or @status.state != :disabled} />
           <label for="subrouter-prefix">Subnet prefix length</label>
@@ -159,7 +159,8 @@ defmodule TailnetSubrouter.UI do
     cond do
       port.internet? -> "Used for Internet"
       port.claimed? -> "Already claimed"
-      not port.application_enabled? -> "Not enabled for applications"
+      port.assigned_plugin != "tailnet_subrouter" -> "Not assigned to this plugin"
+      not port.application_enabled? -> "Disabled under Hardware"
       port.addresses != [] -> "Already has an address"
       true -> nil
     end

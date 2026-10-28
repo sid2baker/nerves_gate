@@ -9,7 +9,7 @@ defmodule NervesGateSDK.Hardware do
 
     @type t :: %__MODULE__{
             id: String.t(),
-            kind: :serial | :can,
+            kind: :serial | :can | :ethernet,
             present?: boolean(),
             path: String.t() | nil,
             interface: String.t() | nil

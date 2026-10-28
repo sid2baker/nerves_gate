@@ -17,7 +17,11 @@ defmodule NervesGateWeb.HardwarePortLive do
   end
 
   def handle_params(%{"id" => id}, _, socket) do
-    ports = %{rs485: %{"1" => "ttyS3", "2" => "ttyS4"}, can: %{"1" => "can0", "2" => "can1"}}
+    ports = %{
+      lan: %{"1" => "eth0", "2" => "eth1"},
+      rs485: %{"1" => "ttyS3", "2" => "ttyS4"},
+      can: %{"1" => "can0", "2" => "can1"}
+    }
 
     case get_in(ports, [socket.assigns.live_action, id]) do
       nil ->
@@ -27,7 +31,7 @@ defmodule NervesGateWeb.HardwarePortLive do
         {:noreply,
          assign(socket,
            port_name: name,
-           title: "#{if socket.assigns.live_action == :can, do: "CAN", else: "RS485"} #{id}",
+           title: "#{socket.assigns.live_action |> Atom.to_string() |> String.upcase()} #{id}",
            draft: nil
          )}
     end
@@ -112,7 +116,11 @@ defmodule NervesGateWeb.HardwarePortLive do
           %{
             name: assigns.port_name,
             present: false,
-            transport: if(assigns.live_action == :can, do: "can", else: "rs485"),
+            transport:
+              if(assigns.live_action == :lan,
+                do: "ethernet",
+                else: Atom.to_string(assigns.live_action)
+              ),
             profile: "Unavailable hardware"
           }
         ]
@@ -127,7 +135,20 @@ defmodule NervesGateWeb.HardwarePortLive do
           NervesGate.Plugins.Assignments.kind(assigns.port_name) in kinds,
           do: plugin
 
-    assigns = assign(assigns, ports: ports, setting: setting, eligible: Enum.sort(eligible))
+    network = if assigns.live_action == :lan, do: assigns.projection.network.desired
+
+    reserved =
+      assigns.live_action == :lan and
+        (network["mode"] != "ports" or
+           NervesGate.Config.role_port(network, "internet") == assigns.port_name)
+
+    assigns =
+      assign(assigns,
+        ports: ports,
+        setting: setting,
+        eligible: Enum.sort(eligible),
+        reserved: reserved
+      )
 
     ~H"""
     <.back_link navigate="/hardware">Hardware</.back_link>
@@ -135,6 +156,10 @@ defmodule NervesGateWeb.HardwarePortLive do
     <p class="ui-help">
       Hardware permission and assignment only. Plugins own handles, protocol settings and equipment connections. Opening this page never opens a port.
     </p>
+    <.notice :if={@reserved} tone="warning" id="hardware-reserved">
+      This interface is reserved for Internet or is not yet an independent LAN. Manage Internet separately; it cannot be acquired by a plugin.
+      <.link navigate="/network" class="ui-text-link">Manage Internet</.link>
+    </.notice>
     <p :if={@outcome} role="status">{@outcome}</p>
     <p :if={@hardware.error} role="alert">
       Hardware assignments unavailable: {inspect(@hardware.error)}
@@ -163,7 +188,10 @@ defmodule NervesGateWeb.HardwarePortLive do
         <p :if={@eligible == []}>
           No selected plugin supports this hardware kind. It may remain unassigned.
         </p>
-        <form phx-submit="review" class="ui-stack">
+        <p :if={port.transport == "ethernet" and Map.has_key?(port, :link)}>
+          Link: {if port.link, do: "Up", else: "Down"}. Assignment starts no DHCP, default route or advertisement.
+        </p>
+        <form :if={!@reserved} id="hardware-assignment-form" phx-submit="review" class="ui-stack">
           <label>Permission<select name="assignment[enabled]">
             <option value="false" selected={!@setting.enabled}>Disabled</option>
             <option value="true" selected={@setting.enabled}>Enabled for assigned plugin</option>
@@ -189,7 +217,7 @@ defmodule NervesGateWeb.HardwarePortLive do
         </form>
       </div>
     </section>
-    <section :if={@draft} class="ui-panel" id="assignment-review">
+    <section :if={is_map(@draft) and !@reserved} class="ui-panel" id="assignment-review">
       <div class="ui-panel-body">
         <p>
           Assign {@port_name} to {if @draft["plugin"] in [nil, ""],

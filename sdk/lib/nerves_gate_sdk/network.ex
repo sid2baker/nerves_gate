@@ -12,6 +12,7 @@ defmodule NervesGateSDK.Network do
       addresses: [],
       internet?: false,
       application_enabled?: false,
+      assigned_plugin: nil,
       claimed?: false
     ]
 
@@ -22,6 +23,7 @@ defmodule NervesGateSDK.Network do
             addresses: [String.t()],
             internet?: boolean(),
             application_enabled?: boolean(),
+            assigned_plugin: String.t() | nil,
             claimed?: boolean()
           }
   end
@@ -56,7 +58,7 @@ defmodule NervesGateSDK.Network do
           }
   end
 
-  @doc "Claim an operator-enabled local interface. No DHCP, default route, DNS or advertisement is started. The calling process owns the claim."
+  @doc "Claim an enabled Ethernet interface exclusively assigned to this managed plugin. No DHCP, default route, DNS or advertisement is started. The calling process owns the claim."
   @spec claim_local(String.t(), String.t(), 1..30) :: {:ok, reference()} | {:error, term()}
   def claim_local(interface, address, prefix)
       when interface in ["eth0", "eth1"] and is_binary(address) and is_integer(prefix) and

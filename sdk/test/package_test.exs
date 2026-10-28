@@ -83,6 +83,27 @@ defmodule NervesGateSDK.PackageTest do
              context |> archive(optional_applications: [:not_a_dependency]) |> Package.read()
   end
 
+  test "Ethernet is an explicit hardware capability; unknown and duplicate kinds are rejected",
+       context do
+    for kinds <- [[:ethernet], [:serial, :can, :ethernet]] do
+      file =
+        archive(context,
+          env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_hardware: kinds]
+        )
+
+      assert {:ok, _} = Package.read(file)
+    end
+
+    for kinds <- [[:ethernet, :ethernet], [:usb], [:serial, :can, :ethernet, :other]] do
+      file =
+        archive(context,
+          env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_hardware: kinds]
+        )
+
+      assert {:error, :invalid_package} = Package.read(file)
+    end
+  end
+
   test "optional UI declarations must name a module in the main application", context do
     for module <- [String, "Elixir.SomeUI", nil] do
       file =

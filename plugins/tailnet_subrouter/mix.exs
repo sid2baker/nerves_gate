@@ -4,7 +4,7 @@ defmodule TailnetSubrouter.MixProject do
   def project do
     [
       app: :tailnet_subrouter,
-      version: "0.1.3",
+      version: "0.1.4",
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       deps: [
@@ -22,6 +22,7 @@ defmodule TailnetSubrouter.MixProject do
       mod: {TailnetSubrouter.Application, []},
       env: [
         nerves_gate_sdk_requirement: "~> 0.2.0-dev",
+        nerves_gate_hardware: [:ethernet],
         nerves_gate_health_check: {TailnetSubrouter, :health_check, []},
         nerves_gate_ui: TailnetSubrouter.UI
       ]

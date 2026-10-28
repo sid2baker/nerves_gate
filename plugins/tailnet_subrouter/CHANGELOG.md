@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- Version 0.1.4 requires exclusive Ethernet assignment under Hardware. The interface picker rejects unassigned and other-plugin LANs; claiming still uses the supervised plugin owner and checked platform cleanup.
+
 ### Compatibility
 
 - Version 0.1.3 gives the current bundled artifact a new immutable identity. Saved 0.1.2 remains unchanged; selection and activation are explicit.

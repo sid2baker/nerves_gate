@@ -3,7 +3,8 @@ defmodule Scenarios.ManagedApp do
   import ExUnit.Assertions
   alias Scenarios.Device
 
-  def with_app(vm, fun) do
+  def with_app(vm, fun, opts \\ []) do
+    ports = Keyword.get(opts, :assigned_ports, [])
     prepare_storage(vm)
     directory = Path.join(System.tmp_dir!(), "gate-managed-#{nonce()}")
     guest = "/tmp/managed-fixture-#{nonce()}.ez"
@@ -12,6 +13,10 @@ defmodule Scenarios.ManagedApp do
       path = build!(directory, "1.0.0")
       :ok = Device.rpc(vm, File, :write, [guest, File.read!(path)])
       assert {:ok, _} = apps(vm, :install, [guest])
+
+      for port <- ports,
+          do: assert(:ok == apps(vm, :assign_port, [port, true, "managed_fixture", true]))
+
       assert :ok = apps(vm, :start, [:managed_fixture])
       client = main(vm)
       fun.(client)
@@ -25,6 +30,9 @@ defmodule Scenarios.ManagedApp do
         error ->
           flunk("Fixture cleanup requires known application state: #{inspect(error)}")
       end
+
+      for port <- ports,
+          do: assert(:ok == apps(vm, :assign_port, [port, false, nil, true]))
 
       Device.rpc(vm, File, :rm, [guest])
       File.rm_rf!(directory)
@@ -62,6 +70,7 @@ defmodule Scenarios.ManagedApp do
 
     env = [
       nerves_gate_sdk_requirement: "~> 0.2.0-dev",
+      nerves_gate_hardware: [:ethernet],
       nerves_gate_health_check: {ManagedFixture.Application, :health_check, []},
       fixture_health: Keyword.get(options, :health, :ok),
       fixture_start: Keyword.get(options, :start, :ok),

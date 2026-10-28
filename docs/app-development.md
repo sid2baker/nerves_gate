@@ -65,8 +65,9 @@ See [runtime](applications.md) for dependency ownership and cleanup guarantees.
 
 Read-only hardware observations can be queried through the SDK. Protocol clients
 should use normal libraries/TCP. Claim exclusive shared resources only where needed:
-serial/CAN workers open exclusively assigned resources from
-`NervesGateSDK.Hardware.resources/0`, supervised by their plugin. There are no SDK
+serial/CAN workers open exclusively assigned resources, and local Ethernet addressing
+requires an exclusively assigned LAN plus a caller-owned network lease. Query assignments through
+`NervesGateSDK.Hardware.resources/0`. Keep transport workers supervised by the plugin. There are no SDK
 bus transport proxies. Local-network addressing still uses platform leases; creating
 a TCP connection does not claim or reconfigure the Internet interface. See [hardware](hardware.md).
 

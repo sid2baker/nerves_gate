@@ -2,6 +2,43 @@ defmodule NervesGate.Network.Policy do
   @moduledoc "Pure trial admission, topology readiness and observed subnet conflict checks."
   alias NervesGate.Config
 
+  def assignable(status, interface) do
+    network = status.config && status.config["network"]
+    ports = Config.ports(network)
+    observed = status.observed || %{ports: []}
+
+    if interface in ["eth0", "eth1"] and network["mode"] == "ports" and
+         get_in(ports, [interface, "role"]) != "internet" and
+         Enum.any?(observed.ports, &(&1.name == interface and &1.present and &1.master == nil)),
+       do: :ok,
+       else:
+         {:error,
+          NervesGate.Error.new(
+            "hardware_reserved",
+            "Internet, joined, missing and management interfaces cannot be assigned."
+          )}
+  end
+
+  def hardware_change(network, assignments) do
+    assigned =
+      for {name, setting} <- assignments,
+          name in ["eth0", "eth1"] and (setting.enabled or setting.plugin != nil),
+          do: name
+
+    conflict =
+      (network["mode"] != "ports" and assigned != []) or
+        Enum.any?(assigned, &(get_in(network, [&1, "role"]) == "internet"))
+
+    if conflict,
+      do:
+        {:error,
+         NervesGate.Error.new(
+           "hardware_assigned",
+           "Disable and unassign this LAN under Hardware before using it for Internet."
+         )},
+      else: :ok
+  end
+
   def available(nil),
     do:
       {:error,

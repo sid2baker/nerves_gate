@@ -102,12 +102,15 @@ defmodule NervesGateWeb.HardwarePageTest do
     end)
 
     document = page("/hardware")
-    assert Floki.text(document) =~ "Internet uplink"
-    assert [_] = Floki.find(document, "#hardware-lan-1")
+    assert [] = Floki.find(document, "#hardware-lan-1")
     assert [_] = Floki.find(document, "#hardware-lan-2")
     port = page("/hardware/lan/2")
-    assert [_] = Floki.find(port, "#application-port-form")
-    assert [_, _] = Floki.find(port, "input[name='network[enabled]']")
+    assert [_] = Floki.find(port, "#hardware-assignment-form")
+    assert [_] = Floki.find(port, "select[name='assignment[plugin]']")
+    assert [] = Floki.find(port, "#application-port-form")
+    reserved = page("/hardware/lan/1")
+    assert [_] = Floki.find(reserved, "#hardware-reserved")
+    assert [] = Floki.find(reserved, "#hardware-assignment-form")
 
     assert [] =
              Floki.find(
@@ -255,7 +258,11 @@ defmodule NervesGateWeb.HardwarePageTest do
              NervesGateWeb.HardwarePortLive.handle_event("modbus-read", %{}, socket)
 
     assert {:noreply, ^socket} =
-             NervesGateWeb.LanLive.handle_event("edit-label", %{"id" => "anything"}, socket)
+             NervesGateWeb.HardwarePortLive.handle_event(
+               "edit-label",
+               %{"id" => "anything"},
+               socket
+             )
   end
 
   test "application enablement configures no IP and Internet edits preserve it" do
@@ -265,15 +272,13 @@ defmodule NervesGateWeb.HardwarePageTest do
       "eth1" => nil
     }
 
-    assert {:ok, enabled} =
-             NetworkForm.to_network(%{"enabled" => "true"}, [], base, {:application, "eth1"})
-
-    assert enabled["eth1"] == %{"role" => "application", "address" => nil}
+    enabled = Map.put(base, "eth1", %{"role" => "application", "address" => nil})
     params = NetworkForm.from_settings(enabled, :internet)
     assert {:ok, preserved} = NetworkForm.to_network(params, [], enabled, :internet)
     assert preserved["eth1"] == enabled["eth1"]
 
-    assert {:error, _} =
+    # Form construction is not admission: Network checks exclusive ownership.
+    assert {:ok, _} =
              NetworkForm.to_network(%{params | "internet_port" => "eth1"}, [], enabled, :internet)
 
     assert {:error, _} =
@@ -288,7 +293,7 @@ defmodule NervesGateWeb.HardwarePageTest do
       "internet" => %{"mode" => "cellular", "apn" => ""}
     }
 
-    for editor <- [:ports, {:equipment, "eth1"}] do
+    for editor <- [:ports, {:equipment, "eth1"}, {:application, "eth1"}] do
       assert {:error, _} =
                NetworkForm.to_network(
                  %{"mode" => "shared", "enabled" => "true"},
@@ -297,12 +302,6 @@ defmodule NervesGateWeb.HardwarePageTest do
                  editor
                )
     end
-
-    assert {:ok, enabled} =
-             NetworkForm.to_network(%{"enabled" => "true"}, [], base, {:application, "eth1"})
-
-    assert enabled["internet"] == base["internet"]
-    assert enabled["eth1"] == %{"role" => "application", "address" => nil}
   end
 
   defp page(path), do: build_conn() |> get(path) |> html_response(200) |> Floki.parse_document!()

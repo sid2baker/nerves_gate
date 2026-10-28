@@ -1,23 +1,24 @@
 defmodule NervesGateWeb.HardwareLive do
   use Phoenix.LiveView
   import NervesGateWeb.CoreComponents
-  import NervesGateWeb.NetworkStatus, only: [lan_ports: 1, equipment_status: 1, port_label: 1]
+  import NervesGateWeb.NetworkStatus, only: [lan_ports: 1, port_label: 1]
 
   on_mount({NervesGateWeb.Observations, :status})
 
   def render(assigns) do
-    assigns = assign(assigns, ports: lan_ports(assigns.projection))
+    ports = Enum.reject(lan_ports(assigns.projection), &(&1.role in ["internet", "shared"]))
+    assigns = assign(assigns, ports: ports)
 
     ~H"""
     <.page_header title="Hardware" description="Physical interfaces available to applications." />
     <p class="ui-help">
-      The gateway manages shared interfaces and access. Applications configure connected equipment,
-      protocols and data collection. Opening this page never scans a network or opens a bus.
+      Assign free interfaces exclusively to plugins. Applications configure connected equipment,
+      protocols and data collection. Internet uplinks belong under Internet, not Hardware. Opening this page never scans a network or opens a bus.
     </p>
     <section class="ui-stack" aria-labelledby="lan-heading">
       <h2 id="lan-heading">Ethernet</h2>
-      <p :if={@projection.connections.mode == "shared"} class="ui-help">
-        LAN 1 and LAN 2 share one network. Network observations are not attributed to individual ports.
+      <p :if={@ports == []} class="ui-help">
+        No independent Ethernet ports are available for assignment.
       </p>
       <div class="ui-connections">
         <.navigation_card
@@ -26,9 +27,9 @@ defmodule NervesGateWeb.HardwareLive do
           icon="port"
           href={"/hardware/lan/#{port.id}"}
           id={"hardware-lan-#{port.id}"}
-          status={lan_status(port, @projection.network.observed)}
+          status={port_status(@projection.hardware, port.name)}
         >
-          {role_label(port.role)}
+          Exclusive Ethernet assignment · plugin-owned local addressing
         </.navigation_card>
       </div>
     </section>
@@ -52,28 +53,12 @@ defmodule NervesGateWeb.HardwareLive do
           id={"hardware-#{kind}-#{number}"}
           status={port_status(@projection.hardware, name)}
         >
-          {if kind == "rs485",
-            do: "Exclusive serial access · passive diagnostics",
-            else: "Shared receive access · listen-only diagnostics"}
+          Exclusive plugin assignment · plugin-owned transport
         </.navigation_card>
       </div>
     </section>
     """
   end
-
-  defp role_label("internet"), do: "Internet uplink · managed under Internet"
-
-  defp role_label("equipment"),
-    do: "Existing local configuration · enable application access on its port page"
-
-  defp role_label("application"), do: "Enabled for applications · no default IP configuration"
-  defp role_label("shared"), do: "Joined network · LAN 1 + LAN 2"
-  defp role_label(_), do: "Application access disabled"
-
-  defp lan_status(_, nil), do: "Unavailable"
-  defp lan_status(%{role: "unassigned"}, _), do: "Not configured"
-  defp lan_status(%{observed: nil}, _), do: "Not detected"
-  defp lan_status(port, _), do: equipment_status(port.observed)
 
   defp port_status(%{available: false}, _), do: "Unavailable"
 

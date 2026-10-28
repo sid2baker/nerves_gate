@@ -109,7 +109,7 @@ defmodule NervesGate.Network.LocalTest do
     assert Local.observation(local, nil, status(), %{}) == nil
   end
 
-  test "only an explicitly enabled independent interface can be claimed" do
+  test "addressing accepts an independent port; assignment is separately admitted by its owner" do
     assert {:ok, scope} = Local.candidate(status(), "eth1", "192.168.50.2", 24)
     assert scope.cidr == "192.168.50.0/24"
 
@@ -117,7 +117,7 @@ defmodule NervesGate.Network.LocalTest do
       assert {:error, _} = Local.candidate(status(), interface, "192.168.50.2", 24)
     end
 
-    assert {:error, _} =
+    assert {:ok, _} =
              Local.candidate(
                put_in(status().config["network"]["eth1"], nil),
                "eth1",
@@ -129,6 +129,53 @@ defmodule NervesGate.Network.LocalTest do
              Local.candidate(%{status() | trial: %{id: "trial"}}, "eth1", "192.168.50.2", 24)
 
     assert {:error, _} = Local.candidate(%{status() | observed: nil}, "eth1", "192.168.50.2", 24)
+  end
+
+  test "Internet roles and hardware assignments cannot race into shared ownership" do
+    status = status()
+    assert :ok = Policy.assignable(status, "eth1")
+
+    for name <- ["eth0", "usb0", "eth2", "br0", "ttyS3"] do
+      assert {:error, %{code: "hardware_reserved"}} = Policy.assignable(status, name)
+    end
+
+    assert {:error, _} = Policy.assignable(%{status | observed: nil}, "eth1")
+
+    joined =
+      update_in(status.observed.ports, &Enum.map(&1, fn port -> %{port | master: "br0"} end))
+
+    assert {:error, _} = Policy.assignable(joined, "eth1")
+    assignments = %{"eth1" => %{enabled: true, plugin: "tailnet_subrouter"}}
+    network = status.config["network"]
+    assert :ok = Policy.hardware_change(network, assignments)
+    changed = Map.put(network, "eth1", network["eth0"])
+    assert {:error, %{code: "hardware_assigned"}} = Policy.hardware_change(changed, assignments)
+    assert {:error, _} = Policy.hardware_change(%{"mode" => "unconfigured"}, assignments)
+
+    assert {:error, _} =
+             Policy.hardware_change(changed, put_in(assignments["eth1"].enabled, false))
+
+    assert :ok = Policy.hardware_change(changed, %{"eth1" => %{enabled: false, plugin: nil}})
+    ref = make_ref()
+    held = %{hardware_assignment: %{monitor: ref}}
+
+    assert {:noreply, %{hardware_assignment: nil}} =
+             NervesGate.Network.handle_info({:DOWN, ref, :process, self(), :normal}, held)
+  end
+
+  test "an assignment reservation excludes new claims and competing assignments until worker exit" do
+    ref = make_ref()
+    state = %{hardware_assignment: %{monitor: ref}, observed: nil, error: nil}
+
+    for request <- [{:claim_local, "eth1", "192.168.50.2", 24}, {:reserve_hardware, "eth1", true}] do
+      assert {:reply, {:error, %{code: "operation_in_progress"}}, held} =
+               NervesGate.Network.handle_call(request, {self(), make_ref()}, state)
+
+      assert held.hardware_assignment == state.hardware_assignment
+    end
+
+    assert {:noreply, %{hardware_assignment: nil}} =
+             NervesGate.Network.handle_info({:DOWN, ref, :process, self(), :normal}, state)
   end
 
   test "claims reject observed overlap, malformed addresses and non-host addresses" do

@@ -29,7 +29,7 @@ defmodule NervesGateWeb.Router do
       live("/plugins", PluginsLive, :plugins)
       live("/plugins/:app", PluginLive, :plugin)
       live("/hardware", HardwareLive, :hardware)
-      live("/hardware/lan/:id", LanLive, :lan)
+      live("/hardware/lan/:id", HardwarePortLive, :lan)
       live("/hardware/rs485/:id", HardwarePortLive, :rs485)
       live("/hardware/can/:id", HardwarePortLive, :can)
       live("/settings", SettingsLive, :settings)

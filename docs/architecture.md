@@ -203,7 +203,7 @@ variation points, as does the published SDK backend contract.
 | Cellular | Named SIM/PIN/PAP operations and eligibility; uses Network's worker, no separate GenServer |
 | Remote | Serialized bounded daemon operations and sanitized metadata |
 | Indicators | LED/button policy, identification and recovery |
-| Hardware | Allowlisted serial/CAN inventory; Plugins owns exclusive assignment intent |
+| Hardware | Allowlisted Ethernet/serial/CAN inventory; Plugins owns exclusive assignment intent |
 | SSH | Public-key validation, persistence and authentication |
 | Storage | SD detection, commissioning, mounting and formatting |
 | Apps | Trusted OTP app admission, lifecycle and version selection; guards destructive storage changes |

@@ -23,9 +23,13 @@ defmodule Scenarios.Cases.Plugins do
     assert Enum.map(plugins, & &1.app) == ["modbus_plugin", "tailnet_subrouter"]
     assert Enum.all?(plugins, &(&1.bundled? and not &1.enabled and not &1.running?))
 
+    Device.save(vm, Device.settings("eth0"))
+
     try do
       assert :ok = ManagedApp.apps(vm, :start, [:tailnet_subrouter])
       assert Device.rpc(vm, TailnetSubrouter, :status) == %{state: :disabled}
+      ethernet(vm)
+      assert :ok = ManagedApp.apps(vm, :start, [:tailnet_subrouter])
       assert :ok = ManagedApp.apps(vm, :start, [:modbus_plugin])
       assert Device.rpc(vm, ModbusPlugin, :status) == []
       assert {:error, :firmware_owned_plugin} = ManagedApp.apps(vm, :uninstall, [:modbus_plugin])
@@ -50,6 +54,40 @@ defmodule Scenarios.Cases.Plugins do
       assert Device.rpc(vm, :code, :is_loaded, [TailnetSubrouter.UI]) == false
       modbus(vm)
     end)
+  end
+
+  defp ethernet(vm) do
+    assert {:error, "hardware_not_assigned"} =
+             Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
+
+    assert {:error, %{code: "hardware_reserved"}} =
+             ManagedApp.apps(vm, :assign_port, ["eth0", true, "tailnet_subrouter", true])
+
+    assert :ok = ManagedApp.apps(vm, :assign_port, ["eth1", true, "tailnet_subrouter", true])
+    assert :ok = ManagedApp.apps(vm, :start, [:tailnet_subrouter])
+    assert :ok = Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
+
+    Device.await(vm, "assigned LAN is configured without changing Internet", fn status ->
+      status.network.local != nil and status.network.local.phase == :configured and
+        NervesGate.Config.role_port(status.network.desired, "internet") == "eth0"
+    end)
+
+    assert :ok = Device.rpc(vm, TailnetSubrouter, :disable, [], 75_000)
+    changed = Device.settings("eth1")
+
+    assert {:error, %{code: "hardware_assigned"}} =
+             Device.rpc(vm, NervesGate.Network, :propose, [changed])
+
+    assert :ok = Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
+    assert :ok = ManagedApp.apps(vm, :assign_port, ["eth1", false, nil, true])
+
+    Device.await(vm, "reassignment drains the owning plugin's LAN lease", fn status ->
+      status.network.local == nil and
+        Enum.any?(status.connections.ports, &(&1.name == "eth1" and &1.addresses == []))
+    end)
+
+    {:ok, plugins} = ManagedApp.apps(vm, :list, [])
+    refute Enum.find(plugins, &(&1.app == "tailnet_subrouter")).running?
   end
 
   defp modbus(vm) do

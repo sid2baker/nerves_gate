@@ -4,6 +4,7 @@
 
 ### Breaking changes
 
+- Hardware excludes Internet-owned LANs. Free LANs use the same reviewed exclusive plugin assignment as RS485/CAN; local Ethernet claims require that assignment, and assigned LANs cannot be repurposed for Internet until disabled and unassigned. The separate network application-enable editor is removed.
 - Workbench is one attachable hidden development node with a verified gateway directory and shared projection-driven pages for physical and simulated gateways. Disconnected gateways retain their last-seen time. Pi and Mix clients use distribution; the internal HTTP control API, split physical pages, `mix app.console`, separate simulator BEAM and private EPMD namespace are removed.
 - QEMU management uses explicitly prepared bridge/TAP hardware and firmware-owned EPMD at the guest IP. Run `mix dev.network setup --subnet <private-/24>` before QEMU use and explicit cleanup afterward. Existing disposable disks with loopback-index serials require an authorized reset; physical devices are not migrated.
 

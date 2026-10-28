@@ -1,7 +1,8 @@
 # Hardware assignments and Modbus
 
-Hardware inventories allowlisted EC100 `ttyS3`/`ttyS4` RS485 and `can0`/`can1`
-interfaces. It never opens traffic sockets, captures frames or issues Modbus reads.
+Hardware offers independent non-Internet `eth0`/`eth1` LAN ports alongside
+allowlisted EC100 `ttyS3`/`ttyS4` RS485 and `can0`/`can1` interfaces. Internet uplinks
+are managed under Internet, not displayed as assignable hardware. It never opens traffic sockets, captures frames or issues Modbus reads.
 There is no built-in capture/Modbus diagnostic API. Opening Hardware is read-only.
 
 ## Exclusive assignment
@@ -9,8 +10,8 @@ There is no built-in capture/Modbus diagnostic API. Opening Hardware is read-onl
 On a port's Hardware page, choose operator enablement and a compatible plugin, then
 review and confirm. One port has zero or one assigned plugin; a plugin can own several
 ports. Assignment is persistent intent, not proof of an open handle or device readiness.
-Only plugins declaring the corresponding `nerves_gate_hardware: [:serial]` or `[:can]`
-capability appear. Unassigned or missing resources are valid observable states.
+Only plugins declaring the corresponding `:ethernet`, `:serial` or `:can` kind in
+`nerves_gate_hardware` appear. Unassigned or missing resources are valid observable states.
 
 Changing ownership/permission stops BOTH affected plugins, including all their other
 ports and TCP connections, through the checked lifecycle path. A review is bound to
@@ -52,8 +53,13 @@ cleanup. Unmanaged/detached transport processes are not supported. Trusted same-
 code can bypass conventions; this is coordination, not a security sandbox.
 
 Ordinary Modbus TCP/S7 clients use sockets without claiming/reconfiguring Ethernet.
-The subnet-router plugin retains platform-owned network/address/route leases; its
-durable cleanup journal is not replaced by hardware assignment flags.
+Ethernet addressing requires both an enabled exclusive hardware assignment and an
+actual-PID network lease. The subnet-router declares `nerves_gate_hardware: [:ethernet]`.
+Its supervised owner claims only its assigned LAN; a UI process or another plugin
+cannot borrow that permission. The platform still owns addressing, routes and durable
+cleanup. Assignment reserves network admission while affected plugins are stopped
+and drained. An assigned LAN must be disabled and unassigned before becoming Internet;
+a pending network trial prevents assignment. No assignment starts traffic or sharing.
 
 ## Modbus TCP and RTU
 

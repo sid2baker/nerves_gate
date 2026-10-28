@@ -37,7 +37,10 @@ defmodule TailnetSubrouter.UITest do
     for {attributes, reason} <- [
           {[claimed?: true, application_enabled?: true], "Already claimed"},
           {[application_enabled?: true, addresses: ["192.168.50.2"]], "Already has an address"},
-          {[], "Not enabled for applications"}
+          {[], "Disabled under Hardware"},
+          {[application_enabled?: true, assigned_plugin: nil], "Not assigned to this plugin"},
+          {[application_enabled?: true, assigned_plugin: "another_plugin"],
+           "Not assigned to this plugin"}
         ] do
       html = render_component(UI, id: "subrouter", interfaces: {:ok, [port("eth1", attributes)]})
       assert html =~ ~r/<option[^>]*value="eth1"[^>]*disabled/
@@ -115,7 +118,10 @@ defmodule TailnetSubrouter.UITest do
   end
 
   defp port(id, attributes) do
-    struct!(%Interface{id: id, kind: :ethernet, state: :down}, attributes)
+    struct!(
+      %Interface{id: id, kind: :ethernet, state: :down, assigned_plugin: "tailnet_subrouter"},
+      attributes
+    )
   end
 
   test "invalid prefix stays a draft and enable still uses the supervised app's validation" do

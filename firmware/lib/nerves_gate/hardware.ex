@@ -1,5 +1,5 @@
 defmodule NervesGate.Hardware do
-  @moduledoc "Allowlisted physical bus inventory. Plugins own transport handles and protocols."
+  @moduledoc "Allowlisted Ethernet and bus inventory. Plugins own assigned resources and protocols."
   use GenServer
   alias NervesGate.Observations
 
@@ -23,7 +23,8 @@ defmodule NervesGate.Hardware do
 
         %{
           available:
-            Process.whereis(__MODULE__) != nil and NervesGate.Board.get(:hardware_adapter) != nil,
+            Process.whereis(__MODULE__) != nil and
+              (ports != [] or NervesGate.Board.get(:hardware_adapter) != nil),
           ports:
             Enum.map(ports, fn port ->
               setting = assignments.ports[port.name] || %{enabled: false, plugin: nil}
@@ -58,6 +59,16 @@ defmodule NervesGate.Hardware do
         _ -> []
       end
 
+    ethernet =
+      case NervesGate.Network.Vintage.snapshot() do
+        %{ports: ports} ->
+          Enum.map(ports, &Map.merge(&1, %{transport: "ethernet", interface: &1.name}))
+
+        _ ->
+          []
+      end
+
+    ports = ethernet ++ ports
     if ports != previous, do: Observations.put(["hardware"], ports)
     Process.send_after(self(), :poll, 2_000)
     {:noreply, ports}

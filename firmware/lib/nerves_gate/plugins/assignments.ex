@@ -1,9 +1,10 @@
 defmodule NervesGate.Plugins.Assignments do
   @moduledoc "Bounded current-only exclusive port intent, persisted by the plugin manager."
-  @ids ~w(ttyS3 ttyS4 can0 can1)
+  @ids ~w(eth0 eth1 ttyS3 ttyS4 can0 can1)
   def ids, do: @ids
   def kind(id) when id in ["ttyS3", "ttyS4"], do: :serial
   def kind(id) when id in ["can0", "can1"], do: :can
+  def kind(id) when id in ["eth0", "eth1"], do: :ethernet
   def kind(_), do: nil
 
   def read(file) do
@@ -31,7 +32,7 @@ defmodule NervesGate.Plugins.Assignments do
       else: {:error, :invalid_hardware_assignments}
   end
 
-  def valid?(ports) when is_map(ports) and map_size(ports) <= 4 do
+  def valid?(ports) when is_map(ports) and map_size(ports) <= 6 do
     Enum.all?(ports, fn
       {id, %{enabled: enabled, plugin: plugin} = value} ->
         id in @ids and map_size(value) == 2 and is_boolean(enabled) and

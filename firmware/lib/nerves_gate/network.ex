@@ -66,7 +66,10 @@ defmodule NervesGate.Network do
     end
   end
 
-  @doc "Claim one enabled, isolated Ethernet interface for the actual calling process. Addressing is transient."
+  @doc false
+  def reserve_hardware(interface, needed), do: call({:reserve_hardware, interface, needed})
+
+  @doc "Claim an enabled Ethernet interface assigned to the actual managed caller. Addressing is transient."
   def claim_local(interface, address, prefix),
     do: call({:claim_local, interface, address, prefix}, 70_000)
 
@@ -138,7 +141,8 @@ defmodule NervesGate.Network do
       poll_ms: Keyword.get(opts, :poll_ms, 1000),
       effect_ms: effect_ms,
       observation_timer: nil,
-      local: local
+      local: local,
+      hardware_assignment: nil
     }
 
     Observations.subscribe(sources(state))
@@ -156,10 +160,25 @@ defmodule NervesGate.Network do
     {:reply, sources(state), state}
   end
 
+  def handle_call({:reserve_hardware, interface, needed}, {pid, _}, state) do
+    state = refresh(state)
+
+    with :ok <- hardware_idle(state),
+         :ok <- Policy.available(Map.put(public(state), :local, nil)),
+         :ok <- hardware_candidate(state, interface, needed) do
+      reservation = %{pid: pid, monitor: Process.monitor(pid)}
+      {:reply, :ok, Map.put(state, :hardware_assignment, reservation)}
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
   def handle_call({:claim_local, interface, address, prefix}, {pid, _} = from, state) do
     state = refresh(state)
 
-    with {:ok, generation} <- NervesGate.Plugins.Owner.resolve(pid),
+    with :ok <- hardware_idle(state),
+         {:ok, generation} <- NervesGate.Plugins.Owner.resolve(pid),
+         :ok <- NervesGate.Plugins.authorize_port(pid, interface),
          :ok <- Local.idle(state.local),
          {:ok, scope} <- Local.candidate(public(state), interface, address, prefix) do
       ref = make_ref()
@@ -287,10 +306,12 @@ defmodule NervesGate.Network do
   defp respond({result, state}), do: {:reply, result, publish(state)}
 
   defp propose(state, input, access, expected, from) do
-    with :ok <- Policy.available(public(state)),
+    with :ok <- hardware_idle(state),
+         :ok <- Policy.available(public(state)),
          :ok <- check_expected(state, expected),
          {:ok, network} <- validate(input),
          :ok <- Policy.supported(state.observed, network, state.config["network"]),
+         :ok <- hardware_network_change(network),
          :ok <- lan_change(state) do
       auto = not state.config["setup_completed"] and Access.usb?(state.observed, access)
       timeout = if auto, do: 15_000, else: state.trial_ms
@@ -316,6 +337,47 @@ defmodule NervesGate.Network do
     else
       error -> {error, state}
     end
+  end
+
+  defp hardware_idle(state) do
+    if Map.get(state, :hardware_assignment) == nil,
+      do: :ok,
+      else:
+        {:error,
+         NervesGate.Error.new(
+           "operation_in_progress",
+           "Wait for hardware assignment cleanup and completion."
+         )}
+  end
+
+  defp hardware_candidate(_, interface, _) when interface not in ["eth0", "eth1"],
+    do: {:error, :invalid_hardware_assignment}
+
+  defp hardware_candidate(_, _, false), do: :ok
+
+  defp hardware_candidate(state, interface, true) do
+    Policy.assignable(public(state), interface)
+  end
+
+  defp hardware_network_change(network) do
+    case NervesGate.Plugins.hardware() do
+      %{ports: assignments, error: nil} ->
+        Policy.hardware_change(network, assignments)
+
+      _ ->
+        {:error,
+         NervesGate.Error.new(
+           "hardware_unavailable",
+           "Inspect unresolved hardware ownership before changing networking."
+         )}
+    end
+  catch
+    :exit, _ ->
+      {:error,
+       NervesGate.Error.new(
+         "hardware_unavailable",
+         "Hardware ownership is unavailable; no network change was admitted."
+       )}
   end
 
   defp check_expected(_state, :any), do: :ok
@@ -418,6 +480,9 @@ defmodule NervesGate.Network do
 
   def handle_info({:expire, id}, %{trial: %{id: id}} = state),
     do: {:noreply, expire(state, nil) |> publish()}
+
+  def handle_info({:DOWN, ref, :process, _, _}, %{hardware_assignment: %{monitor: ref}} = state),
+    do: {:noreply, %{state | hardware_assignment: nil}}
 
   def handle_info({:DOWN, ref, :process, _, _}, %{local: %{monitor: ref} = local} = state)
       when is_reference(ref) do
@@ -839,6 +904,13 @@ defmodule NervesGate.Network do
       code: "recovery_in_progress",
       message: "Wait for saved settings to be restored before trying again."
     }
+
+  defp error(:hardware_not_assigned),
+    do:
+      NervesGate.Error.new(
+        "hardware_not_assigned",
+        "Enable and exclusively assign this LAN to the plugin under Hardware first."
+      )
 
   defp error(:application_not_running),
     do:

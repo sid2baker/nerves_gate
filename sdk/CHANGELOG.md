@@ -4,6 +4,7 @@
 
 ### Breaking changes
 
+- Local Ethernet claims require an enabled exclusive assignment to the actual managed plugin. Declare `:ethernet` in `nerves_gate_hardware`; a network application-role flag alone grants no access. Hardware resources include Ethernet interfaces and network observations expose the assigned plugin.
 - Removed CAN/RS485 claim, subscription and byte-I/O APIs. Plugins query their caller-derived exclusive assignments through `Hardware.resources/0` and supervise ordinary transport libraries directly. Reassignment requires checked whole-plugin stop; Internet/local-network leases retain their separate platform contract.
 - `circuits_uart` is a shared firmware library, never a private plugin native payload; packaging records its exact compatible platform version.
 

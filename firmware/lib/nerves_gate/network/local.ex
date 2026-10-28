@@ -7,7 +7,9 @@ defmodule NervesGate.Network.Local do
   def candidate(status, interface, address, prefix) do
     with :ok <- Policy.available(status),
          %{"network" => %{"mode" => "ports"} = network} <- status.config,
-         %{"role" => "application", "address" => nil} <- network[interface],
+         true <-
+           network[interface] == nil or
+             network[interface] == %{"role" => "application", "address" => nil},
          true <- interface in ["eth0", "eth1"] and is_integer(prefix) and prefix in 1..30,
          {:ok, address} <-
            Config.validate_address(%{
@@ -29,7 +31,7 @@ defmodule NervesGate.Network.Local do
       _ ->
         failure(
           "local_unavailable",
-          "Enable an independent, unaddressed Ethernet interface for applications first. Internet, joined and USB links cannot be claimed."
+          "Assign an independent, unaddressed Ethernet interface to this plugin under Hardware first. Internet, joined and USB links cannot be claimed."
         )
     end
   end

@@ -270,14 +270,18 @@ Factory reset erases it.
 
 ## Saving and rollback
 
-Internet and application enablement have separate UI drafts but one Network
-owner and one saved configuration. All pages show the same active trial and timer. Saving
+Internet drafts and trials belong to Network. Ethernet permission and exclusive
+plugin assignment belong to Hardware/Plugins, using the same checked-stop review as
+RS485/CAN. All pages show the same active Internet trial and timer. Saving
 checks the draft's original configuration inside Network; stale drafts are rejected
 and must be reloaded.
 
 The administrative `Network.propose/2` API accepts independent Internet/application
-ports only. Hardware edits application enablement. All platform changes are blocked
-while an app lease or unknown cleanup exists; apps must release first. 4G backup
+ports only. Network application-role metadata grants no access by itself: an enabled
+exclusive assignment is required before the actual managed plugin can claim a LAN.
+Assignment changes reserve Network admission while affected plugins stop and drain;
+an assigned LAN must be disabled and unassigned before becoming Internet. Network
+trials are blocked while a local lease or unresolved cleanup exists. 4G backup
 needs an Ethernet uplink.
 
 VintageNet stores interface settings; the trial exists only in memory. Unreadable

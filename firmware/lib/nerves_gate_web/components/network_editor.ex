@@ -325,9 +325,7 @@ defmodule NervesGateWeb.NetworkEditor do
             assigns.form.params["internet_mode"] in ["cellular", "backup"],
         cellular_available:
           assigns.projection.capabilities.mobile and
-            match?(%{cellular: %{present: true}}, assigns.projection.network.observed),
-        application_reason:
-          NetworkForm.application_reason(assigns.projection.network.desired, assigns.editor)
+            match?(%{cellular: %{present: true}}, assigns.projection.network.observed)
       )
 
     ~H"""
@@ -345,8 +343,6 @@ defmodule NervesGateWeb.NetworkEditor do
           <.trial pending={@pending} projection={@projection} now={@now} target={@myself} />
         <% @editor == :internet and @step in [0, 3] -> %>
           <p :if={@own_save} role="status">Connecting…</p>
-        <% @application_reason != nil -> %>
-          <.notice tone="warning">{@application_reason}</.notice>
         <% true -> %>
           <.notice :if={@stale} tone="warning">
             Settings changed in another session. Your draft has not been applied.
@@ -360,36 +356,15 @@ defmodule NervesGateWeb.NetworkEditor do
             phx-submit="save"
             class="ui-stack"
           >
-            <%= case @editor do %>
-              <% :internet -> %>
-                <.internet_form
-                  form={@form}
-                  projection={@projection}
-                  base={@base}
-                  initial={@initial}
-                  step={@step}
-                  settings={@settings}
-                  cellular_available={@cellular_available}
-                />
-              <% {:application, _} -> %>
-                <.panel title="Application access" icon="port">
-                  <.choice_group field={@form[:enabled]} label="Ethernet interface">
-                    <:option
-                      value="true"
-                      title="Enabled"
-                      description="Allow an application to claim this link and request its local IP configuration."
-                    />
-                    <:option
-                      value="false"
-                      title="Disabled"
-                      description="Keep this link down and unavailable to applications."
-                    />
-                  </.choice_group>
-                  <p class="ui-help">
-                    Enabling does not assign an IP address, run DHCP, join ports or advertise a route. Applications own their equipment configuration; active leases must be released before changing enablement.
-                  </p>
-                </.panel>
-            <% end %>
+            <.internet_form
+              form={@form}
+              projection={@projection}
+              base={@base}
+              initial={@initial}
+              step={@step}
+              settings={@settings}
+              cellular_available={@cellular_available}
+            />
             <.notice :if={!@projection.actions["network.propose"].enabled} tone="warning">
               {@projection.actions["network.propose"].reason.message}
             </.notice>
@@ -674,7 +649,6 @@ defmodule NervesGateWeb.NetworkEditor do
   end
 
   defp form_id(:internet), do: "network-form"
-  defp form_id({:application, _}), do: "application-port-form"
   defp submit_label(:internet, 1, _, %{"internet_mode" => "cellular"}), do: "Connect"
   defp submit_label(:internet, 1, _, _), do: "Continue"
   defp submit_label(:internet, _, false, _), do: "Connect"

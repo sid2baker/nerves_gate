@@ -53,7 +53,8 @@ defmodule NervesGate.SDKOwnershipTest do
   } do
     ports = %{
       "ttyS3" => %{enabled: true, plugin: "modbus_plugin"},
-      "ttyS4" => %{enabled: false, plugin: "modbus_plugin"}
+      "ttyS4" => %{enabled: false, plugin: "modbus_plugin"},
+      "eth1" => %{enabled: true, plugin: "tailnet_subrouter"}
     }
 
     file = Path.join(dir, "hardware.term")
@@ -98,16 +99,18 @@ defmodule NervesGate.SDKOwnershipTest do
     ports = [
       %{name: "ttyS3", present: true},
       %{name: "ttyS4", present: false},
-      %{name: "can0", present: true}
+      %{name: "can0", present: true},
+      %{name: "eth1", present: true}
     ]
 
-    capabilities = %{"modbus_plugin" => [:serial]}
+    capabilities = %{"modbus_plugin" => [:serial], "tailnet_subrouter" => [:ethernet]}
+    assert :ok = Assignments.validate("eth1", true, "tailnet_subrouter", ports, capabilities)
     assert :ok = Assignments.validate("ttyS3", true, "modbus_plugin", ports, capabilities)
     assert :ok = Assignments.validate("ttyS3", false, nil, ports, capabilities)
     assert :ok = Assignments.validate("ttyS4", false, nil, ports, capabilities)
 
     assert {:error, :invalid_hardware_assignment} =
-             Assignments.validate("eth0", true, "modbus_plugin", ports, capabilities)
+             Assignments.validate("eth2", true, "modbus_plugin", ports, capabilities)
 
     assert {:error, :hardware_missing} =
              Assignments.validate("ttyS4", true, "modbus_plugin", ports, capabilities)
@@ -138,7 +141,14 @@ defmodule NervesGate.SDKOwnershipTest do
 
   test "assignment query derives actual caller rather than accepting an app name" do
     Owner.init()
-    state = %{assignment_error: nil}
+    state = %{assignment_error: nil, blocked: nil}
+
+    assert {:reply, {:error, :application_not_running}, ^state} =
+             NervesGate.Plugins.handle_call(
+               {:authorize_port, self(), "eth1"},
+               {self(), make_ref()},
+               state
+             )
 
     assert {:reply, {:error, :application_not_running}, ^state} =
              NervesGate.Plugins.handle_call(:resources, {self(), make_ref()}, state)

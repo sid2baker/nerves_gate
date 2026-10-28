@@ -39,7 +39,8 @@ cookies, or reboot/reset the device.
 
 ## Isolated local-network access (SDK 0.2.0-dev checkout)
 
-An operator must explicitly enable a non-Internet Ethernet port for applications.
+An operator must enable and exclusively assign a non-Internet LAN to the plugin
+under Hardware. The plugin declares `nerves_gate_hardware: [:ethernet]`.
 `Network.claim_local(interface, address, prefix)` gives the actual caller exclusive
 access to one temporary static local interface, without DHCP, DNS or a default route.
 `Network.local_status/0` reads only that caller's private lease, including its handle
@@ -60,7 +61,7 @@ Applications on a device are trusted same-BEAM OTP applications, not sandboxed.
 
 ## Exclusive hardware assignments
 
-Plugins may declare `nerves_gate_hardware: [:serial]` or `[:can]` in their main OTP
+Plugins declare the kinds they use (`:ethernet`, `:serial`, `:can`) in `nerves_gate_hardware` in their main OTP
 environment. `Hardware.resources/0` returns enabled allowlisted assignments for the
 actual managed caller, as `%Hardware.Port{id: ..., kind: ..., present?: ..., path: ...}`.
 It opens nothing and accepts no app name or arbitrary operator-supplied path. One
@@ -73,7 +74,9 @@ both affected plugins, and leave them stopped. Native handles must drain. Unknow
 cleanup/persistence blocks reuse. Assignments persist independently of plugin code.
 The SDK is not a sandbox; trusted code can bypass coordination conventions.
 
-TCP connections need no hardware assignment. UART's native driver is platform
+Ordinary TCP connections need no hardware assignment. Reconfiguring a dedicated
+local Ethernet interface requires its assignment plus `Network.claim_local/3`.
+`Network.Interface.assigned_plugin` is a public read model for plugin UIs, not authority. UART's native driver is platform
 provided; plugins declare compatible `circuits_uart` and packaging excludes its
 native payload while recording an exact version requirement. No native plugin
 binaries are introduced. See [hardware assignments](../docs/hardware.md).

@@ -16,27 +16,6 @@ defmodule NervesGateWeb.NetworkForm do
     |> put_address("internet", Config.role_address(network, "internet"))
   end
 
-  def from_settings(network, {:application, name}),
-    do: %{"enabled" => to_string(get_in(Config.ports(network), [name, "role"]) == "application")}
-
-  def application_reason(network, {:application, name}) do
-    cond do
-      network == nil or network["mode"] == "unconfigured" ->
-        "Finish Internet setup before assigning hardware to applications."
-
-      network["mode"] == "shared" ->
-        "This port belongs to a joined network. An administrator must separate it before application access can be enabled."
-
-      Config.role_port(network, "internet") == name ->
-        "Internet uplinks are managed under Internet, not by applications."
-
-      true ->
-        nil
-    end
-  end
-
-  def application_reason(_, :internet), do: nil
-
   def internet_port(%{"internet_mode" => "cellular"}, _), do: nil
   def internet_port(%{"internet_port" => "auto"}, ports), do: Suggestions.internet_port(ports)
   def internet_port(params, _), do: blank(params["internet_port"])
@@ -52,10 +31,6 @@ defmodule NervesGateWeb.NetworkForm do
       internet not in [nil, "eth0", "eth1"] ->
         {:error, "Choose LAN 1, LAN 2, or Not now."}
 
-      internet && get_in(Config.ports(base), [internet, "role"]) == "application" ->
-        {:error,
-         "Disable application access on this port under Hardware before assigning it to Internet."}
-
       true ->
         with {:ok, _} <- Config.validate_network(base) do
           base
@@ -63,18 +38,6 @@ defmodule NervesGateWeb.NetworkForm do
           |> assign_port(internet, "internet", address(params, "internet"))
           |> validate(params)
         end
-    end
-  end
-
-  def to_network(%{"enabled" => enabled}, _ports, base, {:application, name})
-      when enabled in ["true", "false"] and name in ["eth0", "eth1"] and is_map(base) do
-    case application_reason(base, {:application, name}) do
-      nil ->
-        port = if enabled == "true", do: %{"role" => "application", "address" => nil}
-        base |> Map.put(name, port) |> Config.validate_network()
-
-      reason ->
-        {:error, reason}
     end
   end
 
@@ -88,8 +51,6 @@ defmodule NervesGateWeb.NetworkForm do
       do: static_defaults(params, prefix, observed),
       else: params
   end
-
-  def defaults_for_change(params, _previous, {:application, _}, _observed), do: params
 
   defp application_ports(base) do
     Enum.reduce(Config.ports(base), %{"mode" => "ports", "eth0" => nil, "eth1" => nil}, fn {name,

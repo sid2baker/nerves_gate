@@ -243,53 +243,27 @@ defmodule NervesGateWeb.ProjectionTest do
   defp assert_network_forms(status) do
     base = status.network.desired
     ports = status.connections.ports
-    application = {:application, "eth1"}
-    params = %{"enabled" => "true"}
-    assert {:ok, configured} = NetworkForm.to_network(params, ports, base, application)
-    assert configured["eth0"] == base["eth0"]
-    assert configured["eth1"] == %{"role" => "application", "address" => nil}
-    internet = NetworkForm.from_settings(configured, :internet)
-    assert {:ok, ^configured} = NetworkForm.to_network(internet, ports, configured, :internet)
+    internet = NetworkForm.from_settings(base, :internet)
+    assert {:ok, ^base} = NetworkForm.to_network(internet, ports, base, :internet)
 
     assert {:error, _} =
-             NetworkForm.to_network(
-               Map.put(internet, "internet_port", "eth1"),
-               ports,
-               configured,
-               :internet
+             NetworkForm.to_network(%{"enabled" => "true"}, ports, base, {:application, "eth1"})
+
+    assert {:error, _} = NetworkForm.to_network(%{"mode" => "shared"}, ports, base, :ports)
+    assigns = %{id: "draft-check", editor: :internet, projection: status, access: %{}}
+    assert {:ok, socket} = NetworkEditor.update(assigns, %Socket{})
+
+    assert {:noreply, socket} =
+             NetworkEditor.handle_event(
+               "change",
+               %{"network" => %{"internet_ip" => "192.0.2.123", "enabled" => "forged"}},
+               socket
              )
 
-    assert {:error, _} = NetworkForm.to_network(params, ports, base, {:application, "eth0"})
-    assert {:error, _} = NetworkForm.to_network(%{"mode" => "shared"}, ports, base, :ports)
-    assert {:error, _} = NetworkForm.to_network(params, ports, base, {:equipment, "eth1"})
-    cellular = Map.put(configured, "internet", %{"mode" => "backup", "apn" => "test.apn"})
-
-    assert {:ok, disabled} =
-             NetworkForm.to_network(%{"enabled" => "false"}, ports, cellular, application)
-
-    assert disabled["eth1"] == nil
-    assert disabled["eth0"] == base["eth0"]
-    assert disabled["internet"] == cellular["internet"]
-
-    for {editor, field, value, foreign} <- [
-          {:internet, "internet_ip", "192.0.2.123", "enabled"},
-          {application, "enabled", "true", "internet_port"}
-        ] do
-      assigns = %{id: "draft-check", editor: editor, projection: status, access: %{}}
-      assert {:ok, socket} = NetworkEditor.update(assigns, %Socket{})
-
-      assert {:noreply, socket} =
-               NetworkEditor.handle_event(
-                 "change",
-                 %{"network" => %{field => value, foreign => "forged"}},
-                 socket
-               )
-
-      assert {:ok, socket} = NetworkEditor.update(assigns, socket)
-      assert socket.assigns.form.params[field] == value
-      refute Map.has_key?(socket.assigns.form.params, foreign)
-      assert socket.assigns.dirty
-    end
+    assert {:ok, socket} = NetworkEditor.update(assigns, socket)
+    assert socket.assigns.form.params["internet_ip"] == "192.0.2.123"
+    refute Map.has_key?(socket.assigns.form.params, "enabled")
+    assert socket.assigns.dirty
   end
 
   defp assert_discovery_observations(projection) do

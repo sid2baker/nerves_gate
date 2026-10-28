@@ -59,43 +59,47 @@ defmodule Scenarios.Cases.Equipment do
     enabled = Map.put(previous, "eth1", %{"role" => "application", "address" => nil})
     save(vm, enabled)
 
-    Scenarios.ManagedApp.with_app(vm, fn other ->
-      owner = Scenarios.ManagedApp.client(vm)
+    Scenarios.ManagedApp.with_app(
+      vm,
+      fn other ->
+        owner = Scenarios.ManagedApp.client(vm)
 
-      assert {:ok, ref} =
-               Scenarios.ManagedApp.call(vm, owner, NervesGateSDK.Network, :claim_local, [
-                 "eth1",
-                 "10.44.0.2",
-                 24
-               ])
+        assert {:ok, ref} =
+                 Scenarios.ManagedApp.call(vm, owner, NervesGateSDK.Network, :claim_local, [
+                   "eth1",
+                   "10.44.0.2",
+                   24
+                 ])
 
-      Scenarios.Device.await(
-        vm,
-        "application address ready without changing Internet",
-        fn status ->
-          internet?(status) && addressed?(status, "eth1") &&
-            status.network.local.phase == :configured
-        end
-      )
+        Scenarios.Device.await(
+          vm,
+          "application address ready without changing Internet",
+          fn status ->
+            internet?(status) && addressed?(status, "eth1") &&
+              status.network.local.phase == :configured
+          end
+        )
 
-      assert {:error, "not_owner"} =
-               Scenarios.ManagedApp.call(vm, other, NervesGateSDK.Network, :release_local, [ref])
+        assert {:error, "not_owner"} =
+                 Scenarios.ManagedApp.call(vm, other, NervesGateSDK.Network, :release_local, [ref])
 
-      assert {:error, %{code: "local_in_use"}} =
-               Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [previous])
+        assert {:error, %{code: "local_in_use"}} =
+                 Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [previous])
 
-      assert :ok = Scenarios.ManagedApp.stop_client(vm, owner)
+        assert :ok = Scenarios.ManagedApp.stop_client(vm, owner)
 
-      Scenarios.Device.await(
-        vm,
-        "owner death cleans local address while preserving Internet",
-        fn status ->
-          internet?(status) && status.network.local == nil &&
-            Enum.any?(status.connections.ports, &(&1.name == "eth1" && &1.addresses == []))
-        end,
-        75_000
-      )
-    end)
+        Scenarios.Device.await(
+          vm,
+          "owner death cleans local address while preserving Internet",
+          fn status ->
+            internet?(status) && status.network.local == nil &&
+              Enum.any?(status.connections.ports, &(&1.name == "eth1" && &1.addresses == []))
+          end,
+          75_000
+        )
+      end,
+      assigned_ports: ["eth1"]
+    )
 
     save(vm, previous)
   end

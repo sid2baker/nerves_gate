@@ -14,6 +14,9 @@ defmodule NervesGate.Plugins do
   def hardware, do: GenServer.call(__MODULE__, :hardware)
   def resources, do: GenServer.call(__MODULE__, :resources)
 
+  @doc false
+  def authorize_port(pid, port), do: GenServer.call(__MODULE__, {:authorize_port, pid, port})
+
   def assign_port(port, enabled, plugin, stop_confirmed \\ false, expected \\ nil),
     do: command({:assign_port, port, enabled, plugin, stop_confirmed, expected})
 
@@ -183,6 +186,21 @@ defmodule NervesGate.Plugins do
      }, state}
   end
 
+  def handle_call({:authorize_port, pid, port}, _, state) do
+    result =
+      with nil <- state.assignment_error || state.blocked,
+           {:ok, owner} <- Owner.resolve(pid),
+           %{enabled: true, plugin: plugin} when plugin == owner.app <- state.assignments[port],
+           true <- Assignments.kind(port) in Map.get(capabilities(state), plugin, []) do
+        :ok
+      else
+        {:error, _} = error -> error
+        _ -> {:error, :hardware_not_assigned}
+      end
+
+    {:reply, result, state}
+  end
+
   def handle_call(:resources, {pid, _}, state) do
     with nil <- state.assignment_error,
          {:ok, owner} <- Owner.resolve(pid) do
@@ -197,7 +215,7 @@ defmodule NervesGate.Plugins do
             kind: kind,
             present?: port.present,
             path: Map.get(port, :path),
-            interface: if(kind == :can, do: port.name)
+            interface: if(kind in [:can, :ethernet], do: port.name)
           }
         end
 
@@ -558,6 +576,11 @@ defmodule NervesGate.Plugins do
   defp assignment_unchanged(setting, setting), do: :ok
   defp assignment_unchanged(_, _), do: {:error, :assignment_changed}
 
+  defp reserve_assignment(port, needed) when port in ["eth0", "eth1"],
+    do: NervesGate.Network.reserve_hardware(port, needed)
+
+  defp reserve_assignment(_, _), do: :ok
+
   defp stop_and_assign(affected, port, setting, state, context) do
     affected = Enum.filter(affected, &Map.has_key?(state.entries, &1))
 
@@ -598,7 +621,8 @@ defmodule NervesGate.Plugins do
              NervesGate.Hardware.inventory(),
              capabilities(state)
            ),
-         true <- running == [] or confirmed == true do
+         true <- running == [] or confirmed == true,
+         :ok <- reserve_assignment(port, enabled or plugin != nil) do
       stop_and_assign(affected, port, %{enabled: enabled, plugin: plugin}, state, context)
     else
       false -> {{:error, :stop_confirmation_required}, state}

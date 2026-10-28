@@ -176,8 +176,10 @@ defmodule NervesGate.SDKBackend do
   end
 
   defp network_interfaces(%{observed: observed} = status) when is_map(observed) do
+    assignments = NervesGate.Plugins.hardware()
+
     interfaces =
-      Enum.map(observed.ports, &ethernet_interface(&1, status)) ++
+      Enum.map(observed.ports, &ethernet_interface(&1, status, assignments)) ++
         [
           interface(observed.bridge, :other),
           interface(observed.usb, :usb),
@@ -191,7 +193,7 @@ defmodule NervesGate.SDKBackend do
     {:error, :unavailable}
   end
 
-  defp ethernet_interface(port, status) do
+  defp ethernet_interface(port, status, assignments) do
     local = Map.get(status, :local)
 
     role =
@@ -200,9 +202,12 @@ defmodule NervesGate.SDKBackend do
         "role"
       ])
 
+    setting = assignments.ports[port.name] || %{enabled: false, plugin: nil}
+
     %{
       interface(port, :ethernet)
-      | application_enabled?: role == "application",
+      | application_enabled?: assignments.error == nil and role != "internet" and setting.enabled,
+        assigned_plugin: setting.plugin,
         claimed?: local != nil and local.interface == port.name
     }
   end

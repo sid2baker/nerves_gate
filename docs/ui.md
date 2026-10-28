@@ -21,21 +21,23 @@ on owner loss and obtain a fresh snapshot on resubscription.
 | Overview | `/` | Internet and unified Remote access; actionable storage warnings |
 | Internet | `/network` | Internet port/address, detected 4G sources, network-default APN with advanced override, SIM commissioning |
 | Remote access | `/remote` | Tailscale enrollment and private sign-in; advanced runtime access with explicit credential reveal |
-| Hardware | `/hardware` | All Ethernet, RS485 and CAN ports, availability and use |
-| LAN 1 / 2 | `/hardware/lan/1`, `/hardware/lan/2` | Link observations and explicit application access enable/disable; no address/topology editor |
-| RS485 1 / 2 | `/hardware/rs485/1`, `/hardware/rs485/2` | Availability, exclusive-use status and passive capture |
-| CAN 1 / 2 | `/hardware/can/1`, `/hardware/can/2` | Shared subscription count, listen-only configuration, counters and capture |
+| Hardware | `/hardware` | Free non-Internet LANs, RS485 and CAN; exclusive plugin assignments |
+| LAN 1 / 2 | `/hardware/lan/1`, `/hardware/lan/2` | Link observations and reviewed exclusive assignment; Internet/management ports cannot be acquired |
+| RS485 1 / 2 | `/hardware/rs485/1`, `/hardware/rs485/2` | Availability and reviewed exclusive plugin assignment |
+| CAN 1 / 2 | `/hardware/can/1`, `/hardware/can/2` | Availability and reviewed exclusive plugin assignment |
 | Settings | `/settings` | SSH keys, application storage, device information and maintenance |
 | Application storage | `/settings/storage` | Card commissioning, readiness and explicit format confirmation |
 
-Hardware keeps Internet uplinks, unassigned ports and all buses visible, including
-disabled or unavailable ones. Roles explain use without hiding physical connectors.
+Hardware excludes Internet uplinks and joined Ethernet links from assignable ports.
+Free LANs and all buses remain visible, including disabled or unavailable ones.
+A direct Internet-LAN URL explains the reservation and offers no assignment form.
 Route IDs come from a fixed allowlist. Only the routes above are supported;
 replaced URLs are not aliases.
 
-Internet settings and Ethernet application enablement use the same device-owned
-save/undo flow; an unconfirmed trial is visible on every page with a link to
-keep or restore it. No advanced topology expander or local addressing/sharing form
+Internet settings use the device-owned save/undo flow; an unconfirmed trial is
+visible on every page with a link to keep or restore it. Ethernet permission uses
+the same checked whole-plugin stop and reviewed assignment as RS485/CAN, not a
+second network enablement form. No advanced topology expander or local addressing/sharing form
 is exposed in Hardware. Disconnected views show unavailable instead of stale actions.
 Opening a page never starts scans, route changes, bus traffic or other I/O.
 

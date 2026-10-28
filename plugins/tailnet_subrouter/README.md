@@ -10,12 +10,13 @@ no Ethernet configuration or route advertisement occurs on startup or page load.
 
 ## Use
 
-1. In gateway network settings, enable a dedicated, independent Ethernet interface
-   for applications. Leave the Internet and USB-management interfaces unchanged.
+1. Under **Hardware**, enable and exclusively assign a free LAN to `tailnet_subrouter`.
+   Confirm the checked stop of affected plugins. Internet and management interfaces
+   cannot be assigned; leave them unchanged.
 2. Open **Plugins**, Start `tailnet_subrouter`, then **Open plugin**.
 3. Select an eligible interface and enter an unused gateway-side IPv4 address and
    prefix. The picker disables Internet, claimed, addressed and operator-disabled
-   interfaces with explanations. Refresh after changing network settings.
+   or differently assigned interfaces with explanations. Refresh after assignment changes.
 4. **Configure address** claims the interface and applies a temporary local address.
    It does not advertise a route or set DHCP, DNS or a default route.
 5. Once link readiness is observed, explicitly **Enable sharing**. Approve the
