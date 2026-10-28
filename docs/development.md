@@ -219,7 +219,9 @@ builds; the build pipeline sets it automatically. It is not an asset setting.
 ## Diagnostics and limits
 
 - Bench diagnostics are in `_build/simulator/<session>/<device>/`; boot failures
-  leave `console-*.log`, `qemu.log` and `boot.log`.
+  leave `console-*.log`, `qemu.log` and `boot.log`. QEMU firmware also logs to its
+  serial console, so `tail -f console-<boot>.log` follows a device's logs live; each
+  boot keeps its own file across resets.
 - Never copy login URLs, cookies, CSRF tokens, keys or VM identity disks into logs,
   issues or artifacts.
 - A timed-out state-changing request has an unknown outcome: inspect before retrying.

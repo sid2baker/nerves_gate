@@ -14,5 +14,9 @@ config :nerves_gate, :board, %{
   indicators_adapter: nil
 }
 
+# Also log to the serial console, which the simulator records per boot as
+# console-<boot>.log, so device logs are followable live and survive disk resets.
+config :logger, backends: [RingLogger, :console]
+
 # runtime.exs configures USB recovery and eth2's actual management IP from the
 # virtual disk serial. eth2 is separate from eth0/eth1 and cannot be a trial port.
