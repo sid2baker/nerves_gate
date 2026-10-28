@@ -34,7 +34,9 @@ defmodule NervesGate.PluginOwnerTest do
       Application.unload(:generation_fixture)
     end)
 
-    %{artifact: %{app: :generation_fixture, apps: [%{app: :generation_fixture}]}}
+    %{
+      artifact: %{app: :generation_fixture, version: "1.0.0", apps: [%{app: :generation_fixture}]}
+    }
   end
 
   test "startup membership resolves to the managed epoch and preserves calling PID", %{

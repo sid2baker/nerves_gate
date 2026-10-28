@@ -27,7 +27,11 @@ defmodule NervesGate.SDKOwnershipTest do
       Application.unload(:resources_fixture)
     end)
 
-    Owner.bind(%{app: :resources_fixture, apps: [%{app: :resources_fixture}]}, {make_ref(), 1})
+    Owner.bind(
+      %{app: :resources_fixture, version: "1.0.0", apps: [%{app: :resources_fixture}]},
+      {make_ref(), 1}
+    )
+
     :ok = Application.start(:resources_fixture)
     hardware = start_supervised!(NervesGate.Hardware)
     ports = for name <- ["ttyS3", "ttyS4", "can0"], do: %{name: name, present: true}
@@ -46,6 +50,52 @@ defmodule NervesGate.SDKOwnershipTest do
       assert {:reply, {:ok, []}, ^state} =
                NervesGate.Plugins.handle_call(:resources, {pid, make_ref()}, state)
     end
+  end
+
+  test "configuration storage derives plugin and version from the actual managed caller" do
+    Owner.init()
+
+    :ok =
+      :application.load(
+        {:application, :config_fixture,
+         [
+           vsn: ~c"2.1.0",
+           modules: [ResourceFixture],
+           applications: [:kernel, :stdlib, :elixir],
+           mod: {ResourceFixture, []}
+         ]}
+      )
+
+    on_exit(fn ->
+      Application.stop(:config_fixture)
+      Application.unload(:config_fixture)
+    end)
+
+    artifact = %{app: :config_fixture, version: "2.1.0", apps: [%{app: :config_fixture}]}
+    tag = Owner.bind(artifact, {make_ref(), 1})
+    :ok = Application.start(:config_fixture)
+    sdk = NervesGateSDK.Storage
+
+    # Unmanaged callers, such as this test process, are refused before any I/O.
+    assert {:error, :plugin_not_running} = sdk.save_config(:x)
+    assert {:error, :plugin_not_running} = sdk.restore_config()
+    assert {:error, :plugin_not_running} = sdk.delete_config()
+
+    # A process of the activation resolves to its plugin and version. Without the
+    # storage domain there is no fallback directory.
+    parent = self()
+    leader = Process.info(Process.whereis(ResourceFixture), :group_leader) |> elem(1)
+
+    spawn(fn ->
+      Process.group_leader(self(), leader)
+      send(parent, {Owner.resolve(self()), sdk.save_config(:x), sdk.restore_config()})
+    end)
+
+    assert_receive {{:ok, %{app: "config_fixture", version: "2.1.0"} = ^tag},
+                    {:error, :unavailable}, {:error, :unavailable}}
+
+    Owner.revoke(tag)
+    Application.stop(:config_fixture)
   end
 
   test "assignments persist multiple ports for one plugin and keep missing intent", %{

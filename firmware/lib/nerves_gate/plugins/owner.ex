@@ -8,7 +8,7 @@ defmodule NervesGate.Plugins.Owner do
   end
 
   def bind(artifact, generation) do
-    tag = %{app: to_string(artifact.app), generation: generation}
+    tag = %{app: to_string(artifact.app), version: artifact.version, generation: generation}
     :ets.insert(@table, {{:generation, generation}, :active})
     Enum.each(artifact.apps, fn app -> :ets.insert(@table, {{:app, app.app}, tag}) end)
     tag

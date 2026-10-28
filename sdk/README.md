@@ -17,6 +17,43 @@ alias NervesGateSDK.{Events, Hardware, Network, Storage, System}
 {:ok, assigned_ports} = Hardware.resources() # managed plugin caller only
 ```
 
+## Plugin configuration (SDK 0.2.0-dev.2 checkout)
+
+```elixir
+:ok = Storage.save_config(%{clients: [...], servers: [...]})
+{:ok, config} = Storage.restore_config() # or :not_found
+:ok = Storage.delete_config()            # or :not_found
+```
+
+One opaque term per running plugin version, stored on commissioned SD storage.
+The platform derives plugin and version from the actual managed caller. Saves
+are atomic replacements (at most 1 MiB serialized); `{:error, :commit_unknown}`
+means the new term may or may not be durable. Restores refuse atoms/functions
+unknown to the running system and malformed files (`{:error, :invalid_configuration}`,
+left in place). A new plugin version starts from `:not_found`; older versions'
+terms are kept and never loaded or migrated automatically. Without storage, calls
+return `{:error, :storage_unavailable}`; there is no `/data` fallback.
+
+Subscriptions deliver `%NervesGateSDK.Events.Event{topic: topic, value: value}`
+to the calling process. The backend monitors subscribers. Plugins supervise their
+own serial/CAN libraries and handles; ordinary OTP shutdown must close them. Stateful calls require an installed,
+starting/running managed plugin. The backend derives activation identity from
+the actual PID, never a supplied plugin name. Activation generations fence stale
+subscriptions/claims/in-flight work; restart/rollback requires fresh subscriptions
+and handles. Outside managed plugins, general platform read-only queries remain available,
+but resource calls fail with `plugin_not_running` (network errors use the
+string code). Use administrative domain APIs for IEx/RPC maintenance.
+SDK structs are the public contract,
+not firmware status maps. Commands return `:ok`, `{:ok, value}` or `{:error, reason}`.
+A timeout means an unknown outcome, not cancellation or permission to retry.
+
+Both physical and QEMU firmware supply the same runtime entry point. There is no
+backend configuration or host hardware emulation. The bridge is an ordinary module
+call in the plugin's process, not a proxy process; the SDK has no compile-time
+Mix dependency on firmware. SDK APIs do not manage
+Internet/USB, Tailscale enrollment or credentials, SSH, plugins or firmware, expose
+cookies, or reboot/reset the device.
+
 ## I/O data contracts (SDK 0.2.0-dev.1 checkout)
 
 `NervesGateSDK.IO` contains three shared data types: `InputDefinition`,

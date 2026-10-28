@@ -100,7 +100,19 @@ operator decision; it is not silently adopted or deleted.
 Plugin storage remains a separately commissioned ext4 SD mount at `/mnt/plugins`.
 `Storage.data_dir/1` requires available storage and a real managed calling process;
 there is no silent `/data` fallback. Plugins using files must handle storage errors
-and removal. The two bundled plugins keep their own configuration volatile and do
+and removal.
+
+`Storage.save_config/1`, `restore_config/0` and `delete_config/0` keep one opaque
+term per plugin version in `<data dir>/.nerves_gate/config/<version>.term`. Firmware
+derives plugin and version from the actual managed caller; a plugin cannot name
+another plugin or version. Saves replace the file atomically (a failure leaves the
+previous term or none; `{:error, :commit_unknown}` means durability is uncertain).
+Restores decode safely and report corrupt files without removing them. Updating a
+plugin starts from no configuration; older versions' terms are kept until explicitly
+deleted. Stopping, disabling, updating or uninstalling never deletes them. There is
+no migration, merging or schema: the plugin owns the term.
+
+The two bundled plugins keep their own configuration volatile and do
 not require SD for operation. The platform retains durable subnet cleanup ownership
 independently of the subnet plugin's volatile state.
 

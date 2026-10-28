@@ -6,6 +6,7 @@ defmodule NervesGate.Storage do
   """
   use GenServer
   alias NervesGate.{Error, Observations}
+  alias NervesGate.Storage.Config
   alias NervesGateSDK.Package
   alias NervesGateSDK.Storage.Status
 
@@ -510,6 +511,19 @@ defmodule NervesGate.Storage do
       false -> {:error, :invalid_application}
       error -> error
     end
+  end
+
+  @doc """
+  Save, restore or delete one managed activation's opaque configuration term in
+  its plugin data directory. The owner tag comes from the actual managed caller.
+  See `NervesGate.Storage.Config`.
+  """
+  def save_config(owner, term), do: with_data(owner, &Config.save(&1, owner.version, term))
+  def restore_config(owner), do: with_data(owner, &Config.restore(&1, owner.version))
+  def delete_config(owner), do: with_data(owner, &Config.delete(&1, owner.version))
+
+  defp with_data(%{app: app}, fun) do
+    with {:ok, data} <- data_dir(app), do: fun.(data)
   end
 
   @doc false

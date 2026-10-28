@@ -14,6 +14,7 @@ defmodule NervesGate.PluginUITest do
 
     artifact = %{
       app: :ui_fixture,
+      version: "1.0.0",
       apps: [%{app: :ui_fixture, env: [nerves_gate_ui: Component]}],
       modules: [Component]
     }

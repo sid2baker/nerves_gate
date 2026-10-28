@@ -80,6 +80,11 @@ preserve managed calling-process ownership. The I/O UI and Modbus integration ar
 not available yet.
 These types require the local SDK `~> 0.2.0-dev.1`, not the published 0.1.0 package.
 
+For persistent settings, `NervesGateSDK.Storage.save_config/1`, `restore_config/0`
+and `delete_config/0` keep one opaque term per plugin version on commissioned SD
+(SDK `~> 0.2.0-dev.2`). Validate the restored term yourself; a new version starts
+empty. See [storage and state](plugins.md#storage-and-state).
+
 The firmware domain's `register_input/1`, `register_output/2`, `publish_input/3`
 and `read_desired/1` use plugin-local IDs and actual managed caller membership.
 The input registrar publishes its observations; the output's supervised handler

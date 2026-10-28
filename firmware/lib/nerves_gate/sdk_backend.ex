@@ -38,6 +38,11 @@ defmodule NervesGate.SDKBackend do
     end
   end
 
+  # Identity and version come only from the actual caller's activation.
+  def call(:storage_save_config, [term]), do: owned_config(&Storage.save_config(&1, term))
+  def call(:storage_restore_config, []), do: owned_config(&Storage.restore_config/1)
+  def call(:storage_delete_config, []), do: owned_config(&Storage.delete_config/1)
+
   def call(:io_register_input, [definition]),
     do: managed_io(:active, fn -> NervesGate.IO.register_input(definition) end)
 
@@ -73,6 +78,12 @@ defmodule NervesGate.SDKBackend do
 
   def call(operation, arguments),
     do: available(fn -> GenServer.call(__MODULE__, {operation, arguments}) end)
+
+  defp owned_config(fun) do
+    available(fn ->
+      with {:ok, owner} <- NervesGate.Plugins.Owner.resolve(self()), do: fun.(owner)
+    end)
+  end
 
   defp managed_io(mode, fun) do
     available(fn ->

@@ -47,7 +47,8 @@ defmodule NervesGate.Plugins.Metadata do
     end
   end
 
-  defp sync_directory(path) do
+  @doc false
+  def sync_directory(path) do
     case :prim_file.open(String.to_charlist(path), [:read, :directory]) do
       {:ok, directory} ->
         try do
