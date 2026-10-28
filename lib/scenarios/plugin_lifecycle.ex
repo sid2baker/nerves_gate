@@ -375,7 +375,7 @@ defmodule Scenarios.PluginLifecycle do
 
     Device.await(
       vm,
-      "application ownership reconciled after manager restart",
+      "plugin ownership reconciled after manager restart",
       fn _ ->
         state = Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
         state.restored? and state.job == nil and state.blocked == nil

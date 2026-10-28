@@ -252,8 +252,7 @@ defmodule NervesGate.Plugins do
        {:error,
         %{
           code: "plugins_installed",
-          message:
-            "Application ownership is present or unresolved. Do not format or skip storage."
+          message: "Plugin ownership is present or unresolved. Do not format or skip storage."
         }}, state}
     else
       {:reply, Storage.admit(action, card_id, confirmation), state}

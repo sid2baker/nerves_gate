@@ -180,13 +180,13 @@ defmodule Scenarios.Cases.Topology do
                    24
                  ])
 
-        Scenarios.Device.await(vm, "application local address ready", &addressed?(&1, "eth0"))
+        Scenarios.Device.await(vm, "plugin local address ready", &addressed?(&1, "eth0"))
         refuses_forwarding(vm, "eth0", "10.0.3.2", destination)
       end,
       assigned_ports: ["eth0"]
     )
 
-    Scenarios.Device.await(vm, "application lease cleaned", &(&1.network.local == nil), 75_000)
+    Scenarios.Device.await(vm, "plugin lease cleaned", &(&1.network.local == nil), 75_000)
   end
 
   defp refuses_forwarding(vm, interface, gateway, destination) do
