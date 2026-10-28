@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Compatibility
+
+- Version 0.2.3 gives the rebuilt artifact a new immutable identity. Saved 0.2.2 artifacts and plugin selections remain unchanged.
+
 ## 0.2.2 - 2026-10-27
 
 ### Fixed
