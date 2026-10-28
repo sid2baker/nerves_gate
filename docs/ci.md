@@ -11,7 +11,7 @@ Routine CI never boots a device. Required checks:
 - **plugins:** create, test and package two generated plugins against the local SDK,
   plus both selected plugin test suites (`plugins/tailnet_subrouter` and `plugins/modbus`).
 
-`qemu.yml` is dispatched manually or runs weekly on Monday at 03:00 UTC on main. It runs `mix setup` and `mix test.qemu --ci` on
+`qemu.yml` is dispatched manually or runs weekly on Monday at 03:00 UTC on main. It runs `mix setup` and `mix scenario.ci all --device gateway_a` on
 disposable devices with portable TCG (KVM is optional), and keeps logs but never
 VM identity disks. Its optional, main-only Tailscale job uses the protected
 `tailnet-ci` environment; see [tailnet CI](tailnet-ci.md).

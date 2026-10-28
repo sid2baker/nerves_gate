@@ -180,7 +180,10 @@ defmodule WorkbenchWeb.PluginsLive do
           <.button type="submit">Confirm new plugin install</.button>
         </form>
         <.job
-          :if={@job.kind in ["test", "package", "install"] && @job.subject == @plugin.path}
+          :if={
+            @job.kind in ["test", "package", "plugin_review", "install"] &&
+              @job.subject == @plugin.path
+          }
           job={@job}
         />
       </.panel>

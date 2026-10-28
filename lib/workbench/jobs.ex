@@ -11,36 +11,95 @@ defmodule Workbench.Jobs do
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
+  def history, do: GenServer.call(__MODULE__, :history)
+  def fetch(id), do: GenServer.call(__MODULE__, {:fetch, id})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
 
-  def build(target), do: GenServer.call(__MODULE__, {:build, target})
-  def test_plugin(path), do: GenServer.call(__MODULE__, {:plugin, :test, path})
-  def package_plugin(path), do: GenServer.call(__MODULE__, {:plugin, :package, path})
-  def install_plugin(path, device), do: GenServer.call(__MODULE__, {:install, path, device})
+  def build(target, expected \\ Workbench.Session.identity()),
+    do: admit({:build, target}, expected)
 
-  def review_firmware(node, firmware),
-    do: GenServer.call(__MODULE__, {:review_firmware, node, firmware})
+  def test_plugin(path, expected \\ Workbench.Session.identity()),
+    do: admit({:plugin, :test, path}, expected)
 
-  def confirm_firmware(token, address),
-    do: GenServer.call(__MODULE__, {:confirm, :firmware, token, [address]})
+  def package_plugin(path, expected \\ Workbench.Session.identity()),
+    do: admit({:plugin, :package, path}, expected)
 
-  def confirm_plugin(token, address),
-    do: GenServer.call(__MODULE__, {:confirm, :plugin_install, token, [address]})
+  def install_plugin(path, device, expected \\ Workbench.Session.identity()),
+    do: admit({:install, path, device}, expected)
 
-  def review_factory(params), do: GenServer.call(__MODULE__, {:review_factory, params})
-  def check(node, scenario), do: GenServer.call(__MODULE__, {:check, node, scenario})
+  def review_firmware(node, firmware, expected \\ Workbench.Session.identity()),
+    do: admit({:review_firmware, node, firmware}, expected)
 
-  def confirm_factory(token, text, identified),
-    do: GenServer.call(__MODULE__, {:confirm, :factory, token, [text, identified]})
+  def confirm_firmware(token, address, expected \\ Workbench.Session.identity()),
+    do: admit({:confirm, :firmware, token, [address]}, expected)
+
+  def confirm_plugin(token, address, expected \\ Workbench.Session.identity()),
+    do: admit({:confirm, :plugin_install, token, [address]}, expected)
+
+  def review_factory(params, expected \\ Workbench.Session.identity()),
+    do: admit({:review_factory, params}, expected)
+
+  def check(node, scenario, expected \\ Workbench.Session.identity()),
+    do: admit({:check, node, scenario}, expected)
+
+  def confirm_factory(token, text, identified, expected \\ Workbench.Session.identity()),
+    do: admit({:confirm, :factory, token, [text, identified]}, expected)
+
+  defp admit(request, expected), do: GenServer.call(__MODULE__, {:admit, expected, request})
 
   @impl true
   def init(_) do
     Process.flag(:trap_exit, true)
-    {:ok, %{task: nil, review: nil, view: view(nil, :idle)}}
+    session = Process.whereis(Workbench.SessionServices)
+
+    restarted =
+      not is_nil(session) and :persistent_term.get({__MODULE__, :session}, nil) == session
+
+    if session, do: :persistent_term.put({__MODULE__, :session}, session)
+
+    current =
+      if restarted do
+        %{
+          view("maintenance", :uncertain)
+          | certainty: :unknown,
+            result:
+              "Jobs owner restarted; operation history/effects are unknown. Inspect targets and coordinate session replacement; do not replay."
+        }
+      else
+        view(nil, :idle)
+      end
+
+    {:ok, %{task: nil, review: nil, view: current, history: [], blocked: restarted}}
   end
 
   @impl true
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
+
+  def handle_call(:history, _, state),
+    do: {:reply, Enum.take([state.view | state.history], 21), state}
+
+  def handle_call({:fetch, id}, _, state) do
+    job = Enum.find([state.view | state.history], &(&1.id == id))
+
+    {:reply,
+     if(job, do: {:ok, job}, else: {:error, "Unknown job in this session; inspect mix dev.job"}),
+     state}
+  end
+
+  def handle_call({:admit, expected, request}, from, state) do
+    with :ok <- Workbench.Session.admit(expected) do
+      handle_call(request, from, state)
+    else
+      error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call(_, _, %{blocked: true} = state),
+    do:
+      {:reply,
+       {:error,
+        "Maintenance outcome uncertain. Inspect the job and target; no further maintenance admitted in this session."},
+       state}
 
   def handle_call(_, _, %{task: task} = state) when task != nil,
     do: {:reply, {:error, "Finish the current job first"}, state}
@@ -78,13 +137,16 @@ defmodule Workbench.Jobs do
       {:ok, %{source: :network} = gateway} ->
         start(
           state,
-          "install",
+          "plugin_review",
           path,
           &{:review, Workbench.PluginInstall.review!(path, gateway.node, &1)}
         )
 
+      {:ok, %{source: :qemu, sim_id: id}} ->
+        start(state, "install", path, &{:ok, install_qemu!(path, id, &1)}, id)
+
       _ ->
-        start(state, "install", path, &{:ok, Workbench.Plugins.install!(path, device, &1)})
+        {:reply, {:error, "Choose an explicit connected gateway from mix gateway.list"}, state}
     end
   end
 
@@ -144,10 +206,10 @@ defmodule Workbench.Jobs do
 
     # Consumed exactly once: the worker owns the snapshot from here.
     case start(%{state | review: nil}, kind_name, state.view.subject, run) do
-      {:reply, :ok, next} ->
+      {:reply, {:ok, id}, next} ->
         # Factory recovery files must stay visible whatever the outcome.
         recovery = if kind == :factory, do: plan.public.backup
-        {:reply, :ok, publish(put_in(next.view.recovery, recovery))}
+        {:reply, {:ok, id}, publish(put_in(next.view.recovery, recovery))}
 
       {:reply, error, _} ->
         {:reply, error, state}
@@ -160,8 +222,8 @@ defmodule Workbench.Jobs do
     do: {:reply, {:error, "Review first; another review cannot authorize this"}, state}
 
   @impl true
-  def handle_info({:output, line}, state),
-    do: {:noreply, publish(put_in(state.view.output, line))}
+  def handle_info({:output, id, line}, %{view: %{id: id}} = state),
+    do: {:noreply, publish(put_in(state.view.output, String.slice(line, 0, 2000)))}
 
   def handle_info({ref, result}, %{task: %{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
@@ -174,14 +236,39 @@ defmodule Workbench.Jobs do
           %{
             state
             | review: plan,
-              view: %{state.view | status: :awaiting_confirmation, review: plan.public}
+              view: %{
+                state.view
+                | status: :awaiting_confirmation,
+                  certainty: :known,
+                  review: plan.public
+              }
           }
 
         {:ok, message} ->
-          %{state | view: %{state.view | status: :succeeded, result: to_string(message)}}
+          %{
+            state
+            | view: %{
+                state.view
+                | status: :succeeded,
+                  certainty: :known,
+                  result: to_string(message)
+              }
+          }
 
         {:error, message} ->
-          %{state | view: %{state.view | status: :failed, result: message}}
+          # A maintenance exception/reply alone cannot prove no remote effects.
+          uncertain = effectful?(state.view.kind)
+
+          %{
+            state
+            | blocked: state.blocked or uncertain,
+              view: %{
+                state.view
+                | status: if(uncertain, do: :uncertain, else: :failed),
+                  certainty: if(uncertain, do: :unknown, else: :known),
+                  result: message
+              }
+          }
       end
 
     {:noreply, publish(%{state | task: nil})}
@@ -192,7 +279,12 @@ defmodule Workbench.Jobs do
       "Job worker exited. The outcome is unknown; inspect the device and preserve recovery files. Do not retry automatically."
 
     {:noreply,
-     publish(%{state | task: nil, view: %{state.view | status: :failed, result: result}})}
+     publish(%{
+       state
+       | task: nil,
+         blocked: true,
+         view: %{state.view | status: :uncertain, certainty: :unknown, result: result}
+     })}
   end
 
   def handle_info({:expire, token}, %{review: %{public: %{token: token}} = plan} = state) do
@@ -203,28 +295,38 @@ defmodule Workbench.Jobs do
 
   def handle_info(_, state), do: {:noreply, state}
 
-  defp start(state, kind, subject, run) do
+  defp start(state, kind, subject, run, device \\ nil) do
     owner = self()
+
+    id =
+      "#{System.get_env("WORKBENCH_SESSION_ID", "local")}:jobs:#{System.unique_integer([:positive, :monotonic])}"
 
     task =
       Task.Supervisor.async(Workbench.Tasks, fn ->
         receive do
           :admitted ->
             try do
-              run.(&send(owner, {:output, &1}))
+              run.(&send(owner, {:output, id, &1}))
             rescue
               error -> {:error, Exception.message(error)}
             end
         end
       end)
 
-    case Scenarios.Runner.admit_job(task.pid, kind, subject) do
+    reservation = if device, do: %{subject: subject, device: device}, else: subject
+
+    case Scenarios.Runner.admit_job(task.pid, kind, reservation) do
       :ok ->
         if state.review, do: state.review.owner.cleanup(state.review)
         send(task.pid, :admitted)
 
-        {:reply, :ok,
-         publish(%{state | task: task, review: nil, view: view(kind, :running, subject)})}
+        history =
+          if state.view.id, do: Enum.take([state.view | state.history], 20), else: state.history
+
+        current = %{view(kind, :running, subject) | id: id}
+
+        {:reply, {:ok, id},
+         publish(%{state | task: task, review: nil, history: history, view: current})}
 
       error ->
         Task.shutdown(task, :brutal_kill)
@@ -240,6 +342,9 @@ defmodule Workbench.Jobs do
 
   defp view(kind, status, subject \\ nil),
     do: %{
+      id: nil,
+      certainty: if(status == :running, do: :pending, else: :known),
+      next: "Inspect mix dev.job and the explicit target. Never replay an uncertain operation.",
       kind: kind,
       status: status,
       subject: subject,
@@ -248,6 +353,61 @@ defmodule Workbench.Jobs do
       review: nil,
       recovery: nil
     }
+
+  # Only this admitted Jobs worker packages and orchestrates the reserved install.
+  defp install_qemu!(path, target, report) do
+    output = Workbench.Plugins.package!(path, report, :temporary)
+    {owner, _} = Scenarios.Runner.watch(self())
+    monitor = Process.monitor(owner)
+
+    try do
+      case Scenarios.Runner.install(target, output) do
+        {:ok, id} ->
+          report.("Runner operation #{id}")
+
+          await_install!(
+            id,
+            report,
+            Scenarios.Runner.snapshot(),
+            monitor,
+            System.monotonic_time(:millisecond) + 600_000
+          )
+
+        {:error, message} ->
+          raise ArgumentError, message
+      end
+    after
+      Process.demonitor(monitor, [:flush])
+      File.rm(output)
+    end
+  end
+
+  defp await_install!(id, report, snapshot, monitor, deadline) do
+    run = Enum.find(snapshot.runs, &(&1.id == id))
+    if run, do: report.(run.phase)
+
+    case run do
+      %{status: :passed} ->
+        "Plugin running"
+
+      %{status: status} when status != :running ->
+        raise "Installation #{status}; inspect runner operation #{id} before any retry"
+
+      _ ->
+        receive do
+          {:scenarios, snapshot} ->
+            await_install!(id, report, snapshot, monitor, deadline)
+
+          {:DOWN, ^monitor, :process, _, _} ->
+            raise "Install outcome unknown; inspect before retrying"
+        after
+          max(deadline - System.monotonic_time(:millisecond), 0) ->
+            raise "Install wait deadline reached; inspect operation #{id}; do not retry"
+        end
+    end
+  end
+
+  defp effectful?(kind), do: kind in ["install", "firmware_update", "factory_provision", "check"]
 
   defp publish(state) do
     Phoenix.PubSub.broadcast(NervesGate.PubSub, @topic, {:jobs, state.view})

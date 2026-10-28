@@ -24,15 +24,31 @@ defmodule Workbench.Gateways do
 
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
 
-  @doc "A connected gateway by node name."
-  def fetch(node) do
-    case Enum.find(list(), &(to_string(&1.node) == to_string(node))) do
-      %{connected: true} = gateway -> {:ok, gateway}
-      _ -> {:error, :not_connected}
-    end
+  @doc "Resolve an explicit node, address or owned simulator ID; never select a default."
+  def fetch(target) do
+    resolve(list(), target)
   catch
     :exit, _ -> {:error, :not_connected}
   end
+
+  def resolve(gateways, target) when is_binary(target) or is_atom(target) do
+    matches =
+      Enum.filter(gateways, fn gateway ->
+        gateway.connected and
+          Enum.any?(
+            [gateway.node, gateway.address, gateway.sim_id],
+            &(not is_nil(&1) and to_string(&1) == to_string(target))
+          )
+      end)
+
+    case matches do
+      [gateway] -> {:ok, gateway}
+      [] -> {:error, :not_connected}
+      _ -> {:error, :ambiguous_target}
+    end
+  end
+
+  def resolve(_, _), do: {:error, :explicit_target_required}
 
   @impl true
   def init(opts) do

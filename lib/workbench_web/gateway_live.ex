@@ -93,7 +93,7 @@ defmodule WorkbenchWeb.GatewayLive do
       sim_id: sim_id,
       device: device,
       active:
-        device && is_integer(device.owner) && Enum.find(bench.runs, &(&1.id == device.owner)),
+        device && is_binary(device.owner) && Enum.find(bench.runs, &(&1.id == device.owner)),
       results: results(bench, device)
     )
   end

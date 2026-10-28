@@ -10,6 +10,41 @@ defmodule Workbench.ManagementNetwork do
     end
   end
 
+  @doc "Read recorded resources and current kernel identities without repairing networking."
+  def status do
+    case load() do
+      nil ->
+        %{status: :not_prepared}
+
+      network ->
+        resources =
+          Enum.map(network.created, fn resource ->
+            observed =
+              case File.read("/sys/class/net/#{resource.name}/ifindex") do
+                {:ok, index} -> String.trim(index)
+                _ -> nil
+              end
+
+            %{name: resource.name, matches: observed == resource.index}
+          end)
+
+        %{
+          status:
+            if(network.ready and Enum.all?(resources, & &1.matches),
+              do: :ready,
+              else: :unavailable
+            ),
+          resources: resources
+        }
+    end
+  rescue
+    _ ->
+      %{
+        status: :unreadable,
+        next: "Inspect the recorded management network; do not delete its journal or auto-repair."
+      }
+  end
+
   def setup!(subnet, ids) do
     if active_session?(),
       do: raise("Stop this checkout's Workbench sessions before preparing its network")

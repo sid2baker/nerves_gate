@@ -87,8 +87,15 @@
   device firmware or booting devices. Plugins are ordinary external Mix projects.
 - The user owns `mix dev [PLUGIN_DIRECTORY]`. Do not launch/stop that session or
   boot/reset devices without authorization. Ask for an available session if needed.
-- Focused checks use `mix test.qemu --only ID [--device ID]` against that session.
-  Never use `--ci` to launch another bench without explicit authorization.
+- Focused checks use `mix scenario.run ID --device TARGET` against that session.
+  `mix simulator.start/stop/reset` owns explicit QEMU lifecycle; reset erases disks
+  and requires confirmation. Never use `mix scenario.ci ID --device ID` to launch
+  another bench without explicit authorization.
+- Prefer the canonical operational matrix in `docs/development.md` and `mix help`.
+  Use `mix dev.doctor`, `mix gateway.list/inspect/logs` and `mix dev.job [ID]` for
+  observation. Session commands verify root, identity and protocol inputs inside
+  Jobs/Runner admission. Stale sessions require coordinated replacement, not bypass.
+  Raw `:erpc` belongs in owning transports; do not improvise command/connection loops.
 - Root tests own host tooling/shared UI integration; firmware `test/unit/` and
   `test/web/` own policy/codecs/gateway checks; SDK tests own its typed contract.
   Extend real scenarios instead of adding a hardware-mock suite or fake SDK backend.

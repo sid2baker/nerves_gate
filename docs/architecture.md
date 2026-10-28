@@ -114,6 +114,14 @@ CI sessions use `_build/workbench-ci-<run>/`. Simulator diagnostics/disks are un
 `_build/simulator/<session>/`. Internal session inputs use `WORKBENCH_*`; actual
 simulator configuration is selected by `QEMU_SIM_CONFIG`.
 
+CLI and Pi verify a Session handshake against locked metadata: canonical checkout
+root, session ID, protocol revision and compatibility inputs. The explicit manifest
+in `Workbench.Session` covers the session/admission wire contracts and SDK bridge,
+not arbitrary source freshness. Jobs/Runner recheck the expected identity and
+compatibility at write admission. Changed protocol inputs or loaded SDK/platform
+versions block mutation until coordinated session replacement; inspection remains
+available. There is no fallback attachment or automatic restart.
+
 Starting the session boots no devices. An explicit Start builds selected local
 firmware if needed and starts configured disposable devices from this checkout.
 Host tools and guest firmware must be updated together; a source change does not
@@ -126,7 +134,18 @@ installation, factory provisioning and operator-assisted physical scenarios. Pri
 reviews carry their owner and immutable snapshot; public metadata never does.
 `Scenarios.Runner` owns lifecycle, manual control and per-device reservations for
 UI, CLI and CI. Jobs reserve lifecycle/shutdown admission with Runner until their
-worker exits. UI availability is not admission.
+worker exits. QEMU plugin installation reserves its target before packaging.
+UI availability is not admission. Standalone firmware/assets/plugin build workflows
+use cross-process build-output exclusion without requiring a session.
+
+Jobs and Runner each own session-qualified IDs and bounded in-memory observations;
+there is no shared operations service. Accepted work is distinct from successful
+completion. Maintenance errors with unproven effects and interrupted controls expose
+an `uncertain` outcome and block further maintenance/control. Client wait timeouts
+never cancel workers or release reservations. History is lost with its owner/session,
+which is not evidence that an uncertain write is safe to repeat. Mix commands and
+LiveViews invoke these same owners; [development](development.md#commands) is the
+canonical operational command map.
 
 Independent devices can run concurrently. `devices: :all` reserves the whole
 bench, including exclusion of manual actions. Reservations last until worker exit,

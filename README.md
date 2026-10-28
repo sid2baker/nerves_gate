@@ -40,7 +40,7 @@ store or dependency download. See [plugin development](docs/plugin-development.m
 ```sh
 mix format --force
 mix check                                    # pre-commit host checks; no devices
-mix test.qemu --only sdk --device gateway_a    # against your running mix dev
+mix scenario.run sdk --device gateway_a       # against your running mix dev
 ```
 
 | Path | Contents |

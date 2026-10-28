@@ -1,20 +1,30 @@
 defmodule Simulator.Prerequisites do
   @moduledoc "Workstation requirements for real QEMU devices and firmware builds."
   @tools ~w(qemu-system-x86_64 fwup flock mkfs.ext4 git make cc pkg-config inotifywait
-            mksquashfs unsquashfs timeout socat)
+            mksquashfs unsquashfs timeout)
+
+  def status do
+    %{
+      supported_host:
+        :os.type() == {:unix, :linux} and
+          String.starts_with?(to_string(:erlang.system_info(:system_architecture)), [
+            "x86_64",
+            "aarch64"
+          ]),
+      tools: Map.new(@tools, &{&1, System.find_executable(&1) != nil})
+    }
+  end
 
   def check! do
-    unless :os.type() == {:unix, :linux} and
-             String.starts_with?(to_string(:erlang.system_info(:system_architecture)), [
-               "x86_64",
-               "aarch64"
-             ]) do
+    status = status()
+
+    unless status.supported_host do
       Mix.raise(
         "The simulator requires Linux x86_64 or aarch64 with QEMU. There is no in-memory fallback."
       )
     end
 
-    missing = Enum.reject(@tools, &System.find_executable/1)
+    missing = for tool <- @tools, not status.tools[tool], do: tool
 
     if missing != [],
       do:

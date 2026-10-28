@@ -57,7 +57,7 @@ jobs:
         run: |
           mkdir -p _build/simulator
           set -o pipefail
-          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci 2>&1 | tee _build/simulator/suite.log
+          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix scenario.ci all --device gateway_a 2>&1 | tee _build/simulator/suite.log
       - name: Remove recorded management hardware
         if: always()
         run: mise exec -- mix dev.network cleanup
@@ -99,7 +99,7 @@ jobs:
           TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
           TS_TAGS: tag:ci
         # Never tee stdout or upload daemon logs, identity disks or credentials.
-        run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix test.qemu --ci --only tailscale_auth --config priv/simulator/tailnet.exs
+        run: mise exec -- env -u NERVES_GATE_DEVICE_NODE mix scenario.ci tailscale_auth --device gateway_a --config priv/simulator/tailnet.exs
       - name: Remove recorded management hardware
         if: always()
         run: mise exec -- mix dev.network cleanup

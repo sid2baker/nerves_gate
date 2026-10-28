@@ -30,39 +30,43 @@ defmodule Workbench.Builds do
   end
 
   def assets!(report \\ fn _ -> :ok end) do
-    report.("Building frontend assets")
+    Workbench.BuildLock.run!(fn ->
+      report.("Building frontend assets")
 
-    case Volt.build() do
-      {:ok, _result} -> :ok
-      {:error, reason} -> raise "Asset build failed: #{inspect(reason)}"
-    end
+      case Volt.build() do
+        {:ok, _result} -> :ok
+        {:error, reason} -> raise "Asset build failed: #{inspect(reason)}"
+      end
+    end)
   end
 
   def firmware!(target \\ "x86_64", report \\ fn _ -> :ok end, env \\ :dev)
       when (target == "x86_64" and env == :dev) or (target == "ec100" and env in [:dev, :prod]) do
-    assets!(report)
-    Workbench.PluginBuild.build!(report)
+    Workbench.BuildLock.run!(fn ->
+      assets!(report)
+      Workbench.PluginBuild.build!(report)
 
-    status =
-      Simulator.BuildOutput.run(
-        "mix",
-        ["firmware", "--overwrite"],
-        [
-          cd: Path.join(Workbench.root(), "firmware"),
-          env: [
-            {"MIX_TARGET", target},
-            {"MIX_ENV", Atom.to_string(env)},
-            {"NERVES_GATE_LOCAL_DEPS", "1"},
-            {"NERVES_GATE_DEVICE_NODE", nil}
-          ]
-        ],
-        report
-      )
+      status =
+        Simulator.BuildOutput.run(
+          "mix",
+          ["firmware", "--overwrite"],
+          [
+            cd: Path.join(Workbench.root(), "firmware"),
+            env: [
+              {"MIX_TARGET", target},
+              {"MIX_ENV", Atom.to_string(env)},
+              {"NERVES_GATE_LOCAL_DEPS", "1"},
+              {"NERVES_GATE_DEVICE_NODE", nil}
+            ]
+          ],
+          report
+        )
 
-    if status != 0 do
-      raise "Firmware build failed (exit #{status}); inspect build output and system artifact availability"
-    end
+      if status != 0 do
+        raise "Firmware build failed (exit #{status}); inspect build output and system artifact availability"
+      end
 
-    Path.join(Workbench.root(), "firmware/_build/#{target}_#{env}/nerves/images/nerves_gate.fw")
+      Path.join(Workbench.root(), "firmware/_build/#{target}_#{env}/nerves/images/nerves_gate.fw")
+    end)
   end
 end

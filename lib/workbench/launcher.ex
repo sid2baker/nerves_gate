@@ -1,12 +1,20 @@
 defmodule Workbench.Launcher do
   @moduledoc """
-  `mix dev` and disposable `--ci` benches: flock → MuonTrap → one session BEAM
+  `mix dev` and explicit `mix scenario.ci` benches: flock → MuonTrap → one session BEAM
   running `priv/workbench/session.exs`. The OS wrapper owns the lock and child
   cleanup even if the session BEAM aborts.
   """
 
-  def run(args) do
-    options = options!(args)
+  def dev(args), do: launch(options!(args))
+
+  def ci(selection, device, config \\ nil) do
+    unless is_binary(device) and device != "" and Scenarios.select(selection) != [],
+      do: Mix.raise("Select a QEMU scenario and explicit configured device")
+
+    launch(ci: true, only: selection, device: device, config: config)
+  end
+
+  defp launch(options) do
     Simulator.Prerequisites.check!()
     ci? = options[:ci] || false
     port = options[:port] || if(ci?, do: 0, else: 4000)
@@ -18,6 +26,14 @@ defmodule Workbench.Launcher do
     File.chmod!(dir, 0o700)
     unless ci?, do: check_port!(port)
     flock = System.find_executable("flock") || Mix.raise("Install flock (util-linux)")
+    config = config_path!(options, dir)
+
+    if ci? do
+      configured = Simulator.config(config, Path.join(dir, "preflight"))
+
+      unless Enum.any?(Map.keys(configured.devices), &(to_string(&1) == options[:device])),
+        do: Mix.raise("Unknown configured device #{options[:device]}; no devices started")
+    end
 
     env = [
       {"MIX_TARGET", "host"},
@@ -25,8 +41,9 @@ defmodule Workbench.Launcher do
       {"WORKBENCH_DIR", dir},
       {"WORKBENCH_HTTP_PORT", Integer.to_string(port)},
       {"WORKBENCH_CI", to_string(ci?)},
-      {"WORKBENCH_SCENARIO", options[:only] || "all"},
-      {"QEMU_SIM_CONFIG", config_path!(options, dir)},
+      {"WORKBENCH_SCENARIO", options[:only] || ""},
+      {"WORKBENCH_DEVICE", options[:device] || ""},
+      {"QEMU_SIM_CONFIG", config},
       {"NERVES_GATE_PLUGIN", options[:plugin] || ""},
       {"ERL_EPMD_PORT", false},
       {"NERVES_GATE_DEVICE_NODE", false}
@@ -84,7 +101,7 @@ defmodule Workbench.Launcher do
   defp options!(args) do
     {options, plugins} =
       OptionParser.parse!(args,
-        strict: [port: :integer, ci: :boolean, only: :string, config: :string, firmware: :string]
+        strict: [port: :integer, config: :string, firmware: :string]
       )
 
     if options[:config] && options[:firmware],

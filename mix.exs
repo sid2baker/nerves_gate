@@ -49,7 +49,7 @@ defmodule Workbench.MixProject do
   def application,
     do: [extra_applications: [:logger, :crypto, :ssh, :eex], mod: {Workbench.Application, []}]
 
-  def cli, do: [preferred_envs: [ci: :test, check: :test, "test.qemu": :test]]
+  def cli, do: [preferred_envs: [ci: :test, check: :test, "scenario.ci": :test]]
 
   defp deps_get(args) do
     for project <- @projects, do: run(project, ["deps.get" | args])

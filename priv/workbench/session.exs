@@ -62,7 +62,7 @@ result =
 
     if ci? do
       Runner.subscribe()
-      :ok = Runner.lifecycle("start")
+      {:ok, _} = Runner.lifecycle("start")
 
       views.(900_000, "QEMU startup stopped reporting")
       |> Enum.find(fn view ->
@@ -72,9 +72,9 @@ result =
         view.lifecycle.status == :ready
       end)
 
-      # CI runs on the first device; multi-device scenarios hold the others.
-      [first | _] = Runner.snapshot().lifecycle.devices
-      {:ok, id} = Runner.run(first.id, System.fetch_env!("WORKBENCH_SCENARIO"))
+      # CI also requires an explicit configured target; multi-device cases reserve peers.
+      device = System.fetch_env!("WORKBENCH_DEVICE")
+      {:ok, id} = Runner.run(device, System.fetch_env!("WORKBENCH_SCENARIO"))
 
       views.(600_000, "QEMU runner stopped reporting")
       |> Enum.reduce_while(MapSet.new(), fn view, printed ->

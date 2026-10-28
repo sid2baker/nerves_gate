@@ -53,6 +53,16 @@ defmodule Workbench.SessionServicesTest do
     refute Process.whereis(NervesGate.Supervisor)
     refute Process.whereis(NervesGateWeb.Endpoint)
 
+    # Loss of an admission owner must not make an uncertain write replayable.
+    # These are the real host services with an empty simulator, not a fake backend.
+    :ok = Supervisor.terminate_child(supervisor, Workbench.Jobs)
+    assert {:ok, _} = Supervisor.restart_child(supervisor, Workbench.Jobs)
+    assert %{status: :uncertain, certainty: :unknown} = Workbench.Jobs.snapshot()
+    :ok = Supervisor.terminate_child(supervisor, Scenarios.Runner)
+    assert {:ok, _} = Supervisor.restart_child(supervisor, Scenarios.Runner)
+    assert Scenarios.Runner.snapshot().blocked
+    assert Simulator.devices() == %{}
+
     :ok = stop_supervised(Workbench.SessionServices)
     for {pid, ref} <- processes, do: assert_receive({:DOWN, ^ref, :process, ^pid, _})
     refute Process.whereis(NervesGate.PubSub)

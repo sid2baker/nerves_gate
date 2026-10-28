@@ -43,12 +43,18 @@ defmodule WorkbenchWeb.Components do
     ~H"""
     <div :if={@job.kind} id={@id} class="ui-stack">
       <p role="status">{job_label(@job.kind)} · {@job.status}</p>
+      <code :if={@job[:id]}>{@job.id}</code>
+      <p :if={@job.status == :uncertain}>
+        Outcome unknown. Inspect the target; do not retry. {@job[:next]}
+      </p>
       <div :if={@job.status == :running} class="ui-progress"></div>
       <code :if={@job.output} class="bench-output">{@job.output}</code>
-      <.notice :if={@job.result && @job.status == :failed} tone="warning" role="alert">
+      <.notice :if={@job.result && @job.status in [:failed, :uncertain]} tone="warning" role="alert">
         {@job.result}
       </.notice>
-      <p :if={@job.result && @job.status != :failed} class="dev-result">{@job.result}</p>
+      <p :if={@job.result && @job.status not in [:failed, :uncertain]} class="dev-result">
+        {@job.result}
+      </p>
       <p :if={@job[:recovery]} class="dev-result">
         Preserve recovery files: <code>{@job.recovery}</code>
       </p>
@@ -65,7 +71,7 @@ defmodule WorkbenchWeb.Components do
       do: "/devices/#{node}"
 
   def job_path(%{kind: kind, subject: path})
-      when kind in ["test", "package", "install"] and is_binary(path),
+      when kind in ["test", "package", "plugin_review", "install"] and is_binary(path),
       do: "/develop/plugins/" <> Base.url_encode64(path, padding: false)
 
   def job_path(_), do: "/develop/firmware"
@@ -75,6 +81,7 @@ defmodule WorkbenchWeb.Components do
   def job_label("firmware"), do: "Firmware build"
   def job_label("firmware_review"), do: "Firmware review"
   def job_label("firmware_update"), do: "Firmware update"
+  def job_label("plugin_review"), do: "Plugin review"
   def job_label("factory_review"), do: "Factory review"
   def job_label("factory_provision"), do: "Factory provisioning"
   def job_label(kind), do: String.capitalize(kind)
@@ -85,6 +92,8 @@ defmodule WorkbenchWeb.Components do
   def result_tone(:succeeded), do: "good"
   def result_tone(:awaiting_confirmation), do: "warning"
   def result_tone(:failed), do: "warning"
+  def result_tone(:uncertain), do: "warning"
+  def result_tone(:rejected), do: "warning"
   def result_tone(:running), do: "busy"
   def result_tone(_), do: "neutral"
 

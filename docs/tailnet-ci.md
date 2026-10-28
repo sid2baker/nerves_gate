@@ -4,7 +4,7 @@ The manually dispatched **QEMU integration** workflow has an optional main-branc
 **Tailscale authentication** job using the protected `tailnet-ci` GitHub environment.
 Enable the **tailscale** input to run it. It never runs automatically on pushes or
 pull requests.
-Ordinary **Run all** and `mix test.qemu` selections exclude `tailscale_auth`;
+Ordinary **Run all** and `mix scenario.run all --device TARGET` selections exclude `tailscale_auth`;
 select it explicitly to enroll real test devices.
 
 The scenario uses the three-device configuration in `priv/simulator/tailnet.exs`. Each guest
@@ -114,13 +114,13 @@ mix dev --config priv/simulator/tailnet.exs
 Choose **Start devices** under **Develop → Firmware**. In another terminal:
 
 ```sh
-mix test.qemu --only tailscale_auth
+mix scenario.run tailscale_auth --device gateway_a
 ```
 
 The scenario uses fresh disks and reserves all three devices. The key is read by
-the running session, not the attaching `mix test.qemu` client: restart `mix dev` after
+the running session, not the attaching `mix scenario.run` client: restart `mix dev` after
 changing its key or configuration. With no local key, the helper attempts GitHub
-OIDC and reports missing settings outside CI. Do not use `--ci` to start another
+OIDC and reports missing settings outside CI. Do not use `mix scenario.ci` to start another
 local bench.
 
 ## Cleanup and safety

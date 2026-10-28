@@ -6,6 +6,8 @@ defmodule Workbench.SessionServices do
 
   @impl true
   def init(opts) do
+    Workbench.Session.capture()
+
     Supervisor.init(
       [
         {Phoenix.PubSub, name: NervesGate.PubSub},

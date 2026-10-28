@@ -31,6 +31,11 @@ defmodule Workbench.Skill.DevEnvironment do
     stop and inspect; do not create
     a second device-connection loop or load project source into Pi's bridge.
     Keep project target for source work, runtime for Workbench/device inspection.
+    Attachment verifies the same Session handshake as CLI. A stale compatibility
+    report permits inspection, not mutation; coordinate a user-owned session restart.
+    Prefer `mix gateway.list/inspect/logs`, `mix scenario.run ID --device TARGET`,
+    and the documented named Jobs/Runner operations over raw RPC. If the installed
+    bridge refuses retargeting, report that limitation; do not bypass this skill.
     """)
   end
 
@@ -62,8 +67,22 @@ defmodule Workbench.Skill.DevEnvironment do
 
     case result do
       %{connected: true, node: node, project_root: cwd} ->
-        true = Path.expand(cwd) == Path.expand(root)
-        ^id = :erpc.call(node, System, :get_env, ["WORKBENCH_SESSION_ID"], 5_000)
+        {canonical, 0} = System.cmd("pwd", ["-P"], cd: Path.expand(root))
+        canonical = String.trim(canonical)
+        remote = :erpc.call(node, Workbench.Session, :handshake, [], 5_000)
+
+        expected = %{
+          root: canonical,
+          id: id,
+          compatibility: :erpc.call(node, Workbench.Session, :compatibility, [canonical], 5_000)
+        }
+
+        :ok = :erpc.call(node, Workbench.Session, :validate, [remote, expected, false], 5_000)
+        true = :erpc.call(node, Workbench.Session, :locked?, [], 5_000)
+
+        mutation_preflight =
+          :erpc.call(node, Workbench.Session, :validate, [remote, expected, true], 5_000)
+
         # A replacement during verification requires a fresh attachment, not a
         # successful response for a session that is no longer current.
         %{"node" => ^name, "id" => ^id} =
@@ -71,7 +90,7 @@ defmodule Workbench.Skill.DevEnvironment do
 
         System.put_env("PI_ELIXIR_NODE", name)
         System.put_env("PI_ELIXIR_COOKIE", "mycookie")
-        {:ok, %{node: node, root: cwd}}
+        {:ok, %{node: node, root: cwd, session_id: id, mutation_preflight: mutation_preflight}}
 
       error ->
         {:error, error}

@@ -17,36 +17,54 @@ defmodule Scenarios.Runner do
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
   def snapshot, do: GenServer.call(__MODULE__, :snapshot)
   def watch(pid), do: GenServer.call(__MODULE__, {:watch, pid})
-  def run(device, selection \\ "all"), do: GenServer.call(__MODULE__, {:run, device, selection})
-  def mode(device, mode), do: GenServer.call(__MODULE__, {:mode, device, mode})
-  def manual(device, action), do: GenServer.call(__MODULE__, {:manual, device, action})
+
+  def run(device, selection, expected \\ Workbench.Session.identity()),
+    do: admit({:run, device, selection}, expected)
+
+  def mode(device, mode, expected \\ Workbench.Session.identity()),
+    do: admit({:mode, device, mode}, expected)
+
+  def manual(device, action, expected \\ Workbench.Session.identity()),
+    do: admit({:manual, device, action}, expected)
+
+  def fetch(id), do: GenServer.call(__MODULE__, {:fetch, id})
   # Plugin installs use the same exclusive admission and progress as scenarios.
-  def install(device, path) do
-    GenServer.call(__MODULE__, {:install, device, path})
-  end
+  def install(device, path, expected \\ Workbench.Session.identity()),
+    do: admit({:install, device, path}, expected)
 
-  def lifecycle(action), do: GenServer.call(__MODULE__, {:lifecycle, action})
+  def lifecycle(action, expected \\ Workbench.Session.identity()),
+    do: admit({:lifecycle, action}, expected)
 
-  def admit_job(pid, kind, subject),
-    do: GenServer.call(__MODULE__, {:admit_job, pid, kind, subject})
+  def admit_job(pid, kind, subject, expected \\ Workbench.Session.identity()),
+    do: admit({:admit_job, pid, kind, subject}, expected)
 
-  def stop_session(id, request \\ self()),
-    do: GenServer.call(__MODULE__, {:stop_session, id, request})
+  def stop_session(id, request \\ self(), expected \\ Workbench.Session.identity()),
+    do: admit({:stop_session, id, request}, expected)
 
-  def configure(change), do: GenServer.call(__MODULE__, {:configure, change})
+  def configure(change, expected \\ Workbench.Session.identity()),
+    do: admit({:configure, change}, expected)
+
+  defp admit(request, expected), do: GenServer.call(__MODULE__, {:admit, expected, request})
   def subscribe, do: Phoenix.PubSub.subscribe(NervesGate.PubSub, @topic)
   def unsubscribe, do: Phoenix.PubSub.unsubscribe(NervesGate.PubSub, @topic)
 
   @impl true
   def init(_) do
     Process.flag(:trap_exit, true)
+    session = Process.whereis(Workbench.SessionServices)
+
+    restarted =
+      not is_nil(session) and :persistent_term.get({__MODULE__, :session}, nil) == session
+
+    if session, do: :persistent_term.put({__MODULE__, :session}, session)
 
     view = %{
       lifecycle: Simulator.subscribe(),
       devices: %{},
       scenarios: Enum.map(Scenarios.all(), &Map.delete(&1, :module)),
       runs: [],
-      blocked: false,
+      operations: [],
+      blocked: restarted,
       events: []
     }
 
@@ -64,6 +82,24 @@ defmodule Scenarios.Runner do
 
   @impl true
   def handle_call(:snapshot, _, state), do: {:reply, state.view, state}
+
+  def handle_call({:fetch, id}, _, state) do
+    operation = Enum.find(state.view.runs ++ Map.get(state.view, :operations, []), &(&1.id == id))
+
+    {:reply,
+     if(operation,
+       do: {:ok, operation},
+       else: {:error, "Unknown runner operation in this session"}
+     ), state}
+  end
+
+  def handle_call({:admit, expected, request}, from, state) do
+    with :ok <- Workbench.Session.admit(expected) do
+      handle_call(request, from, state)
+    else
+      error -> {:reply, error, state}
+    end
+  end
 
   def handle_call({:watch, pid}, _, state) when is_pid(pid) do
     watchers = Map.get(state, :watchers, %{})
@@ -89,13 +125,26 @@ defmodule Scenarios.Runner do
          state}
 
       true ->
-        {:reply, :ok, Map.put(state, :job, %{pid: pid, ref: Process.monitor(pid)})}
+        held =
+          case subject do
+            %{device: device} -> [device]
+            _ -> []
+          end
+
+        with :ok <- available(state, held) do
+          view = hold(state.view, held, {:job, pid})
+
+          {:reply, :ok,
+           %{state | view: view, job: %{pid: pid, ref: Process.monitor(pid), devices: held}}}
+        else
+          error -> {:reply, error, state}
+        end
     end
   end
 
-  def handle_call({:install, device, path}, _, state) do
+  def handle_call({:install, device, path}, {caller, _}, state) do
     with {:ok, id} <- device_id(state, device),
-         :ok <- available(state, [id]),
+         :ok <- available(state, [id], caller),
          true <- is_binary(path) and Path.type(path) == :absolute and Path.extname(path) == ".ez" do
       owner = self()
       vm = state.handles[id]
@@ -158,30 +207,38 @@ defmodule Scenarios.Runner do
       do: {:reply, {:error, "Finish the current operations first."}, state}
 
   def handle_call({:lifecycle, action}, _, state) do
-    with true <- lifecycle_allowed?(action, state.view),
-         :ok <- Simulator.lifecycle(action) do
-      # Close admission immediately, before the asynchronous progress arrives.
-      status = if action == "start", do: :starting, else: :stopping
-      view = %{state.view | lifecycle: %{state.view.lifecycle | status: status}, devices: %{}}
-      {:reply, :ok, publish(%{state | view: view, handles: %{}})}
+    if lifecycle_allowed?(action, state.view) do
+      start_lifecycle(state, action)
     else
-      false ->
-        {:reply,
-         {:error,
-          "Lifecycle action unavailable. Release manual control or Reset after a failure."},
-         state}
-
-      error ->
-        {:reply, error, state}
+      {:reply,
+       {:error, "Lifecycle action unavailable. Inspect reservations and simulator state."}, state}
     end
-  catch
-    :exit, _ -> {:reply, {:error, "Simulator unavailable; restart mix dev."}, state}
   end
 
+  def handle_call({:configure, _}, _, %{view: %{blocked: true}} = state),
+    do:
+      {:reply,
+       {:error,
+        "Control/configuration outcome uncertain. Inspect before an authorized recovery."}, state}
+
   def handle_call({:configure, change}, _, state) do
-    {:reply, Simulator.configure(change), state}
-  catch
-    :exit, _ -> {:reply, {:error, "Simulator unavailable; restart mix dev."}, state}
+    {id, view} = operation(state.view, "simulator.configure")
+
+    try do
+      case Simulator.configure(change) do
+        :ok ->
+          view = finish_operations(view, &(&1.id == id), :succeeded)
+          {:reply, {:ok, id}, publish(%{state | view: view})}
+
+        error ->
+          view = finish_operations(view, &(&1.id == id), :rejected)
+          {:reply, error, publish(%{state | view: view})}
+      end
+    catch
+      :exit, _ ->
+        view = finish_operations(view, &(&1.id == id), :uncertain)
+        {:reply, {:ok, id}, publish(%{state | view: %{view | blocked: true}})}
+    end
   end
 
   def handle_call({:run, device, selection}, _, state) do
@@ -226,16 +283,25 @@ defmodule Scenarios.Runner do
           [:link, :monitor]
         )
 
-      worker = %{ref: ref, run: nil, devices: [id], timer: nil, completed: false}
+      {operation_id, view} = operation(state.view, "#{id}: manual.acquire")
+
+      worker = %{
+        ref: ref,
+        run: nil,
+        operation: operation_id,
+        devices: [id],
+        timer: nil,
+        completed: false
+      }
 
       view =
-        state.view
+        view
         |> hold([id], :manual)
         |> update_device(id, &%{&1 | manual_action: "acquire"})
         |> event("#{id}: manual control requested")
 
       state = %{state | view: view, workers: Map.put(state.workers, pid, worker)}
-      {:reply, :ok, state |> arm_manual_timeout(pid) |> publish()}
+      {:reply, {:ok, operation_id}, state |> arm_manual_timeout(pid) |> publish()}
     else
       error -> {:reply, error, state}
     end
@@ -246,7 +312,8 @@ defmodule Scenarios.Runner do
       {:ok, id} ->
         case state.view.devices[id] do
           %{owner: :manual, manual_action: nil} ->
-            {:reply, :ok, start_manual(state, id, "release")}
+            next = start_manual(state, id, "release")
+            {:reply, {:ok, hd(next.view.operations).id}, next}
 
           %{owner: nil} ->
             {:reply, :ok, state}
@@ -266,7 +333,8 @@ defmodule Scenarios.Runner do
     with {:ok, id} <- device_id(state, device),
          %{owner: :manual, manual_action: nil} <- state.view.devices[id],
          true <- action in Faults.actions() do
-      {:reply, :ok, start_manual(state, id, action)}
+      next = start_manual(state, id, action)
+      {:reply, {:ok, hd(next.view.operations).id}, next}
     else
       false -> {:reply, {:error, "Unknown manual action"}, state}
       {:error, _} = error -> {:reply, error, state}
@@ -415,8 +483,14 @@ defmodule Scenarios.Runner do
     {:noreply, publish(%{state | view: view, handles: %{}})}
   end
 
-  def handle_info({:DOWN, ref, :process, pid, _reason}, %{job: %{pid: pid, ref: ref}} = state),
-    do: {:noreply, %{state | job: nil}}
+  def handle_info({:DOWN, ref, :process, pid, _reason}, %{job: %{pid: pid, ref: ref}} = state) do
+    devices =
+      Map.new(state.view.devices, fn {id, device} ->
+        {id, if(device.owner == {:job, pid}, do: %{device | owner: nil}, else: device)}
+      end)
+
+    {:noreply, publish(%{state | job: nil, view: %{state.view | devices: devices}})}
+  end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case state.workers[pid] do
@@ -445,7 +519,7 @@ defmodule Scenarios.Runner do
   def terminate(_, state), do: for({pid, _} <- state.workers, do: Process.exit(pid, :kill))
 
   defp start_run(state, id, held, selection, scenarios, execute) do
-    run_id = System.unique_integer([:positive, :monotonic])
+    run_id = operation_id()
     {pid, ref} = :erlang.spawn_opt(fn -> execute.(run_id) end, [:link, :monitor])
 
     rows =
@@ -464,6 +538,9 @@ defmodule Scenarios.Runner do
       devices: Enum.sort(held),
       selection: selection,
       status: :running,
+      outcome: :running,
+      certainty: :pending,
+      next: "Inspect this runner operation; do not replay after a lost reply.",
       phase: "Preparing",
       rows: rows
     }
@@ -526,13 +603,21 @@ defmodule Scenarios.Runner do
     end
   end
 
-  defp available(state, ids) do
+  defp available(state, ids, caller \\ nil)
+
+  defp available(%{view: %{blocked: true}}, _, _),
+    do: {:error, "Control outcome uncertain. Inspect before an authorized recovery."}
+
+  defp available(state, ids, caller) do
     Enum.find_value(ids, :ok, fn id ->
       case state.view.devices[id] do
         %{blocked: true} -> {:error, "#{id}: control uncertain. Reset the devices."}
         %{owner: :manual} -> {:error, "#{id}: manual control is held. Switch to Scenarios."}
         %{owner: nil} -> nil
+        %{owner: {:job, pid}} when caller == pid -> nil
+        %{owner: {:job, _}} -> {:error, "#{id}: plugin maintenance holds this device."}
         %{owner: run} -> {:error, "#{id}: run ##{run} is in progress."}
+        nil -> {:error, "Unknown or unavailable owned device #{id}"}
       end
     end)
   end
@@ -559,7 +644,8 @@ defmodule Scenarios.Runner do
   # Never evict an active run, even when more than 20 devices run concurrently.
   defp keep_runs(runs) do
     {active, finished} = Enum.split_with(runs, &(&1.status == :running))
-    Enum.sort_by(active ++ Enum.take(finished, @run_limit), & &1.id, :desc)
+    retained = MapSet.new(Enum.map(active ++ Enum.take(finished, @run_limit), & &1.id))
+    Enum.filter(runs, &MapSet.member?(retained, &1.id))
   end
 
   defp update_row(rows, id, fun), do: Enum.map(rows, &if(&1.id == id, do: fun.(&1), else: &1))
@@ -589,6 +675,27 @@ defmodule Scenarios.Runner do
     %{state | view: finish(state.view, worker, true), workers: Map.delete(state.workers, pid)}
   end
 
+  defp start_lifecycle(state, action) do
+    {id, view} = operation(state.view, "simulator.#{action}")
+
+    try do
+      case Simulator.lifecycle(action) do
+        :ok ->
+          status = if action == "start", do: :starting, else: :stopping
+          view = %{view | lifecycle: %{view.lifecycle | status: status}, devices: %{}}
+          {:reply, {:ok, id}, publish(%{state | view: view, handles: %{}})}
+
+        error ->
+          view = finish_operations(view, &(&1.id == id), :rejected)
+          {:reply, error, publish(%{state | view: view})}
+      end
+    catch
+      :exit, _ ->
+        view = finish_operations(view, &(&1.id == id), :uncertain)
+        {:reply, {:ok, id}, publish(%{state | view: %{view | blocked: true}})}
+    end
+  end
+
   defp lifecycle_allowed?("start", %{
          blocked: false,
          lifecycle: %{status: :stopped, reset_required: false}
@@ -607,6 +714,15 @@ defmodule Scenarios.Runner do
   defp lifecycle_progress(state, lifecycle) do
     view = %{state.view | lifecycle: lifecycle}
 
+    outcome =
+      case lifecycle.status do
+        status when status in [:ready, :stopped] -> :succeeded
+        status when status in [:failed, :unavailable] -> :uncertain
+        _ -> :running
+      end
+
+    view = finish_operations(view, &String.starts_with?(&1.kind, "simulator."), outcome)
+
     view =
       if state.view.lifecycle.phase != lifecycle.phase,
         do: event(view, lifecycle.phase),
@@ -618,9 +734,11 @@ defmodule Scenarios.Runner do
   defp start_manual(state, id, action) do
     {pid, _} = Enum.find(state.workers, fn {_, w} -> w.run == nil and w.devices == [id] end)
     send(pid, {:manual_action, action})
+    {operation_id, view} = operation(state.view, "#{id}: manual.#{action}")
+    state = put_in(state.workers[pid].operation, operation_id)
 
     view =
-      state.view
+      view
       |> update_device(id, &%{&1 | manual_action: action})
       |> event("#{id}: requested #{manual_label(action)}")
 
@@ -644,6 +762,7 @@ defmodule Scenarios.Runner do
           |> update_device(id, &%{&1 | manual_action: nil})
           |> event("#{id}: #{message}")
 
+        view = finish_operations(view, &(&1.id == Map.get(worker, :operation)), :succeeded)
         workers = Map.put(state.workers, pid, %{worker | timer: nil})
         publish(%{state | view: view, workers: workers})
 
@@ -675,6 +794,13 @@ defmodule Scenarios.Runner do
 
     view = %{view | devices: devices, blocked: view.blocked or uncertain}
 
+    view =
+      finish_operations(
+        view,
+        &(&1.id == Map.get(worker, :operation)),
+        if(uncertain, do: :uncertain, else: :succeeded)
+      )
+
     if worker.run,
       do: finish_run(view, worker.run, uncertain),
       else: finish_manual(view, worker, uncertain)
@@ -691,10 +817,27 @@ defmodule Scenarios.Runner do
     |> update_run(run_id, fn run ->
       rows = if uncertain, do: Enum.map(run.rows, &stopped/1), else: run.rows
 
-      status = if uncertain, do: :failed, else: Scenarios.result(rows)
+      status = if uncertain, do: :uncertain, else: Scenarios.result(rows)
 
-      phase = if uncertain, do: "Control state uncertain; Reset the devices", else: "Finished"
-      %{run | rows: rows, status: status, phase: phase}
+      outcome =
+        case status do
+          :passed -> :succeeded
+          :uncertain -> :uncertain
+          _ -> :failed
+        end
+
+      phase =
+        if uncertain,
+          do: "Control state uncertain; inspect before an authorized Reset",
+          else: "Finished"
+
+      Map.merge(run, %{
+        rows: rows,
+        status: status,
+        outcome: outcome,
+        certainty: if(uncertain, do: :unknown, else: :known),
+        phase: phase
+      })
     end)
     |> then(fn view ->
       run = Enum.find(view.runs, &(&1.id == run_id))
@@ -711,6 +854,48 @@ defmodule Scenarios.Runner do
   end
 
   defp stopped(row), do: row
+
+  defp operation_id,
+    do:
+      "#{System.get_env("WORKBENCH_SESSION_ID", "local")}:runner:#{System.unique_integer([:positive, :monotonic])}"
+
+  defp operation(view, kind) do
+    id = operation_id()
+
+    row = %{
+      id: id,
+      kind: kind,
+      status: :running,
+      outcome: :running,
+      certainty: :pending,
+      next: "Inspect the runner and target; do not replay an uncertain operation."
+    }
+
+    {id, Map.put(view, :operations, keep_operations([row | Map.get(view, :operations, [])]))}
+  end
+
+  defp keep_operations(rows) do
+    {active, terminal} = Enum.split_with(rows, &(&1.status == :running))
+    active ++ Enum.take(terminal, @run_limit)
+  end
+
+  defp finish_operations(view, matches, outcome) do
+    rows =
+      Enum.map(Map.get(view, :operations, []), fn row ->
+        if row.status == :running and matches.(row) do
+          %{
+            row
+            | status: outcome,
+              outcome: outcome,
+              certainty: if(outcome == :uncertain, do: :unknown, else: :known)
+          }
+        else
+          row
+        end
+      end)
+
+    Map.put(view, :operations, keep_operations(rows))
+  end
 
   defp cancel_timer(%{timer: nil}), do: :ok
   defp cancel_timer(%{timer: timer}), do: Process.cancel_timer(timer)

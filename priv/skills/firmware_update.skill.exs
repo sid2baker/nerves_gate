@@ -25,16 +25,17 @@ defmodule Workbench.Skill.FirmwareUpdate do
 
     ```elixir
     {:ok, gateway} = Workbench.Gateways.fetch(:"nerves_gate@100.120.69.127")
-    :ok = Workbench.Jobs.review_firmware(gateway.node, "firmware/_build/ec100_dev/nerves/images/nerves_gate.fw")
-    Workbench.Jobs.snapshot() # wait for :awaiting_confirmation; show review to user
+    {:ok, review_job} = Workbench.Jobs.review_firmware(gateway.node, "firmware/_build/ec100_dev/nerves/images/nerves_gate.fw")
+    Workbench.Jobs.fetch(review_job) # wait for :awaiting_confirmation; show review to user
     ```
 
     Only after the user confirms that exact review, use its token and address:
 
     ```elixir
-    %{status: :awaiting_confirmation, review: review} = Workbench.Jobs.snapshot()
-    :ok = Workbench.Jobs.confirm_firmware(review.token, review.address)
-    Workbench.Jobs.snapshot() # observe progress and final outcome
+    {:ok, %{status: :awaiting_confirmation, review: review}} = Workbench.Jobs.fetch(review_job)
+    {:ok, update_job} = Workbench.Jobs.confirm_firmware(review.token, review.address)
+    Workbench.Jobs.fetch(update_job) # observe this operation, not an unrelated later job
+    # A wait timeout does not cancel it. Inspect the ID; never resubmit.
     ```
 
     Prefer the gateway page's review/confirm UI when the user is present; it is the

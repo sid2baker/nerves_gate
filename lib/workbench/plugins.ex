@@ -94,80 +94,39 @@ defmodule Workbench.Plugins do
   end
 
   def test!(path, report \\ fn _ -> :ok end) do
-    plugin = project!(path)
-    run!(plugin.path, :test, ["deps.get"], report)
-    run!(plugin.path, :test, ["deps.compile"], report)
-    run!(plugin.path, :test, ["test"], report)
-    :ok
+    Workbench.BuildLock.run!(
+      fn ->
+        plugin = project!(path)
+        run!(plugin.path, :test, ["deps.get"], report)
+        run!(plugin.path, :test, ["deps.compile"], report)
+        run!(plugin.path, :test, ["test"], report)
+        :ok
+      end,
+      path
+    )
   end
 
   def package!(path, report \\ fn _ -> :ok end, destination \\ :release) do
-    plugin = project!(path)
+    Workbench.BuildLock.run!(
+      fn ->
+        plugin = project!(path)
 
-    relative =
-      if destination == :temporary,
-        do: "_build/packages/#{plugin.name}-#{Base.encode16(:crypto.strong_rand_bytes(8))}.ez",
-        else: "packages/#{plugin.name}.ez"
+        relative =
+          if destination == :temporary do
+            "_build/packages/#{plugin.name}-#{Base.encode16(:crypto.strong_rand_bytes(8))}.ez"
+          else
+            "packages/#{plugin.name}.ez"
+          end
 
-    output = Path.join(plugin.path, relative)
-    File.mkdir_p!(Path.dirname(output))
-    run!(plugin.path, :prod, ["deps.get"], report)
-    # Compile path dependencies before loading their packaging task: a changed
-    # SDK requirement must not be checked against an older cached .app version.
-    run!(plugin.path, :prod, ["deps.compile"], report)
-    run!(plugin.path, :prod, ["nerves_gate.package", "--output", output], report)
-    output
-  end
-
-  @doc "Install and start a development package on an owned simulated device under reservation."
-  def install!(path, target, report \\ fn _ -> :ok end) do
-    output = package!(path, report, :temporary)
-    {owner, _} = Scenarios.Runner.watch(self())
-    monitor = Process.monitor(owner)
-
-    try do
-      case Scenarios.Runner.install(target, output) do
-        {:ok, id} ->
-          await_install!(
-            id,
-            report,
-            Scenarios.Runner.snapshot(),
-            monitor,
-            System.monotonic_time(:millisecond) + 600_000
-          )
-
-        {:error, message} ->
-          raise ArgumentError, message
-      end
-    after
-      Process.demonitor(monitor, [:flush])
-      File.rm(output)
-    end
-  end
-
-  defp await_install!(id, report, snapshot, monitor, deadline) do
-    run = Enum.find(snapshot.runs, &(&1.id == id))
-    if run, do: report.(run.phase)
-
-    case run do
-      %{status: :passed} ->
-        "Plugin running"
-
-      %{status: status} when status != :running ->
-        raise "Installation failed; inspect the device page"
-
-      _ ->
-        receive do
-          {:scenarios, snapshot} ->
-            await_install!(id, report, snapshot, monitor, deadline)
-
-          {:DOWN, ^monitor, :process, _, _} ->
-            raise "Install outcome unknown; inspect before retrying"
-        after
-          max(deadline - System.monotonic_time(:millisecond), 0) ->
-            raise "Install deadline reached; inspect before retrying"
-        end
-    end
+        output = Path.join(plugin.path, relative)
+        File.mkdir_p!(Path.dirname(output))
+        run!(plugin.path, :prod, ["deps.get"], report)
+        run!(plugin.path, :prod, ["deps.compile"], report)
+        run!(plugin.path, :prod, ["nerves_gate.package", "--output", output], report)
+        output
+      end,
+      path
+    )
   end
 
   defp run!(path, env, args, report) do

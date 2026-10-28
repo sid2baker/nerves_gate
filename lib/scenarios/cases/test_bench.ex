@@ -22,6 +22,7 @@ defmodule Scenarios.Cases.TestBench do
   def run(%{device: vm, devices: devices}) do
     assert_configuration(vm)
     assert_tailnet_tools()
+    assert_session_admission(vm)
     assert {:error, _} = Runner.stop_session(System.get_env("WORKBENCH_SESSION_ID"))
     assert_shutdown_admission()
 
@@ -100,6 +101,36 @@ defmodule Scenarios.Cases.TestBench do
     assert Enum.count_until(events, 101) <= 100
     ids = Enum.map(events, & &1.id)
     assert ids == Enum.sort(Enum.uniq(ids))
+  end
+
+  defp assert_session_admission(vm) do
+    alias Workbench.Session
+    expected = Session.identity()
+    assert :ok = Session.validate(Session.handshake(), expected, true)
+    assert {:error, identity} = Runner.run(vm.id, "sdk", %{expected | id: "replaced-session"})
+    assert identity =~ "identity changed"
+    stale = put_in(expected.compatibility.sdk, "0.0.0")
+    assert {:error, compatibility} = Runner.run(vm.id, "sdk", stale)
+    assert compatibility =~ "stale"
+    # Exercise the actual CLI transport and the same reservation boundary it uses.
+    assert {:error, _} = Session.command(Runner, :run, [vm.id, "sdk"])
+    {:ok, snapshot} = Session.call(Runner, :fetch, [Runner.snapshot().devices[vm.id].owner])
+    assert snapshot.status == :running
+    assert String.contains?(snapshot.id, ":runner:")
+
+    Scenarios.Device.await(vm, "Verified gateway directory observes the owned guest", fn _ ->
+      match?({:ok, %{source: :qemu}}, Workbench.Gateways.fetch(vm.node))
+    end)
+
+    before = Workbench.Jobs.snapshot()
+
+    assert {:error, _} =
+             Session.command(Workbench.Jobs, :install_plugin, [
+               "/not-read-while-reserved",
+               vm.node
+             ])
+
+    assert Workbench.Jobs.snapshot() == before
   end
 
   @doc false

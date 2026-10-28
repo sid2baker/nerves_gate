@@ -129,6 +129,54 @@ defmodule Workbench.AdmissionTest do
     assert released.watchers == %{}
   end
 
+  test "packaging reservation excludes other callers before install starts" do
+    from = {self(), make_ref()}
+
+    pid =
+      spawn(fn ->
+        receive do
+          :finish -> :ok
+        end
+      end)
+
+    {:reply, :ok, held} =
+      Runner.handle_call(
+        {:admit_job, pid, "install", %{device: :a, subject: "/tmp/app"}},
+        from,
+        state()
+      )
+
+    assert held.view.devices.a.owner == {:job, pid}
+
+    for request <- [{:run, :a, "sdk"}, {:mode, :a, "manual"}, {:install, :a, "/tmp/app.ez"}] do
+      assert {:reply, {:error, _}, ^held} = Runner.handle_call(request, from, held)
+    end
+
+    ref = held.job.ref
+    send(pid, :finish)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
+    {:noreply, released} = Runner.handle_info({:DOWN, ref, :process, pid, :normal}, held)
+    assert released.view.devices.a.owner == nil
+  end
+
+  test "uncertain worker termination is distinct and blocks further control" do
+    {:reply, {:ok, run}, state} =
+      Runner.handle_call({:install, :a, "/tmp/absent.ez"}, {self(), make_ref()}, state())
+
+    [{pid, %{ref: ref}}] = Map.to_list(state.workers)
+    Process.unlink(pid)
+    Process.exit(pid, :kill)
+    {:noreply, state} = Runner.handle_info({:DOWN, ref, :process, pid, :killed}, state)
+
+    assert [%{id: ^run, status: :uncertain, outcome: :uncertain, certainty: :unknown}] =
+             state.view.runs
+
+    assert state.view.devices.a.blocked
+
+    assert {:reply, {:error, _}, ^state} =
+             Runner.handle_call({:run, :a, "sdk"}, {self(), make_ref()}, state)
+  end
+
   defp state do
     devices =
       for id <- [:a, :b], into: %{} do
@@ -147,11 +195,13 @@ defmodule Workbench.AdmissionTest do
 
     %{
       session_stopping: false,
+      job: nil,
       workers: %{},
       handles: %{a: %{id: :a}, b: %{id: :b}},
       view: %{
         devices: devices,
         runs: [],
+        operations: [],
         events: [],
         blocked: false,
         lifecycle: %{status: :ready}

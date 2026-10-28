@@ -42,7 +42,7 @@ defmodule Workbench.FirmwareUpdate do
           :ok
 
         found ->
-          raise "Plugin artifacts changed under existing versions: #{inspect(found)}. Bump versions and rebuild; no firmware sent."
+          raise "Plugin artifacts changed under existing versions: #{inspect(found)}. Give each changed plugin a new version in its mix.exs, rebuild with mix firmware ec100, then Refresh images and Review again. Existing device selections stay unchanged; no firmware sent."
       end
 
       %{

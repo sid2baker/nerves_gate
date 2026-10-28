@@ -76,14 +76,22 @@ EC100 builds additionally need the published EC100 system artifact.
 | `mix setup` | Prepare tools and artifacts |
 | `mix firmware [x86_64 \| ec100] [--env dev \| prod]` | Build assets and selected pure-BEAM plugins on the host, then firmware in an isolated process; never boots a device |
 | `mix dev [PLUGIN_DIRECTORY] [--config PATH] [--port 4000]` | Start the workbench; optionally open a plugin project |
-| `mix dev.status`, `mix dev.stop` | Read (including the attachable node) or gracefully stop this checkout's session |
+| `mix dev.status`, `mix dev.doctor` | Read session identity, loaded protocol compatibility and prerequisites; doctor never repairs anything |
+| `mix dev.stop` | Gracefully stop this checkout's idle session; excludes active jobs/runs |
+| `mix dev.job [ID]` | Read current/recent Jobs and Runner outcomes; IDs include session and owner |
+| `mix gateway.list` | Read the verified gateway directory, including target kind and owned simulator IDs |
+| `mix gateway.inspect TARGET` | Bounded identity, status (including storage), plugins and hardware reads |
+| `mix gateway.logs TARGET [--limit 1..100]` | Bounded sanitized warning-or-higher log snapshot; not streaming |
 | `mix dev.network setup --subnet PRIVATE/24 [--config PATH]` | Explicitly prepare private QEMU bridge/TAPs; requires approved sudo access |
 | `mix dev.network cleanup` | Remove only recorded network resources after stopping the session |
 | `mix firmware.update GATEWAY [IMAGE] [--sha256 SHA]` | [Reviewed physical firmware update](#physical-firmware-updates) |
-| `mix plugin.new/test/package/install PATH` | [Plugin project operations](plugin-development.md) |
-| `mix test.qemu --only ID [--device ID]` | Run scenarios on the running bench |
-| `mix test.qemu --lifecycle start/stop/reset` | Explicit lifecycle action on that bench |
-| `mix test.qemu --ci --only ID` | Boot and clean up a separate disposable bench |
+| `mix plugin.new/test/package PATH` | Standalone [plugin project operations](plugin-development.md); no session required |
+| `mix plugin.install PATH --device TARGET` | Session Jobs workflow; owned QEMU installation or reviewed/confirmed physical installation |
+| `mix simulator.start/stop` | Start/stop the running session's owned QEMU devices; stop preserves disks |
+| `mix simulator.reset [--confirm]` | Erase every owned simulated device disk; prompts unless explicitly confirmed |
+| `mix scenario.list` | Local catalogue, requirements and target kinds; no session or effects |
+| `mix scenario.run ID --device TARGET` | Run an explicit case/target through Runner (QEMU) or Jobs (physical catalogue only) |
+| `mix scenario.ci ID --device ID [--config PATH]` | Explicitly boot and clean up a separate disposable QEMU bench |
 | `mix test`, `mix test.sdk` | Root or SDK host tests |
 | `mix format --force` | Format the root and subprojects |
 | `mix check` | Required pre-commit host gate, including firmware lint/clone/architecture, generated-plugin and plugin tests; no dialyzer/devices |
@@ -91,7 +99,47 @@ EC100 builds additionally need the published EC100 system artifact.
 | `mix release.check TAG` | Read-only release validation |
 
 The user owns the `mix dev` session. Agents must not start, stop or reset it, boot
-its devices, or run `--ci` benches without authorization.
+its devices, or run `scenario.ci` benches without authorization.
+
+### Choosing an interface and observing completion
+
+Standalone setup, build, format, host tests and plugin project commands need no
+session. Gateway inspection, maintenance, simulator controls and scenario execution
+attach to this checkout's running Workbench. Run `mix help TASK` for strict flags.
+Targets are always explicit: a connected node/address or owned simulator ID from
+`mix gateway.list`. There is no implicit first-device selection. `all` is an explicit
+QEMU catalogue selection, never a collection of physical procedures.
+
+Session commands verify canonical checkout root, session ID and protocol revision.
+Mutation admission also compares loaded SDK/platform versions and a small explicit
+manifest of protocol-defining source inputs captured at compilation/startup. This
+is not general source freshness checking. Changes to those inputs require a
+coordinated user-owned Workbench restart. Reads remain available for diagnostics.
+No command automatically restarts a session or repairs host networking.
+
+Jobs and Runner own their IDs and bounded in-memory histories independently. CLI
+commands print the accepted ID and wait for completion; the UI shows the same IDs
+and outcomes. Use `mix dev.job ID` after a client timeout. A timeout does not cancel
+the worker, release reservations or authorize replay. If the admission reply was
+lost, inspect `mix dev.job` and the target without resubmitting. `uncertain` means
+unknown effects; further maintenance/control remains blocked as appropriate.
+History is lost with its owner/session; a new session is not proof of safe retry.
+An admission owner restarted inside the same session fails closed rather than
+re-enabling writes after losing its history. Inspect targets and coordinate session
+replacement; this does not authorize replay.
+
+Use Mix workflows or UI for supported operations. Runtime tools attach through
+`dev-environment` and read the verified directory via `Workbench.DeviceInspection`.
+Raw `:erpc` is transport infrastructure, not a bypass for Jobs/Runner admission,
+confirmation or physical authorization. Scenario code uses `Scenarios.Device.rpc/4`.
+Subscriptions and SDK leases retain actual-calling-PID ownership; temporary RPC
+workers never proxy those resources. Workbench exposes no general remote gateway
+command facade or HTTP control API.
+
+Only reviewed firmware/plugin/factory maintenance has a Workbench physical-write
+path. Firmware confirmation consumes a target/image-bound review once; exact SHA
+approval is not permission to retry an uncertain upload. Physical checks are
+explicit operator-authorized cases, not automatically included in QEMU suites.
 
 ## Workbench and simulator
 

@@ -35,6 +35,8 @@ defmodule WorkbenchWeb.FirmwareLive do
 
   defp command(socket, {:error, message}), do: {:noreply, assign(socket, :error, message)}
 
+  defp command(socket, {:ok, _id}), do: command(socket, :ok)
+
   defp command(socket, :ok),
     do: {:noreply, assign(socket, bench: Runner.snapshot(), error: nil, confirm_reset: false)}
 
@@ -53,6 +55,9 @@ defmodule WorkbenchWeb.FirmwareLive do
         <a href="#lab-devices">3. Test and debug</a>
         <a href="#lab-runs">Results</a>
       </nav>
+      <p :for={operation <- @bench[:operations] || []} role="status">
+        {operation.id} · {operation.kind} · {operation.outcome}
+      </p>
       <.panel title="1. Build firmware" icon="port" id="firmware-build">
         <form id="build-firmware" phx-submit="build" class="ui-actions">
           <select name="target" aria-label="Firmware build target">
