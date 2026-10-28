@@ -6,7 +6,10 @@ defmodule Workbench.CLI do
       mix test.qemu [--only ID] [--device ID]   # run on the running session
       mix test.qemu --lifecycle start|stop|reset # reset erases every simulated disk
       mix test.qemu --ci [--only ID] [--config PATH]   # disposable bench
+      mix firmware.update GATEWAY [IMAGE] [--sha256 SHA] # reviewed physical update
   """
+
+  @image "firmware/_build/ec100_dev/nerves/images/nerves_gate.fw"
   alias Workbench.Session
 
   def test_qemu(args) do
@@ -95,6 +98,75 @@ defmodule Workbench.CLI do
         after
           File.rm(package)
         end
+    end
+  end
+
+  @doc """
+  Print gateway state, review the image, confirm once (interactively or by exact
+  `--sha256`), wait for the verified outcome and print the state again.
+  """
+  def firmware_update(args) do
+    {options, positional} = OptionParser.parse!(args, strict: [sha256: :string])
+
+    {name, image} =
+      case positional do
+        [name] -> {name, @image}
+        [name, image] -> {name, image}
+        _ -> Mix.raise("Usage: mix firmware.update GATEWAY [IMAGE] [--sha256 SHA]")
+      end
+
+    gateway =
+      Enum.find(call(Workbench.Gateways, :list, []), &(name in [to_string(&1.node), &1.address])) ||
+        Mix.raise("No connected gateway #{name}")
+
+    print_state("Before", gateway.node)
+    ok!(call(Workbench.Jobs, :review_firmware, [gateway.node, Path.expand(image)]))
+
+    case await_job(deadline(300_000), nil) do
+      %{status: :awaiting_confirmation, review: review} ->
+        IO.puts("Review:\n" <> inspect(Map.delete(review, :token), pretty: true))
+
+        confirmed? =
+          if sha = options[:sha256],
+            do: sha == review.sha256 || Mix.raise("Reviewed image is not #{sha}; nothing sent"),
+            else: Mix.shell().yes?("Send this exact image to #{review.serial}?", default: :no)
+
+        unless confirmed?, do: Mix.raise("Not confirmed; nothing sent")
+        ok!(call(Workbench.Jobs, :confirm_firmware, [review.token, review.address]))
+
+        case await_job(deadline(600_000), nil) do
+          %{status: :succeeded, result: result} ->
+            IO.puts(result)
+            print_state("After", gateway.node)
+
+          job ->
+            Mix.raise("#{job.result} Do not retry; inspect the gateway.")
+        end
+
+      job ->
+        Mix.raise(job.result)
+    end
+  end
+
+  defp print_state(label, node) do
+    state = call(Workbench.FirmwareUpdate, :state, [node])
+    IO.puts("#{label}:\n" <> inspect(state, pretty: true, limit: :infinity))
+  end
+
+  defp await_job(deadline, output) do
+    job = call(Workbench.Jobs, :snapshot, [])
+    if job.output != output and job.output, do: IO.puts(job.output)
+
+    cond do
+      job.status != :running ->
+        job
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        Mix.raise("Outcome unknown; inspect the gateway. Do not retry")
+
+      true ->
+        Process.sleep(1_000)
+        await_job(deadline, job.output)
     end
   end
 

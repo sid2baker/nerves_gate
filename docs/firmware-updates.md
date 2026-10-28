@@ -36,8 +36,9 @@ manual-verification downgrade or alternate transport fallback. An update changes
 firmware, not saved plugin selection or hardware assignments. Changed plugin bytes
 require a new version; never erase saved metadata to bypass a conflict.
 
-The `firmware-update` Pi skill uses the same `Workbench.Jobs` review/confirmation
-path on the attached Workbench node. It requires explicit user authorization;
+`mix firmware.update GATEWAY [IMAGE] [--sha256 SHA]` and the `firmware-update` Pi
+skill use the same `Workbench.Jobs` review/confirmation path on the attached
+Workbench node. The task also prints read-only gateway state before and after. It requires explicit user authorization;
 inspection, building or discovery is not authorization to flash.
 
 ## Physical checks

@@ -22,13 +22,22 @@ Call `attach/1` again before device operations and after the Workbench restarts;
 Pi itself does not need a restart. Inspection does not start another node or
 connection loop. Use the project target for source work, not device inspection.
 
-## Firmware updates from Pi
+## Physical firmware updates
 
-After explicit operator authorization, the `firmware-update` executable skill calls
-`Workbench.Jobs.review_firmware(node, firmware_path)` in the attached Workbench.
-The user-owned `mix dev` must be running. Show the completed review to the user;
-only after confirmation call `Workbench.Jobs.confirm_firmware(token, address)`.
-Review checks the exact image, saved plugin artifacts, identity, health and SSH
+With the user-owned `mix dev` running, and after explicit operator authorization:
+
+```sh
+mix firmware.update nerves-gate.example.ts.net            # built EC100 image
+mix firmware.update GATEWAY path/to/image.fw --sha256 SHA # non-interactive
+```
+
+`GATEWAY` is a connected gateway's address or node. The task prints read-only
+gateway state (firmware, plugins, storage and saved network settings), reviews
+the image through `Workbench.Jobs`, shows the review and asks for confirmation.
+`--sha256` replaces the prompt and confirms only that exact reviewed image; use it
+from Pi only after the user approved that SHA-256. After a verified update it
+prints the state again so changes, such as plugins that need a new selection, are
+visible. The `firmware-update` skill and gateway page use the same jobs. Review checks the exact image, saved plugin artifacts, identity, health and SSH
 trust. Confirmation consumes the review once, uploads over SSH and verifies a new
 healthy boot over distribution. It never selects or starts plugins.
 Errors or timeouts require inspection, not automatic replay. It does not build,
@@ -70,6 +79,7 @@ EC100 builds additionally need the published EC100 system artifact.
 | `mix dev.status`, `mix dev.stop` | Read (including the attachable node) or gracefully stop this checkout's session |
 | `mix dev.network setup --subnet PRIVATE/24 [--config PATH]` | Explicitly prepare private QEMU bridge/TAPs; requires approved sudo access |
 | `mix dev.network cleanup` | Remove only recorded network resources after stopping the session |
+| `mix firmware.update GATEWAY [IMAGE] [--sha256 SHA]` | [Reviewed physical firmware update](#physical-firmware-updates) |
 | `mix plugin.new/test/package/install PATH` | [Plugin project operations](plugin-development.md) |
 | `mix test.qemu --only ID [--device ID]` | Run scenarios on the running bench |
 | `mix test.qemu --lifecycle start/stop/reset` | Explicit lifecycle action on that bench |

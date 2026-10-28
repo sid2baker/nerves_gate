@@ -11,8 +11,17 @@ defmodule Workbench.Skill.FirmwareUpdate do
     markdown("""
     # Update physical firmware
 
-    Only after the user explicitly authorizes flashing the target. Attach with
-    `dev-environment`, then in `elixir_eval` with target `runtime`:
+    Only after the user explicitly authorizes flashing the target. Prefer the shell
+    command, which prints gateway state before and after:
+
+    ```sh
+    mix firmware.update GATEWAY [IMAGE]                # review, then stop at the prompt
+    mix firmware.update GATEWAY [IMAGE] --sha256 SHA   # after the user approved SHA
+    ```
+
+    Without a terminal, the first form stops at the prompt and sends nothing. Show
+    its review; run the second form only for the SHA-256 the user approved.
+    Alternatively, attach with `dev-environment`, then in `elixir_eval` with target `runtime`:
 
     ```elixir
     {:ok, gateway} = Workbench.Gateways.fetch(:"nerves_gate@100.120.69.127")

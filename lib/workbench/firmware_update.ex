@@ -159,6 +159,27 @@ defmodule Workbench.FirmwareUpdate do
     end
   end
 
+  @doc "Read-only gateway state worth comparing before and after an update."
+  def state(node) do
+    call = &:erpc.call(node, &1, &2, [], 15_000)
+    {:ok, plugins} = call.(NervesGate.Plugins, :list)
+    network = call.(NervesGate.Network, :status)
+
+    %{
+      firmware: Map.take(observe!(node), ["version", "source_revision", "boot_id"]),
+      plugins:
+        Enum.map(
+          plugins,
+          &Map.take(&1, [:app, :active_version, :available_version, :enabled, :running?, :error])
+        ),
+      storage: Map.take(call.(NervesGate.Storage, :commissioning), [:ready, :choice, :error]),
+      network: %{
+        saved: get_in(network, [:config, "network"]),
+        error: network && network.error
+      }
+    }
+  end
+
   @doc false
   def verified?(plan, observed) do
     observed["serial"] == plan.before["serial"] and observed["boot_id"] != plan.before["boot_id"] and

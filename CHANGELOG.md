@@ -32,6 +32,8 @@
 
 ### Added
 
+- `mix firmware.update GATEWAY [IMAGE] [--sha256 SHA]` prints read-only gateway state, reviews the image, confirms once (interactively or by exact SHA-256), waits for the verified boot and prints the state again.
+
 - Gateway Plugins page with explicit Start/Stop and optional plugin-owned LiveComponents. Firmware bundles the selected pure-BEAM dependency closures and a verified inventory; bundled code needs no SD card. Saved unavailable versions require explicit selection, never silent replacement. Uncertain commands are never replayed.
 - Read-only Modbus TCP/RTU plugin using yamodbus, with explicit per-device configuration/connection, bounded holding/input-register polling and connection cleanup. RTU requires an enabled exclusive RS485 assignment, operator approval and firmware-provided circuits_uart; the initial profile is 9600 8N1. No equipment connections occur at startup.
 - Subnet-router interface picker uses gateway observations and disables Internet, claimed, addressed and operator-disabled ports with explanations.
