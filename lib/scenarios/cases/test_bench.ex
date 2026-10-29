@@ -256,13 +256,20 @@ defmodule Scenarios.Cases.TestBench do
     assert_receive {:manual_done, ^pid, ^action}, 10_000
   end
 
+  # Saved ports mode administratively disables unassigned ports.
+  defp expected_link?(port), do: port.link == (port.role != "unassigned")
+
   defp recovered(vm, before) do
     status =
-      Scenarios.Device.await(vm, "manual cleanup restores management and both links", fn status ->
-        Enum.all?(status.connections.ports, & &1.link) and
-          status.remote.auth_state == before.remote.auth_state and
-          status.remote.ipv4 == before.remote.ipv4
-      end)
+      Scenarios.Device.await(
+        vm,
+        "manual cleanup restores management and assigned links",
+        fn status ->
+          Enum.all?(status.connections.ports, &expected_link?/1) and
+            status.remote.auth_state == before.remote.auth_state and
+            status.remote.ipv4 == before.remote.ipv4
+        end
+      )
 
     assert Scenarios.Qemu.topology(vm) == Simulator.Network.baseline()
     assert device(vm).topology == Simulator.Network.baseline()
