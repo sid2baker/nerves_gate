@@ -7,7 +7,7 @@ Native `circuits_uart` 1.7.0 is supplied by firmware, not bundled in the plugin;
 SDK/LiveView are shared platform libraries too.
 
 Mapped holding registers (integers 0–65535) and coils (booleans) become platform
-inputs and outputs through `NervesGateSDK.IO`, named
+inputs (`NervesGateSDK.IO`) and outputs (`NervesGateSDK.Output`), named
 `modbus_plugin.<connection>.<mapping>`.
 
 ## Definitions
@@ -22,6 +22,8 @@ Each saved connection has an ID, a role, a transport, a unit ID, a timeout and
   changes update the map. TCP servers listen on the configured port on all addresses.
 - **Client**: polls a remote device every interval. Each mapping is an `input` or a
   repeatable `output` setter, optionally linked to a feedback input of the same table.
+  That input becomes the output's readback evidence: it shows the register/coil
+  value, not a physical equipment condition.
 
 Mapping IDs identify stable equipment meaning. The platform keeps endpoint
 definitions after a mapping or connection is deleted; reuse an ID only for the same
@@ -63,15 +65,18 @@ ModbusPlugin.stop("server1")
 ## Desired state
 
 Client outputs are repeatable setters only; there are no pulses, toggles,
-increments or command journals. The client runtime serializes one request at a time.
-Each cycle it reads the current desire right before each setter, writes it when it
-changed or when linked feedback disagrees, then reads its inputs. Changes converge on
-the latest desire; queued hints are not replayed as writes. A nil desire (no writer,
-released claim or lost writer) causes no physical write and no fallback value.
+increments or command journals. Each started client runs a linked
+`NervesGateSDK.Output` runtime (`ModbusPlugin.Outputs`) that applies the newest
+Desire as one setter, serialized with the connection's reads; queued hints are not
+replayed as writes. A successful write reports `:applied`, a timeout `:unknown`
+and any other error `{:failed, reason}`; both are retried after the poll interval
+because these setters are repeatable. When linked readback disagrees with the last
+written value, the output is applied again. A released or lost Desire holds the
+last value (`on_release: :hold`): no physical write and no fallback value.
 
 Failed reads publish `:invalid` (Modbus exception) or `:unknown` (timeout or
-transport loss) with no value. Feedback is an ordinary input, not proof that
-equipment completed anything.
+transport loss) with no value. The gateway's Status confirms an output only from
+fresh readback received after the Desire changed, never from the write alone.
 
 Manual desires from the page go through the supervised `ModbusPlugin.Command`
 process, which holds the platform claim; UI processes never own desired state.

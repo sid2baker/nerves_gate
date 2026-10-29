@@ -54,26 +54,51 @@ Mix dependency on firmware. SDK APIs do not manage
 Internet/USB, Tailscale enrollment or credentials, SSH, plugins or firmware, expose
 cookies, or reboot/reset the device.
 
-## I/O data contracts (SDK 0.2.0-dev.1 checkout)
+## I/O: Readings, Desires and Apply (SDK 0.2.0-dev.3 checkout)
 
-`NervesGateSDK.IO` contains three shared data types: `InputDefinition`,
-`OutputDefinition` and `Observation`. Inputs describe latest observable state;
-outputs describe repeatable desired state. Feedback is an ordinary input. Definitions
-persist on firmware; observations, desired values and writer ownership do not.
+A **Reading** is the latest observation of an input; a **Desire** is what the
+current controller of an output wants; **Apply** is the plugin's attempt to make
+it so; **Status** is the platform's judgement of whether the evidence agrees.
+Shared types: `IO.InputDefinition`, `IO.OutputDefinition`, `IO.Evidence` and
+`IO.Reading`. Definitions persist on firmware; Readings, Desires and Authority do not.
 
-Managed plugin processes use `register_input/1`, `register_output/2`,
-`publish_input/3` and `read_desired/1` with local IDs. Readers use `input/1`,
-`output/1`, `subscribe/1` and `unsubscribe/1` with full IDs. Writers use
-`claim_output/1`, `set_output/2` and `release_output/1` with full IDs; success stores
-only desired state, not a physical result. Calls preserve actual PID ownership.
-Subscribe before reading and monitor the returned controller PID; re-register and
-resubscribe after controller loss. No old desired value survives that loss.
-The [I/O domain API](../docs/action-api.md#io-state-and-desire) coalesces dirty hints
-until the recipient reads current state; it does not silently drop the final change
-or provide reliable occurrence delivery. Plugins own reconciliation and physical
-writes. There is no command, request-journal or safety contract.
+Inputs: managed plugin processes call `IO.register_input/1` and `IO.publish/3` with
+local IDs. Readers use `input/1`, `output/1`, `subscribe/1` and `unsubscribe/1` with
+full IDs; subscribe before reading and resubscribe after controller loss.
 
-Use the local SDK requirement `~> 0.2.0-dev.1` for these APIs. They are not in the
+Outputs: start `NervesGateSDK.Output` under your supervision with the output
+definitions and a module implementing `apply/3`:
+
+```elixir
+@behaviour NervesGateSDK.Output
+
+@impl true
+def apply(id, nil, state), do: {:applied, state}   # Desire ended: your release behaviour
+
+def apply(id, value, state) do
+  case MyDevice.write(state.device, id, value) do
+    :ok -> {:applied, state}
+    {:error, :timeout} -> {:unknown, state}
+    {:error, reason} -> {{:failed, reason}, state}
+  end
+end
+```
+
+The runtime registers the outputs, runs `apply/3` in its own process, always
+applies the newest Desire and reports outcomes under the current claim epoch;
+results for an ended claim or superseded Desire are discarded. It never calls
+`apply/3` merely because it started and never retries; use `Output.reapply/2` or
+`Output.reapply_after/2` for repeatable operations. A module defining `apply/3`
+must call `Kernel.apply/3` qualified.
+
+Declare `evidence` (inputs, possibly from other plugins, with a role, settle time
+and expectation) and `on_release` (`:hold` or `{:value, v}`, descriptive only) in
+the output definition. Writers use `claim_output/1`, `set_output/2` and
+`release_output/1` with full IDs; success stores only a Desire. Calls preserve actual
+PID ownership. See the [I/O domain API](../docs/action-api.md#io-state-and-desire).
+There is no command, request-journal or safety contract.
+
+Use the local SDK requirement `~> 0.2.0-dev.3` for these APIs. They are not in the
 published 0.1.0 package.
 
 ## Isolated local-network access (SDK 0.2.0-dev checkout)

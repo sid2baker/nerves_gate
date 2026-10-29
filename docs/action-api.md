@@ -82,28 +82,36 @@ Do not log it or put it in configuration.
 ## I/O state and desire
 
 `NervesGate.IO` is separate from the administrative status projection. It exposes
-latest input state and exclusive, process-owned desired outputs, not physical
-commands. All IDs in the following functions are fully qualified, for example
+latest Readings and exclusive, process-owned output Desires with their Status, not
+physical commands. All IDs in the following functions are fully qualified, for example
 `modbus_plugin.pump.enable`. Validation/admission errors are `{:error, reason}`
 with a domain-owned atom; controller loss exits the call and requires reconnecting.
 
 | Function | Success |
 | --- | --- |
 | `IO.definitions()` | Map of full IDs to persisted SDK input/output definitions |
-| `IO.input(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., observation: ..., stale?: ...}}` |
-| `IO.output(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., claimed?: ..., owned?: ..., desired: ..., reported: ...}}` |
+| `IO.input(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., reading: ..., stale?: ...}}` |
+| `IO.output(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., claimed?: ..., owned?: ..., desired: ..., status: ...}}` |
 | `IO.snapshot()` | `%{inputs: [...], outputs: [...]}` of every persisted endpoint, sorted by ID; consumes no hints |
 | `IO.subscribe(id)` | `{:ok, controller_pid}`; input subscription belongs to the caller |
 | `IO.unsubscribe(id)` | `:ok`; removes only this caller's input subscription |
 | `IO.claim_output(id)` | `:ok`; exclusive claim for the actual caller, initially no desire |
 | `IO.set_output(id, value)` | `:ok`; typed desired value stored, not device success |
-| `IO.release_output(id)` | `:ok`; caller's desire and claim cleared, no device operation |
+| `IO.release_output(id)` | `:ok`; caller's Desire and claim cleared; the plugin's release behaviour applies |
 
-`observation` is nil until published; otherwise it is an SDK `IO.Observation`.
-`reported` is the optionally linked ordinary input snapshot, not a second observation
-store. Unavailable or stale feedback is never proof of current device state.
-`false` is a valid desire; nil means no active target. Owning PIDs stay private:
-`owned?` only says whether the actual caller holds the claim.
+`reading` is nil until published; otherwise it is an SDK `IO.Reading`. `status` is
+`%{state: :confirmed | :pending | :mismatch | :unknown, reason: ..., applied: ...,
+evidence: [%{input: ..., role: ..., state: ...}]}`, derived on each read from the
+handler's Apply outcome for the current claim epoch and the declared evidence
+inputs. It is diagnostic, never proof of device state. `false` is a valid Desire;
+nil means no active target. Owning PIDs and epochs stay private: `owned?` only says
+whether the actual caller holds the claim. When saved definitions are unsupported
+or unreadable, every call returns `{:error, :io_catalog_unavailable}` and the file
+is left unchanged.
+
+The bound handler (normally `NervesGateSDK.Output`) uses `IO.read_desired/1`
+(`{:ok, %{desired: ..., epoch: ...}}`) and `IO.report_applied/4` with local IDs;
+reports for an ended epoch or superseded Desire return `{:error, :stale_report}`.
 
 Subscribe before reading and monitor the returned controller PID. Each input sends
 `{:nerves_gate_input_changed, full_id}` when first dirtied. Updates coalesce until
@@ -132,9 +140,9 @@ Errors are `{:error, %{code: ..., message: ...}}`.
 | `IO.Manual.status()` | `IO.snapshot()` as seen by the manual writer (`owned?` means manual control) |
 | `IO.Manual.claim(id)` | `:ok`; free, available output now manually controlled, no desire yet |
 | `IO.Manual.set(id, value)` | `:ok`; typed desired value stored for a manually controlled output |
-| `IO.Manual.release(id)` | `:ok`; manual desire and claim cleared, no device operation |
+| `IO.Manual.release(id)` | `:ok`; manual Desire and claim cleared; the plugin's release behaviour applies |
 
-Codes: `io_unknown_output`, `io_output_unavailable` (plugin not running),
+Codes: `io_catalog_unavailable`, `io_unknown_output`, `io_output_unavailable` (plugin not running),
 `io_output_owned` (another writer holds it), `io_not_manual`, `io_invalid_value`,
 plus the shared `unavailable`/`outcome_unknown` call-loss errors. Manual claims end
 with release, binding loss or an I/O restart (the writer restarts with I/O).

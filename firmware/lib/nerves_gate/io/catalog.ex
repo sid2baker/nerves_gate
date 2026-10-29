@@ -6,6 +6,9 @@ defmodule NervesGate.IO.Catalog do
 
   @limit 1024 * 1024
   @endpoints 1024
+  # Schema 2 output definitions declare evidence and release behaviour. Any other
+  # catalogue is rejected and kept untouched.
+  @schema 2
 
   def load(path) do
     with {:ok, %{type: :regular, size: size}} when size <= @limit <- File.lstat(path),
@@ -18,7 +21,7 @@ defmodule NervesGate.IO.Catalog do
   end
 
   def save(path, definitions) do
-    bytes = :erlang.term_to_binary(%{schema: 1, definitions: definitions})
+    bytes = :erlang.term_to_binary(%{schema: @schema, definitions: definitions})
 
     if valid?(definitions) and byte_size(bytes) <= @limit do
       case Metadata.write(path, bytes) do
@@ -37,7 +40,7 @@ defmodule NervesGate.IO.Catalog do
     Code.ensure_loaded!(Definition)
 
     case :erlang.binary_to_term(bytes, [:safe, :used]) do
-      {%{schema: 1, definitions: definitions} = document, used}
+      {%{schema: @schema, definitions: definitions} = document, used}
       when map_size(document) == 2 and used == byte_size(bytes) ->
         if valid?(definitions), do: {:ok, definitions}, else: {:error, :invalid_io_catalog}
 

@@ -225,7 +225,7 @@ variation points, as does the published SDK backend contract.
 | Hardware | Allowlisted Ethernet/serial/CAN inventory; Plugins owns exclusive assignment intent |
 | SSH | Public-key validation, persistence and authentication |
 | Storage | SD detection, commissioning, mounting and formatting |
-| IO | Persisted I/O definitions, live plugin bindings, latest input snapshots, coalesced hints and process-owned desired outputs; `IO.Manual` is the manual writer |
+| IO | Persisted I/O definitions, live plugin bindings, latest Readings, coalesced hints, process-owned output Authority with claim epochs, Desires, Apply outcomes and derived Status; `IO.Manual` is the manual writer |
 | Plugins | Trusted plugin admission, lifecycle, version selection and exclusive hardware assignment; guards destructive storage changes |
 | ProjectionServer | Sanitized UI read model, not command coordination |
 | SDKBackend | Translation into the separate typed plugin contract |
@@ -277,20 +277,31 @@ Mix task / Pi → distribution → Workbench.Jobs / Scenarios.Runner / Workbench
 Status is non-atomic and does not query a projection cache. Commands return their
 result without an implicit follow-up status read. See the [API](action-api.md).
 
-### Observable inputs and desired outputs
+### Readings, Desires and Status
 
 `NervesGate.IO` owns one controller for plugin-scoped definitions, live bindings,
-latest input observations, subscriptions, exclusive writer ownership and desired
-values. **Inputs describe what we observe; outputs describe what we want.** Only
+latest Readings, subscriptions, exclusive output Authority and Desires.
+**Readings describe what we observe; Desires describe what we want.** Only
 repeatable state-setting operations qualify as outputs. There are no commands,
-reliable event occurrences, write journals or physical completion states.
+reliable event occurrences or write journals.
 
 Definitions persist; all other I/O state is runtime-only. Restart, binding loss and
 writer loss never establish a replacement target or cause a device operation.
-Writers must claim an available output and explicitly set desire. Releasing clears
-it, not the device's physical state. Feedback is an ordinary input, optionally linked
-by an output definition. Availability, observation quality and freshness are distinct.
-UTC timestamps remain nil until clock synchronization; freshness is monotonic.
+Writers must claim an available output and explicitly set a Desire; each claim starts
+a new claim epoch. Releasing clears the Desire; the plugin's declared release
+behaviour applies. Availability, Reading quality and freshness are distinct. UTC
+timestamps remain nil until clock synchronization; freshness is monotonic.
+Unsupported or unreadable saved definitions disable I/O without stopping the
+controller or rewriting the file.
+
+Plugins apply Desires through the SDK's `NervesGateSDK.Output` runtime, which
+reports `:applied`, `:unknown` or `{:failed, reason}` for the current epoch and
+Desire; stale reports are rejected. `IO.OutputStatus` is a pure read model deriving
+`confirmed | pending | mismatch | unknown` from that outcome and the output's declared
+evidence inputs: stronger roles (physical, consequence, estimate, readback) win over
+weaker ones and over Apply, only good Readings received after the Desire changed
+plus its settle time count, and Apply alone never confirms. Status is diagnostic,
+never authority.
 
 Input subscribers and bound output handlers receive one outstanding dirty hint per
 endpoint. Updates coalesce until that recipient reads the snapshot; reads by other
@@ -299,14 +310,15 @@ later publication. The read atomically returns current state and clears the flag
 Consumers subscribe before reading and monitor the controller to resubscribe after
 loss. Short-lived transitions may be missed; this is not an event-delivery protocol.
 
-Plugins own device reconciliation, readback, retry policy and shutdown. I/O performs
+Plugins own device reconciliation, readback, retry policy and release behaviour. I/O performs
 no protocol writes and cannot guarantee safety. Managed-generation checks and PID
 monitors fence endpoints; a periodic sweep also detects revoked/quiescing generations
 without requiring a new publication. I/O precedes Plugins in the supervision tree,
 so a controller restart also invalidates managed activation bindings.
 
 `NervesGateSDK.IO` calls run in the actual managed caller. The Modbus plugin registers
-mapped registers/coils from its runtime processes. The gateway **I/O** page reads
+mapped inputs from its connection process and outputs through a linked
+`NervesGateSDK.Output` runtime. The gateway **I/O** page reads
 `IO.snapshot/0` once a second (freshness is time-based) through `IO.Manual`, the
 single manual writer process that owns manual claims independently of browser tabs.
 I/O is not part of the administrative projection or the Workbench device view.
@@ -383,7 +395,7 @@ See [optional plugin UI](plugins.md#optional-ui).
 | Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
 | Plugins: `/data/nerves_gate/hardware.term` | Bounded exclusive port assignment and enablement intent |
-| IO: `/data/nerves_gate/io.term` | Schema 1 input/output definitions only; no desired values, observations or ownership |
+| IO: `/data/nerves_gate/io.term` | Schema 2 input/output definitions only (outputs with evidence and release declarations); no Desires, Readings or Authority |
 | Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data |
 
 Both targets require writable ext4 data before data users start. Unreadable saved

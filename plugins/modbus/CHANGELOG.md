@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Version 0.4.0 applies outputs through the SDK's `NervesGateSDK.Output` runtime: newest Desire only, Apply outcomes under the current claim epoch, `:hold` release behaviour, retry after the poll interval for failed or uncertain repeatable setters, and reapplication when readback disagrees. Linked feedback inputs are declared as readback evidence. Requires SDK `~> 0.2.0-dev.3` and firmware with output Status; definitions saved by 0.3.0 stay on the card and are not loaded.
+
 - Version 0.3.0 replaces volatile read-only polling with saved client and server definitions, persisted as the plugin version's `NervesGateSDK.Storage` configuration term. `configure/connect/disconnect` are replaced by `save/start/stop/delete`; the read-only FC3/FC4 block definition is not supported and nothing is migrated. Save and plugin startup never communicate.
 - Mapped holding registers and coils are registered as platform inputs and repeatable outputs through `NervesGateSDK.IO`, with optional linked feedback, by the runtime process that owns the transport.
 - RTU speed, parity and stop bits are configurable (8 data bits).

@@ -6,8 +6,9 @@ defmodule NervesGate.IO.Manual do
   validation as for automations and clears manual claims on plugin/binding loss or
   an I/O restart.
 
-  A successful `set/2` stores desire only; the plugin decides how and whether the
-  equipment follows. `release/1` clears desire without reverting or stopping it.
+  A successful `set/2` stores a Desire only; the plugin decides how and whether the
+  equipment follows, and Status reports what the evidence says. `release/1` clears
+  the Desire; the plugin's declared release behaviour applies.
   """
   use GenServer
   alias NervesGate.Error
@@ -33,7 +34,15 @@ defmodule NervesGate.IO.Manual do
   # Every I/O call runs in this process, which is the claim owner. A lost I/O
   # reply must not crash it: that would silently drop every manual claim.
   @impl true
-  def handle_call(:status, _, state), do: {:reply, Error.protect(&GateIO.snapshot/0), state}
+  def handle_call(:status, _, state) do
+    reply =
+      case Error.protect(&GateIO.snapshot/0) do
+        {:error, :io_catalog_unavailable} -> {:error, error(:io_catalog_unavailable)}
+        result -> result
+      end
+
+    {:reply, reply, state}
+  end
 
   def handle_call({:claim, id}, _, state),
     do: {:reply, result(Error.protect(fn -> GateIO.claim_output(id) end)), state}
@@ -77,6 +86,13 @@ defmodule NervesGate.IO.Manual do
       Error.new(
         "io_invalid_value",
         "The value does not match the output's type or limits. Nothing was stored."
+      )
+
+  defp error(:io_catalog_unavailable),
+    do:
+      Error.new(
+        "io_catalog_unavailable",
+        "Saved I/O definitions are unsupported or unreadable. I/O is disabled; the file was left unchanged."
       )
 
   defp error(:not_output_owner),

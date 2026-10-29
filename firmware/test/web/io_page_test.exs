@@ -18,7 +18,7 @@ defmodule NervesGateWeb.IOPageTest do
 
   @output "#io-output-io_fixture-setpoint"
 
-  test "inputs and outputs show availability, freshness, writer and feedback separately" do
+  test "inputs and outputs show availability, freshness, writer and Status separately" do
     {:ok, view, html} = live(build_conn(), "/io")
     assert html =~ "No plugin has registered an input."
     assert has_element?(view, "nav a[aria-current=page][href='/io']", "I/O")
@@ -33,7 +33,10 @@ defmodule NervesGateWeb.IOPageTest do
     assert output =~ "float · celsius · 0.0 – 40.0"
     assert output =~ "Target: none"
     assert output =~ "Free"
-    assert output =~ "Feedback: 21.5 celsius · Fresh"
+    assert output =~ "Unknown"
+    assert output =~ "No Desire"
+    assert output =~ "Readback · <code>io_fixture.temperature</code>"
+    assert output =~ "Plugin holds the last value"
     refute has_element?(view, "#io-set-io_fixture-setpoint")
 
     # Another writer (an automation) owns it: no manual claim, set or release offered.
@@ -65,7 +68,7 @@ defmodule NervesGateWeb.IOPageTest do
     assert render(view) =~ "Enter a number."
     render_submit(form, %{"output" => "io_fixture.setpoint", "value" => "100"})
     assert render(view) =~ "does not match the output&#39;s type or limits"
-    assert {:ok, nil} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
+    assert {:ok, %{desired: nil}} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
 
     # A draft survives the periodic re-read until it is submitted.
     render_change(form, %{"output" => "io_fixture.setpoint", "value" => "23"})
@@ -75,12 +78,13 @@ defmodule NervesGateWeb.IOPageTest do
     render_submit(form, %{"output" => "io_fixture.setpoint", "value" => "22.5"})
     assert render(view) =~ "Desired value stored. The plugin decides how the equipment follows"
     assert has_element?(view, @output, "Target: 22.5 celsius")
-    assert {:ok, 22.5} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
+    assert {:ok, %{desired: 22.5}} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
+    assert has_element?(view, "#io-status-io_fixture-setpoint", "Pending")
 
     view |> element("#io-release-io_fixture-setpoint") |> render_click()
-    assert render(view) =~ "the equipment was not reverted or stopped"
+    assert render(view) =~ "the plugin&#39;s release behaviour applies"
     assert has_element?(view, @output, "Free")
-    assert {:ok, nil} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
+    assert {:ok, %{desired: nil}} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
   end
 
   test "form text converts only to the output's declared type" do

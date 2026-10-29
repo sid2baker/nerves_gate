@@ -28,8 +28,9 @@ defmodule NervesGateSDK.Backend do
           | :hardware_resources
           | :io_register_input
           | :io_register_output
-          | :io_publish_input
+          | :io_publish
           | :io_read_desired
+          | :io_report_applied
           | :io_input
           | :io_output
           | :io_subscribe

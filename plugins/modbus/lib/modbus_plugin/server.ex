@@ -32,7 +32,7 @@ defmodule ModbusPlugin.Server do
   def init(config) do
     Process.flag(:trap_exit, true)
 
-    with :ok <- Endpoint.register(config, self()),
+    with :ok <- Endpoint.register(config),
          {:ok, server} <- start_server(config) do
       map = Map.new(config.mappings, &{{&1.table, &1.address}, &1.initial})
       state = %{config: config, server: server, map: map, status: nil}

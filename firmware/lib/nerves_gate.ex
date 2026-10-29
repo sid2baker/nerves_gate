@@ -5,8 +5,9 @@ defmodule NervesGate do
   Commands belong to their domains: `NervesGate.Network`, `NervesGate.Cellular`,
   `NervesGate.Remote`, `NervesGate.Hardware`,
   `NervesGate.Indicators`, `NervesGate.SSH` and `NervesGate.Storage`.
-  Observable inputs and runtime-only desired outputs belong to `NervesGate.IO`;
-  its snapshots and subscriptions are separate from administrative status.
+  Readings, output Authority, runtime-only Desires and output Status belong to
+  `NervesGate.IO`; its snapshots and subscriptions are separate from administrative
+  status.
   `NervesGate.IO.Manual` is the gateway's manual writer.
   Read build/runtime identity with `NervesGate.System.info/0`.
   Equipment identities and discovery belong to plugins.

@@ -308,22 +308,23 @@ evidence with explicit thresholds.
 
 ## Current state
 
-Implemented and exercised on rebuilt QEMU guests through the `plugins` scenario:
+Phases 1–5 were exercised on rebuilt QEMU guests through the `plugins` scenario.
+Phase 5 passed with Modbus 0.4.0: readback confirms an applied register, disagreeing
+readback triggers reconciliation and confirmation again, manual Authority excludes
+other writers, release writes nothing, and transport loss publishes unusable Readings.
 
-- `NervesGate.IO` with persisted definitions, bindings, Readings (currently the
-  `NervesGateSDK.IO.Observation` struct), coalesced hints, exclusive writers and
-  Desires.
-- SDK transport in `NervesGateSDK.IO`: `register_input/1`, `publish_input/3`,
-  `register_output/2`, `read_desired/1`, plus input, output, subscribe and
-  claim/set/release operations. SDK 0.2.0 publication is pending.
-- The `/io` page with `NervesGate.IO.snapshot/0` and `NervesGate.IO.Manual`, one
-  supervised manual writer whose claims outlive browser tabs.
-- Modbus plugin 0.3.0 with configured client/server definitions and explicit
-  Start/Stop. QEMU covers TCP; RTU between EC100 ports awaits separately authorized
+- `NervesGate.IO` with schema-2 persisted definitions, bindings, Readings, coalesced
+  hints, exclusive Authority with claim epochs, Desires, Apply outcomes and the pure
+  `IO.OutputStatus` read model. Unsupported saved definitions disable I/O without
+  stopping the controller or rewriting the file.
+- SDK 0.2.0-dev.3: `NervesGateSDK.IO` (`register_input/1`, `publish/3`, input,
+  output, subscribe and claim/set/release) and the `NervesGateSDK.Output` runtime
+  with `apply/3`. SDK 0.2.0 publication is pending.
+- The `/io` page with `NervesGate.IO.snapshot/0` and `NervesGate.IO.Manual`, showing
+  Status with reason, Apply outcome, evidence and declared release behaviour.
+- Modbus plugin 0.4.0 on the output runtime, with readback evidence and `:hold`
+  release. QEMU covers TCP; RTU between EC100 ports awaits separately authorized
   physical testing.
-
-Current outputs have a single display-only `feedback_input_id`, no claim epochs, no
-Apply outcomes and no Status. Plugins handle hints and `read_desired/1` directly.
 
 ## Delivery
 
@@ -350,6 +351,9 @@ request) and physical RTU qualification (separate authorization).
 
 ### 5. Plugin output runtime, epochs, evidence and Status
 
+**Status:** implemented with passing SDK, firmware unit/web and Modbus host tests;
+rebuilt-guest `plugins` qualification passed (185 seconds).
+
 One breaking SDK change before SDK 0.2.0 is published, with no compatibility field:
 
 - Align names with the vocabulary: `Observation` becomes `Reading`,
@@ -364,8 +368,10 @@ One breaking SDK change before SDK 0.2.0 is published, with no compatibility fie
 **Acceptance:** SDK contract tests and firmware unit tests for epoch increments,
 rejection of ended-epoch outcomes, equal Desires across epochs, evidence validation,
 settle timing on monotonic receipt, cross-plugin evidence, the Status table and
-evidence precedence; LiveView tests for `/io`; the QEMU `plugins` scenario confirms a
-Modbus output through readback and shows a stale-epoch result discarded.
+evidence precedence; output-runtime tests in a real managed activation for newest
+Desire, discarded superseded outcomes, release and reapply; LiveView tests for `/io`;
+the QEMU `plugins` scenario confirms a Modbus output through readback, including
+after a disagreeing readback is reapplied.
 
 ### 6. Automation runtime
 

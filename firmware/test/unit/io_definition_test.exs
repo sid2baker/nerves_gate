@@ -1,11 +1,11 @@
 defmodule NervesGate.IODefinitionTest do
   use ExUnit.Case, async: true
   alias NervesGate.IO.{Catalog, Definition}
-  alias NervesGateSDK.IO.{InputDefinition, Observation, OutputDefinition}
+  alias NervesGateSDK.IO.{Evidence, InputDefinition, OutputDefinition, Reading}
 
   @moduletag :tmp_dir
 
-  test "strict types, units, IDs, bounds and feedback IDs" do
+  test "strict types, units, IDs and bounds" do
     input = %InputDefinition{id: "room.temperature", type: :float}
     output = %OutputDefinition{id: "setpoint", type: :float, min: 0.0, max: 40.0}
     assert Definition.valid?(input)
@@ -40,7 +40,6 @@ defmodule NervesGate.IODefinitionTest do
     refute Definition.valid?(Map.put(input, :kind, :event))
     refute Definition.valid?(%{output | min: 0})
     refute Definition.valid?(%{output | min: 50.0})
-    refute Definition.valid?(%{output | feedback_input_id: "Bad"})
     refute Definition.valid?(%OutputDefinition{id: "relay", type: :boolean, min: 0})
     assert Definition.value?(:boolean, false)
     refute Definition.value?(:boolean, 0)
@@ -52,10 +51,52 @@ defmodule NervesGate.IODefinitionTest do
     refute Definition.value?(:integer, 1.0)
   end
 
+  test "evidence and release declarations use a closed, type-checked set" do
+    output = %OutputDefinition{id: "setpoint", type: :float, min: 0.0, max: 40.0}
+    readback = %Evidence{input: "modbus_plugin.room.temperature", role: :readback}
+    relay = %OutputDefinition{id: "relay", type: :boolean}
+
+    for valid <- [
+          %{output | evidence: [readback]},
+          %{output | evidence: [%{readback | expect: {:tolerance, 0.5}, settle_ms: 3_600_000}]},
+          %{output | on_release: :hold},
+          %{output | on_release: {:value, 0.0}},
+          %{relay | evidence: [%{readback | role: :physical, expect: %{true => {:above, 1.0}}}]},
+          %{
+            relay
+            | evidence: [%{readback | role: :estimate, expect: %{false => {:equals, "off"}}}]
+          }
+        ] do
+      assert Definition.valid?(valid)
+    end
+
+    for invalid <- [
+          %{output | evidence: readback},
+          %{output | evidence: [readback, readback]},
+          %{output | evidence: List.duplicate(readback, 9)},
+          %{output | evidence: [%{readback | input: "temperature"}]},
+          %{output | evidence: [%{readback | input: "Bad.id"}]},
+          %{output | evidence: [%{readback | role: :command}]},
+          %{output | evidence: [%{readback | settle_ms: -1}]},
+          %{output | evidence: [%{readback | settle_ms: 3_600_001}]},
+          %{output | evidence: [%{readback | expect: {:tolerance, -1}}]},
+          %{output | evidence: [%{readback | expect: %{true => {:above, 1}}}]},
+          %{output | evidence: [Map.put(readback, :extra, true)]},
+          %{output | on_release: {:value, 41.0}},
+          %{output | on_release: :close},
+          %{relay | evidence: [%{readback | expect: {:tolerance, 1}}]},
+          %{relay | evidence: [%{readback | expect: %{}}]},
+          %{relay | evidence: [%{readback | expect: %{1 => {:above, 1}}}]},
+          %{relay | evidence: [%{readback | expect: %{true => {:near, 1}}}]}
+        ] do
+      refute Definition.valid?(invalid)
+    end
+  end
+
   test "freshness uses monotonic receipt only; no interval has no age threshold" do
     input = %InputDefinition{id: "temperature", type: :float, expected_interval_ms: 100}
 
-    sample = %Observation{
+    sample = %Reading{
       input_id: "test.temperature",
       value: 21.0,
       quality: :good,
@@ -83,7 +124,15 @@ defmodule NervesGate.IODefinitionTest do
         type: :integer,
         min: 0,
         max: 100,
-        feedback_input_id: "temperature"
+        on_release: {:value, 0},
+        evidence: [
+          %Evidence{
+            input: "test.temperature",
+            role: :readback,
+            settle_ms: 500,
+            expect: {:tolerance, 1}
+          }
+        ]
       }
     }
 
@@ -141,13 +190,14 @@ defmodule NervesGate.IODefinitionTest do
     documents = [
       "broken",
       valid <> "trailing",
-      :erlang.term_to_binary(%{schema: 2, definitions: definitions}),
-      :erlang.term_to_binary(%{schema: 1, definitions: definitions, desire: true}),
-      :erlang.term_to_binary(%{schema: 1, definitions: %{"wrong.id" => input}}),
-      :erlang.term_to_binary(%{schema: 1, definitions: %{"test.temperature" => malformed}}),
-      :erlang.term_to_binary(%{schema: 1, definitions: definitions}, compressed: 9),
+      :erlang.term_to_binary(%{schema: 1, definitions: definitions}),
+      :erlang.term_to_binary(%{schema: 3, definitions: definitions}),
+      :erlang.term_to_binary(%{schema: 2, definitions: definitions, desire: true}),
+      :erlang.term_to_binary(%{schema: 2, definitions: %{"wrong.id" => input}}),
+      :erlang.term_to_binary(%{schema: 2, definitions: %{"test.temperature" => malformed}}),
+      :erlang.term_to_binary(%{schema: 2, definitions: definitions}, compressed: 9),
       :erlang.term_to_binary(%{
-        schema: 1,
+        schema: 2,
         definitions: Map.new(1..1025, &{"test.value#{&1}", %{input | id: "value#{&1}"}})
       }),
       :binary.copy(<<0>>, 1024 * 1024 + 1)

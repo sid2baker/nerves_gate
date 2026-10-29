@@ -23,7 +23,7 @@ on owner loss and obtain a fresh snapshot on resubscription.
 | Remote access | `/remote` | Tailscale enrollment and private sign-in; advanced runtime access with explicit credential reveal |
 | Plugins | `/plugins` | Firmware-bundled plugins: version selection, start/stop and status |
 | Plugin page | `/plugins/:app` | Optional plugin LiveComponent while its activation runs |
-| I/O | `/io` | Plugin inputs and outputs: availability, latest value, quality, freshness, writer, target and linked feedback; manual control |
+| I/O | `/io` | Plugin inputs and outputs: availability, latest Reading, quality, freshness, writer, target and Status with its evidence; manual control |
 | Hardware | `/hardware` | Free non-Internet LANs, RS485 and CAN; exclusive plugin assignments |
 | LAN 1 / 2 | `/hardware/lan/1`, `/hardware/lan/2` | Link observations and reviewed exclusive assignment; Internet/management ports cannot be acquired |
 | RS485 1 / 2 | `/hardware/rs485/1`, `/hardware/rs485/2` | Availability and reviewed exclusive plugin assignment |
@@ -50,14 +50,17 @@ Opening a page never starts scans, route changes, bus traffic or other I/O.
 running. Inputs show the latest value, quality (`Invalid`/`Unknown` never display an
 old good value) and monotonic freshness. Outputs show the writer (**Free**, **Manual
 control**, **Other writer** such as an automation or the plugin's own controls),
-the desired target and optional linked feedback, which is an ordinary input, not a
-write confirmation. The page rereads I/O once a second rather than using the
-administrative projection, because freshness changes without publications.
+the desired target and its **Status**: **Confirmed**, **Pending**, **Mismatch** or
+**Unknown**. Expanding an output shows the reason, the plugin's Apply outcome, each
+declared evidence input with whether it agrees, and the plugin's declared release
+behaviour. Apply alone never confirms a target. The page rereads I/O once a second
+rather than using the administrative projection, because freshness and settle times
+change without publications.
 
 **Take manual control** claims a free, available output without setting a value.
 **Set target** stores a validated typed value; the plugin decides how and whether
-the equipment follows. **Release** clears the target without reverting or stopping
-the equipment. Manual claims belong to the gateway's manual writer, not the browser
+the equipment follows. **Release** clears the target; what the equipment then does
+is the plugin's declared release behaviour. Manual claims belong to the gateway's manual writer, not the browser
 tab, so closing the page keeps them and any operator can release them. Another
 writer's output offers no manual controls. Drafts survive the periodic reread; the
 I/O domain validates every value regardless of what the form offered.

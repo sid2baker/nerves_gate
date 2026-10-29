@@ -1,6 +1,6 @@
 defmodule NervesGateWeb.IOLive do
   @moduledoc """
-  Observed inputs and desired outputs registered by plugins, with manual control.
+  Readings and output Desires registered by plugins, with Status and manual control.
   Reads go through `NervesGate.IO.Manual` so `owned?` means manual control; all
   validation stays in `NervesGate.IO`. Freshness depends on elapsed time, not only on
   changes, so the page re-reads once a second. Drafts stay separate from that read.
@@ -42,7 +42,7 @@ defmodule NervesGateWeb.IOLive do
       command(
         socket,
         Manual.set(id, value),
-        "Desired value stored. The plugin decides how the equipment follows; check its feedback."
+        "Desired value stored. The plugin decides how the equipment follows; Status shows what the evidence says."
       )
     else
       nil -> {:noreply, put_flash(socket, :error, "This output is not defined.")}
@@ -55,7 +55,7 @@ defmodule NervesGateWeb.IOLive do
       command(
         socket,
         Manual.release(id),
-        "Manual control released. The target was cleared; the equipment was not reverted or stopped."
+        "Manual control released. The target was cleared; the plugin's release behaviour applies."
       )
 
   defp command(socket, result, success) do
@@ -92,8 +92,8 @@ defmodule NervesGateWeb.IOLive do
     />
     <.notice icon="info">
       Setting a desired value only stores the target. The owning plugin decides how and
-      whether the equipment follows; check its feedback input. Releasing clears the target
-      without reverting or stopping the equipment.
+      whether the equipment follows; Status shows whether its evidence agrees. Releasing
+      clears the target; what the equipment then does is the plugin's declared behaviour.
     </.notice>
     <.notice :if={match?({:error, _}, @io)} tone="warning" role="alert" id="io-unavailable">
       I/O is unavailable. {elem(@io, 1).message}
@@ -111,7 +111,7 @@ defmodule NervesGateWeb.IOLive do
             <div class="ui-io-value">
               <strong>{observed(input)}</strong>
               <.status tone={tone(input)}>{state(input)}</.status>
-              <span :if={input.observation} class="ui-muted">{age(input.observation, @now)}</span>
+              <span :if={input.reading} class="ui-muted">{age(input.reading, @now)}</span>
             </div>
           </li>
         </ul>
@@ -128,10 +128,25 @@ defmodule NervesGateWeb.IOLive do
             <div class="ui-io-value">
               <strong>Target: {target(output)}</strong>
               <.status tone={writer_tone(output)}>{writer(output)}</.status>
-              <span :if={output.reported} class="ui-muted">
-                Feedback: {observed(output.reported)} · {state(output.reported)}
+              <span id={dom_id("io-status", output.id)}>
+                <.status tone={status_tone(output.status.state)}>
+                  {status_name(output.status.state)}
+                </.status>
               </span>
             </div>
+            <details class="ui-io-details" id={dom_id("io-evidence", output.id)}>
+              <summary>{output.status.reason}</summary>
+              <dl>
+                <dt>Apply</dt>
+                <dd>{applied(output.status.applied)}</dd>
+                <div :for={entry <- output.status.evidence} class="ui-io-pair">
+                  <dt>{String.capitalize(to_string(entry.role))} · <code>{entry.input}</code></dt>
+                  <dd>{evidence_state(entry.state)}</dd>
+                </div>
+                <dt>On release</dt>
+                <dd>{on_release(output.definition)}</dd>
+              </dl>
+            </details>
             <div class="ui-io-controls">
               <.button
                 :if={!output.claimed?}
@@ -206,9 +221,9 @@ defmodule NervesGateWeb.IOLive do
     |> Enum.join(" · ")
   end
 
-  defp observed(%{observation: nil}), do: "No value yet"
+  defp observed(%{reading: nil}), do: "No value yet"
 
-  defp observed(%{observation: %{quality: :good, value: value}, definition: d}),
+  defp observed(%{reading: %{quality: :good, value: value}, definition: d}),
     do: format(value, d)
 
   defp observed(_), do: "—"
@@ -220,16 +235,16 @@ defmodule NervesGateWeb.IOLive do
   defp format(value, %{unit: unit}), do: "#{value} #{unit}"
 
   defp state(%{available?: false}), do: "Plugin not running"
-  defp state(%{observation: nil}), do: "No observation"
-  defp state(%{observation: %{quality: :invalid}}), do: "Invalid"
-  defp state(%{observation: %{quality: :unknown}}), do: "Unknown"
+  defp state(%{reading: nil}), do: "No reading"
+  defp state(%{reading: %{quality: :invalid}}), do: "Invalid"
+  defp state(%{reading: %{quality: :unknown}}), do: "Unknown"
   defp state(%{stale?: true}), do: "Stale"
   defp state(_), do: "Fresh"
 
   defp tone(input) do
     case state(input) do
       "Fresh" -> "good"
-      "No observation" -> "neutral"
+      "No reading" -> "neutral"
       _ -> "warning"
     end
   end
@@ -246,6 +261,33 @@ defmodule NervesGateWeb.IOLive do
       _ -> "warning"
     end
   end
+
+  defp status_name(:confirmed), do: "Confirmed"
+  defp status_name(:pending), do: "Pending"
+  defp status_name(:mismatch), do: "Mismatch"
+  defp status_name(:unknown), do: "Unknown"
+
+  defp status_tone(:confirmed), do: "good"
+  defp status_tone(:pending), do: "busy"
+  defp status_tone(:mismatch), do: "warning"
+  defp status_tone(:unknown), do: "neutral"
+
+  defp applied(nil), do: "No outcome for this target yet"
+  defp applied(:applied), do: "Applied (the operation appeared successful)"
+  defp applied(:unknown), do: "Unknown (it may or may not have happened)"
+  defp applied(:failed), do: "Failed"
+
+  defp evidence_state(:confirmed), do: "Agrees"
+  defp evidence_state(:contradicted), do: "Disagrees"
+  defp evidence_state(:pending), do: "Waiting"
+  defp evidence_state(:stale), do: "Stale or not good"
+  defp evidence_state(:unknown), do: "No usable evidence"
+
+  defp on_release(%{on_release: nil}), do: "Not declared by the plugin"
+  defp on_release(%{on_release: :hold}), do: "Plugin holds the last value"
+
+  defp on_release(%{on_release: {:value, value}} = definition),
+    do: "Plugin sets #{format(value, definition)}"
 
   defp age(%{received_at_ms: at}, now) do
     seconds = max(0, div(now - at, 1_000))

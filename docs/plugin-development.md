@@ -74,37 +74,43 @@ a TCP connection does not claim or reconfigure the Internet interface. See [hard
 
 ## State I/O foundation
 
-The firmware `NervesGate.IO` domain and SDK `NervesGateSDK.IO` expose registration,
-publication, input subscriptions and exclusive desired-state writers using shared
-`IO.InputDefinition`, `IO.OutputDefinition` and `IO.Observation` structs. SDK calls
+The firmware `NervesGate.IO` domain and SDK `NervesGateSDK.IO` expose input
+registration, Readings, subscriptions and exclusive output Authority using shared
+`IO.InputDefinition`, `IO.OutputDefinition`, `IO.Evidence` and `IO.Reading`
+structs. Outputs are handled by the `NervesGateSDK.Output` runtime. SDK calls
 preserve managed calling-process ownership. The Modbus plugin is the reference
-integration; the I/O UI is not available yet.
-These types require the local SDK `~> 0.2.0-dev.1`, not the published 0.1.0 package.
+integration; the gateway **I/O** page shows Readings, Desires and Status.
+These APIs require the local SDK `~> 0.2.0-dev.3`, not the published 0.1.0 package.
 
 For persistent settings, `NervesGateSDK.Storage.save_config/1`, `restore_config/0`
 and `delete_config/0` keep one opaque term per plugin version on commissioned SD
 (SDK `~> 0.2.0-dev.2`). Validate the restored term yourself; a new version starts
 empty. See [storage and state](plugins.md#storage-and-state).
 
-The firmware domain's `register_input/1`, `register_output/2`, `publish_input/3`
-and `read_desired/1` use plugin-local IDs and actual managed caller membership.
-The input registrar publishes its observations; the output's supervised handler
-must belong to the same activation and is the only plugin PID allowed to read desire.
-Registrations must match saved definitions. Bindings and observations are live only.
+`IO.register_input/1` and `IO.publish/3` use plugin-local IDs and actual managed
+caller membership; only the input registrar publishes its Readings. Registrations
+must match saved definitions. Bindings and Readings are live only. Publish
+invalid/unknown quality with nil when there is no usable sample. Inputs are latest
+state, not reliable press/pulse events: expose occurrences that must not be missed
+as counters or sequence numbers.
 
-Handlers receive `{:nerves_gate_output_changed, local_id}` and read the current
-snapshot with `read_desired/1`. Read once after registration too. The read consumes
-that handler's dirty flag; further changes produce another hint. Multiple changes
-before the read coalesce; hints never carry executable work. Monitor the I/O controller
-and discard cached desire after its loss. A nil desire means no active target, not
-an instruction to write zero/false or restore a default.
+For outputs, start `NervesGateSDK.Output` under your supervision with the output
+definitions and a callback module implementing `apply/3` (see the
+[SDK README](../sdk/README.md#io-readings-desires-and-apply-sdk-020-dev3-checkout)).
+The runtime hides change hints, reading Desires and claim epochs: it always applies
+the newest Desire, discards outcomes from an ended claim or superseded Desire, and
+never calls `apply/3` at startup. `apply/3` receives `nil` once an applied Desire
+ends; perform your declared release behaviour, never an implicit default. Return
+`:applied` only when the operation appeared successful, `:unknown` when it may or
+may not have happened, otherwise `{:failed, reason}`.
 
 Only repeatable state-setting operations belong here. Plugins serialize actual
-writes and own polling, reconnection, readback, retries and shutdown policy. Re-read
-desire before reconciliation and after reconnect, rather than replaying old hints.
-Readback uses an ordinary input, optionally named in `feedback_input_id`; setting
-desire never fabricates feedback. Publish invalid/unknown quality with nil when
-there is no usable sample. Inputs are latest state, not reliable press/pulse events.
+writes and own polling, reconnection, readback, retries and release behaviour. Ask
+the runtime to reapply after a reconnect or a disagreeing readback, rather than
+replaying old hints. Declare readback and physical feedback as `evidence` on the
+output definition and say whether it is a register/coil value or a physical
+condition; declare `on_release` so operators know what happens. Setting a Desire
+never fabricates evidence.
 
 Clearing ownership or losing a binding causes no implicit physical operation and
 does not cancel work already in flight. Plugin shutdown/fallback and equipment

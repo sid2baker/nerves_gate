@@ -1,21 +1,30 @@
 defmodule NervesGate.IO do
   @moduledoc """
-  Observable inputs and process-owned, runtime-only desired outputs.
+  Observed inputs, exclusive output Authority and runtime-only Desires.
 
-  Plugins register and publish using local IDs in their managed activation. Readers
-  and writers use full IDs. Subscribe before reading; monitor the returned controller
-  PID and subscribe afresh after its loss. A snapshot read consumes this caller's
-  outstanding hint. Changes coalesce until that read, never silently disappear.
+  Plugins register inputs and publish Readings using local IDs in their managed
+  activation. Outputs are bound to a plugin-supervised handler, normally the SDK's
+  `NervesGateSDK.Output` runtime. Readers and writers use full IDs. Subscribe
+  before reading; monitor the returned controller PID and subscribe afresh after
+  its loss. A snapshot read consumes this caller's outstanding hint. Changes
+  coalesce until that read, never silently disappear.
 
-  Only the bound plugin handler reads desire via `read_desired/1`. Plugins own all
-  physical reconciliation, retries and shutdown. A successful `set_output/2` stores
-  desire only. Release, process loss and restart cause no implicit device operation.
-  Feedback is an ordinary input; this domain provides no command or safety guarantee.
+  Every claim starts a new claim epoch. Only the bound handler reads the Desire with
+  its epoch and reports Apply outcomes for it; reports for an ended epoch or a
+  superseded Desire are rejected. Output Status interprets the Apply outcome and
+  declared evidence (`NervesGate.IO.OutputStatus`); it is never authority.
+
+  Plugins own all physical reconciliation, retries and release behaviour. A
+  successful `set_output/2` stores a Desire only. Release, process loss and restart
+  cause no implicit device operation. This domain provides no safety guarantee.
+
+  Unsupported or unreadable saved definitions are kept untouched; the controller
+  then stays up with I/O disabled and refuses every endpoint operation.
   """
   use GenServer
-  alias NervesGate.IO.{Catalog, Definition}
+  alias NervesGate.IO.{Catalog, Definition, OutputStatus}
   alias NervesGate.Plugins.Owner
-  alias NervesGateSDK.IO.{InputDefinition, Observation, OutputDefinition}
+  alias NervesGateSDK.IO.{InputDefinition, OutputDefinition, Reading}
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
@@ -31,28 +40,35 @@ defmodule NervesGate.IO do
 
   def register_output(_, _), do: {:error, :invalid_definition}
 
-  @doc "Replace the caller's input observation, including invalid/unknown samples."
-  def publish_input(local_id, value, quality \\ :good),
-    do: GenServer.call(__MODULE__, {:publish_input, local_id, value, quality})
+  @doc "Replace the caller's latest Reading, including invalid/unknown samples."
+  def publish(local_id, value, quality \\ :good),
+    do: GenServer.call(__MODULE__, {:publish, local_id, value, quality})
 
-  @doc "Read the bound handler's current target; nil means no active desire, never a default."
+  @doc """
+  Read the bound handler's current Desire and claim epoch. A nil Desire means no
+  active target, never a default; a nil epoch means unclaimed.
+  """
   def read_desired(local_id) do
     consume_hint(:nerves_gate_output_changed, local_id)
     GenServer.call(__MODULE__, {:read_desired, local_id})
   end
 
+  @doc "Record the bound handler's Apply outcome for `value` in claim `epoch`."
+  def report_applied(local_id, epoch, value, outcome),
+    do: GenServer.call(__MODULE__, {:report_applied, local_id, epoch, value, outcome})
+
   @doc "Read persisted definitions, independent of live availability."
   def definitions, do: GenServer.call(__MODULE__, :definitions)
 
-  @doc "Read latest state, quality and monotonic freshness. Consumes this caller's input hint."
+  @doc "Read the latest Reading, quality and monotonic freshness. Consumes this caller's input hint."
   def input(full_id) do
     consume_hint(:nerves_gate_input_changed, full_id)
     GenServer.call(__MODULE__, {:input, full_id})
   end
 
   @doc """
-  Read desire and optional ordinary input feedback, never a write outcome. `owned?`
-  is relative to the actual caller; other writers stay private.
+  Read Desire and Status, never a guarantee of device state. `owned?` is relative to
+  the actual caller; other writers stay private.
   """
   def output(full_id), do: GenServer.call(__MODULE__, {:output, full_id})
 
@@ -71,43 +87,48 @@ defmodule NervesGate.IO do
     result
   end
 
-  @doc "Exclusively claim an available output for the actual calling PID, without setting desire."
+  @doc "Exclusively claim an available output for the actual calling PID, without setting a Desire."
   def claim_output(full_id), do: GenServer.call(__MODULE__, {:claim_output, full_id})
 
-  @doc "Set the caller-owned desired value. Success says nothing about physical device state."
+  @doc "Set the caller-owned Desire. Success says nothing about physical device state."
   def set_output(full_id, value), do: GenServer.call(__MODULE__, {:set_output, full_id, value})
 
-  @doc "Clear this caller's desire and ownership. Does not revert or stop the equipment."
+  @doc "Clear this caller's Desire and Authority. The plugin's release behaviour applies."
   def release_output(full_id), do: GenServer.call(__MODULE__, {:release_output, full_id})
 
   @impl true
   def init(opts) do
     path = Keyword.get(opts, :path, "/data/nerves_gate/io.term")
 
-    case Catalog.load(path) do
-      {:ok, definitions} ->
-        Process.send_after(self(), :sweep, 1_000)
+    {definitions, error} =
+      case Catalog.load(path) do
+        {:ok, definitions} -> {definitions, nil}
+        {:error, _} -> {%{}, :io_catalog_unavailable}
+      end
 
-        {:ok,
-         %{
-           path: path,
-           definitions: definitions,
-           bindings: %{},
-           latest: %{},
-           desires: %{},
-           writers: %{},
-           subscribers: %{},
-           monitors: %{},
-           storage_error: nil,
-           clock: subscribe_clock()
-         }}
+    Process.send_after(self(), :sweep, 1_000)
 
-      {:error, reason} ->
-        {:stop, reason}
-    end
+    {:ok,
+     %{
+       path: path,
+       catalog_error: error,
+       definitions: definitions,
+       bindings: %{},
+       latest: %{},
+       desires: %{},
+       claims: %{},
+       applied: %{},
+       subscribers: %{},
+       monitors: %{},
+       storage_error: nil,
+       clock: subscribe_clock()
+     }}
   end
 
   @impl true
+  def handle_call(_, _, %{catalog_error: error} = state) when error != nil,
+    do: {:reply, {:error, error}, state}
+
   def handle_call({:register_input, definition}, {pid, _}, state),
     do: register(definition, pid, nil, sweep(state))
 
@@ -116,14 +137,14 @@ defmodule NervesGate.IO do
 
   def handle_call(:definitions, _, state), do: {:reply, state.definitions, sweep(state)}
 
-  def handle_call({:publish_input, local_id, value, quality}, {pid, _}, state) do
+  def handle_call({:publish, local_id, value, quality}, {pid, _}, state) do
     state = sweep(state)
 
     with {:ok, id, binding} <- caller_binding(state, pid, local_id),
          %InputDefinition{} = definition <- state.definitions[id],
          true <- binding.pid == pid,
-         true <- Definition.observation?(definition, value, quality) do
-      observation = %Observation{
+         true <- Definition.reading?(definition, value, quality) do
+      reading = %Reading{
         input_id: id,
         value: value,
         quality: quality,
@@ -131,8 +152,8 @@ defmodule NervesGate.IO do
         received_at_utc: utc(state.clock)
       }
 
-      state = put_in(state.latest[id], observation) |> notify_input(id)
-      {:reply, {:ok, observation}, state}
+      state = put_in(state.latest[id], reading) |> notify_input(id)
+      {:reply, {:ok, reading}, state}
     else
       {:error, _} = error -> {:reply, error, state}
       _ -> {:reply, {:error, :invalid_publication}, state}
@@ -144,13 +165,30 @@ defmodule NervesGate.IO do
 
     case caller_binding(state, pid, local_id) do
       {:ok, id, %{handler: ^pid}} ->
-        {:reply, {:ok, state.desires[id]}, put_in(state.bindings[id].dirty?, false)}
+        desire = %{desired: state.desires[id], epoch: epoch(state, id)}
+        {:reply, {:ok, desire}, put_in(state.bindings[id].dirty?, false)}
 
       {:error, _} = error ->
         {:reply, error, state}
 
       _ ->
         {:reply, {:error, :not_output_handler}, state}
+    end
+  end
+
+  def handle_call({:report_applied, local_id, epoch, value, outcome}, {pid, _}, state) do
+    state = sweep(state)
+
+    with {:ok, id, %{handler: ^pid}} <- caller_binding(state, pid, local_id),
+         true <- outcome?(outcome) || {:error, :invalid_outcome},
+         true <-
+           (epoch != nil and epoch == epoch(state, id) and value == state.desires[id]) ||
+             {:error, :stale_report} do
+      applied = %{epoch: epoch, value: value, outcome: outcome}
+      {:reply, :ok, put_in(state.applied[id], applied)}
+    else
+      {:error, _} = error -> {:reply, error, state}
+      _ -> {:reply, {:error, :not_output_handler}, state}
     end
   end
 
@@ -161,17 +199,19 @@ defmodule NervesGate.IO do
 
   def handle_call({:output, id}, {pid, _}, state) do
     state = sweep(state)
-    {:reply, output_snapshot(state, id, pid), state}
+    {:reply, output_snapshot(state, id, pid, System.monotonic_time(:millisecond)), state}
   end
 
   def handle_call(:snapshot, {pid, _}, state) do
     state = sweep(state)
     ids = state.definitions |> Map.keys() |> Enum.sort()
+    now = System.monotonic_time(:millisecond)
 
     {:reply,
      %{
        inputs: for(id <- ids, {:ok, input} <- [input_snapshot(state, id)], do: input),
-       outputs: for(id <- ids, {:ok, output} <- [output_snapshot(state, id, pid)], do: output)
+       outputs:
+         for(id <- ids, {:ok, output} <- [output_snapshot(state, id, pid, now)], do: output)
      }, state}
   end
 
@@ -197,8 +237,10 @@ defmodule NervesGate.IO do
 
     with :ok <- writable(state, id),
          true <- alive?(pid),
-         true <- state.writers[id] in [nil, pid] do
-      {:reply, :ok, put_in(state.writers[id], pid) |> watch(pid)}
+         claim = state.claims[id],
+         true <- claim == nil or claim.pid == pid do
+      state = if claim, do: state, else: start_claim(state, id, pid)
+      {:reply, :ok, watch(state, pid)}
     else
       {:error, _} = error -> {:reply, error, state}
       _ -> {:reply, {:error, :output_owned}, state}
@@ -209,10 +251,14 @@ defmodule NervesGate.IO do
     state = sweep(state)
 
     with :ok <- writable(state, id),
-         true <- state.writers[id] == pid,
+         %{pid: ^pid} <- state.claims[id],
          true <- Definition.desired?(state.definitions[id], value) do
-      state = put_in(state.desires[id], value) |> notify_output(id)
-      {:reply, :ok, state}
+      state =
+        if state.desires[id] === value,
+          do: state,
+          else: put_in(state.claims[id].changed_at_ms, System.monotonic_time(:millisecond))
+
+      {:reply, :ok, put_in(state.desires[id], value) |> notify_output(id)}
     else
       {:error, _} = error -> {:reply, error, state}
       _ -> {:reply, {:error, :invalid_output_write}, state}
@@ -222,10 +268,9 @@ defmodule NervesGate.IO do
   def handle_call({:release_output, id}, {pid, _}, state) do
     state = sweep(state)
 
-    if state.writers[id] == pid do
-      {:reply, :ok, clear_writer(state, id)}
-    else
-      {:reply, {:error, :not_output_owner}, state}
+    case state.claims[id] do
+      %{pid: ^pid} -> {:reply, :ok, clear_writer(state, id)}
+      _ -> {:reply, {:error, :not_output_owner}, state}
     end
   end
 
@@ -335,6 +380,22 @@ defmodule NervesGate.IO do
   defp available?(nil), do: false
   defp available?(binding), do: Owner.valid?(binding.owner)
 
+  # Unique and increasing for the controller's lifetime; a restarted controller has
+  # no bindings, so no earlier epoch can be reported to it.
+  defp start_claim(state, id, pid) do
+    claim = %{
+      pid: pid,
+      epoch: :erlang.unique_integer([:positive, :monotonic]),
+      changed_at_ms: System.monotonic_time(:millisecond)
+    }
+
+    put_in(state.claims[id], claim) |> notify_output(id)
+  end
+
+  defp epoch(state, id), do: get_in(state.claims, [id, :epoch])
+
+  defp outcome?(outcome), do: outcome in [:applied, :unknown] or match?({:failed, _}, outcome)
+
   defp input_snapshot(state, id) do
     case state.definitions[id] do
       %InputDefinition{} = definition ->
@@ -343,7 +404,7 @@ defmodule NervesGate.IO do
            id: id,
            definition: definition,
            available?: available?(state.bindings[id]),
-           observation: state.latest[id],
+           reading: state.latest[id],
            stale?:
              Definition.stale?(definition, state.latest[id], System.monotonic_time(:millisecond))
          }}
@@ -353,37 +414,38 @@ defmodule NervesGate.IO do
     end
   end
 
-  defp output_snapshot(state, id, caller) do
+  defp output_snapshot(state, id, caller, now) do
     case state.definitions[id] do
       %OutputDefinition{} = definition ->
+        claim = state.claims[id]
+        desired = state.desires[id]
+
+        desire =
+          if claim && desired != nil,
+            do: %{value: desired, epoch: claim.epoch, changed_at_ms: claim.changed_at_ms}
+
+        inputs =
+          Map.new(definition.evidence, fn evidence ->
+            {evidence.input,
+             case input_snapshot(state, evidence.input) do
+               {:ok, snapshot} -> snapshot
+               _ -> nil
+             end}
+          end)
+
         {:ok,
          %{
            id: id,
            definition: definition,
            available?: available?(state.bindings[id]),
-           claimed?: Map.has_key?(state.writers, id),
-           owned?: state.writers[id] == caller,
-           desired: state.desires[id],
-           reported: feedback(state, id, definition)
+           claimed?: claim != nil,
+           owned?: claim != nil and claim.pid == caller,
+           desired: desired,
+           status: OutputStatus.derive(definition, desire, state.applied[id], inputs, now)
          }}
 
       _ ->
         {:error, :unknown_output}
-    end
-  end
-
-  defp feedback(_, _, %{feedback_input_id: nil}), do: nil
-
-  defp feedback(state, id, definition) do
-    [app, _] = String.split(id, ".", parts: 2)
-
-    case input_snapshot(state, app <> "." <> definition.feedback_input_id) do
-      {:ok, %{definition: %{type: type, unit: unit}} = snapshot}
-      when type == definition.type and unit == definition.unit ->
-        snapshot
-
-      _ ->
-        nil
     end
   end
 
@@ -419,7 +481,12 @@ defmodule NervesGate.IO do
   end
 
   defp clear_writer(state, id) do
-    %{state | writers: Map.delete(state.writers, id), desires: Map.delete(state.desires, id)}
+    %{
+      state
+      | claims: Map.delete(state.claims, id),
+        desires: Map.delete(state.desires, id),
+        applied: Map.delete(state.applied, id)
+    }
     |> notify_output(id)
   end
 
@@ -430,7 +497,7 @@ defmodule NervesGate.IO do
       end)
 
     state =
-      Enum.reduce(state.writers, state, fn {id, pid}, acc ->
+      Enum.reduce(state.claims, state, fn {id, %{pid: pid}}, acc ->
         if live_owner?(state, pid, :active), do: acc, else: clear_writer(acc, id)
       end)
 
@@ -486,7 +553,7 @@ defmodule NervesGate.IO do
   end
 
   # Local administrative consumers have no plugin generation. Managed consumers
-  # must not keep subscriptions or desire alive after their activation is revoked.
+  # must not keep subscriptions or Desires alive after their activation is revoked.
   defp live_owner?(state, pid, mode) do
     alive?(pid) and
       case state.monitors[pid] do
@@ -498,7 +565,8 @@ defmodule NervesGate.IO do
 
   defp unwatch_unused(state) do
     bound = Enum.flat_map(state.bindings, fn {_, binding} -> [binding.pid, binding.handler] end)
-    used = MapSet.new(bound ++ Map.values(state.writers) ++ Map.keys(state.subscribers))
+    writers = Enum.map(state.claims, fn {_, claim} -> claim.pid end)
+    used = MapSet.new(bound ++ writers ++ Map.keys(state.subscribers))
 
     monitors =
       Map.filter(state.monitors, fn {pid, %{ref: ref}} ->

@@ -49,11 +49,14 @@ defmodule NervesGate.SDKBackend do
   def call(:io_register_output, [definition, handler]),
     do: managed_io(:active, fn -> NervesGate.IO.register_output(definition, handler) end)
 
-  def call(:io_publish_input, [id, value, quality]),
-    do: managed_io(:release, fn -> NervesGate.IO.publish_input(id, value, quality) end)
+  def call(:io_publish, [id, value, quality]),
+    do: managed_io(:release, fn -> NervesGate.IO.publish(id, value, quality) end)
 
   def call(:io_read_desired, [id]),
     do: managed_io(:release, fn -> NervesGate.IO.read_desired(id) end)
+
+  def call(:io_report_applied, [id, epoch, value, outcome]),
+    do: managed_io(:release, fn -> NervesGate.IO.report_applied(id, epoch, value, outcome) end)
 
   def call(:io_input, [id]),
     do: managed_io(:release, fn -> NervesGate.IO.input(id) end)

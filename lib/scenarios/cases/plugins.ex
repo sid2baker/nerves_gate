@@ -115,7 +115,7 @@ defmodule Scenarios.Cases.Plugins do
       assert :ok = Device.rpc(vm, ModbusPlugin, :save, ["client1", modbus_client()])
 
       # Platform configuration storage keys the term by the running plugin version.
-      config = "/mnt/plugins/data/modbus_plugin/.nerves_gate/config/0.3.0.term"
+      config = "/mnt/plugins/data/modbus_plugin/.nerves_gate/config/0.4.0.term"
 
       assert %{"client1" => _, "server1" => _} =
                config |> then(&Device.rpc(vm, File, :read!, [&1])) |> :erlang.binary_to_term()
@@ -134,9 +134,17 @@ defmodule Scenarios.Cases.Plugins do
       assert :ok = command(vm, :set, [@holding_setter, 42])
       await_value(vm, "desired register reaches the server map", @server_holding, 42)
 
-      Device.await(vm, "linked feedback reports the written register", fn _ ->
+      Device.await(vm, "readback evidence confirms the applied register", fn _ ->
         match?(
-          {:ok, %{desired: 42, reported: %{observation: %{value: 42, quality: :good}}}},
+          {:ok,
+           %{
+             desired: 42,
+             status: %{
+               state: :confirmed,
+               applied: :applied,
+               evidence: [%{input: @client_holding, role: :readback, state: :confirmed}]
+             }
+           }},
           io(vm, :output, [@holding_setter])
         )
       end)
@@ -152,13 +160,20 @@ defmodule Scenarios.Cases.Plugins do
       assert :ok = Device.rpc(vm, ModbusPlugin.Server, :put, ["server1", "holding0", 99])
       await_value(vm, "client restores held desire after feedback mismatch", @server_holding, 5)
 
+      Device.await(vm, "restored register is confirmed again", fn _ ->
+        match?(
+          {:ok, %{desired: 5, status: %{state: :confirmed}}},
+          io(vm, :output, [@holding_setter])
+        )
+      end)
+
       # Release drops the desire without writing; later local changes stand.
       assert :ok = command(vm, :release, [@holding_setter])
       assert {:ok, %{claimed?: false, desired: nil}} = io(vm, :output, [@holding_setter])
       assert :ok = Device.rpc(vm, ModbusPlugin.Server, :put, ["server1", "holding0", 99])
       await_value(vm, "client observes the local server change", @client_holding, 99)
       Process.sleep(1_000)
-      assert {:ok, %{observation: %{value: 99}}} = io(vm, :input, [@server_holding])
+      assert {:ok, %{reading: %{value: 99}}} = io(vm, :input, [@server_holding])
       manual(vm)
 
       # Losing the server is reported as unknown/invalid, never a stale success.
@@ -167,7 +182,7 @@ defmodule Scenarios.Cases.Plugins do
 
       Device.await(vm, "client reports lost server without fabricated values", fn _ ->
         match?(
-          {:ok, %{observation: %{value: nil, quality: quality}}} when quality != :good,
+          {:ok, %{reading: %{value: nil, quality: quality}}} when quality != :good,
           io(vm, :input, [@client_holding])
         )
       end)
@@ -202,7 +217,7 @@ defmodule Scenarios.Cases.Plugins do
              } =
                Device.rpc(vm, ModbusPlugin, :status)
 
-      assert {:ok, %{available?: false, observation: nil}} = io(vm, :input, [@server_holding])
+      assert {:ok, %{available?: false, reading: nil}} = io(vm, :input, [@server_holding])
       assert :ok = Device.rpc(vm, ModbusPlugin, :delete, ["client1"])
       assert :ok = Device.rpc(vm, ModbusPlugin, :delete, ["server1"])
     after
@@ -223,6 +238,7 @@ defmodule Scenarios.Cases.Plugins do
     page = io_page(vm)
     assert page =~ "Manual control"
     assert page =~ "Target: 11"
+    assert page =~ ~s(id="io-status-modbus_plugin-client1-holding0_set")
     assert :ok = manual(vm, :release, [@holding_setter])
     assert {:ok, %{claimed?: false, desired: nil}} = io(vm, :output, [@holding_setter])
     await_value(vm, "release writes nothing back", @server_holding, 11)
@@ -240,7 +256,7 @@ defmodule Scenarios.Cases.Plugins do
 
   defp await_value(vm, phase, id, value) do
     Device.await(vm, phase, fn _ ->
-      match?({:ok, %{observation: %{value: ^value, quality: :good}}}, io(vm, :input, [id]))
+      match?({:ok, %{reading: %{value: ^value, quality: :good}}}, io(vm, :input, [id]))
     end)
   end
 

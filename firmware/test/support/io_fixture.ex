@@ -7,7 +7,7 @@ defmodule NervesGate.IOFixture do
   import ExUnit.Callbacks, only: [on_exit: 1]
   alias NervesGate.IO, as: GateIO
   alias NervesGate.Plugins.Owner
-  alias NervesGateSDK.IO.{InputDefinition, OutputDefinition}
+  alias NervesGateSDK.IO.{Evidence, InputDefinition, OutputDefinition}
 
   defmodule Child do
     @moduledoc false
@@ -83,10 +83,13 @@ defmodule NervesGate.IOFixture do
       unit: "celsius",
       min: 0.0,
       max: 40.0,
-      feedback_input_id: "temperature"
+      on_release: :hold,
+      evidence: [
+        %Evidence{input: "io_fixture.temperature", role: :readback, expect: {:tolerance, 0.5}}
+      ]
     }
 
-  def publish(value), do: plugin(Publisher, fn -> GateIO.publish_input("temperature", value) end)
+  def publish(value), do: plugin(Publisher, fn -> GateIO.publish("temperature", value) end)
 
   @doc "Run `fun` in a fixture process, preserving that process as the actual caller."
   def plugin(name, fun), do: GenServer.call(name, {:run, fun})
