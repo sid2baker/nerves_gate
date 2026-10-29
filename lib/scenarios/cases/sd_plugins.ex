@@ -64,14 +64,8 @@ defmodule Scenarios.Cases.SdPlugins do
       assert {:ok, %{app: :gate_fixture, version: "1.0.0"}} = plugins(vm, :install, [first])
       assert [{:gate_fixture, "1.0.0", false}] == selection(vm)
 
-      assert {{:error, %{code: "plugins_installed"}}} =
-               Scenarios.Device.rpc(
-                 vm,
-                 NervesGate.Storage,
-                 :setup,
-                 [:format, nil, :erase_all_data],
-                 30_000
-               )
+      assert {:error, %{code: "plugins_installed"}} =
+               storage_setup(vm, [:format, nil, :erase_all_data])
 
       assert :ok = plugins(vm, :start, [:gate_fixture])
       assert [{:gate_fixture, "1.0.0", true}] == selection(vm)
@@ -219,7 +213,7 @@ defmodule Scenarios.Cases.SdPlugins do
     assert {:error, :storage_unavailable} =
              Scenarios.Device.rpc(vm, NervesGate.Storage, :root, [], 30_000)
 
-    assert :ok = Scenarios.Device.rpc(vm, NervesGate.Storage, :setup, [:skip], 30_000)
+    assert :ok = storage_setup(vm, [:skip])
 
     assert :ok =
              Scenarios.Device.rpc(
@@ -243,14 +237,14 @@ defmodule Scenarios.Cases.SdPlugins do
 
     id = storage.().card_id
 
-    assert {{:error, %{code: "storage_card_changed"}}} =
-             Scenarios.Device.rpc(vm, NervesGate.Storage, :setup, [:use, "stale"], 30_000)
+    assert {:error, %{code: "storage_card_changed"}} =
+             storage_setup(vm, [:use, "stale"])
 
-    assert {{:error, %{code: "storage_confirmation_required"}}} =
-             Scenarios.Device.rpc(vm, NervesGate.Storage, :setup, [:format, id], 30_000)
+    assert {:error, %{code: "storage_confirmation_required"}} =
+             storage_setup(vm, [:format, id])
 
     # The preformatted QEMU card still requires a commissioning choice.
-    assert :ok = Scenarios.Device.rpc(vm, NervesGate.Storage, :setup, [:use, id], 30_000)
+    assert :ok = storage_setup(vm, [:use, id])
     await(fn -> storage.().ready end)
 
     assert {:ok, data} =
@@ -258,16 +252,10 @@ defmodule Scenarios.Cases.SdPlugins do
 
     marker = Path.join(data, "preserve-or-erase")
     assert :ok = Scenarios.Device.rpc(vm, File, :write, [marker, "preserved"], 30_000)
-    assert :ok = Scenarios.Device.rpc(vm, NervesGate.Storage, :setup, [:skip], 30_000)
+    assert :ok = storage_setup(vm, [:skip])
 
     assert :ok =
-             Scenarios.Device.rpc(
-               vm,
-               NervesGate.Storage,
-               :setup,
-               [:use, storage.().card_id],
-               30_000
-             )
+             storage_setup(vm, [:use, storage.().card_id])
 
     await(fn -> storage.().ready end)
     assert "preserved" = Scenarios.Device.rpc(vm, File, :read!, [marker], 30_000)
@@ -286,20 +274,14 @@ defmodule Scenarios.Cases.SdPlugins do
     try do
       await(fn -> storage.().card_id != id end)
 
-      assert {{:error, %{code: "storage_in_use"}}} =
-               Scenarios.Device.rpc(
-                 vm,
-                 NervesGate.Storage,
-                 :setup,
-                 [:format, storage.().card_id, :erase_all_data],
-                 30_000
-               )
+      assert {:error, %{code: "storage_in_use"}} =
+               storage_setup(vm, [:format, storage.().card_id, :erase_all_data])
     after
       Scenarios.Device.rpc(vm, Application, :put_env, [:nerves_gate, :board, board], 30_000)
     end
 
     await(fn -> storage.().filesystem == "ext4" end)
-    assert :ok = Scenarios.Device.rpc(vm, NervesGate.Storage, :setup, [:skip], 30_000)
+    assert :ok = storage_setup(vm, [:skip])
 
     # Make the disposable card unprepared by clearing its ext magic. No host
     # block device is opened; setup must reject using this card without erasing.
@@ -317,26 +299,15 @@ defmodule Scenarios.Cases.SdPlugins do
 
     await(fn -> storage.().filesystem == "Unknown" end)
 
-    assert {{:error, %{code: "storage_filesystem"}}} =
-             Scenarios.Device.rpc(
-               vm,
-               NervesGate.Storage,
-               :setup,
-               [:use, storage.().card_id],
-               30_000
-             )
+    assert {:error, %{code: "storage_filesystem"}} =
+             storage_setup(vm, [:use, storage.().card_id])
 
     assert :ok =
-             Scenarios.Device.rpc(
-               vm,
-               NervesGate.Storage,
-               :setup,
-               [:format, storage.().card_id, :erase_all_data],
-               30_000
-             )
+             storage_setup(vm, [:format, storage.().card_id, :erase_all_data])
 
     await(fn -> storage.().operation == nil end, 1_300)
     assert storage.().error == nil
+
     assert storage.().ready
     refute Scenarios.Device.rpc(vm, File, :exists?, [marker], 30_000)
   end
@@ -397,6 +368,19 @@ defmodule Scenarios.Cases.SdPlugins do
 
   defp plugins(vm, function, args),
     do: Scenarios.Device.rpc(vm, NervesGate.Plugins, function, args, 200_000)
+
+  # The manager polls storage and reconciles a changed card in its own operation;
+  # storage changes are admitted only after it has observed the current card.
+  defp storage_setup(vm, args) do
+    Scenarios.Device.await(vm, "plugin manager observed storage", fn _ ->
+      state = Scenarios.Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
+
+      state.restored? and state.job == nil and state.blocked == nil and
+        state.storage_identity == Scenarios.Device.rpc(vm, NervesGate.Storage, :identity)
+    end)
+
+    Scenarios.Device.rpc(vm, NervesGate.Storage, :setup, args, 30_000)
+  end
 
   defp await(predicate, attempts \\ 30)
   defp await(_, 0), do: flunk("Expected plugin storage state was not reached")
