@@ -244,8 +244,17 @@ defmodule NervesGate.Plugins do
 
   def handle_call({:worker, _, _}, _, state), do: {:reply, {:error, :stale_operation}, state}
 
+  def handle_call({:storage_setup, _, _, _}, _, %{job: job} = state) when not is_nil(job) do
+    {:reply,
+     {:error,
+      %{
+        code: "operation_in_progress",
+        message: "A plugin operation is in progress. Wait for it to finish."
+      }}, state}
+  end
+
   def handle_call({:storage_setup, action, card_id, confirmation}, _, state) do
-    if state.blocked != nil or state.job != nil or
+    if state.blocked != nil or
          Enum.any?(state.entries, fn {_, entry} -> not firmware_entry?(entry) end) or
          map_size(state.running) != 0 do
       {:reply,
