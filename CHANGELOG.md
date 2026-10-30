@@ -72,6 +72,7 @@
 
 ### Fixed
 
+- Explicit `mix dev.network setup` can recreate an unchanged recorded QEMU management network after reboot when every bridge/TAP is absent. Partial or conflicting interfaces still require inspection and cleanup; ordinary startup never changes host networking.
 - Gateway status, hardware and plugin-port authorization no longer re-verify every plugin archive on each read; status reads that took over a second (and timed out under load) now return in milliseconds.
 - Boot no longer fails and restarts when the first `fwup status` after startup exceeds `Nerves.Runtime.KV`'s one-second timeout.
 - Stopping or uninstalling a plugin that holds a local LAN lease no longer reports `generation_cleanup_pending` when the platform has already begun releasing that lease.

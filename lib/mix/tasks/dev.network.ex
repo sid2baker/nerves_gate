@@ -1,6 +1,18 @@
 defmodule Mix.Tasks.Dev.Network do
   use Mix.Task
   @shortdoc "Explicitly prepare or remove this checkout's private QEMU bridge/TAPs"
+  @moduledoc """
+  With this checkout's Workbench stopped and sudo access authorized:
+
+      mix dev.network setup --subnet <private-/24> [--config PATH]
+      mix dev.network cleanup
+
+  Setup recreates a complete recorded network after reboot only when all its
+  bridge/TAP names are absent and the subnet, device set and owner are unchanged.
+  Host routes are checked again. Surviving/conflicting interfaces or incomplete
+  setup still require inspection and explicit cleanup. Nothing is repaired by
+  ordinary Workbench startup.
+  """
   @requirements ["app.config"]
 
   def run(["setup" | args]) do

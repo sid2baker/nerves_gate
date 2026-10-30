@@ -49,18 +49,23 @@ defmodule Workbench.ManagementNetwork do
     if active_session?(),
       do: raise("Stop this checkout's Workbench sessions before preparing its network")
 
-    if load(), do: raise("A network is already recorded; clean it up explicitly first")
+    recorded = load()
     {output, 0} = System.cmd("ip", ["-json", "route", "show", "table", "all"])
-    network = plan!(subnet, ids, JSON.decode!(output))
-
+    requested = plan!(subnet, ids, JSON.decode!(output))
     {uid, 0} = System.cmd("id", ["-u"])
-    network = Map.put(network, :uid, String.trim(uid))
-    File.mkdir_p!(Path.dirname(@journal))
-    # Journal only successfully created resources, including partial setup.
-    :ok =
-      File.write(@journal, :erlang.term_to_binary(Map.put(network, :created, [])), [:exclusive])
+    requested = Map.put(requested, :uid, String.trim(uid))
+    network = setup_plan!(requested, recorded, File.ls!("/sys/class/net"))
 
-    File.chmod!(@journal, 0o600)
+    File.mkdir_p!(Path.dirname(@journal))
+    # All preflight checks precede journal changes. After recovery, only newly
+    # created kernel identities belong to this attempt, including partial setup.
+    if recorded do
+      persist!(network)
+    else
+      :ok = File.write(@journal, :erlang.term_to_binary(network), [:exclusive])
+      File.chmod!(@journal, 0o600)
+    end
+
     create!(network.bridge, ["link", "add", network.bridge, "type", "bridge"])
     # Only the newly created bridge: never toggle workstation-wide forwarding.
     run!("sysctl", ["-w", "net.ipv4.conf.#{network.bridge}.forwarding=0"])
@@ -175,6 +180,46 @@ defmodule Workbench.ManagementNetwork do
       devices: devices,
       ready: false
     }
+  end
+
+  @doc false
+  def setup_plan!(requested, nil, present) do
+    require_absent!(interface_names(requested), present)
+    Map.put(requested, :created, [])
+  end
+
+  def setup_plan!(requested, recorded, present) do
+    names = interface_names(recorded)
+
+    unless recorded.ready and Enum.sort(Enum.map(recorded.created, & &1.name)) == names,
+      do: raise("Recorded network setup is incomplete; inspect and clean it up explicitly first")
+
+    unless network_settings(requested) == network_settings(recorded),
+      do:
+        raise(
+          "Recorded network settings differ; clean it up explicitly before changing subnet, devices or owner"
+        )
+
+    require_absent!(names, present)
+    %{recorded | ready: false, created: []}
+  end
+
+  defp interface_names(network),
+    do: Enum.sort([network.bridge | Enum.map(network.devices, fn {_, port} -> port.tap end)])
+
+  defp network_settings(network) do
+    devices =
+      Map.new(network.devices, fn {id, port} -> {id, Map.take(port, [:address, :mac])} end)
+
+    network |> Map.take([:subnet, :host, :uid]) |> Map.put(:devices, devices)
+  end
+
+  defp require_absent!(names, present) do
+    if Enum.any?(names, &(&1 in present)),
+      do:
+        raise(
+          "Management interfaces still exist; refusing to replace a prepared, partial or conflicting network. Inspect and use explicit cleanup if needed"
+        )
   end
 
   defp active_session? do

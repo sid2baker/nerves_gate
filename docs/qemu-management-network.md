@@ -22,7 +22,7 @@ mix dev
 ```
 
 The address above is an example, not a subnet to impose without checking. Setup
-rejects overlapping routes and existing recorded resources. It uses `sudo -n ip`
+rejects overlapping routes and existing interface names. It uses `sudo -n ip`
 and a bridge-scoped `sudo -n sysctl`, never an interactive sudo prompt. The host
 requires iproute2 (Fedora: iproute). QEMU itself stays unprivileged.
 
@@ -46,8 +46,26 @@ create interfaces or invoke sudo. It verifies prepared interface identities befo
 QEMU starts. With no prepared network, Workbench can still inspect physical
 gateways, but cannot boot QEMU devices.
 
-The network is checkout-owned and reusable across sessions. To change the device
-set or subnet, stop the session, explicitly clean up, then prepare again.
+The network is checkout-owned and reusable across sessions. After a host reboot,
+Linux removes the bridge/TAPs but the ownership record survives. With Workbench
+stopped, rerun the same explicit setup command:
+
+```sh
+sudo -v
+mix dev.network setup --subnet 10.203.42.0/24
+mix dev
+```
+
+Setup recreates the recorded interface names, addresses and MACs only when **all**
+recorded bridge/TAP names are absent and the subnet, device set and user match.
+It rechecks current host/VPN routes, clears obsolete kernel indices only after
+preflight, and journals each newly created interface. No preliminary cleanup is
+needed for this all-absent case. Normal `mix dev` startup still never repairs networking.
+
+Any surviving or conflicting interface, incomplete setup record, changed owner or
+changed configuration is refused. Inspect it and use explicit cleanup; do not delete
+the journal to bypass ownership checks. To change the device set or subnet, stop the
+session, explicitly clean up, then prepare again.
 
 ## What remains isolated
 
