@@ -26,6 +26,8 @@
 
 ### Fixed
 
+- SDK 0.2.0-dev.4 produces reproducible plugin ZIP archives: identical file contents produce the same archive regardless of build time or input order, avoiding false immutable-version conflicts on firmware updates.
+
 - Reject developer-platform applications from device archives, alongside firmware and simulator applications.
 - Packaging rejects disagreement between the SDK dependency range and the application's declared SDK compatibility range.
 

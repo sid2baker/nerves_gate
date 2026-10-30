@@ -61,6 +61,33 @@ defmodule NervesGateSDK.Package do
 
   def valid_version?(_), do: false
 
+  # Archive identity must depend on content, not build time or host ownership.
+  def create(path, files) do
+    timestamp = {{1980, 1, 1}, {0, 0, 0}}
+
+    entries =
+      files
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(fn {name, bytes} ->
+        info =
+          file_info(
+            size: byte_size(bytes),
+            type: :regular,
+            access: :read_write,
+            atime: timestamp,
+            mtime: timestamp,
+            ctime: timestamp,
+            mode: 0o100644,
+            uid: 0,
+            gid: 0
+          )
+
+        {name, bytes, info}
+      end)
+
+    :zip.create(String.to_charlist(path), entries, extra: [])
+  end
+
   def read(path) when is_binary(path) do
     with {:ok, %{type: :regular, size: size}} when size <= @max_bytes <- File.stat(path),
          {:ok, bytes} <- File.read(path) do

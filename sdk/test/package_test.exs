@@ -28,6 +28,25 @@ defmodule NervesGateSDK.PackageTest do
     %{root: root}
   end
 
+  test "archive identity depends on contents, not time or input order", %{root: root} do
+    files = [{~c"fixture/priv/b.txt", "second"}, {~c"fixture/priv/a.txt", "first"}]
+    first = Path.join(root, "first.ez")
+    second = Path.join(root, "second.ez")
+    assert {:ok, _} = Package.create(first, files)
+    # ZIP's DOS timestamp has two-second resolution.
+    Process.sleep(2_100)
+    assert {:ok, _} = Package.create(second, Enum.reverse(files))
+    assert File.read!(first) == File.read!(second)
+    assert {:ok, entries} = :zip.extract(String.to_charlist(first), [:memory])
+    assert entries == Enum.sort(files)
+
+    {:ok, [_comment | table]} = :zip.table(String.to_charlist(first))
+
+    for {:zip_file, _, info, _, _, _} <- table do
+      assert File.Stat.from_record(info).mtime == {{1980, 1, 1}, {0, 0, 0}}
+    end
+  end
+
   test "reads and extracts standard OTP layout without a custom manifest", context do
     archive = archive(context)
     assert {:ok, package} = Package.read(archive)

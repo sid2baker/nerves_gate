@@ -18,6 +18,7 @@
 
 ### Compatibility
 
+- Version 0.4.1 gives the reproducibly packaged artifact a new immutable identity. Existing 0.4.0 selections and configuration remain unchanged; selecting 0.4.1 is explicit and its version-scoped configuration starts empty.
 - Requires firmware with the `NervesGate.IO` domain and plugin configuration storage, and SDK `~> 0.2.0-dev.2`.
 - Version 0.2.4 is rebuilt against the plugin-terminology SDK. Saved 0.2.3 artifacts and plugin selections remain unchanged.
 - Version 0.2.3 gives the rebuilt artifact a new immutable identity. Saved 0.2.2 artifacts and plugin selections remain unchanged.

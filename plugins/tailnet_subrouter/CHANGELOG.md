@@ -9,6 +9,7 @@
 
 ### Compatibility
 
+- Version 0.1.8 gives the reproducibly packaged artifact a new immutable identity. Existing selections remain unchanged; selection and activation are explicit.
 - Version 0.1.7 gives the artifact rebuilt against SDK 0.2.0-dev.3 a new immutable identity. Existing selections remain unchanged; selection and activation are explicit.
 - Version 0.1.6 gives the rebuilt artifact a new immutable identity for the updated firmware SDK. Existing selections are preserved; selecting and starting the new version remain explicit.
 - Version 0.1.3 gives the current bundled artifact a new immutable identity. Saved 0.1.2 remains unchanged; selection and activation are explicit.

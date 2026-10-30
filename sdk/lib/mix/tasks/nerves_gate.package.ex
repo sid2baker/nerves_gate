@@ -102,7 +102,7 @@ defmodule Mix.Tasks.NervesGate.Package do
         {spec_path, IO.iodata_to_binary(:io_lib.format(~c"~tp.~n", [spec]))}
       )
 
-    with {:ok, _} <- :zip.create(String.to_charlist(filename), files),
+    with {:ok, _} <- Package.create(filename, files),
          {:ok, package} <- Package.read(filename),
          :ok <- Package.pure_beam(package),
          :ok <-
