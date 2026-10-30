@@ -334,6 +334,27 @@ other writers, release writes nothing, and transport loss publishes unusable Rea
   release. QEMU covers TCP; RTU between EC100 ports awaits separately authorized
   physical testing.
 
+## Readiness baseline
+
+The platform is ready for dependency evaluation, not yet approved for Jido
+integration. The qualified source baseline is `34a5671`:
+
+- Root `mix check`: 363 tests passed, including SDK, firmware, host tooling,
+  generated-plugin and first-party plugin tests; static checks passed.
+- Rebuilt QEMU: all 43 standard scenarios passed in one run
+  (`70ab33168f52cd8cdb44b4e61eaaf4ac:runner:7232`). Opt-in `tailscale_auth`
+  and physical hardware qualification were not included.
+- SDKBackend precedes Plugins. Restoration is an explicit asynchronous job;
+  Storage notifications and plugin-supervisor monitors replace readiness polling.
+- No Jido, Runic or LiveFlow dependency or temporary automation engine is present.
+
+Before adoption, Phase 0 must still establish target-build compatibility,
+resource cost, bounded execution and ownership semantics. Passing platform tests
+is not evidence that a future Jido dependency meets those requirements.
+SDK publication and physical RTU qualification remain separately authorized work.
+The existing boot-time fwup workaround remains until an upstream fix is adopted
+and qualified; opening an upstream PR does not change the firmware dependency.
+
 ## Delivery
 
 ### 0. Evaluate Jido and LiveFlow

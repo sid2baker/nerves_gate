@@ -4,6 +4,13 @@ The repository root is the host-only developer platform, including the QEMU
 simulator. `sdk/`, `firmware/` and `systems/` are separate projects, not umbrella
 children. Plugin developers use [ordinary plugin projects](plugin-development.md).
 
+## Deferred tooling
+
+Machine-readable JSON observation output and local artifact-baseline preflight
+are not implemented. Device-side immutable-artifact review remains authoritative;
+a missing local baseline must never be treated as proof of compatibility. These
+optional improvements do not block automation dependency evaluation.
+
 ## Dev-device inspection from Pi
 
 `mix dev` starts a uniquely named hidden node. Its supervised `Workbench.Gateways`
