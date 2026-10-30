@@ -9,6 +9,7 @@ defmodule NervesGate.Recovery.DataInit do
   def child_spec(args), do: %{id: __MODULE__, start: {__MODULE__, :start_link, [args]}}
 
   def start_link(_) do
+    await_first_fwup()
     Nerves.Runtime.Init.init_application_partition()
 
     with {:ok, _mount} <- check_data(),
@@ -16,6 +17,18 @@ defmodule NervesGate.Recovery.DataInit do
          :ok <- NervesGate.Network.Vintage.prepare_cellular_input() do
       :ignore
     end
+  end
+
+  # Nerves.Runtime.KV resolves the active slot through `fwup status` with a fixed
+  # one-second call timeout and exits when it expires, which fails this hook and
+  # the boot. The first `fwup` run after boot can exceed that while the single
+  # guest CPU replays kernel logs. Run it here and wait for it to finish, so
+  # KV's own run starts once that startup burst has passed. A status read
+  # changes nothing on the device.
+  defp await_first_fwup do
+    Nerves.Runtime.FwupOps.status()
+  catch
+    :exit, {:timeout, _} -> :sys.get_state(Nerves.Runtime.FwupOps, 60_000)
   end
 
   @doc false

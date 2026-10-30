@@ -244,8 +244,9 @@ defmodule Scenarios.Recovery do
 
   # A fresh, bounded request to the guest's private management IP. No body is logged,
   # even on failure: error pages can contain private state. Never follow redirects.
+  # The Remote page renders this guest's distribution node from its projection.
   def http_ready?(vm) do
-    case Req.get(Qemu.ui_url(vm) <> "/",
+    case Req.get(Qemu.ui_url(vm) <> "/remote",
            retry: false,
            redirect: false,
            decode_body: false,
@@ -258,7 +259,7 @@ defmodule Scenarios.Recovery do
            ]
          ) do
       {:ok, %{status: 200, body: body}} when is_binary(body) ->
-        String.contains?(body, ~s(id="connection-internet")) and
+        String.contains?(body, ~s(id="distribution-node")) and
           String.contains?(body, to_string(vm.node))
 
       _ ->

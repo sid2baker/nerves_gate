@@ -241,14 +241,22 @@ defmodule NervesGate.Network do
     if NervesGate.Plugins.Loader.stale?(state.local.generation, tag) do
       state = orphan_generation(state)
 
-      if state.worker == nil and state.trial == nil and state.local.scope != nil and
-           state.local.phase != :blocked do
-        next =
-          local_work(state, :release, from, fn -> Local.cleanup_if_ready(state.local.scope) end)
+      cond do
+        # The periodic generation fence may already be releasing this orphaned
+        # lease; the drain takes that release's outcome instead of failing.
+        match?(%{local_action: :release, from: nil}, state.worker) ->
+          worker = Map.merge(state.worker, %{from: from, drain?: true})
+          {:noreply, %{state | worker: worker}}
 
-        {:noreply, %{next | worker: Map.put(next.worker, :drain?, true)}}
-      else
-        {:reply, {:error, :generation_cleanup_pending}, state}
+        state.worker == nil and state.trial == nil and state.local.scope != nil and
+            state.local.phase != :blocked ->
+          next =
+            local_work(state, :release, from, fn -> Local.cleanup_if_ready(state.local.scope) end)
+
+          {:noreply, %{next | worker: Map.put(next.worker, :drain?, true)}}
+
+        true ->
+          {:reply, {:error, :generation_cleanup_pending}, state}
       end
     else
       {:reply, :ok, state}

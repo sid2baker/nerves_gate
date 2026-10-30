@@ -72,6 +72,10 @@
 
 ### Fixed
 
+- Gateway status, hardware and plugin-port authorization no longer re-verify every plugin archive on each read; status reads that took over a second (and timed out under load) now return in milliseconds.
+- Boot no longer fails and restarts when the first `fwup status` after startup exceeds `Nerves.Runtime.KV`'s one-second timeout.
+- Stopping or uninstalling a plugin that holds a local LAN lease no longer reports `generation_cleanup_pending` when the platform has already begun releasing that lease.
+- An unexpected storage setup worker exit is logged with its reason.
 - Storage commissioning while a plugin operation is reconciling the card reports `operation_in_progress` instead of claiming plugins are installed.
 - A storage owner busy probing or mounting the card no longer crashes the SDK backend or other callers; `NervesGate.Storage.root/0` reports `:storage_unavailable`, as documented for plugin configuration storage.
 - Valid saved I/O definitions no longer prevent firmware startup after a cold boot. The catalogue loads its compiled schema before safe decoding; unknown atoms and malformed files remain rejected without rewriting saved state.

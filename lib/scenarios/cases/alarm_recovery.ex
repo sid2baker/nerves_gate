@@ -2,7 +2,7 @@ defmodule Scenarios.Cases.AlarmRecovery do
   @moduledoc false
   import ExUnit.Assertions
   alias NervesGate.Alarms
-  alias Scenarios.Alarms, as: Alarms
+  alias Scenarios.Alarms, as: Probe
   alias Scenarios.Recovery, as: Recovery
   alias Scenarios.Device, as: Device
   alias Scenarios.Qemu, as: Qemu
@@ -56,8 +56,8 @@ defmodule Scenarios.Cases.AlarmRecovery do
   end
 
   defp thresholds(vm) do
-    raw = {Alarms, Alarms, :internet_unavailable}
-    managed = {Alarms.Warning, Alarms, :internet_unavailable}
+    raw = {Alarms, Probe, :internet_unavailable}
+    managed = {Alarms.Warning, Probe, :internet_unavailable}
 
     # These pulses test Alarmist's own clock, not cable/DHCP detection latency.
     short =
@@ -86,7 +86,7 @@ defmodule Scenarios.Cases.AlarmRecovery do
     assert (cleared.at - source_clear.at) in 0..1_000
 
     for fault <- [:network_restore_failed, :led_restore_failed, :recovery_failed] do
-      critical_id = {Alarms, Alarms, fault}
+      critical_id = {Alarms, Probe, fault}
       critical = pulse(vm, fault, [{0, true}, {500, false}])
       assert %{level: :error} = raised = event!(critical, critical_id, :set)
       started = event!(critical, :probe_start, :start)
@@ -97,7 +97,7 @@ defmodule Scenarios.Cases.AlarmRecovery do
   end
 
   defp pulse(vm, fault, actions) do
-    events = Alarms.pulse(vm, fault, actions)
+    events = Probe.pulse(vm, fault, actions)
     Recovery.event(vm, :alarm_probe, %{fault: fault, actions: actions, events: events})
     events
   end

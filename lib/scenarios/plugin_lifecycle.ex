@@ -21,6 +21,7 @@ defmodule Scenarios.PluginLifecycle do
 
       if Enum.any?(entries, &(&1.app == "managed_fixture")) do
         assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
+        assert :ok = ManagedPlugin.plugins(vm, :assign_port, ["eth1", false, nil, true])
         assert :ok = ManagedPlugin.plugins(vm, :uninstall, [@app])
       end
 
@@ -126,6 +127,11 @@ defmodule Scenarios.PluginLifecycle do
       })
     )
 
+    # Local claims need an exclusive assignment; changing it stops the plugin.
+    assert :ok =
+             ManagedPlugin.plugins(vm, :assign_port, ["eth1", true, "managed_fixture", true])
+
+    assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
     client = ManagedPlugin.main(vm)
     {:ok, scope} = Device.rpc(vm, NervesGate.Plugins.Owner, :resolve, [client])
 
@@ -156,6 +162,8 @@ defmodule Scenarios.PluginLifecycle do
              ])
 
     assert_inflight_cleanup(vm)
+    assert :ok = ManagedPlugin.plugins(vm, :assign_port, ["eth1", false, nil, true])
+    assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
 
     restore =
       if previous["mode"] == "unconfigured", do: Scenarios.Device.settings("eth0"), else: previous
@@ -166,6 +174,19 @@ defmodule Scenarios.PluginLifecycle do
   defp assert_inflight_cleanup(vm) do
     interface = {:via, Registry, {VintageNet.Interface.Registry, "eth1"}}
     client = ManagedPlugin.main(vm)
+
+    # Draining the previous lease reconfigures eth1; a claim needs it settled
+    # and unaddressed before its interface process is suspended.
+    Device.await(vm, "assigned LAN settled before the in-flight claim", fn status ->
+      Enum.any?(
+        status.connections.ports,
+        &match?(
+          %{name: "eth1", present: true, state: :configured, master: nil, addresses: []},
+          &1
+        )
+      )
+    end)
+
     assert :ok = Device.rpc(vm, :sys, :suspend, [interface])
 
     task =
@@ -183,7 +204,7 @@ defmodule Scenarios.PluginLifecycle do
 
     try do
       Device.await(vm, "managed claim is admitted before owner stops", fn status ->
-        status.network.local != nil and status.network.local.phase == :configuring
+        status.network.local != nil and status.network.local.phase == :claim
       end)
 
       assert {:error, _} = ManagedPlugin.plugins(vm, :stop, [@app])

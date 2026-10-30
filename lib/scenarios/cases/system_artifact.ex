@@ -38,13 +38,14 @@ defmodule Scenarios.Cases.SystemArtifact do
              {NervesGate.Recovery.EC100, :firmware_precheck, []}
 
     serial = Scenarios.Device.rpc(vm, Nerves.Runtime, :serial_number, [])
-    assert {:ok, hostname} = Scenarios.Device.rpc(vm, :inet, :gethostname, [])
-    assert to_string(hostname) == serial
+    # :inet.gethostname/0 drops everything from the first dot of the QEMU serial.
+    hostname = Scenarios.Device.rpc(vm, File, :read!, ["/proc/sys/kernel/hostname"])
+    assert String.trim(hostname) == serial
+    # USB recovery hashes the full serial, so QEMU advertises it as the DHCP hostname.
+    usb0 = %{type: VintageNetDirect, vintage_net_direct: %{hostname: serial}}
     defaults = Scenarios.Device.rpc(vm, Application, :fetch_env!, [:vintage_net, :config])
-    assert {"usb0", %{type: VintageNetDirect}} in defaults
-
-    assert Scenarios.Device.rpc(vm, VintageNet, :get_configuration, ["usb0"]) ==
-             %{type: VintageNetDirect, vintage_net_direct: %{}}
+    assert {"usb0", usb0} in defaults
+    assert Scenarios.Device.rpc(vm, VintageNet, :get_configuration, ["usb0"]) == usb0
 
     assert Scenarios.Device.rpc(vm, File, :read!, ["/sys/class/net/usb0/address"]) ==
              "52:54:00:12:34:59\n"

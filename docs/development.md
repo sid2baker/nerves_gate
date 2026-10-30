@@ -197,10 +197,11 @@ session shutdown until each job worker exits.
 Every case declares `requires: %{device: [...], fixture: [...]}`. Device resources
 are `:ethernet`, `:cellular`, `:can` and `:rs485`; fixture capabilities describe
 owned controls, not product hardware. QEMU-specific cases require `:qemu`.
-`cable_loss` requires Ethernet and `:ethernet_link`: it discovers the configured
-Internet port, checks link loss and typed SDK events, then restores the link.
-Prepare a linked, addressed, separate Internet port and independent management
-path. Read-only status/SDK cases need no fixture. QEMU-specific assertions are
+`cable_loss` requires Ethernet, owned QEMU and `:ethernet_link`: it discovers the
+configured Internet port, checks link loss through typed SDK events received by
+the managed fixture plugin (SDK subscriptions belong to managed plugin processes),
+then restores the link. Prepare a linked, addressed, separate Internet port and
+independent management path. Read-only status/SDK cases need no fixture. QEMU-specific assertions are
 `qemu_status`/`qemu_sdk`.
 
 `Scenarios.run(module, %{device: target})` performs no default QEMU preparation.

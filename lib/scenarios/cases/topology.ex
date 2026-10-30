@@ -44,8 +44,11 @@ defmodule Scenarios.Cases.Topology do
     Qemu.network(vm, %{internet: :off})
     assert Scenarios.Qemu.topology(vm) == %{lan1: :plugin, lan2: :plugin}
     assert {:error, _} = Qemu.internet_request(vm, 3_000)
-    assert Scenarios.Device.status(vm).device.available
-    assert Scenarios.Device.status(vm).network.desired == configured
+
+    status =
+      Scenarios.Device.await(vm, "device available without Internet", & &1.device.available)
+
+    assert status.network.desired == configured
     assert identities(vm) == original
 
     Qemu.network(vm, %{internet: :lan1})

@@ -19,8 +19,14 @@ defmodule Scenarios.Cases.TailscaleLogin do
     save(vm, settings("eth0"))
     Scenarios.Device.await(vm, "public Internet reachable", &internet?/1, 60_000)
 
+    # Connecting also needs system time from public NTP servers over QEMU's network.
     ready =
-      Scenarios.Device.await(vm, "Tailscale daemon ready", & &1.actions["remote.connect"].enabled)
+      Scenarios.Device.await(
+        vm,
+        "time synchronized and Tailscale daemon ready",
+        & &1.actions["remote.connect"].enabled,
+        120_000
+      )
 
     # Remote itself rejects a draft based on another hostname, before any daemon write.
     stale = [expected: "not-#{ready.remote.hostname}"]

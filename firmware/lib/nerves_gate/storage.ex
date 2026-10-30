@@ -9,6 +9,7 @@ defmodule NervesGate.Storage do
   alias NervesGate.Storage.Config
   alias NervesGateSDK.Package
   alias NervesGateSDK.Storage.Status
+  require Logger
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -188,18 +189,24 @@ defmodule NervesGate.Storage do
     {:noreply, publish(next)}
   end
 
-  def handle_info({:DOWN, ref, :process, _, _}, %{worker: %{task: %Task{ref: ref}}} = state),
-    do:
-      {:noreply,
-       publish(%{
-         state
-         | worker: nil,
-           error: %{
-             code: "storage_setup_failed",
-             message:
-               "Storage setup failed. Inspect the card before retrying; formatting may have erased data."
-           }
-       })}
+  def handle_info(
+        {:DOWN, ref, :process, _, reason},
+        %{worker: %{task: %Task{ref: ref}, action: action}} = state
+      ) do
+    # The reason is the operator's only evidence for an unexpected worker exit.
+    Logger.warning("Storage #{action} worker exited: #{inspect(reason, limit: 20)}")
+
+    {:noreply,
+     publish(%{
+       state
+       | worker: nil,
+         error: %{
+           code: "storage_setup_failed",
+           message:
+             "Storage setup failed. Inspect the card before retrying; formatting may have erased data."
+         }
+     })}
+  end
 
   def handle_info(_, state), do: {:noreply, state}
 

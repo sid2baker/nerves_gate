@@ -181,7 +181,7 @@ defmodule Workbench.ScenariosTest do
     assert ids == Enum.sort(ids)
     assert ids == Enum.uniq(ids)
 
-    portable = ~w(cable_loss invalid_configuration invalid_trial_ids public_status sdk)
+    portable = ~w(invalid_configuration invalid_trial_ids public_status sdk)
     assert length(scenarios) == 44
 
     for scenario <- scenarios do

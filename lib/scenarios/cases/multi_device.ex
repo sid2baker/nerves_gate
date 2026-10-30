@@ -66,6 +66,8 @@ defmodule Scenarios.Cases.MultiDevice do
 
       # Replace only A's QEMU process, preserving its disk and selected faults.
       assert :ok = Simulator.command(first, :power_cycle)
+      # Distribution returns before the gateway's domains finish starting.
+      Scenarios.Device.await(first, "power-cycled device available", & &1.device.available)
       assert boot_id(first) != first_boot
       assert has_key?(first, fingerprint)
       assert Scenarios.Device.status(first).network.desired == settings("eth0")

@@ -38,7 +38,7 @@ defmodule Scenarios.Cases.Plugins do
       assert {:error, :firmware_owned_plugin} =
                ManagedPlugin.plugins(vm, :uninstall, [:modbus_plugin])
 
-      response = Req.get!(Scenarios.Qemu.ui_url(vm) <> "/plugins", retry: false)
+      response = guest_page(vm, "/plugins")
       assert response.status == 200
       assert response.body =~ "/plugins/tailnet_subrouter"
       assert response.body =~ "/plugins/modbus_plugin"
@@ -244,8 +244,13 @@ defmodule Scenarios.Cases.Plugins do
     await_value(vm, "release writes nothing back", @server_holding, 11)
   end
 
+  # Disposable guests are replaced without closing host sockets; a pooled
+  # keep-alive connection would fail the next scenario's first request.
+  defp guest_page(vm, path),
+    do: Req.get!(Scenarios.Qemu.ui_url(vm) <> path, headers: [connection: "close"], retry: false)
+
   defp io_page(vm) do
-    response = Req.get!(Scenarios.Qemu.ui_url(vm) <> "/io", retry: false)
+    response = guest_page(vm, "/io")
     assert response.status == 200
     response.body
   end

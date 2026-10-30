@@ -57,8 +57,12 @@ defmodule Scenarios.Cases.QemuStatus do
                :registration,
                :operator,
                :signal_dbm,
+               :access_technology,
+               :provider,
+               :provider_options,
                :refreshed_at,
                :operation,
+               :result,
                :error
              ])
 

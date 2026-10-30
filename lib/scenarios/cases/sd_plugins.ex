@@ -6,7 +6,7 @@ defmodule Scenarios.Cases.SdPlugins do
     %{
       name: "SD plugin install, cold upgrade, rollback and removal",
       fresh_disk: true,
-      requires: %{device: [], fixture: [:qemu]}
+      requires: %{device: [:ethernet], fixture: [:qemu]}
     }
   end
 
@@ -52,9 +52,12 @@ defmodule Scenarios.Cases.SdPlugins do
 
     assert {_, 0} = Scenarios.Device.rpc(vm, System, :cmd, ["mount", ["--bind", backing, mount]])
 
-    await(fn ->
+    Scenarios.Device.await(vm, "plugin manager observed the replacement mount", fn status ->
       state = Scenarios.Device.rpc(vm, :sys, :get_state, [NervesGate.Plugins])
-      state.available? and state.restored? and state.job == nil
+      identity = Scenarios.Device.rpc(vm, NervesGate.Storage, :identity)
+
+      status.storage.ready and match?({:ok, _}, identity) and state.restored? and
+        state.job == nil and state.blocked == nil and state.storage_identity == identity
     end)
 
     try do

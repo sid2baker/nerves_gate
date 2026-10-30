@@ -116,7 +116,8 @@ defmodule NervesGate.Plugins do
       sequence: Enum.reduce(entries, 0, fn {_, entry}, n -> max(n, entry.generation) end),
       restored?: false,
       available?: false,
-      storage_identity: nil
+      storage_identity: nil,
+      declared: %{}
     }
 
     send(self(), :storage)
@@ -173,11 +174,13 @@ defmodule NervesGate.Plugins do
   end
 
   def handle_call(:hardware, _, state) do
+    {capabilities, state} = capabilities(state)
+
     {:reply,
      %{
        ports: state.assignments,
        error: state.assignment_error || state.blocked,
-       capabilities: capabilities(state),
+       capabilities: capabilities,
        plugins:
          Map.new(state.entries, fn {app, _} ->
            {app, if(Map.has_key?(state.running, app), do: :running, else: :stopped)}
@@ -187,29 +190,36 @@ defmodule NervesGate.Plugins do
   end
 
   def handle_call({:authorize_port, pid, port}, _, state) do
-    result =
-      with nil <- state.assignment_error || state.blocked,
-           {:ok, owner} <- Owner.resolve(pid),
-           %{enabled: true, plugin: plugin} when plugin == owner.app <- state.assignments[port],
-           true <- Assignments.kind(port) in Map.get(capabilities(state), plugin, []) do
-        :ok
-      else
-        {:error, _} = error -> error
-        _ -> {:error, :hardware_not_assigned}
-      end
+    with nil <- state.assignment_error || state.blocked,
+         {:ok, owner} <- Owner.resolve(pid),
+         %{enabled: true, plugin: plugin} when plugin == owner.app <- state.assignments[port] do
+      {capabilities, state} = capabilities(state)
 
-    {:reply, result, state}
+      if Assignments.kind(port) in Map.get(capabilities, plugin, []),
+        do: {:reply, :ok, state},
+        else: {:reply, {:error, :hardware_not_assigned}, state}
+    else
+      {:error, _} = error -> {:reply, error, state}
+      _ -> {:reply, {:error, :hardware_not_assigned}, state}
+    end
   end
 
   def handle_call(:resources, {pid, _}, state) do
     with nil <- state.assignment_error,
          {:ok, owner} <- Owner.resolve(pid) do
-      resources =
+      assigned =
         for port <- NervesGate.Hardware.inventory(),
             %{enabled: true, plugin: plugin} <- [state.assignments[port.name]],
             plugin == owner.app,
+            do: port
+
+      {capabilities, state} = if assigned == [], do: {%{}, state}, else: capabilities(state)
+      kinds = Map.get(capabilities, owner.app, [])
+
+      resources =
+        for port <- assigned,
             kind = Assignments.kind(port.name),
-            kind in Map.get(capabilities(state), plugin, []) do
+            kind in kinds do
           %NervesGateSDK.Hardware.Port{
             id: port.name,
             kind: kind,
@@ -568,16 +578,34 @@ defmodule NervesGate.Plugins do
     if firmware_entry?(entry) and not Bundled.selected?(app, entry), do: :plugin_not_in_firmware
   end
 
+  # Hardware kinds declared by each active artifact. Registered artifacts are
+  # immutable, so one verified read is kept per exact {app, version, descriptor}
+  # instead of re-verifying every archive on each status read or port check.
+  # Failed reads, for example while storage is unavailable, are not kept.
   defp capabilities(state) do
-    Map.new(state.entries, fn {app, entry} ->
-      kinds =
-        case Artifact.load(app, entry.active_version, entry.artifacts[entry.active_version]) do
-          {:ok, _, package} -> package.main.env[:nerves_gate_hardware] || []
-          _ -> []
-        end
+    {kinds, declared} =
+      Enum.map_reduce(state.entries, %{}, fn {app, entry}, declared ->
+        version = entry.active_version
+        key = {app, version, entry.artifacts[version]}
 
-      {app, kinds}
-    end)
+        case Map.fetch(state.declared, key) do
+          {:ok, kinds} -> {{app, kinds}, Map.put(declared, key, kinds)}
+          :error -> verified_hardware(key, declared)
+        end
+      end)
+
+    {Map.new(kinds), %{state | declared: declared}}
+  end
+
+  defp verified_hardware({app, version, metadata} = key, declared) do
+    case Artifact.load(app, version, metadata) do
+      {:ok, _, package} ->
+        kinds = package.main.env[:nerves_gate_hardware] || []
+        {{app, kinds}, Map.put(declared, key, kinds)}
+
+      _ ->
+        {{app, []}, declared}
+    end
   end
 
   defp assignment_unchanged(_, nil), do: :ok
@@ -618,6 +646,7 @@ defmodule NervesGate.Plugins do
     old = state.assignments[port] || %{enabled: false, plugin: nil}
     affected = Enum.reject(Enum.uniq([old.plugin, plugin]), &is_nil/1)
     running = Enum.filter(affected, &Map.has_key?(state.running, &1))
+    {capabilities, state} = capabilities(state)
 
     with nil <- state.assignment_error,
          :ok <- assignment_unchanged(old, expected),
@@ -627,7 +656,7 @@ defmodule NervesGate.Plugins do
              enabled,
              plugin,
              NervesGate.Hardware.inventory(),
-             capabilities(state)
+             capabilities
            ),
          true <- running == [] or confirmed == true,
          :ok <- reserve_assignment(port, enabled or plugin != nil) do
