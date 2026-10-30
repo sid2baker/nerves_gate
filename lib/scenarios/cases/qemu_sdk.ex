@@ -11,7 +11,7 @@ defmodule Scenarios.Cases.QemuSdk do
     }
 
   def run(%{device: vm}) do
-    # Plugin discovery runs after boot; assignment answers operation_in_progress until then.
+    # Plugin restore runs as a job right after boot; commands wait for that state.
     ManagedPlugin.await_idle(vm)
     assert {:ok, info} = Device.rpc(vm, NervesGateSDK.System, :info)
     assert info.model == "x86_64"
@@ -53,6 +53,21 @@ defmodule Scenarios.Cases.QemuSdk do
           subscriber
         )
       end)
+
+      # A plugin application that stops on its own is noticed through its
+      # monitored supervisor, then halted and reported instead of shown running.
+      assert :ok = Device.rpc(vm, Application, :stop, [:managed_fixture])
+
+      Device.await(vm, "self-stopped plugin is noticed and halted", fn _ ->
+        match?(%{running?: false}, fixture_entry(vm))
+      end)
+
+      assert %{error: :plugin_stopped} = fixture_entry(vm)
     end)
+  end
+
+  defp fixture_entry(vm) do
+    {:ok, entries} = ManagedPlugin.plugins(vm, :list, [])
+    Enum.find(entries, &(&1.app == "managed_fixture"))
   end
 end

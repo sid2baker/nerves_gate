@@ -16,7 +16,14 @@ defmodule Scenarios.Recovery do
   ]
 
   # Only known, guest-owned workers. Registry partitions link subscribers, so
-  # losing one also restarts ProjectionServer and the Endpoint after it.
+  # losing one restarts its earliest non-trapping subscriber and, rest_for_one,
+  # every child after it. SDKBackend subscribes to the NervesGate and VintageNet
+  # tables and precedes Plugins, so those faults also restart plugins.
+  @registry_scopes %{
+    NervesGate.Properties.Subscriptions => NervesGate.SDKBackend,
+    VintageNet.Subscriptions => NervesGate.SDKBackend,
+    Tailscaled.Properties.Subscriptions => NervesGate.ProjectionServer
+  }
   @registries [
     {:registry, NervesGate.Properties.Subscriptions},
     {:registry, VintageNet.Subscriptions},
@@ -83,7 +90,12 @@ defmodule Scenarios.Recovery do
     pid = dependency_pid(vm, dependency)
     assert is_pid(pid), "Guest dependency is not running: #{inspect(dependency)}"
     fault_at = now()
-    scope = if dependency in @registries, do: NervesGate.ProjectionServer
+
+    scope =
+      case dependency do
+        {:registry, registry} -> Map.fetch!(@registry_scopes, registry)
+        _ -> nil
+      end
 
     event(vm, :crash, %{
       target: dependency,
@@ -221,7 +233,7 @@ defmodule Scenarios.Recovery do
   `:reboot` requires a new kernel boot with the same children and saved state.
   """
   def await_recovery(vm, before, target, options \\ [])
-      when target in @targets or target in [nil, :reboot] do
+      when target in @targets or target in [NervesGate.SDKBackend, nil, :reboot] do
     timeout = Keyword.get(options, :timeout, 30_000)
     # OTP counts an inclusive, whole-second restart window. Six quiet seconds
     # age out a five-second window even when a fault lands on a second boundary.

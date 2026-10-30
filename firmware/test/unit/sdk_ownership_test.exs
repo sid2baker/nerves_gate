@@ -182,6 +182,9 @@ defmodule NervesGate.SDKOwnershipTest do
         else: Application.delete_env(:nerves_gate, :plugins_metadata)
     end)
 
+    # Plugins relies on the services before it in the supervision order.
+    start_supervised!({PropertyTable, name: NervesGate.Properties})
+    start_supervised!({Task.Supervisor, name: NervesGate.PluginTasks})
     manager = start_supervised!(NervesGate.Plugins)
     :erlang.trace(manager, true, [:receive])
     caller = self()

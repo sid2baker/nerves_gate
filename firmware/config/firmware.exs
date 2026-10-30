@@ -19,9 +19,11 @@ config :nerves_gate,
     NervesGate.IO,
     # Owns manual output claims; restarts with I/O, which clears them anyway.
     NervesGate.IO.Manual,
+    # Plugins start after everything they call while starting. Views come later,
+    # so a UI or projection restart (rest_for_one) never restarts plugins.
+    NervesGate.SDKBackend,
     NervesGate.Plugins,
     NervesGate.ProjectionServer,
-    NervesGate.SDKBackend,
     NervesGateWeb.Endpoint
   ]
 

@@ -242,16 +242,23 @@ Dependencies supervise VintageNet, tailscaled and Alarmist. The device's
 `rest_for_one` application children are ordered as follows:
 
 ```text
-PubSub → Network.Vintage → workflow PropertyTable → persistent Settings PropertyTable
-       → SSH → Network → Remote → Indicators → Hardware → PluginTasks
-       → Storage → IO → IO.Manual → Plugins → ProjectionServer → SDKBackend
-       → gateway Endpoint
+PubSub → Plugins.UI → Network.Vintage → workflow PropertyTable
+       → persistent Settings PropertyTable → SSH → Network → Remote → Indicators
+       → Hardware → PluginTasks → Storage → IO → IO.Manual → SDKBackend → Plugins
+       → ProjectionServer → gateway Endpoint
 ```
 
 See [`firmware/config/firmware.exs`](../firmware/config/firmware.exs) and
 [`NervesGate.Application`](../firmware/lib/nerves_gate/application.ex). An earlier
-child's failure restarts later children. The application is `transient`: exhausting
-its restart limit stops the BEAM and erlinit reboots the device. This is not the
+child's failure restarts later children. Supervision order is the startup barrier:
+Plugins follows every service plugins call while starting, so it restores plugins
+as soon as its `init/1` returns, without readiness polling. Restoration runs as a
+linked job because plugin start callbacks call back into Plugins; commands return
+`:plugins_not_ready` until it completes. Plugins reacts to Storage's published
+card changes and to monitored plugin supervisors, rereading current state after each
+job. Views follow Plugins, so a UI or projection restart never restarts plugins.
+The application is `transient`: exhausting its restart limit stops the BEAM and
+erlinit reboots the device. This is not the
 host session's supervision tree.
 
 Workers are linked and bounded; owners stop/join workers before restoration or new

@@ -1,8 +1,8 @@
 defmodule NervesGate.Plugins do
   @moduledoc "Serialized cold lifecycle for firmware-bundled plugins and development artifacts. Trusted OTP code, not a sandbox."
   use GenServer
+  alias NervesGate.{Observations, Storage}
   alias NervesGate.Plugins.{Artifact, Assignments, Bundled, Loader, Metadata, Owner, UI}
-  alias NervesGate.Storage
   alias NervesGateSDK.Package
   @timeout 190_000
   @budget 180_000
@@ -115,14 +115,23 @@ defmodule NervesGate.Plugins do
       epoch: make_ref(),
       sequence: Enum.reduce(entries, 0, fn {_, entry}, n -> max(n, entry.generation) end),
       restored?: false,
-      available?: false,
       storage_identity: nil,
-      declared: %{}
+      declared: %{},
+      monitors: %{},
+      stopped: MapSet.new()
     }
 
-    send(self(), :storage)
-    {:ok, state}
+    # Every service plugins call starts before this one. Subscribe to card
+    # changes before the first identity read, then restore immediately.
+    :ok = Observations.subscribe([{Observations.table(), ["storage"]}])
+    {:ok, state, {:continue, :restore}}
   end
+
+  @impl true
+  def handle_continue(:restore, %{blocked: nil} = state),
+    do: {:noreply, %{begin_work(:restore, nil, state) | storage_identity: Storage.identity()}}
+
+  def handle_continue(:restore, state), do: {:noreply, state}
 
   defp initial_entries(file) do
     obsolete =
@@ -286,7 +295,7 @@ defmodule NervesGate.Plugins do
       state.blocked && not recovery?(request, state.blocked_app) ->
         {:reply, {:error, :plugins_blocked}, state}
 
-      not (state.restored? and state.available?) and not match?({:stop, _}, request) ->
+      not state.restored? and not match?({:stop, _}, request) ->
         {:reply, {:error, :plugins_not_ready}, state}
 
       true ->
@@ -444,9 +453,9 @@ defmodule NervesGate.Plugins do
              blocked: nil,
              blocked_app: nil,
              job: nil,
-             available?: next.available?,
              restored?: next.restored?
-         }}
+         }
+         |> observe_changes()}
     end
   end
 
@@ -461,31 +470,33 @@ defmodule NervesGate.Plugins do
     {:noreply, block(%{state | job: %{job | from: nil}}, :operation_timeout)}
   end
 
-  def handle_info(:storage, %{blocked: blocked} = state) when not is_nil(blocked) do
-    Process.send_after(self(), :storage, 1_000)
-    {:noreply, state}
-  end
+  # Storage publishes its commissioning view whenever it changes.
+  def handle_info(%PropertyTable.Event{property: ["storage" | _]}, state),
+    do: {:noreply, observe_changes(state)}
 
-  def handle_info(:storage, state) do
-    Process.send_after(self(), :storage, 1_000)
-    available? = true
+  # A running plugin's top supervisor exited. Outside a job nothing else stops
+  # plugins, so the exit itself is the evidence: the application controller may
+  # still list the application as started. During a job (which may restart the
+  # plugin) completion rereads started applications instead.
+  def handle_info({:DOWN, ref, :process, _, _}, %{monitors: monitors} = state)
+      when is_map_key(monitors, ref) do
+    stopped =
+      if state.job == nil, do: MapSet.put(state.stopped, monitors[ref]), else: state.stopped
 
-    next = storage_changed(state, available?)
-    {:noreply, %{next | available?: available?}}
+    {:noreply, observe_changes(%{state | monitors: Map.delete(monitors, ref), stopped: stopped})}
   end
 
   def handle_info({:EXIT, _, _}, state), do: {:noreply, state}
   def handle_info(_, state), do: {:noreply, state}
 
-  defp storage_changed(%{job: job} = state, _) when not is_nil(job), do: state
+  # Events are hints: reread storage and started applications. Changes seen
+  # during a job or a block are acted on when that job completes.
+  defp observe_changes(%{job: job} = state) when not is_nil(job), do: state
+  defp observe_changes(%{blocked: blocked} = state) when not is_nil(blocked), do: state
+  defp observe_changes(%{restored?: false} = state), do: state
+  defp observe_changes(state), do: state |> monitor_running() |> storage_changed()
 
-  defp storage_changed(state, true) do
-    ready? =
-      Enum.all?(
-        [NervesGate.Network, NervesGate.Hardware, NervesGate.SDKBackend],
-        &Process.whereis/1
-      )
-
+  defp storage_changed(state) do
     identity = Storage.identity()
 
     development_running? =
@@ -494,9 +505,6 @@ defmodule NervesGate.Plugins do
     changed? = identity != state.storage_identity
 
     cond do
-      ready? and not state.restored? ->
-        %{begin_work(:restore, nil, state) | storage_identity: identity}
-
       development_running? and changed? ->
         %{begin_work(:halt_development, nil, state) | storage_identity: nil}
 
@@ -508,14 +516,51 @@ defmodule NervesGate.Plugins do
     end
   end
 
+  defp monitor_running(state) do
+    monitored = MapSet.new(Map.values(state.monitors))
+
+    Enum.reduce(state.running, state, fn
+      {app, %{phase: :running, artifact: artifact}}, acc ->
+        with false <- MapSet.member?(monitored, app),
+             {:ok, pid} <- :application.get_supervisor(artifact.app) do
+          put_in(acc.monitors[Process.monitor(pid)], app)
+        else
+          _ -> acc
+        end
+
+      _, acc ->
+        acc
+    end)
+    |> prune_monitors()
+  end
+
+  defp prune_monitors(state) do
+    {current, stale} =
+      Enum.split_with(state.monitors, fn {_, app} ->
+        match?(%{phase: :running}, state.running[app])
+      end)
+
+    Enum.each(stale, fn {ref, _} -> Process.demonitor(ref, [:flush]) end)
+    running? = &match?(%{phase: :running}, state.running[&1])
+    %{state | monitors: Map.new(current), stopped: MapSet.filter(state.stopped, running?)}
+  end
+
   defp check_running(state) do
     started = MapSet.new(Application.started_applications(), &elem(&1, 0))
 
-    case Enum.find(state.running, fn {_, activation} ->
-           activation.phase == :running and not MapSet.member?(started, activation.artifact.app)
+    case Enum.find(state.running, fn {app, activation} ->
+           activation.phase == :running and
+             (MapSet.member?(state.stopped, app) or
+                not MapSet.member?(started, activation.artifact.app))
          end) do
-      nil -> state
-      {app, _} -> begin_work({:unexpected_stop, app}, nil, state)
+      nil ->
+        state
+
+      {app, _} ->
+        begin_work({:unexpected_stop, app}, nil, %{
+          state
+          | stopped: MapSet.delete(state.stopped, app)
+        })
     end
   end
 
@@ -765,7 +810,7 @@ defmodule NervesGate.Plugins do
          :ok <- reconcile(state.entries) do
       next = Enum.reduce_while(state.entries, state, &restore_entry(&1, &2, context))
 
-      {:ok, %{next | restored?: true, available?: true}}
+      {:ok, %{next | restored?: true}}
     else
       {:error, reason} -> {{:error, reason}, %{state | blocked: reason, restored?: true}}
     end
