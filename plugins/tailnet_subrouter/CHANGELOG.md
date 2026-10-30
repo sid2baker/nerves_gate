@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- Version 0.1.9 offers gateway-owned LAN assignment review before volatile address setup. Review can explicitly start the target plugin but never configures or advertises a subnet; previous selections remain unchanged.
+
 ### Breaking changes
 
 - Version 0.1.5 uses the renamed SDK `plugin_enabled?` interface field and plugin wording.

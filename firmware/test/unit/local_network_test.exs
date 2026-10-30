@@ -167,7 +167,10 @@ defmodule NervesGate.Network.LocalTest do
     ref = make_ref()
     state = %{hardware_assignment: %{monitor: ref}, observed: nil, error: nil}
 
-    for request <- [{:claim_local, "eth1", "192.168.50.2", 24}, {:reserve_hardware, "eth1", true}] do
+    for request <- [
+          {:claim_local, "eth1", "192.168.50.2", 24},
+          {:reserve_hardware, "eth1", true, %{}}
+        ] do
       assert {:reply, {:error, %{code: "operation_in_progress"}}, held} =
                NervesGate.Network.handle_call(request, {self(), make_ref()}, state)
 

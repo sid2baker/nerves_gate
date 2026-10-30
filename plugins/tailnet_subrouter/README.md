@@ -10,10 +10,8 @@ no Ethernet configuration or route advertisement occurs on startup or page load.
 
 ## Use
 
-1. Under **Hardware**, enable and exclusively assign a free LAN to `tailnet_subrouter`.
-   Confirm the checked stop of affected plugins. Internet and management interfaces
-   cannot be assigned; leave them unchanged.
-2. Open **Plugins**, Start `tailnet_subrouter`, then **Open plugin**.
+1. Open **Plugins**, Start `tailnet_subrouter`, then **Open plugin**. Startup changes no addressing.
+2. Use the dedicated LAN's **Discard draft and review assignment** link before entering address settings. The gateway-owned review stops affected plugins; optionally request target-plugin startup. Return here afterwards, starting the plugin explicitly if needed. Existing volatile address drafts are not retained. Internet and management interfaces cannot be assigned.
 3. Select an eligible interface and enter an unused gateway-side IPv4 address and
    prefix. The picker disables Internet, claimed, addressed and operator-disabled
    or differently assigned interfaces with explanations. Refresh after assignment changes.

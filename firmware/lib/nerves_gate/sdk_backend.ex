@@ -14,6 +14,9 @@ defmodule NervesGate.SDKBackend do
   def call(:hardware_resources, []),
     do: available(fn -> NervesGate.Plugins.resources() end)
 
+  def call(:hardware_candidates, []),
+    do: available(fn -> GenServer.call(NervesGate.Plugins, :hardware_candidates) end)
+
   # These calls must also originate from the actual application process, never
   # this observation server or a Task acting as a caller proxy.
   def call(:network_claim_local, [interface, address, prefix]),

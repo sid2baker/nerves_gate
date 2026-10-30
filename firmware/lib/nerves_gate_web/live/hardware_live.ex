@@ -64,11 +64,23 @@ defmodule NervesGateWeb.HardwareLive do
 
   defp port_status(hardware, name) do
     case Enum.find(hardware.ports, &(&1.name == name)) do
-      nil -> "Not detected"
-      %{present: false} -> "Not detected"
-      %{assigned_plugin: plugin} when is_binary(plugin) -> "Assigned to #{plugin}"
-      %{enabled: false} -> "Disabled"
-      _ -> "Available"
+      nil ->
+        "Not detected"
+
+      %{present: false} ->
+        "Not detected"
+
+      %{assigned_plugin: plugin, enabled: false} when is_binary(plugin) ->
+        "#{plugin} — access disabled"
+
+      %{assigned_plugin: plugin} when is_binary(plugin) ->
+        "Assigned to #{plugin}"
+
+      %{enabled: false} ->
+        "Unassigned"
+
+      _ ->
+        "Available"
     end
   end
 end

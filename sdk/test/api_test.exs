@@ -14,6 +14,7 @@ defmodule NervesGateSDK.APITest do
     assert {:error, _} = Storage.status()
     assert {:error, _} = Storage.data_dir(:example)
     assert {:error, _} = Hardware.resources()
+    assert {:error, _} = Hardware.candidates()
   end
 
   test "invalid input never reaches the firmware" do

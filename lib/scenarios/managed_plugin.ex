@@ -15,7 +15,7 @@ defmodule Scenarios.ManagedPlugin do
       assert {:ok, _} = plugins(vm, :install, [guest])
 
       for port <- ports,
-          do: assert(:ok == plugins(vm, :assign_port, [port, true, "managed_fixture", true]))
+          do: assert(:ok == assign(vm, port, true, "managed_fixture"))
 
       assert :ok = plugins(vm, :start, [:managed_fixture])
       client = main(vm)
@@ -32,7 +32,7 @@ defmodule Scenarios.ManagedPlugin do
       end
 
       for port <- ports,
-          do: assert(:ok == plugins(vm, :assign_port, [port, false, nil, true]))
+          do: assert(:ok == assign(vm, port, false, nil))
 
       Device.rpc(vm, File, :rm, [guest])
       File.rm_rf!(directory)
@@ -106,6 +106,11 @@ defmodule Scenarios.ManagedPlugin do
     guest = "/tmp/managed-fixture-#{nonce()}.ez"
     :ok = Device.rpc(vm, File, :write, [guest, File.read!(archive)])
     guest
+  end
+
+  def assign(vm, port, enabled, plugin, start_plugin \\ false) do
+    with {:ok, review} <- plugins(vm, :review_assignment, [port, enabled, plugin, start_plugin]),
+         do: plugins(vm, :confirm_assignment, [review])
   end
 
   def plugins(vm, function, args), do: Device.rpc(vm, NervesGate.Plugins, function, args, 200_000)

@@ -16,6 +16,12 @@ defmodule Scenarios.Cases.QemuSdk do
     assert {:ok, info} = Device.rpc(vm, NervesGateSDK.System, :info)
     assert info.model == "x86_64"
     assert {:error, :plugin_not_running} = Device.rpc(vm, NervesGateSDK.Hardware, :resources)
+    assert {:ok, candidates} = Device.rpc(vm, NervesGateSDK.Hardware, :candidates)
+    assert Enum.all?(candidates, &match?(%NervesGateSDK.Hardware.Candidate{kind: :ethernet}, &1))
+
+    assert {:error, :invalid_hardware_assignment} =
+             ManagedPlugin.plugins(vm, :confirm_assignment, [%{}])
+
     # QEMU exposes only virtual Ethernet ports, never RS485/CAN resources.
     inventory = Device.rpc(vm, NervesGate.Hardware, :inventory)
 
@@ -25,7 +31,11 @@ defmodule Scenarios.Cases.QemuSdk do
            ]
 
     assert {:error, :hardware_missing} =
-             Device.rpc(vm, NervesGate.Plugins, :assign_port, ["ttyS3", true, "modbus_plugin"])
+             Scenarios.Device.rpc(vm, NervesGate.Plugins, :review_assignment, [
+               "ttyS3",
+               true,
+               "modbus_plugin"
+             ])
 
     ManagedPlugin.with_plugin(vm, fn client ->
       assert {:ok, []} = ManagedPlugin.call(vm, client, NervesGateSDK.Hardware, :resources)

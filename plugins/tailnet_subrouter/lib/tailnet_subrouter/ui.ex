@@ -31,7 +31,7 @@ defmodule TailnetSubrouter.UI do
     <section class="ui-panel" id="tailnet-subrouter">
       <div class="ui-panel-body">
         <h2>Share a local subnet</h2>
-        <p class="ui-help">Use a dedicated Ethernet interface assigned to this plugin under Hardware. Keep USB management available. Configuration adds a temporary address; sharing requires a separate explicit action.</p>
+        <p class="ui-help">Assign a dedicated LAN here before entering address settings. Keep USB management available. Configuration adds a temporary address; sharing requires a separate explicit action.</p>
         <p role="status" id="subrouter-state">State: {@status.state}</p>
         <dl :if={@status[:interface]}>
           <dt>Interface</dt><dd>{@status.interface}</dd>
@@ -42,6 +42,15 @@ defmodule TailnetSubrouter.UI do
         </dl>
         <p :if={@message} role="alert">{@message}</p>
         <p :if={@status[:error]} role="alert">{error_message(@status.error)}</p>
+        <section :if={@status.state == :disabled} id="subrouter-assignments">
+          <h3>1. Choose a dedicated LAN</h3>
+          <p class="ui-help">Assignment review is owned by the gateway and may stop this plugin. Address drafts are volatile: the links below discard any unsaved address draft. Assign first, return here, then configure.</p>
+          <p :for={port <- ports(@interfaces)}>
+            {port.id} — {unavailable_reason(port) || "Assigned and available"}
+            <.link :if={!port.internet? and (port.assigned_plugin != "tailnet_subrouter" or !port.plugin_enabled?)} navigate={assignment_path(port.id)} class="ui-button ui-button--secondary">Discard draft and review assignment</.link>
+          </p>
+          <h3>2. Configure address</h3>
+        </section>
         <.form for={@form} id="subrouter-config" class="ui-stack" phx-change="edit_config" phx-submit="configure" phx-target={@myself}>
           <label for="subrouter-interface">Plugin interface</label>
           <select id="subrouter-interface" name="config[interface]" disabled={@uncertain? or @status.state != :disabled}>
@@ -49,7 +58,7 @@ defmodule TailnetSubrouter.UI do
             <option :for={port <- ports(@interfaces)} value={port.id} selected={@form[:interface].value == port.id} disabled={unavailable_reason(port) != nil}>{port.id}{if reason = unavailable_reason(port), do: " — #{reason}"}</option>
           </select>
           <p :if={match?({:error, _}, @interfaces)} class="ui-help">Interface status is unavailable. Refresh status before configuring.</p>
-          <p :if={match?({:ok, _}, @interfaces) and not Enum.any?(ports(@interfaces), &(unavailable_reason(&1) == nil)) and @status.state == :disabled} class="ui-help">No application interface is available. Under Hardware, enable and assign a dedicated Ethernet port to tailnet_subrouter; keep the Internet port unchanged. Then refresh status.</p>
+          <p :if={match?({:ok, _}, @interfaces) and not Enum.any?(ports(@interfaces), &(unavailable_reason(&1) == nil)) and @status.state == :disabled} class="ui-help">No assigned interface is available. Use the assignment review above; keep the Internet port unchanged. Return here after assignment.</p>
           <label for="subrouter-address">Unused gateway-side IPv4 address</label>
           <input id="subrouter-address" name="config[address]" value={@form[:address].value} required placeholder="192.168.50.2" disabled={@uncertain? or @status.state != :disabled} />
           <label for="subrouter-prefix">Subnet prefix length</label>
@@ -165,6 +174,9 @@ defmodule TailnetSubrouter.UI do
       true -> nil
     end
   end
+
+  defp assignment_path("eth0"), do: "/hardware/lan/1?plugin=tailnet_subrouter"
+  defp assignment_path("eth1"), do: "/hardware/lan/2?plugin=tailnet_subrouter"
 
   defp selectable?(interfaces, id),
     do: Enum.any?(ports(interfaces), &(&1.id == id and unavailable_reason(&1) == nil))

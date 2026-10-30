@@ -121,8 +121,8 @@ published 0.1.0 package.
 
 ## Isolated local-network access (SDK 0.2.0-dev checkout)
 
-An operator must enable and exclusively assign a non-Internet LAN to the plugin
-under Hardware. The plugin declares `nerves_gate_hardware: [:ethernet]`.
+An operator must explicitly assign an enabled non-Internet LAN through gateway-owned
+review, reached from plugin setup or Hardware. The plugin declares `nerves_gate_hardware: [:ethernet]`.
 `Network.claim_local(interface, address, prefix)` gives the actual caller exclusive
 access to one temporary static local interface, without DHCP, DNS or a default route.
 `Network.local_status/0` reads only that caller's private lease, including its handle
@@ -149,9 +149,16 @@ actual managed caller, as `%Hardware.Port{id: ..., kind: ..., present?: ..., pat
 It opens nothing and accepts no plugin name or arbitrary operator-supplied path. One
 port belongs to one plugin; a plugin may own several ports with supervised workers.
 
+SDK 0.2.0-dev.5 adds `Hardware.candidates/0`, returning typed
+`%Hardware.Candidate{id: ..., kind: ..., present?: ..., enabled?: ..., assigned_plugin: ...}`
+for read-only setup. Candidates grant no access. Save persistent drafts before
+navigating to gateway-owned assignment review; plugin UI is closed during checked
+unload. There is no administrative assignment SDK API.
+
 The plugin uses its ordinary transport library directly. Hardware assignment and
 enablement changes require checked whole-plugin stop before mutation, including
-both affected plugins, and leave them stopped. Native handles must drain. Unknown
+both affected plugins. Target startup is optional and explicitly reviewed; no
+connection or sharing command is replayed. Native handles must drain. Unknown
 cleanup/persistence blocks reuse. Assignments persist independently of plugin code.
 The SDK is not a sandbox; trusted code can bypass coordination conventions.
 

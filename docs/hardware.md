@@ -7,18 +7,32 @@ There is no built-in capture/Modbus diagnostic API. Opening Hardware is read-onl
 
 ## Exclusive assignment
 
-On a port's Hardware page, choose operator enablement and a compatible plugin, then
-review and confirm. One port has zero or one assigned plugin; a plugin can own several
-ports. Assignment is persistent intent, not proof of an open handle or device readiness.
-Only plugins declaring the corresponding `:ethernet`, `:serial` or `:can` kind in
-`nerves_gate_hardware` appear. Unassigned or missing resources are valid observable states.
+Start setup from the plugin. In Modbus, save a stopped RTU definition, then use
+**Assign port / enable access** beside it. In Tailnet, review LAN assignment before
+entering volatile address settings. Both navigate to a gateway-owned review page
+that survives plugin UI shutdown. Return to the plugin for explicit connection
+Start or address/sharing commands; no resource is opened by saving a definition.
+
+Hardware is the cross-plugin overview. Assigning a compatible plugin grants access;
+there is no separate enablement prerequisite in ordinary setup. **Release** removes
+ownership. Advanced **Disable access** retains ownership for maintenance, and
+**Enable access** explicitly restores permission. Saved disabled intent is preserved.
+One port has zero or one assigned plugin; a plugin can own several ports. Assignment
+is persistent intent, not proof of an open handle or equipment readiness. Only plugins
+declaring the corresponding hardware kind appear.
 
 Changing ownership/permission stops BOTH affected plugins, including all their other
-ports and TCP connections, through the checked lifecycle path. A review is bound to
-the observed old assignment; stale reviews are rejected. Cleanup must succeed before
-the assignment is committed. Plugins remain stopped; starting and connecting are
-explicit separate operations. Busy/unknown cleanup or persistence outcomes block
-reuse. No forced takeover, automatic restart or command replay.
+ports and TCP connections, through checked cleanup. The review binds current ownership,
+permission, artifact/lifecycle state and LAN configuration. Stale reviews fail before
+effects; Network rechecks LAN state inside reservation admission. Unchanged ownership
+and permission do not stop a plugin unnecessarily.
+
+Plugins remain stopped unless **Start the target plugin after assignment** was
+explicitly reviewed (default off). Only the target may start; the previous owner is
+never restarted. Plugin startup can have plugin-defined effects; first-party Modbus
+and Tailnet startup start no connections or sharing. Assignment saved but plugin
+start failed is reported as partial completion, never rolled back or replayed.
+Busy/unknown cleanup or persistence blocks reuse. No forced takeover or automatic retry.
 
 Protected console, USB-management and Internet resources are not assignment
 candidates. Unsupported or absent ports cannot be assigned/enabled. A missing port's
@@ -30,8 +44,9 @@ Administrative API:
 ```elixir
 NervesGate.Plugins.hardware()
 # Explicitly authorize stopping both affected plugins; all their connections stop.
-NervesGate.Plugins.assign_port("ttyS3", true, "modbus_plugin", true)
-NervesGate.Plugins.assign_port("ttyS4", true, "modbus_plugin", true)
+{:ok, review} = NervesGate.Plugins.review_assignment("ttyS3", true, "modbus_plugin", false)
+# Show the whole-plugin stop scope, then confirm this exact review.
+:ok = NervesGate.Plugins.confirm_assignment(review)
 ```
 
 The manager serializes assignments with plugin lifecycle, keeps bounded current-only
@@ -41,7 +56,9 @@ intent is performed.
 
 ## Plugin-owned transport
 
-`NervesGateSDK.Hardware.resources/0` returns typed assigned/enabled allowlisted ports
+`NervesGateSDK.Hardware.candidates/0` provides typed, read-only presence, assignment
+and permission for setup. It grants no resource access and does not replace Network
+admission. `NervesGateSDK.Hardware.resources/0` returns typed assigned/enabled allowlisted ports
 for the actual managed calling process. It accepts no plugin name or arbitrary path and
 opens no handles. Presence and assignment do not imply connected equipment. Plugins
 supervise their own libraries and transport workers, not SDK claim/byte-I/O proxies.

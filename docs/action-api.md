@@ -30,7 +30,8 @@ status = NervesGate.status()
 Plugin-owned local addressing and subnet advertisement use the separate typed
 `NervesGateSDK.Network` lease API; see the [subnet-router plugin](../plugins/tailnet_subrouter/README.md).
 It requires an enabled exclusive assignment of a free LAN to the calling plugin
-(`Plugins.assign_port("eth1", true, "tailnet_subrouter", true)`), preserves
+(review with `Plugins.review_assignment/4`, then explicitly confirm with
+`Plugins.confirm_assignment/1`), preserves
 Internet/USB and blocks platform reconfiguration until owned resources are released
 or safely recovered.
 
@@ -62,7 +63,8 @@ hostname/trial IDs are plain strings. Failures return
 | `SSH.add_key(public_key)` | `:ok` after validating/saving one OpenSSH public key |
 | `SSH.remove_key(fingerprint)` | `:ok` after saving removal; existing sessions stay open |
 | `Plugins.hardware()` | Current exclusive port intent, eligible plugin kinds and lifecycle availability |
-| `Plugins.assign_port(port, enabled, plugin, stop_confirmed \\ false, expected \\ nil)` | Checked whole-plugin stop, then persist assignment; leave stopped |
+| `Plugins.review_assignment(port, enabled, plugin, start_plugin \\ false)` | `{:ok, review}`; current state and whole-plugin stop scope, no lifecycle effects |
+| `Plugins.confirm_assignment(review)` | Checked stop and persist, then optionally start only the explicitly reviewed target; post-commit start failure is distinct |
 | `Storage.setup(action, card_id \\ nil, confirmation \\ nil)` | `:ok`; storage setup accepted |
 | `Distribution.cookie()` | `{:ok, cookie}`; explicit private read |
 | `System.info()` | Sanitized `%{firmware: ..., source_revision: ..., target: ..., node: ..., elixir: ..., otp: ...}` |
@@ -234,12 +236,18 @@ factory-reset command.
 
 ```elixir
 NervesGate.Plugins.hardware()
-NervesGate.Plugins.assign_port("ttyS3", true, "modbus_plugin", true)
+{:ok, review} = NervesGate.Plugins.review_assignment("ttyS3", true, "modbus_plugin")
+# Show the stop scope to the operator before confirming.
+:ok = NervesGate.Plugins.confirm_assignment(review)
 ```
 
-The `true` explicitly permits stopping BOTH affected plugins, interrupting all their
-ports/connections. Changes persist only after checked cleanup, and plugins remain
-stopped. The optional expected old setting binds UI confirmation to reviewed intent.
+Confirmation permits stopping BOTH affected plugins, interrupting all their
+ports/connections. Changes persist only after checked cleanup. Reviews bind owner,
+permission, artifact/lifecycle and LAN state; stale reviews fail before effects.
+The optional fourth review argument explicitly requests target-plugin startup after
+assignment; it defaults to false and never replays a connection or sharing command.
+`{:error, {:assignment_saved_start_failed, reason}}` means ownership was committed
+but target startup failed; inspect it rather than retrying the whole operation.
 Hardware never captures traffic or issues protocol reads. Plugins own direct I/O;
 `NervesGateSDK.Hardware.resources/0` queries the actual managed caller's assignments.
 See [hardware and Modbus](hardware.md) and [storage](plugins.md#storage-and-state).

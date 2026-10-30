@@ -228,7 +228,7 @@ defmodule Scenarios.Cases.ProjectionStream do
 
       assert state.draft in [
                "192.0.2.123",
-               "true",
+               "tailnet_subrouter",
                "unsaved-gateway",
                "unsaved-public-key"
              ]
@@ -300,8 +300,8 @@ defmodule Scenarios.Cases.ProjectionStream do
 
     {:noreply, socket} =
       NervesGateWeb.HardwarePortLive.handle_event(
-        "review",
-        %{"assignment" => %{"enabled" => "true", "plugin" => "tailnet_subrouter"}},
+        "edit_assignment",
+        %{"assignment" => %{"plugin" => "tailnet_subrouter", "start_plugin" => "false"}},
         socket
       )
 
@@ -346,14 +346,14 @@ defmodule Scenarios.Cases.ProjectionStream do
       {:state, from, ref} ->
         fields = %{
           network: "internet_ip",
-          lan: "enabled",
+          lan: "plugin",
           remote: "hostname",
           settings: "public_key"
         }
 
         draft =
           case editor do
-            :lan -> socket.assigns.draft["enabled"]
+            :lan -> socket.assigns.assignment_form["plugin"]
             :settings -> socket.assigns.key_form.params[Map.fetch!(fields, editor)]
             _ -> socket.assigns.form.params[Map.fetch!(fields, editor)]
           end

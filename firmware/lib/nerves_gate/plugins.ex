@@ -17,8 +17,14 @@ defmodule NervesGate.Plugins do
   @doc false
   def authorize_port(pid, port), do: GenServer.call(__MODULE__, {:authorize_port, pid, port})
 
-  def assign_port(port, enabled, plugin, stop_confirmed \\ false, expected \\ nil),
-    do: command({:assign_port, port, enabled, plugin, stop_confirmed, expected})
+  def review_assignment(port, enabled, plugin, start_plugin \\ false) do
+    network = assignment_network(port)
+    GenServer.call(__MODULE__, {:review_assignment, port, enabled, plugin, start_plugin, network})
+  end
+
+  def confirm_assignment(review) do
+    command({:confirm_assignment, review})
+  end
 
   @doc false
   def mount_ui(app), do: GenServer.call(__MODULE__, {:mount_ui, app})
@@ -196,6 +202,51 @@ defmodule NervesGate.Plugins do
          end),
        operation: state.job != nil
      }, state}
+  end
+
+  def handle_call({:review_assignment, port, enabled, plugin, start_plugin, network}, _, state) do
+    {capabilities, state} = capabilities(state)
+
+    result =
+      with nil <- state.assignment_error || state.blocked,
+           nil <- state.job,
+           true <- state.restored?,
+           true <- is_boolean(enabled),
+           true <- is_boolean(start_plugin) and (not start_plugin or (enabled and plugin != nil)),
+           :ok <-
+             Assignments.validate(
+               port,
+               enabled,
+               plugin,
+               NervesGate.Hardware.inventory(),
+               capabilities
+             ) do
+        {:ok, assignment_review(port, enabled, plugin, start_plugin, network, state)}
+      else
+        {:error, _} = error -> error
+        _ -> {:error, :hardware_assignments_unavailable}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call(:hardware_candidates, _, state) do
+    ports =
+      for port <- NervesGate.Hardware.inventory() do
+        setting = state.assignments[port.name] || %{enabled: false, plugin: nil}
+
+        %NervesGateSDK.Hardware.Candidate{
+          id: port.name,
+          kind: Assignments.kind(port.name),
+          present?: port.present,
+          enabled?: setting.enabled,
+          assigned_plugin: setting.plugin
+        }
+      end
+
+    if state.assignment_error || state.blocked,
+      do: {:reply, {:error, :hardware_assignments_unavailable}, state},
+      else: {:reply, {:ok, ports}, state}
   end
 
   def handle_call({:authorize_port, pid, port}, _, state) do
@@ -606,7 +657,7 @@ defmodule NervesGate.Plugins do
     do: true
 
   defp firmware_request?({:select, _, _}, _), do: true
-  defp firmware_request?({:assign_port, _, _, _, _, _}, _), do: true
+  defp firmware_request?({:confirm_assignment, _}, _), do: true
 
   defp firmware_request?({operation, app}, state)
        when operation in [:start, :stop, :restart, :rollback, :uninstall, :unexpected_stop],
@@ -653,14 +704,75 @@ defmodule NervesGate.Plugins do
     end
   end
 
-  defp assignment_unchanged(_, nil), do: :ok
-  defp assignment_unchanged(setting, setting), do: :ok
-  defp assignment_unchanged(_, _), do: {:error, :assignment_changed}
+  defp assignment_network(port) when port in ["eth0", "eth1"] do
+    case NervesGate.Network.status() do
+      nil -> :unavailable
+      status -> Map.take(status, [:config, :trial, :recovering, :ready])
+    end
+  end
 
-  defp reserve_assignment(port, needed) when port in ["eth0", "eth1"],
-    do: NervesGate.Network.reserve_hardware(port, needed)
+  defp assignment_network(_), do: nil
 
-  defp reserve_assignment(_, _), do: :ok
+  defp assignment_review(port, enabled, plugin, start?, network, state) do
+    old = state.assignments[port] || %{enabled: false, plugin: nil}
+    setting = %{enabled: enabled, plugin: plugin}
+    affected = Enum.reject(Enum.uniq([old.plugin, plugin]), &is_nil/1)
+    # Bind reviews to controller lifetime, selections and lifecycle changes,
+    # without exposing generation bindings or internal activation state.
+    activations =
+      Map.new(state.running, fn {app, activation} ->
+        {app, Map.take(activation, [:phase, :owner])}
+      end)
+
+    fingerprint =
+      :crypto.hash(
+        :sha256,
+        :erlang.term_to_binary(
+          {state.epoch, state.sequence, state.entries, state.assignments, activations}
+        )
+      )
+
+    %{
+      port: port,
+      previous: old,
+      setting: setting,
+      affected: affected,
+      affected_ports:
+        Map.new(affected, fn app ->
+          {app, for({id, %{plugin: ^app}} <- state.assignments, do: id) |> Enum.sort()}
+        end),
+      changed?: old != setting,
+      start_plugin?: start?,
+      network: network,
+      fingerprint: fingerprint
+    }
+  end
+
+  defp finish_assignment(_plugin, false, state, _context), do: {:ok, state}
+
+  defp finish_assignment(plugin, true, state, context) do
+    if Map.has_key?(state.running, plugin) do
+      {:ok, state}
+    else
+      case run({:start, plugin}, state, context) do
+        {:ok, next} -> {:ok, next}
+        {{:error, reason}, next} -> {{:error, {:assignment_saved_start_failed, reason}}, next}
+      end
+    end
+  end
+
+  defp reserve_review(%{changed?: false}), do: :ok
+
+  defp reserve_review(%{port: port, setting: setting, network: expected})
+       when port in ["eth0", "eth1"],
+       do:
+         NervesGate.Network.reserve_hardware(
+           port,
+           setting.enabled or setting.plugin != nil,
+           expected
+         )
+
+  defp reserve_review(_), do: :ok
 
   defp stop_and_assign(affected, port, setting, state, context) do
     affected = Enum.filter(affected, &Map.has_key?(state.entries, &1))
@@ -687,31 +799,59 @@ defmodule NervesGate.Plugins do
     end
   end
 
-  defp perform({:assign_port, port, enabled, plugin, confirmed, expected}, state, context) do
-    old = state.assignments[port] || %{enabled: false, plugin: nil}
-    affected = Enum.reject(Enum.uniq([old.plugin, plugin]), &is_nil/1)
-    running = Enum.filter(affected, &Map.has_key?(state.running, &1))
+  defp perform(
+         {:confirm_assignment,
+          %{
+            port: port,
+            setting: %{enabled: enabled, plugin: plugin} = setting,
+            start_plugin?: start?
+          } = review},
+         state,
+         context
+       )
+       when is_boolean(enabled) and is_boolean(start?) and
+              (not start? or (enabled and is_binary(plugin))) do
     {capabilities, state} = capabilities(state)
 
+    current =
+      assignment_review(
+        port,
+        setting.enabled,
+        setting.plugin,
+        start?,
+        assignment_network(port),
+        state
+      )
+
     with nil <- state.assignment_error,
-         :ok <- assignment_unchanged(old, expected),
+         true <- review == current,
          :ok <-
            Assignments.validate(
              port,
-             enabled,
-             plugin,
+             setting.enabled,
+             setting.plugin,
              NervesGate.Hardware.inventory(),
              capabilities
            ),
-         true <- running == [] or confirmed == true,
-         :ok <- reserve_assignment(port, enabled or plugin != nil) do
-      stop_and_assign(affected, port, %{enabled: enabled, plugin: plugin}, state, context)
+         :ok <- reserve_review(current) do
+      result =
+        if current.changed?,
+          do: stop_and_assign(current.affected, port, setting, state, context),
+          else: {:ok, state}
+
+      case result do
+        {:ok, next} -> finish_assignment(setting.plugin, start?, next, context)
+        failure -> failure
+      end
     else
-      false -> {{:error, :stop_confirmation_required}, state}
+      false -> {{:error, :review_changed}, state}
       {:error, _} = error -> {error, state}
       _ -> {{:error, :hardware_assignments_unavailable}, state}
     end
   end
+
+  defp perform({:confirm_assignment, _}, state, _context),
+    do: {{:error, :invalid_hardware_assignment}, state}
 
   defp perform({:select, name, version}, state, context) do
     app = to_string(name)

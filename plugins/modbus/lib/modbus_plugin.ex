@@ -31,7 +31,7 @@ defmodule ModbusPlugin do
   end
 
   @impl true
-  def handle_call(:ports, _, state), do: {:reply, NervesGateSDK.Hardware.resources(), state}
+  def handle_call(:ports, _, state), do: {:reply, NervesGateSDK.Hardware.candidates(), state}
 
   def handle_call({:save, id, params}, _, state) do
     with :ok <- writable(state, id),

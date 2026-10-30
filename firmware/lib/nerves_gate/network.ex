@@ -67,7 +67,9 @@ defmodule NervesGate.Network do
   end
 
   @doc false
-  def reserve_hardware(interface, needed), do: call({:reserve_hardware, interface, needed})
+  def reserve_hardware(interface, needed, expected) do
+    call({:reserve_hardware, interface, needed, expected})
+  end
 
   @doc "Claim an enabled Ethernet interface assigned to the actual managed caller. Addressing is transient."
   def claim_local(interface, address, prefix),
@@ -160,15 +162,17 @@ defmodule NervesGate.Network do
     {:reply, sources(state), state}
   end
 
-  def handle_call({:reserve_hardware, interface, needed}, {pid, _}, state) do
+  def handle_call({:reserve_hardware, interface, needed, expected}, {pid, _}, state) do
     state = refresh(state)
 
     with :ok <- hardware_idle(state),
+         true <- expected == Map.take(public(state), [:config, :trial, :recovering, :ready]),
          :ok <- Policy.available(Map.put(public(state), :local, nil)),
          :ok <- hardware_candidate(state, interface, needed) do
       reservation = %{pid: pid, monitor: Process.monitor(pid)}
       {:reply, :ok, Map.put(state, :hardware_assignment, reservation)}
     else
+      false -> {:reply, {:error, :review_changed}, state}
       error -> {:reply, error, state}
     end
   end

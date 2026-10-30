@@ -84,19 +84,22 @@ defmodule ModbusPlugin.UI do
             <option value="tcp" selected={@form[:transport].value == "tcp"}>TCP</option>
           </select></label>
           <div :if={@form[:transport].value == "rtu"}>
-            <label>Assigned RS485 port<select name="connection[serial_port]" required>
-              <option value="">Select assigned port</option>
+            <label>RS485 port<select name="connection[serial_port]" required>
+              <option value="">Select port</option>
               <option
                 :for={port <- @ports}
                 value={port.id}
                 selected={@form[:serial_port].value == port.id}
                 disabled={!port.present?}
               >
-                {port.id}{if !port.present?, do: " — not detected"}
+                {port_label(port.id)} — {assignment_label(port)}
               </option>
             </select></label>
             <p :if={@ports == []}>
-              No enabled RS485 port is assigned to this plugin. Stop it, assign a port under Hardware, then start it again.
+              No RS485 hardware is detected on this target.
+            </p>
+            <p class="ui-help">
+              Save the stopped definition first, then use Assign port below it if access is missing. Saving never grants access or opens the bus.
             </p>
             <label>Speed<select name="connection[speed]">
               <option
@@ -194,6 +197,17 @@ defmodule ModbusPlugin.UI do
                 "#{connection.serial_port} #{connection.speed} 8#{String.first(Atom.to_string(connection.parity)) |> String.upcase()}#{connection.stop_bits}",
               else: "#{connection.host || "listen"}:#{connection.port}"} · unit {connection.unit} · {connection.state}
           </h3>
+          <p
+            :if={connection.transport == "rtu" and !assigned?(@ports, connection.serial_port)}
+            role="status"
+          >
+            Saved draft — enabled port assignment is required before Start.
+            <.link
+              navigate={assignment_path(connection.serial_port)}
+              class="ui-button ui-button--secondary"
+            >Assign port / enable access</.link>
+            This leaves the plugin page and may stop the whole plugin; saved definitions are retained. Return here after assignment.
+          </p>
           <p :if={connection.read_at}>Last successful read: {connection.read_at}</p>
           <p :if={connection.error} role="alert">{inspect(connection.error)}</p>
           <p :if={connection.state == :cleanup_required} role="alert">
@@ -259,7 +273,10 @@ defmodule ModbusPlugin.UI do
             phx-click="start"
             phx-value-id={connection.id}
             phx-target={@myself}
-            disabled={@uncertain?}
+            disabled={
+              @uncertain? or
+                (connection.transport == "rtu" and !assigned?(@ports, connection.serial_port))
+            }
           >Start</button>
           <button
             :if={connection.state == :stopped}
@@ -438,6 +455,29 @@ defmodule ModbusPlugin.UI do
   catch
     :exit, _ -> %{}
   end
+
+  defp port_label("ttyS3"), do: "RS485 1 (ttyS3)"
+  defp port_label("ttyS4"), do: "RS485 2 (ttyS4)"
+
+  defp assignment_label(port) do
+    cond do
+      !port.present? -> "Not detected"
+      port.assigned_plugin == nil -> "Available for assignment"
+      port.assigned_plugin != "modbus_plugin" -> "Assigned to #{port.assigned_plugin}"
+      !port.enabled? -> "Modbus access disabled"
+      true -> "Assigned to Modbus"
+    end
+  end
+
+  defp assigned?(ports, id),
+    do:
+      Enum.any?(
+        ports,
+        &(&1.id == id and &1.present? and &1.enabled? and &1.assigned_plugin == "modbus_plugin")
+      )
+
+  defp assignment_path("ttyS3"), do: "/hardware/rs485/1?plugin=modbus_plugin"
+  defp assignment_path("ttyS4"), do: "/hardware/rs485/2?plugin=modbus_plugin"
 
   defp ports do
     case ModbusPlugin.ports() do

@@ -21,7 +21,7 @@ defmodule Scenarios.PluginLifecycle do
 
       if Enum.any?(entries, &(&1.app == "managed_fixture")) do
         assert :ok = ManagedPlugin.plugins(vm, :stop, [@app])
-        assert :ok = ManagedPlugin.plugins(vm, :assign_port, ["eth1", false, nil, true])
+        assert :ok = Scenarios.ManagedPlugin.assign(vm, "eth1", false, nil)
         assert :ok = ManagedPlugin.plugins(vm, :uninstall, [@app])
       end
 
@@ -55,6 +55,25 @@ defmodule Scenarios.PluginLifecycle do
       end)
 
     try do
+      # This scenario owns a fresh disposable disk. Establish a configured LAN
+      # baseline; an unconfigured commissioning state cannot be saved as a trial.
+      Device.save(
+        vm,
+        Map.put(Device.settings("eth0"), "eth1", %{"role" => "plugin", "address" => nil})
+      )
+
+      assert {:ok, _} = ManagedPlugin.plugins(vm, :install, [packages["2.4.0"]])
+
+      assert {:error, {:assignment_saved_start_failed, _}} =
+               ManagedPlugin.assign(vm, "eth1", true, "managed_fixture", true)
+
+      assert %{ports: %{"eth1" => %{enabled: true, plugin: "managed_fixture"}}} =
+               ManagedPlugin.plugins(vm, :hardware, [])
+
+      refute active(vm).running?
+      assert :ok = ManagedPlugin.assign(vm, "eth1", false, nil)
+      assert :ok = ManagedPlugin.plugins(vm, :uninstall, [@app])
+
       assert {:ok, _} = ManagedPlugin.plugins(vm, :install, [packages["2.0.0"]])
       assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
       assert_events(vm)
@@ -129,7 +148,7 @@ defmodule Scenarios.PluginLifecycle do
 
     # Local claims need an exclusive assignment; changing it stops the plugin.
     assert :ok =
-             ManagedPlugin.plugins(vm, :assign_port, ["eth1", true, "managed_fixture", true])
+             Scenarios.ManagedPlugin.assign(vm, "eth1", true, "managed_fixture")
 
     assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
     client = ManagedPlugin.main(vm)
@@ -162,7 +181,7 @@ defmodule Scenarios.PluginLifecycle do
              ])
 
     assert_inflight_cleanup(vm)
-    assert :ok = ManagedPlugin.plugins(vm, :assign_port, ["eth1", false, nil, true])
+    assert :ok = Scenarios.ManagedPlugin.assign(vm, "eth1", false, nil)
     assert :ok = ManagedPlugin.plugins(vm, :start, [@app])
 
     restore =

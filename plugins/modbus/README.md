@@ -39,8 +39,13 @@ rewrites them. The controller stays available for diagnosis.
 
 ## Save, Start, Stop
 
-Save never communicates. Startup and plugin restart load definitions and start
-nothing. **Start** explicitly resolves assigned serial ports, registers the
+Save never communicates. Choose RS485 in the connection form and save a stopped
+definition even if ownership is not yet granted. **Assign port / enable access** beside
+the saved draft opens gateway-owned review; it may stop the whole plugin and all its
+connections. Explicitly request target startup or start it afterwards, then return to
+the saved definition and Start. Saving does not grant access, and deleting a definition
+does not release a potentially shared port. Ordinary TCP needs no Ethernet assignment.
+Startup and plugin restart load definitions and start nothing. **Start** explicitly resolves assigned serial ports, registers the
 mappings and only then opens the transport; a registration failure opens nothing.
 Stop a connection before saving a change; there is no live reconfiguration.
 **Stop** terminates the runtime, which clears its platform bindings, claims, desires

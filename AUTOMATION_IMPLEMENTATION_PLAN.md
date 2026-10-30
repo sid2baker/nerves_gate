@@ -325,25 +325,34 @@ other writers, release writes nothing, and transport loss publishes unusable Rea
   hints, exclusive Authority with claim epochs, Desires, Apply outcomes and the pure
   `IO.OutputStatus` read model. Unsupported saved definitions disable I/O without
   stopping the controller or rewriting the file.
-- SDK 0.2.0-dev.3: `NervesGateSDK.IO` (`register_input/1`, `publish/3`, input,
+- SDK 0.2.0-dev.5: `NervesGateSDK.IO` (`register_input/1`, `publish/3`, input,
   output, subscribe and claim/set/release) and the `NervesGateSDK.Output` runtime
   with `apply/3`. SDK 0.2.0 publication is pending.
 - The `/io` page with `NervesGate.IO.snapshot/0` and `NervesGate.IO.Manual`, showing
   Status with reason, Apply outcome, evidence and declared release behaviour.
-- Modbus plugin 0.4.0 on the output runtime, with readback evidence and `:hold`
-  release. QEMU covers TCP; RTU between EC100 ports awaits separately authorized
-  physical testing.
+- Modbus plugin 0.4.2 on the output runtime, with readback evidence and `:hold`
+  release, plus plugin-first hardware assignment review. Tailnet 0.1.9 uses the
+  same host-owned review before volatile network setup. Assignment never starts
+  equipment communication. QEMU covers TCP; RTU between EC100 ports awaits
+  separately authorized physical testing.
 
 ## Readiness baseline
 
-The platform is ready for dependency evaluation, not yet approved for Jido
-integration. The qualified source baseline is `34a5671`:
+The platform prerequisites for dependency evaluation are implemented; evaluation
+remains paused until official Jido v3, and integration is not yet approved. The
+accepted plugin-first hardware cutover extends the earlier `34a5671` baseline:
 
-- Root `mix check`: 363 tests passed, including SDK, firmware, host tooling,
-  generated-plugin and first-party plugin tests; static checks passed.
-- Rebuilt QEMU: all 43 standard scenarios passed in one run
-  (`70ab33168f52cd8cdb44b4e61eaaf4ac:runner:7232`). Opt-in `tailscale_auth`
-  and physical hardware qualification were not included.
+- Root `mix check`: 374 tests passed, including SDK, firmware, host tooling,
+  generated-plugin and first-party plugin tests. The check and `git diff --check`
+  passed again during repository cleanup. Non-fatal diagnostics remain for the
+  existing SSH bare rescue and upstream yamodbus bitstring syntax.
+- Recorded artifact qualification: x86_64 and EC100 firmware, including assets,
+  built successfully. These builds were not repeated during repository cleanup.
+- Recorded rebuilt-QEMU qualification: all 43 standard scenarios passed in one run
+  (`32939124bc2759e6c993b022e4da9597:runner:1601`), with browser checks for
+  plugin-first assignment and review survival across unload. Runtime checks were
+  not repeated during repository cleanup. Opt-in `tailscale_auth` and physical
+  hardware qualification were not included.
 - SDKBackend precedes Plugins. Restoration is an explicit asynchronous job;
   Storage notifications and plugin-supervisor monitors replace readiness polling.
 - No Jido, Runic or LiveFlow dependency or temporary automation engine is present.

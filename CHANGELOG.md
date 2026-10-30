@@ -4,6 +4,7 @@
 
 ### Breaking changes
 
+- Hardware setup is plugin-first. `Plugins.review_assignment/4` and `confirm_assignment/1` replace `assign_port/5`; stale reviews fail before effects. Gateway-owned review survives plugin UI cleanup and offers explicit target-plugin startup after checked assignment. Saved owner/disabled intent is preserved; no connection or sharing command is replayed. Modbus 0.4.2 and Tailnet 0.1.9 expose setup links; new version-scoped configuration is not imported.
 - Physical firmware uploads pin the SSH host-key fingerprints the gateway reports over authenticated distribution (`NervesGate.SSH.host_key_fingerprints/0`) instead of reading `~/.ssh/known_hosts`. Factory-reset gateways need no manual trust step; firmware without this function is rejected and needs one explicitly authorized external update. SSH failures report their reason.
 - Workbench session operations verify checkout/session identity and protocol inputs; stale sessions require coordinated replacement. Use explicit `mix simulator.start/stop/reset`, `mix scenario.run ID --device TARGET` and `mix scenario.ci ID --device ID` instead of `mix test.qemu`. Plugin installs also require an explicit target and share the UI's reviewed Jobs workflow. No compatibility task aliases or automatic first-device selection remain.
 - Plugin terminology replaces application terminology everywhere, without aliases or migration: network role `"plugin"` (saved `"application"` roles are rejected), SD mount `/mnt/plugins` with filesystem label `plugins`, board keys `plugins_device`/`plugins_mount`, `plugin_*` error codes, `/plugins/:plugin` route and the `"plugin"` review key and upload path for reviewed installs. Deployed gateways and SD cards need an explicitly authorized reprovision/reformat; Workbench and firmware must be updated together.
@@ -13,7 +14,7 @@
 
 - Renamed the physical inventory domain to `NervesGate.Hardware` and its adapter configuration to `hardware_adapter`, with no old-name aliases.
 
-- Hardware now exposes exclusive plugin assignments, not built-in capture/Modbus diagnostics. Removed bus diagnostic commands and SDK CAN/RS485 transport proxies; plugins own direct supervised I/O. Assignment and enablement changes require checked stop of both affected plugins and leave them stopped.
+- Hardware now exposes exclusive plugin assignments, not built-in capture/Modbus diagnostics. Removed bus diagnostic commands and SDK CAN/RS485 transport proxies; plugins own direct supervised I/O. Assignment and enablement changes require checked stop of both affected plugins; target startup is separately explicit in the reviewed operation.
 
 - Trusted plugins are selected at firmware build time and managed by `NervesGate.Plugins` at `/plugins`; the application store, GitHub app-release workflow and old gateway application routes/APIs are removed. Schema-2 plugin metadata records immutable artifact identity and source. Old application metadata blocks activation without automatic migration or erasure. Stateful SDK resource access requires managed activation membership; raw IEx/RPC callers use administrative domain APIs.
 - The SDK uses the fixed firmware runtime bridge rather than configurable backends; absent firmware returns `:runtime_unavailable`. Plugin packages reject contributed native payloads and direct NIF loaders.

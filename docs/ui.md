@@ -89,9 +89,14 @@ The optional [Tailnet subnet-router plugin](../plugins/tailnet_subrouter/README.
 provides explicit local configuration and advertisement, disabled on every startup.
 Serial/CAN ports have exclusive persistent plugin assignments; Hardware shows the
 assigned plugin and its lifecycle state, not protocol or capture controls. A plugin
-may own multiple ports. Reassignment explicitly stops both affected plugins and
-leaves them stopped after checked cleanup. UI controls never replace backend
-admission. EM300/extension-card enumeration is not implemented. See [hardware](hardware.md).
+may own multiple ports. Setup begins in the plugin: Modbus saves a stopped draft,
+then links to assignment review; Tailnet assigns before entering volatile settings.
+The gateway-owned review survives plugin UI shutdown and explicitly stops both
+affected plugins. Target startup is an optional, default-off reviewed choice; no
+connection/sharing command is replayed and the previous owner is not restarted.
+Hardware offers cross-plugin visibility, release and advanced maintenance access.
+Post-commit startup failure is shown as partial completion. UI controls never replace
+backend admission. EM300/extension-card enumeration is not implemented. See [hardware](hardware.md).
 
 Neighbor discovery belongs to plugins. Hardware has no neighbor inventory, labels,
 scan or sharing controls.

@@ -25,6 +25,7 @@ defmodule NervesGateSDK.Backend do
           | :storage_save_config
           | :storage_restore_config
           | :storage_delete_config
+          | :hardware_candidates
           | :hardware_resources
           | :io_register_input
           | :io_register_output

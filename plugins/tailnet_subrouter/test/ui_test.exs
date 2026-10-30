@@ -45,9 +45,22 @@ defmodule TailnetSubrouter.UITest do
       html = render_component(UI, id: "subrouter", interfaces: {:ok, [port("eth1", attributes)]})
       assert html =~ ~r/<option[^>]*value="eth1"[^>]*disabled/
       assert html =~ reason
-      assert html =~ "No application interface is available"
+      assert html =~ "No assigned interface is available"
       assert html =~ ~r/<button[^>]*disabled[^>]*>Configure address<\/button>/
     end
+  end
+
+  test "assignment navigation is explicit, host-owned and excludes Internet" do
+    html =
+      render_component(UI,
+        id: "subrouter",
+        interfaces: {:ok, [port("eth0", internet?: true), port("eth1", assigned_plugin: nil)]}
+      )
+
+    assert html =~ "/hardware/lan/2?plugin=tailnet_subrouter"
+    refute html =~ "/hardware/lan/1?plugin=tailnet_subrouter"
+    assert html =~ "discard any unsaved address draft"
+    assert TailnetSubrouter.status() == %{state: :disabled}
   end
 
   test "unavailable or empty observations fail closed rather than inventing interfaces" do

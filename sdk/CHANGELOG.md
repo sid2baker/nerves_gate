@@ -17,6 +17,7 @@
 
 ### Added
 
+- SDK 0.2.0-dev.5 adds read-only `Hardware.candidates/0` for plugin setup, including presence, owner and permission. Candidates do not grant access; `resources/0` still requires actual managed ownership.
 - `Storage.save_config/1`, `restore_config/0` and `delete_config/0`: one opaque, atomically replaced configuration term per running plugin version, with plugin and version derived from the actual managed caller. Other versions' terms are preserved and never loaded automatically; restores refuse unknown atoms/functions and malformed or oversized (over 1 MiB) files. No fallback without commissioned storage.
 - `IO` input registration, `publish/3`, Reading, subscription and exclusive output Authority APIs with actual calling-process ownership. Shared `IO.InputDefinition`, `IO.OutputDefinition`, `IO.Evidence` and `IO.Reading` types describe observable inputs and repeatable desired-state outputs with declared evidence and descriptive release behaviour.
 - `NervesGateSDK.Output` runtime and `apply/3` behaviour: registers outputs, always applies the newest Desire, reports `:applied`/`:unknown`/`{:failed, reason}` under the current claim epoch, discards stale outcomes, never applies at startup or retries on its own (`reapply/2`, `reapply_after/2`). Version `0.2.0-dev.3` replaces the dev.2 `register_output/2`, `read_desired/1`, `publish_input/3`, `IO.Observation` and `feedback_input_id` without aliases.

@@ -66,12 +66,31 @@ defmodule Scenarios.Cases.Plugins do
              Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
 
     assert {:error, %{code: "hardware_reserved"}} =
-             ManagedPlugin.plugins(vm, :assign_port, ["eth0", true, "tailnet_subrouter", true])
+             Scenarios.ManagedPlugin.assign(vm, "eth0", true, "tailnet_subrouter")
 
-    assert :ok =
-             ManagedPlugin.plugins(vm, :assign_port, ["eth1", true, "tailnet_subrouter", true])
+    assert :ok = ManagedPlugin.assign(vm, "eth1", true, "tailnet_subrouter", true)
+    owner = Device.rpc(vm, Process, :whereis, [TailnetSubrouter])
+    assert is_pid(owner)
 
-    assert :ok = ManagedPlugin.plugins(vm, :start, [:tailnet_subrouter])
+    # A same-owner review does not tear down live plugin processes.
+    assert :ok = ManagedPlugin.assign(vm, "eth1", true, "tailnet_subrouter")
+    assert Device.rpc(vm, Process, :whereis, [TailnetSubrouter]) == owner
+
+    assert {:ok, stale} =
+             ManagedPlugin.plugins(vm, :review_assignment, [
+               "eth1",
+               true,
+               "tailnet_subrouter",
+               true
+             ])
+
+    assert :ok = ManagedPlugin.assign(vm, "eth1", false, "tailnet_subrouter")
+
+    assert %{ports: %{"eth1" => %{enabled: false, plugin: "tailnet_subrouter"}}} =
+             ManagedPlugin.plugins(vm, :hardware, [])
+
+    assert {:error, :review_changed} = ManagedPlugin.plugins(vm, :confirm_assignment, [stale])
+    assert :ok = ManagedPlugin.assign(vm, "eth1", true, "tailnet_subrouter", true)
     assert :ok = Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
 
     Device.await(vm, "assigned LAN is configured without changing Internet", fn status ->
@@ -86,7 +105,7 @@ defmodule Scenarios.Cases.Plugins do
              Device.rpc(vm, NervesGate.Network, :propose, [changed])
 
     assert :ok = Device.rpc(vm, TailnetSubrouter, :configure, ["eth1", "10.44.0.2", 24], 75_000)
-    assert :ok = ManagedPlugin.plugins(vm, :assign_port, ["eth1", false, nil, true])
+    assert :ok = Scenarios.ManagedPlugin.assign(vm, "eth1", false, nil)
 
     Device.await(vm, "reassignment drains the owning plugin's LAN lease", fn status ->
       status.network.local == nil and
@@ -115,7 +134,8 @@ defmodule Scenarios.Cases.Plugins do
       assert :ok = Device.rpc(vm, ModbusPlugin, :save, ["client1", modbus_client()])
 
       # Platform configuration storage keys the term by the running plugin version.
-      config = "/mnt/plugins/data/modbus_plugin/.nerves_gate/config/0.4.0.term"
+      version = Device.rpc(vm, Application, :spec, [:modbus_plugin, :vsn]) |> to_string()
+      config = "/mnt/plugins/data/modbus_plugin/.nerves_gate/config/#{version}.term"
 
       assert %{"client1" => _, "server1" => _} =
                config |> then(&Device.rpc(vm, File, :read!, [&1])) |> :erlang.binary_to_term()

@@ -66,6 +66,12 @@ application membership, starts private dependencies and checks optional health.
 Commands are serialized in bounded workers while the manager remains responsive.
 A deadline/lost reply is an unknown result, not cancellation or permission to retry.
 
+Hardware setup starts from plugin forms and navigates to gateway-owned assignment
+review before any affected plugin is stopped. The review survives UI cleanup and can
+explicitly request target-plugin startup; it never starts the previous owner or
+replays equipment connection/sharing commands. Saved disabled permission is an advanced
+maintenance state. See [hardware](hardware.md).
+
 Stop quiesces ownership, closes plugin UI sessions, stops private applications,
 drains SDK resources and checks unload/purge. Busy code or uncertain cleanup blocks
 reuse rather than forcing purge. Shared firmware libraries and other plugins are

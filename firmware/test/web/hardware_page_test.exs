@@ -204,6 +204,16 @@ defmodule NervesGateWeb.HardwarePageTest do
       |> Floki.parse_document!()
 
     assert Floki.text(document) =~ "Assigned plugin: modbus_plugin"
+    assert [] = Floki.find(document, "select[name='assignment[enabled]']")
+    assert [_] = Floki.find(document, "#hardware-advanced")
+
+    assert [_] =
+             Floki.find(
+               document,
+               "input[type='checkbox'][name='assignment[start_plugin]']:not([checked])"
+             )
+
+    assert [_] = Floki.find(document, "a[href='/plugins/modbus_plugin']")
 
     assert [_] =
              Floki.find(
@@ -213,6 +223,41 @@ defmodule NervesGateWeb.HardwarePageTest do
 
     assert [] =
              Floki.find(document, "[phx-click=capture], #modbus-form, input[name='modbus[unit]']")
+  end
+
+  test "assignment edits are effect-free drafts retained across refresh" do
+    socket = %Phoenix.LiveView.Socket{
+      assigns: %{__changed__: %{}, busy: false, uncertain?: false, draft: %{old: :review}}
+    }
+
+    params = %{"plugin" => "tailnet_subrouter", "start_plugin" => "true"}
+
+    assert {:noreply, edited} =
+             NervesGateWeb.HardwarePortLive.handle_event(
+               "edit_assignment",
+               %{"assignment" => params},
+               socket
+             )
+
+    assert edited.assigns.assignment_form == params
+    assert edited.assigns.draft == nil
+
+    assert {:noreply, refreshed} =
+             NervesGateWeb.HardwarePortLive.handle_event("refresh", %{}, edited)
+
+    assert refreshed.assigns.assignment_form == params
+  end
+
+  test "refresh does not clear an unknown assignment outcome" do
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, busy: false, uncertain?: true}}
+
+    assert {:noreply, refreshed} =
+             NervesGateWeb.HardwarePortLive.handle_event("refresh", %{}, socket)
+
+    assert refreshed.assigns.uncertain?
+
+    assert {:noreply, ^refreshed} =
+             NervesGateWeb.HardwarePortLive.handle_event("confirm", %{}, refreshed)
   end
 
   test "plugin ports configure no IP and Internet edits preserve them" do

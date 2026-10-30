@@ -16,6 +16,24 @@ defmodule NervesGateSDK.Hardware do
           }
   end
 
+  defmodule Candidate do
+    @moduledoc "Read-only port choice, not permission to open or configure it."
+    @enforce_keys [:id, :kind, :present?, :enabled?]
+    defstruct [:id, :kind, :present?, :enabled?, :assigned_plugin]
+
+    @type t :: %__MODULE__{
+            id: String.t(),
+            kind: :serial | :can | :ethernet,
+            present?: boolean(),
+            enabled?: boolean(),
+            assigned_plugin: String.t() | nil
+          }
+  end
+
+  @doc "Read hardware candidates for setup. Administrative review grants assignments; this query does not."
+  @spec candidates() :: {:ok, [Candidate.t()]} | {:error, term()}
+  def candidates, do: Backend.call(:hardware_candidates, [])
+
   @spec resources() :: {:ok, [Port.t()]} | {:error, term()}
   def resources, do: Backend.call(:hardware_resources, [])
 end

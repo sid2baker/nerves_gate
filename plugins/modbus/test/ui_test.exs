@@ -36,6 +36,41 @@ defmodule ModbusPlugin.UITest do
     assert ModbusPlugin.Connection.pid("server1") == nil
   end
 
+  test "unassigned saved RTU drafts offer review but cannot start" do
+    {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
+    defaults = socket.assigns.form.params
+    {:ok, mappings} = JSON.decode(defaults["mappings"])
+
+    {:ok, %{"server1" => config}} =
+      ModbusPlugin.Store.put(
+        %{},
+        "server1",
+        Map.merge(defaults, %{"mappings" => mappings, "authorized" => "true"})
+      )
+
+    connection = Map.merge(config, %{state: :stopped, values: nil, error: nil, read_at: nil})
+
+    port = %NervesGateSDK.Hardware.Candidate{
+      id: "ttyS3",
+      kind: :serial,
+      present?: true,
+      enabled?: false
+    }
+
+    html =
+      render_component(ModbusPlugin.UI,
+        id: "modbus",
+        ports: [port],
+        status: %{storage: nil, connections: [connection]}
+      )
+
+    assert html =~ "RS485 1 (ttyS3)"
+    assert html =~ "Available for assignment"
+    assert html =~ "/hardware/rs485/1?plugin=modbus_plugin"
+    assert html =~ ~r/<button[^>]*phx-click="start"[^>]*disabled/
+    assert ModbusPlugin.Connection.pid("server1") == nil
+  end
+
   test "Edit loads a saved definition into a separate draft; role switches keep user edits" do
     {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
     defaults = socket.assigns.form.params
