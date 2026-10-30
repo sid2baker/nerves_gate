@@ -69,7 +69,7 @@ defmodule Workbench.FirmwareUpdateTest do
         {key, to_string(:ssh.hostkey_fingerprint(:sha256, key))}
       end
 
-    assert_raise FunctionClauseError, fn -> Workbench.SSH.verified([]) end
+    assert_raise FunctionClauseError, fn -> apply(Workbench.SSH, :verified, [[]]) end
     options = Workbench.SSH.verified([elem(reported, 1)])
     assert options[:silently_accept_hosts] == false
     assert options[:auth_methods] == ~c"publickey"

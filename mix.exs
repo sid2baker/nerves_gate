@@ -140,7 +140,7 @@ defmodule Workbench.MixProject do
   # Host-only native orchestration. Nerves device builds and user apps run
   # in supervised OS processes instead; their compiler state must be isolated.
   defp project_modules(app) do
-    path = Path.join([Mix.Project.app_path(), "ebin", "#{app}.app"])
+    path = Path.join([Mix.Project.build_path(), "lib", Atom.to_string(app), "ebin", "#{app}.app"])
 
     case :file.consult(String.to_charlist(path)) do
       {:ok, [{:application, ^app, spec}]} -> spec[:modules] || []
@@ -223,7 +223,11 @@ defmodule Workbench.MixProject do
           Mix.Task.run(task, args)
         after
           if not running?, do: Application.stop(app)
-          restore_modules(project_modules(app), loaded_modules)
+
+          # Firmware's independent host graph also loads its own SDK copy.
+          for checked_app <- Enum.uniq([app, :nerves_gate_sdk]) do
+            restore_modules(project_modules(checked_app), loaded_modules)
+          end
         end
       end)
     after
