@@ -32,8 +32,6 @@ defmodule NervesGate.IO.Definition do
 
   def valid?(_), do: false
 
-  def roles, do: @roles
-
   def local_id?(id) do
     is_binary(id) and byte_size(id) in 1..128 and
       Regex.match?(~r/\A[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*\z/, id)

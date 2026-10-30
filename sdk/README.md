@@ -84,6 +84,24 @@ def apply(id, value, state) do
 end
 ```
 
+The callback returns `{outcome, new_state}`. In the plugin's supervisor, use an
+explicit child specification for the runtime's multi-argument `start_link/4`:
+
+```elixir
+children = [
+  %{
+    id: MyPlugin.Outputs,
+    start: {NervesGateSDK.Output, :start_link, [MyPlugin.Outputs, definitions, device_state]}
+  }
+]
+
+Supervisor.init(children, strategy: :one_for_one)
+```
+
+`MyPlugin.Outputs` implements the callback above. Use a distinct child ID for each
+runtime. Its registration and callback calls belong to that supervised process,
+not to the supervisor or a gateway LiveView.
+
 The runtime registers the outputs, runs `apply/3` in its own process, always
 applies the newest Desire and reports outcomes under the current claim epoch;
 results for an ended claim or superseded Desire are discarded. It never calls

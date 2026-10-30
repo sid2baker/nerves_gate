@@ -29,13 +29,12 @@ defmodule NervesGate.IOOutputRuntimeTest do
     parent = self()
     definition = %OutputDefinition{id: "relay", type: :boolean, on_release: :hold}
 
-    # The runtime is started inside the plugin activation, by a process that traps
-    # its exit the way a plugin's owning process would.
+    # Use the documented child specification in a real managed plugin supervisor.
     {:ok, runtime} =
-      plugin(Other, fn ->
-        Process.flag(:trap_exit, true)
-        Output.start_link(Recorder, [definition], parent)
-      end)
+      Supervisor.start_child(FixtureSupervisor, %{
+        id: Output,
+        start: {Output, :start_link, [Recorder, [definition], parent]}
+      })
 
     Map.merge(fixture, %{path: path, runtime: runtime, id: "io_fixture.relay"})
   end
@@ -107,6 +106,42 @@ defmodule NervesGate.IOOutputRuntimeTest do
     send(runtime, {:outcome, :applied})
     :ok = GateIO.claim_output(id)
     :ok = GateIO.release_output(id)
+    refute_receive {:apply, _, _, _}, 100
+  end
+
+  test "ending a claim while Apply is in flight discards its outcome", %{id: id, runtime: runtime} do
+    :ok = GateIO.claim_output(id)
+    :ok = GateIO.set_output(id, true)
+    assert_receive {:apply, ^runtime, "relay", true}
+
+    :ok = GateIO.release_output(id)
+    :ok = GateIO.claim_output(id)
+    :ok = GateIO.set_output(id, true)
+    send(runtime, {:outcome, {:failed, :old_claim}})
+
+    # The equal value belongs to a new claim and must be applied again, not treated
+    # as the already attempted value. The old failure cannot become its Status.
+    assert_receive {:apply, ^runtime, "relay", true}
+    assert {:ok, %{status: %{applied: nil}}} = GateIO.output(id)
+    send(runtime, {:outcome, :applied})
+    await_applied(id, :applied)
+  end
+
+  test "supervised restart registers afresh without restoring a Desire", %{
+    id: id,
+    runtime: runtime
+  } do
+    :ok = GateIO.claim_output(id)
+    :ok = GateIO.set_output(id, true)
+    assert_receive {:apply, ^runtime, "relay", true}
+    send(runtime, {:outcome, :applied})
+    await_applied(id, :applied)
+
+    :ok = Supervisor.terminate_child(FixtureSupervisor, Output)
+    assert {:ok, %{available?: false, claimed?: false, desired: nil}} = GateIO.output(id)
+    {:ok, restarted} = Supervisor.restart_child(FixtureSupervisor, Output)
+    assert restarted != runtime
+    assert {:ok, %{available?: true, claimed?: false, desired: nil}} = GateIO.output(id)
     refute_receive {:apply, _, _, _}, 100
   end
 

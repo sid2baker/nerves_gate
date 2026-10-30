@@ -11,7 +11,8 @@ defmodule NervesGate.IO.OutputStatus do
   """
   alias NervesGateSDK.IO.Evidence
 
-  @tiers [:physical, :consequence, :estimate, :readback]
+  @tiers %{physical: 4, consequence: 3, estimate: 2, readback: 1}
+  @states %{contradicted: 3, pending: 2, confirmed: 1}
 
   @type state :: :confirmed | :pending | :mismatch | :unknown
   @type t :: %{
@@ -106,17 +107,17 @@ defmodule NervesGate.IO.OutputStatus do
   defp verdict(_, nil, _, _), do: {:unknown, "No Desire"}
 
   defp verdict(definition, _, applied, entries) do
-    tier = tier(entries)
+    evidence = tier(entries)
 
     cond do
-      tier in [:confirmed, :mismatch] ->
-        {tier, tier_reason(tier, entries)}
+      match?({state, _} when state in [:confirmed, :mismatch], evidence) ->
+        evidence
 
       match?(%{outcome: {:failed, _}}, applied) ->
         {:mismatch, "Apply failed: " <> reason(applied.outcome)}
 
-      tier == :pending ->
-        {:pending, "Waiting for evidence"}
+      evidence != nil ->
+        evidence
 
       applied == nil ->
         {:pending, "Waiting for the plugin's Apply outcome"}
@@ -134,44 +135,27 @@ defmodule NervesGate.IO.OutputStatus do
 
   # The strongest role with usable (settled or settling) evidence decides.
   defp tier(entries) do
-    Enum.find_value(@tiers, :none, fn role ->
-      usable =
-        for %{role: ^role, state: state} <- entries,
-            state in [:confirmed, :contradicted, :pending],
-            do: state
+    case Enum.max_by(entries, &rank/1, fn -> nil end) do
+      %{role: role, state: state, input: input}
+      when state in [:contradicted, :pending, :confirmed] ->
+        label = role |> Atom.to_string() |> String.capitalize()
 
-      cond do
-        usable == [] -> nil
-        :contradicted in usable -> :mismatch
-        :pending in usable -> :pending
-        true -> :confirmed
-      end
-    end)
+        case state do
+          :contradicted -> {:mismatch, "#{label} evidence #{input} disagrees"}
+          :pending -> {:pending, "Waiting for evidence"}
+          :confirmed -> {:confirmed, "#{label} evidence agrees"}
+        end
+
+      _ ->
+        nil
+    end
   end
 
-  defp tier_reason(:confirmed, entries) do
-    role =
-      Enum.find(@tiers, fn role ->
-        Enum.any?(entries, &(&1.role == role and &1.state == :confirmed))
-      end)
-
-    "#{role |> Atom.to_string() |> String.capitalize()} evidence agrees"
-  end
-
-  defp tier_reason(:mismatch, entries) do
-    %{role: role, input: input} =
-      Enum.find(entries, &(&1.state == :contradicted and strongest?(&1, entries)))
-
-    "#{role |> Atom.to_string() |> String.capitalize()} evidence #{input} disagrees"
-  end
-
-  defp strongest?(entry, entries) do
-    index = Enum.find_index(@tiers, &(&1 == entry.role))
-
-    not Enum.any?(entries, fn other ->
-      Enum.find_index(@tiers, &(&1 == other.role)) < index and
-        other.state in [:confirmed, :contradicted, :pending]
-    end)
+  defp rank(%{role: role, state: state}) do
+    case @states[state] do
+      nil -> {0, 0}
+      priority -> {@tiers[role], priority}
+    end
   end
 
   defp summary(nil), do: nil

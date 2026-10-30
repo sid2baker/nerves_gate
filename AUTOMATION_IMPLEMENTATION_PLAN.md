@@ -1,5 +1,13 @@
 # Platform I/O and automation plan
 
+## Execution status
+
+Phases 1–5 are implemented. Automation work is paused until the official Jido v3
+release; the current focus is repository cleanup, correctness and qualification of
+the existing platform. Dependency evaluation resumes after that release, without
+presuming adoption. Do not integrate Jido, Runic or LiveFlow, or build a temporary
+automation engine during the pause.
+
 ## Model
 
 The gateway runs one kind of thing: a feedback loop that acts only on fresh evidence
@@ -330,7 +338,8 @@ other writers, release writes nothing, and transport loss publishes unusable Rea
 
 ### 0. Evaluate Jido and LiveFlow
 
-Before integrating either dependency, verify against the real code:
+**Deferred until the official Jido v3 release.** Before integrating either
+dependency, verify against the real code:
 
 - EC100 and QEMU builds, footprint and compatibility with locked shared dependencies.
 - Supervised, bounded execution and mailbox behaviour.
@@ -354,16 +363,14 @@ request) and physical RTU qualification (separate authorization).
 **Status:** implemented with passing SDK, firmware unit/web and Modbus host tests;
 rebuilt-guest `plugins` qualification passed (185 seconds).
 
-One breaking SDK change before SDK 0.2.0 is published, with no compatibility field:
+The current SDK contract has no compatibility aliases:
 
-- Align names with the vocabulary: `Observation` becomes `Reading`,
-  `publish_input/3` becomes `publish/3`.
-- Add `NervesGateSDK.Output` and `apply/3`. Plugins stop handling hints and
-  `read_desired/1` themselves.
-- Add claim epochs and epoch-checked Apply outcomes.
-- Replace `feedback_input_id` with evidence declarations and `on_release`.
-- Add the Status read model and show it on `/io`, with drill-down.
-- Release a new immutable Modbus plugin version using the output runtime.
+- `IO.Reading` and `IO.publish/3` describe observed state.
+- `NervesGateSDK.Output` owns output registration, hints and epoch-checked Apply
+  reporting; plugins implement `apply/3`.
+- Outputs declare evidence and `on_release` behaviour.
+- `/io` shows derived Status, Apply outcomes and evidence details.
+- Modbus 0.4.0 uses the output runtime.
 
 **Acceptance:** SDK contract tests and firmware unit tests for epoch increments,
 rejection of ended-epoch outcomes, equal Desires across epochs, evidence validation,
@@ -446,7 +453,9 @@ writes, plugin activation, workstation network changes or a new bench lifecycle.
 ## Order
 
 ```text
-Dependency evaluation (0) ─────────────────────────┐
-                                                   ↓
-Output runtime, epochs, evidence, Status (5) → Automation (6) → LiveFlow (7)
+Now: maintain and qualify the implemented platform (1–5).
+
+After official Jido v3:
+Dependency evaluation (0) → Automation (6) → LiveFlow (7)
+                            only if approved
 ```

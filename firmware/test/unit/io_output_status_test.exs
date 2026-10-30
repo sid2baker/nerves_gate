@@ -119,6 +119,96 @@ defmodule NervesGate.IO.OutputStatusTest do
              )
   end
 
+  test "every stronger evidence role wins regardless of declaration order or Apply outcome" do
+    roles = [:physical, :consequence, :estimate, :readback]
+
+    for {stronger, index} <- Enum.with_index(roles),
+        weaker <- Enum.drop(roles, index + 1),
+        value <- [true, false],
+        outcome <- [:applied, :unknown, {:failed, :busy}],
+        reverse? <- [false, true] do
+      evidence = [
+        %Evidence{input: "p.stronger", role: stronger},
+        %Evidence{input: "p.weaker", role: weaker}
+      ]
+
+      definition = %{@pump | evidence: if(reverse?, do: Enum.reverse(evidence), else: evidence)}
+      expected = if value, do: :confirmed, else: :mismatch
+      label = stronger |> Atom.to_string() |> String.capitalize()
+
+      reason =
+        if value, do: "#{label} evidence agrees", else: "#{label} evidence p.stronger disagrees"
+
+      assert %{state: ^expected, reason: ^reason} =
+               status(
+                 %{
+                   "p.stronger" => input(:boolean, value, 2_000),
+                   "p.weaker" => input(:boolean, not value, 2_000)
+                 },
+                 applied(outcome),
+                 3_000,
+                 definition
+               )
+    end
+  end
+
+  test "within a role contradiction wins over settling, which wins over agreement" do
+    definition = %{
+      @pump
+      | evidence: [
+          %Evidence{input: "p.a", role: :physical},
+          %Evidence{input: "p.b", role: :physical}
+        ]
+    }
+
+    for evidence <- [definition.evidence, Enum.reverse(definition.evidence)] do
+      definition = %{definition | evidence: evidence}
+      pending = input(:boolean, nil, nil, 5_000)
+
+      assert %{state: :mismatch, reason: "Physical evidence p.a disagrees"} =
+               status(
+                 %{"p.a" => input(:boolean, false, 2_000), "p.b" => pending},
+                 nil,
+                 3_000,
+                 definition
+               )
+
+      assert %{state: :pending, reason: "Waiting for evidence"} =
+               status(
+                 %{"p.a" => input(:boolean, true, 2_000), "p.b" => pending},
+                 nil,
+                 3_000,
+                 definition
+               )
+
+      assert %{state: :confirmed} =
+               status(
+                 %{"p.a" => input(:boolean, true, 2_000), "p.b" => input(:boolean, true, 2_000)},
+                 nil,
+                 3_000,
+                 definition
+               )
+    end
+  end
+
+  test "unavailable or unusable stronger evidence cannot override fresh readback" do
+    good = input(:float, 0.0, 7_000)
+
+    for physical <- [
+          %{good | available?: false},
+          %{good | stale?: true},
+          put_in(good.reading.quality, :invalid),
+          put_in(good.reading.quality, :unknown)
+        ] do
+      assert %{state: :confirmed, reason: "Readback evidence agrees"} =
+               status(
+                 %{"p.coil" => input(:boolean, true, 7_000), "p.current" => physical},
+                 nil,
+                 8_000
+               )
+    end
+  end
+
   test "outcomes for another epoch or value are ignored" do
     plain = %OutputDefinition{id: "relay", type: :boolean}
 
