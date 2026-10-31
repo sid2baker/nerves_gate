@@ -24,7 +24,7 @@ defmodule NervesGateWeb.Endpoint do
   plug(Plug.Static,
     at: "/",
     from: :nerves_gate,
-    only: ~w(assets),
+    only: ~w(assets favicon.svg),
     cache_control_for_etags: "public, no-cache"
   )
 

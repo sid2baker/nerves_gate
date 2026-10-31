@@ -14,6 +14,7 @@ defmodule NervesGateWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={get_csrf_token()} />
         <title>Nerves Gate</title>
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
         <link phx-track-static rel="stylesheet" href="/assets/css/app.css" />
         <script phx-track-static type="module" src="/assets/js/app.js">
         </script>

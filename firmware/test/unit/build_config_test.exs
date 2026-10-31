@@ -80,6 +80,25 @@ defmodule NervesGate.BuildConfigTest do
     end
   end
 
+  test "firmware log filters redact authentication material" do
+    config = Config.Reader.read!("config/config.exs", env: :dev, target: :em300)
+    filters = config[:phoenix][:filter_parameters]
+
+    params = %{
+      "_csrf_token" => "csrf-value",
+      "token" => "token-value",
+      "cookie" => "cookie-value",
+      "ssh" => %{"public_key" => "key-value"}
+    }
+
+    assert Phoenix.Logger.filter_values(params, filters) == %{
+             "_csrf_token" => "[FILTERED]",
+             "token" => "[FILTERED]",
+             "cookie" => "[FILTERED]",
+             "ssh" => %{"public_key" => "[FILTERED]"}
+           }
+  end
+
   test "QEMU runtime preserves the full dotted kernel hostname for management" do
     source = File.read!("config/runtime.exs") |> Code.string_to_quoted!()
 

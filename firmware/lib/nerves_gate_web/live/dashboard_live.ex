@@ -1,5 +1,5 @@
 defmodule NervesGateWeb.DashboardLive do
-  use Phoenix.LiveView
+  use Phoenix.LiveView, log: false
   alias NervesGate.Config
   alias NervesGateWeb.RemoteStatus
   import NervesGateWeb.CoreComponents

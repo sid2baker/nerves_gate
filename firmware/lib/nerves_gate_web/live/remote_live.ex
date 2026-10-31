@@ -1,5 +1,5 @@
 defmodule NervesGateWeb.RemoteLive do
-  use Phoenix.LiveView
+  use Phoenix.LiveView, log: false
   import NervesGateWeb.CoreComponents
   alias NervesGateWeb.RemoteStatus
   alias Phoenix.LiveView.JS

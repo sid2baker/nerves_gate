@@ -2,6 +2,7 @@ defmodule NervesGateWeb.GatewaySocketTest do
   use ExUnit.Case, async: false
   alias NervesGateWeb.Endpoint
   alias Phoenix.Socket.Transport
+  require Phoenix.LiveViewTest
 
   setup do
     # Exercise the real transport without a listener or device services. The
@@ -49,6 +50,26 @@ defmodule NervesGateWeb.GatewaySocketTest do
         ] do
       assert connect_info.(cookie_source, params).session == nil
     end
+  end
+
+  test "LiveView diagnostics never dump unfiltered sessions" do
+    views =
+      for route <- Phoenix.Router.routes(NervesGateWeb.Router),
+          {view, _, _, _} <- [route.metadata[:phoenix_live_view]],
+          uniq: true,
+          do: view
+
+    assert views != []
+    for view <- views, do: assert(view.__live__().log == false)
+  end
+
+  test "the page advertises a served favicon" do
+    html = Phoenix.LiveViewTest.render_component(&NervesGateWeb.Layouts.root/1, inner_content: "")
+    assert html =~ ~s(href="/favicon.svg")
+
+    conn = Endpoint.call(Plug.Test.conn(:get, "/favicon.svg"), Endpoint.init([]))
+    assert conn.status == 200
+    assert Plug.Conn.get_resp_header(conn, "content-type") == ["image/svg+xml"]
   end
 
   defp csrf_session(session_opts) do

@@ -9,6 +9,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Load the Wi-Fi regulatory database after the root filesystem is available and
+  use Linux regulatory rules instead of the driver's permissive custom table.
+- Retain radio driver errors without flooding the boot log with debug dumps.
+- Treat the USB PHY's absent shared IRQ as optional while preserving deferred
+  probing; RK3506 uses per-port interrupts.
+
 - Factory provisioning keeps redundant boot-ROM loader copies outside GPT's
   erase block and verifies both copies before reset, preventing a silent return
   to MaskROM after installation.

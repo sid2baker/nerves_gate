@@ -9,7 +9,8 @@ fixes until our pinned kernel includes them, not merely until their PRs merge.
 
 ## Shared patch maintenance
 
-The kernel and Buildroot patches currently match EC100's copies. Keep fixes in
+Kernel patches 0001–0004 and the Buildroot patches match EC100's copies.
+Patch 0005 is intentionally EM300-only pending an EC100 rebuild and qualification. Keep fixes in
 sync deliberately, not through a shared board framework. Review both systems
 when changing one, and document any intentional divergence. The comparison
 commands are in the [EC100 patch notes](../../../../nerves_system_ec100/bootstrap/patches/linux/README.md#shared-patch-maintenance).
@@ -91,8 +92,31 @@ kernel has no matching Quectel ECM entry. Modem identity and ECM mode were
 confirmed on factory firmware; naming and operation under this system still
 need hardware validation.
 
+## 0005 — Optional shared USB PHY interrupt
+
+[Patch](0005-phy-use-optional-shared-usb-irq.patch): RK3506 uses per-port
+interrupts. Request the absent shared interrupt with the optional API rather
+than printing an error on a supported path. Preserve probe deferral.
+
 ## EM300 status
 
-The EM300 has no SPI SD slot (0001 is harmless there), the same RK3506 USB2 PHY
-and DWC2 controllers (0002, 0003) and the same `2c7c:6002` modem (0004). None of
-these patches has been validated on EM300 hardware yet.
+Nerves boots on EM300; USB SSH and modem enumeration as `wwan0` have been
+observed. Resume, USB reconnect stress and modem data operation remain
+unqualified. The board has no SPI SD slot (0001 is harmless there).
+
+## Other retained boot diagnostics
+
+Do not add fictional device-tree resources to hide these vendor diagnostics:
+
+- CAN has no RX DMA mapping; the driver uses its interrupt/FIFO path (`use_dma=0`).
+- The SD host has a default pinctrl state but no separate `normal`/`idle` states;
+  it retains the default mux instead of switching runtime pinctrl states.
+- Ethernet uses RMII with PHY-supplied clocks. RGMII TX/RX delays are irrelevant;
+  the shared vendor driver also requests optional clocks not exposed by RK3506.
+  Both ports have established 100 Mbps links; field qualification is separate.
+- Fixed power rails without software-controlled supplies use dummy regulators.
+- `mtdblock` warns when the raw redundant U-Boot environment is opened. This is
+  not a failed write or evidence of corruption. Moving it to UBI would break
+  the bootloader/storage contract; do not migrate or erase an installed device
+  to suppress this diagnostic. NAND environment durability and A/B rollback
+  still require qualification.

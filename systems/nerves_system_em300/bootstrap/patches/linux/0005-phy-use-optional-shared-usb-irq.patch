@@ -1,0 +1,20 @@
+From: Nerves Gate <nerves-gate@localhost>
+Subject: [PATCH] phy: rockchip: treat the shared USB PHY IRQ as optional
+
+RK3506 uses the per-port interrupts. The driver already supports an absent
+shared IRQ, but platform_get_irq emits an error before that fallback. Use
+the optional accessor and preserve deferred probing.
+
+--- a/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
++++ b/drivers/phy/rockchip/phy-rockchip-inno-usb2.c
+@@ -2536,7 +2536,9 @@
+ 	rphy->chg_state = USB_CHG_STATE_UNDEFINED;
+ 	rphy->chg_type = POWER_SUPPLY_TYPE_UNKNOWN;
+ 	rphy->edev_self = false;
+-	rphy->irq = platform_get_irq(pdev, 0);
++	rphy->irq = platform_get_irq_optional(pdev, 0);
++	if (rphy->irq == -EPROBE_DEFER)
++		return -EPROBE_DEFER;
+ 	platform_set_drvdata(pdev, rphy);
+ 
+ 	ret = rockchip_usb2phy_extcon_register(rphy);

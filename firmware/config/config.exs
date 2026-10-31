@@ -34,7 +34,10 @@ config :phoenix, :filter_parameters, [
   "auth_key",
   "pin",
   "secret",
-  "public_key"
+  "public_key",
+  "csrf",
+  "token",
+  "cookie"
 ]
 
 config :nerves_gate, NervesGateWeb.Endpoint,

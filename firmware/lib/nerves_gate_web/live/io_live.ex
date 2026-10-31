@@ -5,7 +5,7 @@ defmodule NervesGateWeb.IOLive do
   validation stays in `NervesGate.IO`. Freshness depends on elapsed time, not only on
   changes, so the page re-reads once a second. Drafts stay separate from that read.
   """
-  use Phoenix.LiveView
+  use Phoenix.LiveView, log: false
   import NervesGateWeb.CoreComponents
   alias NervesGate.IO.Manual
 

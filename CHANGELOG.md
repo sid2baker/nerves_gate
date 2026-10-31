@@ -79,6 +79,8 @@
 
 ### Fixed
 
+- Gateway pages serve an explicit favicon instead of requesting a missing icon.
+
 - Explicit `mix dev.network setup` can recreate an unchanged recorded QEMU management network after reboot when every bridge/TAP is absent. Partial or conflicting interfaces still require inspection and cleanup; ordinary startup never changes host networking.
 - Gateway status, hardware and plugin-port authorization no longer re-verify every plugin archive on each read; status reads that took over a second (and timed out under load) now return in milliseconds.
 - Boot no longer fails and restarts when the first `fwup status` after startup exceeds `Nerves.Runtime.KV`'s one-second timeout.
@@ -100,6 +102,9 @@
   their exit status when a command finishes.
 
 ### Security
+
+- Gateway logs redact CSRF tokens and cookies and disable LiveView diagnostics
+  that dump unfiltered session contents.
 
 - Updated Bandit to 1.14.0 and Plug.Crypto to 2.2.1 to address known HTTP-server and secret-exposure vulnerabilities. Firmware, workstation and starter-app dependency locks use matching patched shared libraries; rebuild firmware and app packages together.
 

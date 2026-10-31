@@ -216,7 +216,8 @@ CONFIG_BT_RFCOMM=y
 CONFIG_BT_BNEP=y
 CONFIG_WLAN=y
 CONFIG_WIRELESS=y
-CONFIG_CFG80211=y
+# Load after the root filesystem is mounted so regulatory.db is available.
+CONFIG_CFG80211=m
 CONFIG_RFKILL=y
 # The vendor aic_btusb module owns the Bluetooth USB interface.
 # CONFIG_BT_HCIBTUSB is not set

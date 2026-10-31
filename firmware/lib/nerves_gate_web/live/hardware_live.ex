@@ -1,5 +1,5 @@
 defmodule NervesGateWeb.HardwareLive do
-  use Phoenix.LiveView
+  use Phoenix.LiveView, log: false
   import NervesGateWeb.CoreComponents
   import NervesGateWeb.NetworkStatus, only: [lan_ports: 1, port_label: 1]
 

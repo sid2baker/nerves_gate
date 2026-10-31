@@ -1,5 +1,5 @@
 defmodule NervesGateWeb.NetworkLive do
-  use Phoenix.LiveView
+  use Phoenix.LiveView, log: false
   import NervesGateWeb.CoreComponents
 
   on_mount({NervesGateWeb.Observations, :status})

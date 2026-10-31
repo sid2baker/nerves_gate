@@ -129,7 +129,10 @@ The internal USB AIC8800D80 uses one source-built package containing
 loads the modules through their USB aliases; no custom loader service is needed.
 The firmware loader handles the transition from USB `a69c:8d80` to `a69c:8d81`.
 
-Wi-Fi uses cfg80211/nl80211, wpa_supplicant and VintageNetWiFi. No network or
+Wi-Fi uses cfg80211/nl80211, wpa_supplicant and VintageNetWiFi. cfg80211 is a
+module so it loads `regulatory.db` from the mounted root filesystem; the AIC
+driver uses Linux regulatory rules (`custregd=0`) and logs errors only
+(`/etc/modprobe.d/aic8800.conf`). No country is set by default. No network or
 access point is configured by default. Bluetooth uses the Linux HCI interface
 and includes BlueZ tools; pairing, discoverability and a Bluetooth application
 service are not enabled automatically. Driver inclusion is not hardware
