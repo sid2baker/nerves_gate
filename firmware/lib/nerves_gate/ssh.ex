@@ -49,8 +49,6 @@ defmodule NervesGate.SSH do
           do: private |> :ssh_file.extract_public_key() |> fingerprint()
 
     if fingerprints == [], do: {:error, :host_key_unavailable}, else: {:ok, fingerprints}
-  rescue
-    _ -> {:error, :host_key_unavailable}
   catch
     _, _ -> {:error, :host_key_unavailable}
   end
