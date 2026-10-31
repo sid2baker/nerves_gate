@@ -62,7 +62,7 @@ defmodule WorkbenchWeb.DevicesLive do
           <.button type="submit" variant="secondary">Add</.button>
         </form>
         <p class="ui-help">
-          LAN mDNS and Tailnet peers named nerves-gate* are found automatically. A gateway joins once its node accepts the development cookie.
+          LAN mDNS and Tailnet peers tagged tag:nerves-gate are found automatically. A gateway joins once its node accepts the development cookie.
         </p>
         <.link navigate="/provision" class="ui-text-link">Provision a new EC100 or EM300 over USB</.link>
       </.panel>

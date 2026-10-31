@@ -4,6 +4,10 @@
 
 ### Breaking changes
 
+- Workbench Tailnet discovery selects online peers tagged `tag:nerves-gate`
+  instead of device names beginning with `nerves-gate`. Tag gateways in Tailscale
+  or add them manually; untagged name matches are no longer candidates.
+
 - Hardware setup is plugin-first. `Plugins.review_assignment/4` and `confirm_assignment/1` replace `assign_port/5`; stale reviews fail before effects. Gateway-owned review survives plugin UI cleanup and offers explicit target-plugin startup after checked assignment. Saved owner/disabled intent is preserved; no connection or sharing command is replayed. Modbus 0.4.2 and Tailnet 0.1.9 expose setup links; new version-scoped configuration is not imported.
 - Physical firmware uploads pin the SSH host-key fingerprints the gateway reports over authenticated distribution (`NervesGate.SSH.host_key_fingerprints/0`) instead of reading `~/.ssh/known_hosts`. Factory-reset gateways need no manual trust step; firmware without this function is rejected and needs one explicitly authorized external update. SSH failures report their reason.
 - Workbench session operations verify checkout/session identity and protocol inputs; stale sessions require coordinated replacement. Use explicit `mix simulator.start/stop/reset`, `mix scenario.run ID --device TARGET` and `mix scenario.ci ID --device ID` instead of `mix test.qemu`. Plugin installs also require an explicit target and share the UI's reviewed Jobs workflow. No compatibility task aliases or automatic first-device selection remain.

@@ -11,16 +11,19 @@ defmodule Workbench.GatewaysTest do
            ] = Gateways.candidates(owned, [{"10.203.42.2", :network}, {"192.168.1.42", :network}])
   end
 
-  test "Tailnet peers become candidates only when online and named nerves-gate*" do
+  test "Tailnet peers become candidates only when online and tagged, regardless of name" do
+    tag = ["tag:nerves-gate"]
+
     status = %{
       "Peer" => %{
-        "a" => %{"Online" => true, "DNSName" => "nerves-gate.example.ts.net."},
-        "b" => %{"Online" => false, "DNSName" => "nerves-gate-2.example.ts.net."},
-        "c" => %{"Online" => true, "DNSName" => "laptop.example.ts.net."}
+        "a" => %{"Online" => true, "DNSName" => "em300.example.ts.net.", "Tags" => tag},
+        "b" => %{"Online" => false, "DNSName" => "ec100.example.ts.net.", "Tags" => tag},
+        "c" => %{"Online" => true, "DNSName" => "nerves-gate.example.ts.net.", "Tags" => nil},
+        "d" => %{"Online" => true, "DNSName" => "ci.example.ts.net.", "Tags" => ["tag:ci"]}
       }
     }
 
-    assert Gateways.tailnet_peers(status) == [{"nerves-gate.example.ts.net", :network}]
+    assert Gateways.tailnet_peers(status) == [{"em300.example.ts.net", :network}]
     assert Gateways.tailnet_peers(%{}) == []
   end
 

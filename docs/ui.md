@@ -167,7 +167,7 @@ subscribe to its changes; gateway observations come directly from the device-own
 projection stream. Discovery does not occupy the Jobs queue.
 
 Opening a page never starts devices, builds firmware or sends updates. Candidate
-sources are LAN mDNS, online Tailnet `nerves-gate*` peers, manual hostnames/IPv4
+sources are LAN mDNS, online Tailnet peers tagged `tag:nerves-gate`, manual hostnames/IPv4
 addresses and owned QEMU. URLs are not accepted. Tailnet discovery reads the local
 daemon without changing VPN configuration. Names are hints: cookie connection and
 compiled firmware identity checks establish directory membership, not control

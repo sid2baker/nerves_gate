@@ -12,6 +12,8 @@ defmodule Workbench.Gateways do
 
   @topic "gateways"
   @interval 10_000
+  # Tailnet membership is a policy decision; device names are user-editable labels.
+  @tailnet_tag "tag:nerves-gate"
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   def list, do: GenServer.call(__MODULE__, :list)
@@ -263,8 +265,8 @@ defmodule Workbench.Gateways do
   def tailnet_peers(%{"Peer" => peers}) when is_map(peers) do
     for peer <- Map.values(peers),
         peer["Online"] == true,
+        @tailnet_tag in List.wrap(peer["Tags"]),
         {:ok, host} <- [host(peer["DNSName"])],
-        String.starts_with?(host, "nerves-gate"),
         do: {host, :network}
   end
 

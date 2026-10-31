@@ -18,6 +18,11 @@ automatically connects known LAN/Tailnet/manual gateways and running owned QEMU
 gateways with `mycookie`, verifies firmware identity and tracks reconnects. It
 never boots devices or opens equipment connections. **Devices** shows the same directory.
 
+Tailnet discovery considers only online peers tagged `tag:nerves-gate`, never
+device names. Tag gateways in the tailnet's admin/policy; do not tag workstations
+or unrelated nodes, because Workbench tries a distribution connection to each
+tagged peer. Untagged gateways can still be added by hostname or IPv4 address.
+
 Reload Pi resources, then use the `dev-environment` executable skill: call
 `Workbench.Skill.DevEnvironment.attach("/absolute/path/to/nerves_gate")` through
 `elixir_eval` with target `bridge`. It reads this checkout's
