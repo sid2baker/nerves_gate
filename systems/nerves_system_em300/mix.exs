@@ -58,6 +58,9 @@ defmodule NervesSystemEM300.MixProject do
   defp package_files do
     [
       "bootstrap",
+      "Config.in",
+      "external.mk",
+      "package",
       "dts",
       "em300.its",
       "linux",

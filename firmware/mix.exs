@@ -180,6 +180,7 @@ defmodule NervesGate.MixProject do
        ref: "5cd3e5fc5876f17367c47f84073ce39933c3efe6",
        override: true,
        runtime: Mix.target() != :host},
+      {:vintage_net_wifi, "~> 0.12.12", targets: [:em300]},
       {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_ecm, "~> 0.2.1", runtime: Mix.target() != :host},

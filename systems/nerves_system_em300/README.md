@@ -120,8 +120,22 @@ erasure.
 Named GPIO lines on `gpiochip1` (use them by name from Circuits.GPIO):
 `DI0`, `DI1`, `DO0`, `DO1` (main-board I/O), `EXT_LINK`, `EXT_RESET`,
 `EXT_ERROR_LED` (extension bus), `UPS_DETECT`, `UPS_POWER_CTRL`, `WWAN_RESET`,
-`WATCHDOG_ENABLE`. The Wi-Fi module (AIC8800) and the HDMI bridge are not
-supported.
+`WATCHDOG_ENABLE`. The HDMI bridge is not supported.
+
+## Wi-Fi and Bluetooth (unqualified)
+
+The internal USB AIC8800D80 uses one source-built package containing
+`aic_load_fw`, `aic8800_fdrv`, `aic_btusb` and the D80 firmware. NervesUEvent
+loads the modules through their USB aliases; no custom loader service is needed.
+The firmware loader handles the transition from USB `a69c:8d80` to `a69c:8d81`.
+
+Wi-Fi uses cfg80211/nl80211, wpa_supplicant and VintageNetWiFi. No network or
+access point is configured by default. Bluetooth uses the Linux HCI interface
+and includes BlueZ tools; pairing, discoverability and a Bluetooth application
+service are not enabled automatically. Driver inclusion is not hardware
+qualification: verify firmware loading, Wi-Fi client/AP operation and Bluetooth
+controller discovery/pairing after first boot. Concurrent Wi-Fi/AP/Bluetooth
+operation also remains untested.
 
 ## Watchdog (unqualified)
 

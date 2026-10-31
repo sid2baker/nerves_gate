@@ -1,0 +1,8 @@
+config BR2_PACKAGE_AIC8800
+	bool "aic8800"
+	depends on BR2_LINUX_KERNEL
+	help
+	  AIC8800 USB Wi-Fi and Bluetooth drivers and AIC8800D80 firmware,
+	  from Radxa's packaging of the vendor SDK.
+
+	  https://github.com/radxa-pkg/aic8800

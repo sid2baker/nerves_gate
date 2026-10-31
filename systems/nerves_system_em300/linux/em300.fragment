@@ -1,6 +1,6 @@
-# EM300 kernel: built-in drivers, with compiler warnings kept nonfatal.
+# EM300 kernel: built-in board drivers and modular AIC8800 USB drivers.
 # CONFIG_WERROR is not set
-# CONFIG_MODULES is not set
+CONFIG_MODULES=y
 
 # Protect kernel code/rodata and keep writable kernel data non-executable.
 CONFIG_STRICT_KERNEL_RWX=y
@@ -207,9 +207,16 @@ CONFIG_PL330_DMA=y
 # CONFIG_ROCKCHIP_RGA is not set
 # CONFIG_ROCKCHIP_MULTI_RGA is not set
 
-# Wired gateway: no audio, Bluetooth, or Wi-Fi hardware is used.
+# Internal USB AIC8800D80 Wi-Fi/Bluetooth combo module.
 # CONFIG_SOUND is not set
-# CONFIG_BT is not set
-# CONFIG_WLAN is not set
-# CONFIG_WIRELESS is not set
-# CONFIG_RFKILL is not set
+CONFIG_BT=y
+CONFIG_BT_BREDR=y
+CONFIG_BT_LE=y
+CONFIG_BT_RFCOMM=y
+CONFIG_BT_BNEP=y
+CONFIG_WLAN=y
+CONFIG_WIRELESS=y
+CONFIG_CFG80211=y
+CONFIG_RFKILL=y
+# The vendor aic_btusb module owns the Bluetooth USB interface.
+# CONFIG_BT_HCIBTUSB is not set

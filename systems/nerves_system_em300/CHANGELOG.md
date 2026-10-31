@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- AIC8800D80 USB Wi-Fi and Bluetooth driver/firmware package, with
+  wpa_supplicant and BlueZ tools. Radios remain hardware-unqualified and no
+  network, access point or Bluetooth pairing service starts by default.
+
 - Initial Nerves system for the IOTRouter EM300 (RK3506, 512 MiB SPI NAND),
   derived from `nerves_system_ec100`.
 - SPI NAND layout with raw A/B kernel FIT slots, a redundant U-Boot environment

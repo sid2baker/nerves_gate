@@ -14,6 +14,22 @@ Nerves Buildroot and the application cross-toolchain dependencies are declared i
 `mix.exs` and locked in `mix.lock`. Buildroot's external ARMv7 toolchain is pinned
 to `15.3.0` in `nerves_defconfig`, independently of the `15.3.1` Mix package.
 
+## AIC8800 USB Wi-Fi and Bluetooth
+
+`package/aic8800` pins Radxa's vendor-driver packaging at
+`fce88024ed40279def034e203128e0892fdbcac3` from
+[radxa-pkg/aic8800](https://github.com/radxa-pkg/aic8800).
+It builds the USB firmware loader, Wi-Fi driver and Linux HCI Bluetooth driver,
+installing only the AIC8800D80 firmware set. Archive and license hashes live in
+`package/aic8800/aic8800.hash`. Radxa's `debian/copyright` declares `src/*`
+GPL-2 (including the supplied firmware) and packaging GPL-3+; both that notice
+and the repository license are collected by Buildroot.
+
+The recipe applies the pinned Debian patch series, except its USB firmware-path
+and log-level patches, which do not apply to the archive's CRLF sources.
+The driver retains its default `/lib/firmware/aic8800D80` location. No stock
+EM300 kernel modules or privately captured firmware files are redistributed.
+
 ## Buildroot source and license collection
 
 The EM300 is not yet published. When added, the shared
