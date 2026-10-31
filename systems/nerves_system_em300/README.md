@@ -70,7 +70,7 @@ MIX_TARGET=em300 mix em300.flash
 The task builds firmware, stages the factory images offline (environment from
 the archive's `factory-env` task, UBI image with `rootfs_a` from the archive),
 asks for confirmation, reads a full NAND backup to `em300-backups/`, erases the
-NAND, writes the IDB loader, GPT, U-Boot, kernel slot A, the UBI image and the
+NAND, writes GPT, two IDB copies outside GPT's erase block, U-Boot, kernel slot A, the UBI image and the
 environment, reads back every region and resets the board.
 
 USB commands use `sudo -n` by default; authenticate beforehand or use `--no-sudo`

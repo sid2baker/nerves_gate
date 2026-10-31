@@ -58,7 +58,7 @@ stable I/O identities. Writes are confirmed by echo and never blindly replayed.
 - fwup 1.17 `ubi_volume_write` for root filesystems, `em300-write-kernel`
   (erase, `nandwrite -p`, readback) for kernel slots; destination `/dev/mtdblock2`.
   Requires `--unsafe`. Standard Nerves validate/revert/status via `ops.fw`.
-- `mix em300.flash`: MaskROM install (backup, `ef`, `ul`, `gpt`, `wlx`,
+- `mix em300.flash`: MaskROM install (backup, `ef`, `gpt`, `wl` for redundant IDB copies, `wlx`,
   readback, reset). Requires host `ubinize` (mtd-utils).
 - System tests check GPT/DT/fwup/fw_env agreement and run real fwup tasks.
 

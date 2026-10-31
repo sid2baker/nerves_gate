@@ -16,7 +16,8 @@ SPI NAND support. See [../SOURCES.md](../SOURCES.md) for source revisions.
 
 | File | Purpose | NAND location |
 | --- | --- | --- |
-| `em300-loader.bin` | MaskROM USB loader; `rkdeveloptool ul` writes its IDB copies | `idblock` (0–4 MiB) |
+| `em300-loader.bin` | Temporary MaskROM USB transport | RAM only |
+| `em300-idblock.img` | DDR/SPL IDB, padded to two erase blocks per copy | Copies at 128 KiB and 384 KiB |
 | `u-boot.itb` | U-Boot, TEE, and bootloader device tree | `uboot` (4 MiB) |
 | `em300-parameter.txt` | Rockchip GPT definition, written by `rkdeveloptool gpt` | sector 0 / tail |
 | `bootloader.sha256` | Output checksums | Not flashed |
@@ -24,8 +25,11 @@ SPI NAND support. See [../SOURCES.md](../SOURCES.md) for source revisions.
 The pinned vendor DDR parameter tool applies `ddrbin-param.txt` to configure
 115200-baud UART output without changing memory-training parameters.
 
-Factory installation writes the persistent boot images. Normal OTA updates do
-not replace them.
+Factory installation writes GPT first, then two IDB copies with `wl` starting at
+sector 256. Each copy occupies two 128 KiB erase blocks. The first erase block
+belongs exclusively to GPT. Never use `ul`: it places the IDB at 32 KiB, where a
+GPT write erases its header. Both copies are read back and checked before later
+partition writes or reset. Normal OTA updates do not replace boot images.
 
 ## Memory layout
 

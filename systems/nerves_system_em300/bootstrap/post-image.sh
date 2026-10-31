@@ -28,10 +28,15 @@ grep -qx 'uart baudrate=115200' "$BINARIES_DIR/ddrbin-params.txt"
     # Override DDR UART metadata only; official INI retains official SPL/USB.
     "$UBOOT/scripts/spl.sh" --ini "$INI" --tpl "$DDR"
 )
-# On SPI NAND, `rkdeveloptool ul` writes the IDB copies from this loader itself.
+# USB transport and persistent NAND IDB are distinct artifacts. `ul` places the
+# IDB at 32 KiB, inside the erase block used by GPT; never use it on this board.
 LOADER=$(awk -F= '/^PATH=/{gsub(/\r/, "", $2); print $2}' "$INI")
 test -n "$LOADER"
 cp "$RKBIN/$LOADER" "$BINARIES_DIR/em300-loader.bin"
+IDBLOCK=$(awk -F= '/^IDB_PATH=/{gsub(/\r/, "", $2); print $2}' "$INI")
+test -n "$IDBLOCK"
+cp "$RKBIN/$IDBLOCK" "$BINARIES_DIR/em300-idblock.img"
+test "$(wc -c < "$BINARIES_DIR/em300-idblock.img")" -le 262144
 
 # Official RKTRUST/RK3506TOS.ini specifies the secure firmware load address.
 # Keep the vendor binary intact; do not strip headers or use source tee-raw.bin.
@@ -53,5 +58,5 @@ test "$(wc -c < "$BINARIES_DIR/u-boot.itb")" -le 3145728
 cp "$PARAMETER" "$BINARIES_DIR/em300-parameter.txt"
 (
     cd "$BINARIES_DIR"
-    sha256sum em300-loader.bin u-boot.itb em300-parameter.txt > bootloader.sha256
+    sha256sum em300-loader.bin em300-idblock.img u-boot.itb em300-parameter.txt > bootloader.sha256
 )

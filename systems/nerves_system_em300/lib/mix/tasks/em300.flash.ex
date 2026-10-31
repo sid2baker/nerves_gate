@@ -7,8 +7,8 @@ defmodule Mix.Tasks.Em300.Flash do
 
   Builds the firmware, stages the factory images offline, detects exactly one
   EM300 in MaskROM, loads the temporary USB loader, and asks before erasing the
-  whole SPI NAND. It then writes the IDB loader, the GPT from
-  `em300-parameter.txt`, U-Boot, the redundant environment, kernel slot A and
+  whole SPI NAND. It then writes the GPT from `em300-parameter.txt`,
+  redundant IDB loader copies outside GPT's erase block, U-Boot, the redundant environment, kernel slot A and
   the UBI image (rootfs_a, empty rootfs_b, empty data), reading back every
   region. Reset happens only after successful verification.
 
@@ -132,7 +132,7 @@ defmodule Mix.Tasks.Em300.Flash do
       name: "EM300",
       storage: "SPI NAND",
       loader: "em300-loader.bin",
-      boot_files: ~w(em300-loader.bin u-boot.itb em300-parameter.txt),
+      boot_files: ~w(em300-loader.bin em300-idblock.img u-boot.itb em300-parameter.txt),
       sectors: (start + count)..@nand_sectors
     }
   end
@@ -166,7 +166,7 @@ defmodule Mix.Tasks.Em300.Flash do
 
     hashes = File.read!(Path.join(images, "bootloader.sha256"))
 
-    [loader, uboot, parameter] =
+    [_loader, idblock, uboot, parameter] =
       for name <- board().boot_files do
         path = Path.join(images, name)
 
@@ -177,7 +177,18 @@ defmodule Mix.Tasks.Em300.Flash do
       end
 
     check_parameter!(File.read!(parameter))
+    idblock_data = File.read!(idblock)
+
+    unless match?(<<"RKNS", _::binary>>, idblock_data) and byte_size(idblock_data) <= 2 * @peb,
+      do:
+        Mix.raise(
+          "Unsupported EM300 IDB image; expected RKNS header and at most two erase blocks"
+        )
+
     File.mkdir_p!(output)
+    idblock_copies = Path.join(output, "idblock-copies.img")
+    copy = idblock_data <> :binary.copy(<<0xFF>>, 2 * @peb - byte_size(idblock_data))
+    File.write!(idblock_copies, copy <> copy)
 
     {:ok, extracted} =
       :zip.unzip(String.to_charlist(firmware), [
@@ -199,9 +210,9 @@ defmodule Mix.Tasks.Em300.Flash do
     cmd!(ubinize, ["-o", ubi, "-p", to_string(@peb), "-m", to_string(@page), config])
 
     staged = %{
-      loader: loader,
       parameter: parameter,
       writes: [
+        {"idblock", idblock_copies},
         {"uboot", uboot},
         {"kernel_a", kernel},
         {"ubi", ubi},
@@ -277,13 +288,15 @@ defmodule Mix.Tasks.Em300.Flash do
     end
 
     # Old UBI headers would make the new UBI image unattachable, so erase all.
-    # Factory flashing is not atomic: on failure, rerun from MaskROM.
+    # Factory flashing is not atomic. Inspect uncertain outcomes before recovery.
     run.(["ef"])
-    run.(["ul", staged.loader])
     run.(["gpt", staged.parameter])
 
     Enum.each(staged.writes, fn {name, path} ->
-      run.(["wlx", name, path])
+      if name == "idblock",
+        do: run.(["wl", to_string(start!(name)), path]),
+        else: run.(["wlx", name, path])
+
       size = File.stat!(path).size
       count = div(size + 511, 512)
       readback = Path.join(output, name <> "-readback.bin")
@@ -296,7 +309,11 @@ defmodule Mix.Tasks.Em300.Flash do
     end)
   end
 
+  # Stock NAND has IDB copies at 128 and 384 KiB: two erase blocks per copy.
+  # Keep the first erase block exclusively for GPT.
+  defp start!("idblock"), do: div(@peb, 512)
   defp start!(name), do: elem(List.keyfind!(@layout, name, 0), 1)
+  defp sectors!("idblock"), do: div(4 * @peb, 512)
   defp sectors!(name), do: elem(List.keyfind!(@layout, name, 0), 2)
 
   defp sha256!(path) do

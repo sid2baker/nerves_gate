@@ -143,9 +143,15 @@ defmodule EM300LayoutTest do
         images = Path.join(tmp, "images")
 
         hashes =
-          for name <- ["em300-loader.bin", "u-boot.itb", "em300-parameter.txt"] do
+          for name <- Flash.board().boot_files do
             path = Path.join(images, name)
-            unless name == "em300-parameter.txt", do: File.write!(path, name)
+
+            case name do
+              "em300-parameter.txt" -> :ok
+              "em300-idblock.img" -> File.write!(path, "RKNS" <> :binary.copy(<<0xAB>>, 208_892))
+              _ -> File.write!(path, name)
+            end
+
             "#{sha256(File.read!(path))}  #{name}\n"
           end
 
@@ -156,7 +162,66 @@ defmodule EM300LayoutTest do
           Flash.prepare!(firmware, images, 0x80000, Path.join(tmp, "small"))
         end
 
-        assert Enum.map(staged.writes, &elem(&1, 0)) == ["uboot", "kernel_a", "ubi", "env"]
+        assert Enum.map(staged.writes, &elem(&1, 0)) == [
+                 "idblock",
+                 "uboot",
+                 "kernel_a",
+                 "ubi",
+                 "env"
+               ]
+
+        {_, copies_path} = List.keyfind!(staged.writes, "idblock", 0)
+        copies = File.read!(copies_path)
+        assert byte_size(copies) == 4 * 128 * 1024
+        assert binary_part(copies, 0, 262_144) == binary_part(copies, 262_144, 262_144)
+
+        assert binary_part(copies, 0, 208_896) ==
+                 File.read!(Path.join(images, "em300-idblock.img"))
+
+        assert binary_part(copies, 208_896, 53_248) == :binary.copy(<<0xFF>>, 53_248)
+        assert File.read!(Path.join(tmp, "staged/manifest.txt")) =~ "idblock sector=256"
+
+        # Exercise the command contract without accessing USB. Both IDB copies
+        # must be read back, after GPT, before any later partition is written.
+        run = fn args ->
+          send(self(), {:command, args})
+
+          case args do
+            ["rl", "256", "1024", path] ->
+              File.write!(path, copies)
+
+            ["rl", _, _, path] ->
+              name = Path.basename(path, "-readback.bin")
+              {_, source} = List.keyfind!(staged.writes, name, 0)
+              data = File.read!(source)
+
+              File.write!(
+                path,
+                data <> :binary.copy(<<0>>, rem(512 - rem(byte_size(data), 512), 512))
+              )
+
+            _ ->
+              :ok
+          end
+        end
+
+        Flash.install!(run, staged, 0x100000, Path.join(tmp, "staged"), backup: false)
+        assert_receive {:command, ["ef"]}
+        assert_receive {:command, ["gpt", _]}
+        assert_receive {:command, ["wl", "256", ^copies_path]}
+        assert_receive {:command, ["rl", "256", "1024", _]}
+        refute_receive {:command, ["ul", _]}, 0
+
+        corrupt = fn
+          ["rl", "256", "1024", path] -> File.write!(path, :binary.copy(<<0>>, byte_size(copies)))
+          ["wlx" | _] -> flunk("must stop before partition writes after IDB mismatch")
+          _ -> :ok
+        end
+
+        assert_raise Mix.Error, ~r/Readback mismatch: idblock/, fn ->
+          Flash.install!(corrupt, staged, 0x100000, Path.join(tmp, "staged"), backup: false)
+        end
+
         {_, ubi} = List.keyfind(staged.writes, "ubi", 0)
         # UBI erase-counter header magic.
         assert binary_part(File.read!(ubi), 0, 4) == "UBI#"

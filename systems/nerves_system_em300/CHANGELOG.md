@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+### Fixed
+
+- Factory provisioning keeps redundant boot-ROM loader copies outside GPT's
+  erase block and verifies both copies before reset, preventing a silent return
+  to MaskROM after installation.
+
 ### Added
 
 - AIC8800D80 USB Wi-Fi and Bluetooth driver/firmware package, with
