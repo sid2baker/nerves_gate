@@ -35,6 +35,9 @@ defmodule WorkbenchWeb.FactoryLive do
         title="Factory provisioning"
         description="Replace factory firmware over USB MASKROM. This is not a routine SSH update."
       />
+      <.notice :if={@error} tone="warning" id="factory-error">
+        <p role="alert">{@error}</p>
+      </.notice>
       <.notice tone="warning" id="factory-warning">
         <p>
           <strong>Destructive: replaces the bootloader, partition layout, firmware and application data.</strong>
@@ -49,8 +52,8 @@ defmodule WorkbenchWeb.FactoryLive do
             instructions. Installs to eMMC.
           </li>
           <li>
-            EM300: hold the LOADER key while applying power, then connect its USB-C port.
-            Installs to SPI NAND and erases the entire NAND, including the vendor system and its
+            EM300: use the stock U-Boot serial procedure below, or hold the LOADER key while
+            applying power, then connect its USB-C port. Installs to SPI NAND and erases the entire NAND, including the vendor system and its
             vendor-storage data. EM300 support is in bring-up; keep the vendor recovery image.
           </li>
         </ul>
@@ -60,6 +63,37 @@ defmodule WorkbenchWeb.FactoryLive do
           replace it, or connect another Rockchip device during review/install.
         </p>
       </.notice>
+      <.panel title="EM300 · enter MASKROM using the serial console" icon="port">
+        <ol id="em300-maskrom-steps">
+          <li>
+            Connect the debug UART at <strong>115200 baud, 8N1</strong> with flow control off.
+            Keep serial logging enabled to capture the first Nerves boot.
+          </li>
+          <li>
+            During stock firmware startup, press <strong>Ctrl+C</strong> repeatedly when U-Boot
+            says to stop autoboot. Wait for its <code>=&gt;</code> prompt.
+          </li>
+          <li>
+            Connect the board's USB-C download port to this workstation. At the U-Boot prompt,
+            run <code>rbrom</code>. This resets into BootROM download mode without erasing NAND.
+            This procedure requires the stock U-Boot command; it is not a Linux shell command.
+          </li>
+          <li>
+            On the workstation, run <code>rkdeveloptool ld</code>
+            and confirm it reports <strong>Maskrom</strong>. If the board is already in that mode, skip these steps.
+          </li>
+          <li>
+            Select an EM300 image below, leave full backup enabled, then click <strong>Load RAM transport and review</strong>. Check EM300 / SPI NAND and the backup
+            location before entering the displayed erasure confirmation.
+          </li>
+        </ol>
+        <p>
+          Provisioning backs up NAND first when enabled, then erases, writes and verifies the
+          installation before resetting. Keep power, USB and UART connected. Do not erase flash
+          or run saveenv just to enter MASKROM. If a job fails or its outcome is uncertain,
+          inspect its result before retrying.
+        </p>
+      </.panel>
       <ol class="dev-workflow-steps" aria-label="Provisioning stages">
         <li>1 · Prepare image and identify board</li>
         <li>2 · Review and authorize erasure</li>

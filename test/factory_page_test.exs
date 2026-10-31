@@ -3,6 +3,18 @@ defmodule WorkbenchWeb.FactoryPageTest do
   import Phoenix.LiveViewTest, only: [render_component: 2]
   import WorkbenchWeb.PageFixtures
 
+  test "admission errors are visible even without a factory job" do
+    html =
+      render_component(
+        &WorkbenchWeb.FactoryLive.render/1,
+        assigns(error: "Maintenance outcome uncertain")
+      )
+      |> Floki.parse_document!()
+
+    assert html |> Floki.find("#factory-error [role=alert]") |> Floki.text() ==
+             "Maintenance outcome uncertain"
+  end
+
   test "factory provisioning defaults to backup and binds explicit skipping into review" do
     empty =
       render_component(&WorkbenchWeb.FactoryLive.render/1, assigns()) |> Floki.parse_document!()
@@ -12,6 +24,13 @@ defmodule WorkbenchWeb.FactoryPageTest do
     assert Floki.find(empty, "input[type=password]") == []
     assert Floki.attribute(empty, "#factory-backup option:first-child", "value") == ["true"]
     assert Floki.find(empty, "#factory-backup option[value=false]") != []
+    steps = empty |> Floki.find("#em300-maskrom-steps") |> Floki.text()
+    assert steps =~ "115200 baud, 8N1"
+    assert steps =~ "Ctrl+C"
+    assert steps =~ "rbrom"
+    assert steps =~ "rkdeveloptool ld"
+    assert steps =~ "without erasing NAND"
+    assert steps =~ "leave full backup enabled"
     assert Floki.text(empty) =~ "RAM"
     assert Floki.text(empty) =~ "not a verified board or serial number"
     assert Floki.text(empty) =~ "EC100 and EM300 look the"
