@@ -91,7 +91,7 @@ CONFIG_CLK_RK3506=y
 CONFIG_WATCHDOG=y
 CONFIG_WATCHDOG_CORE=y
 CONFIG_WATCHDOG_NOWAYOUT=y
-# External supervisor on GPIO0_B1, exposed through the standard watchdog API.
+# External supervisor fed on GPIO1_D1, exposed through the standard watchdog API.
 CONFIG_GPIO_WATCHDOG=y
 # CONFIG_SOFT_WATCHDOG is not set
 CONFIG_DW_WATCHDOG=y

@@ -163,6 +163,22 @@
         };
     };
 
+    /* External toggle-fed supervisor, as on the EC100. Stock firmware boots
+     * with WATCHDOG_ENABLE at its pull-down level, then its application drives
+     * it high and toggles WATCHDOG_KICK about every 10 s. Enable is hogged
+     * high (see &gpio1); Linux feeds about every 5 s, twice the stock rate.
+     * UNQUALIFIED: the hardware timeout is only known to exceed ~10 s.
+     */
+    external_watchdog: external-watchdog {
+        compatible = "linux,wdt-gpio";
+        pinctrl-names = "default";
+        pinctrl-0 = <&external_watchdog_pin>;
+        gpios = <&gpio1 RK_PD1 GPIO_ACTIVE_HIGH>;
+        hw_algo = "toggle";
+        hw_margin_ms = <10000>;
+        always-running;
+    };
+
     vcc12v_dc: vcc12v-dc {
         compatible = "regulator-fixed";
         regulator-name = "vcc12v_dc";
@@ -281,6 +297,14 @@
         "DI0", "DI1", "DO0", "DO1", "", "", "", "",
         /* D0-D7 */
         "WATCHDOG_ENABLE", "WATCHDOG_KICK", "", "", "", "", "", "";
+
+    /* Arms the external watchdog, as stock firmware does once it feeds. */
+    watchdog-enable-hog {
+        gpio-hog;
+        gpios = <RK_PD0 GPIO_ACTIVE_HIGH>;
+        output-high;
+        line-name = "WATCHDOG_ENABLE";
+    };
 };
 
 /* UART0 serial console: 115200 baud. */
@@ -327,14 +351,9 @@
     pinctrl-0 = <&rm_io3_i2c0_scl &rm_io4_i2c0_sda>;
     status = "okay";
 
-    /* Consumers are unknown except the unused HDMI bridge reset (line 2). */
-    pca9555: gpio@20 {
-        compatible = "nxp,pca9555";
-        reg = <0x20>;
-        gpio-controller;
-        #gpio-cells = <2>;
-    };
-
+    /* The stock tree also declares a PCA9555 at 0x20, but it does not answer
+     * on this board (probe and register reads fail), so it is omitted.
+     */
     rtc@68 {
         compatible = "dallas,ds1307";
         reg = <0x68>;
@@ -497,6 +516,12 @@
 };
 
 &pinctrl {
+    external-watchdog {
+        external_watchdog_pin: external-watchdog-pin {
+            rockchip,pins = <1 RK_PD1 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+    };
+
     user-controls {
         led0_pin: led0-pin {
             rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
@@ -550,8 +575,8 @@
     };
 };
 
-/* The external watchdog (WATCHDOG_ENABLE/KICK) and the SoC watchdogs stay
- * disabled until their timeouts and reset coverage are qualified.
+/* SoC watchdogs stay disabled: the external watchdog is the one reset path,
+ * as on the EC100. wdt0 is the fallback if the external circuit is unusable.
  */
 &wdt0 {
     status = "disabled";

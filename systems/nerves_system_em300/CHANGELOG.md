@@ -18,4 +18,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - `mix em300.flash` MaskROM factory installation with full NAND backup and
   readback verification.
 - EM300 device tree: Ethernet, CAN, four field UARTs, the extension-module
-  UART, SD card, PCA9555, DS1307 RTC, LEDs, keys and named GPIO lines.
+  UART, SD card, DS1307 RTC, LEDs, keys and named GPIO lines. The stock
+  PCA9555 node is omitted because the chip does not respond on this board.
+- External GPIO watchdog for Heart, matching stock: `WATCHDOG_ENABLE` hogged
+  high and `WATCHDOG_KICK` toggled about every 5 s. The hardware timeout is
+  unqualified.

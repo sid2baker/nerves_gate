@@ -8,7 +8,7 @@ the Rockchip RK3506B (3× Cortex-A7, 512 MiB RAM) with **512 MiB SPI NAND**.
   with application validation and boot-count rollback
 - Persistent UBIFS application storage at `/data` (`/root`)
 - Ethernet, CAN, four field UARTs, the extension-module UART, microSD,
-  PCA9555 GPIO expander, DS1307 RTC and a **115200 8N1** serial console
+  DS1307 RTC, the external watchdog and a **115200 8N1** serial console
 
 **Status: bring-up.** Derived from the stock EM300 device tree and the
 `nerves_system_ec100` boot chain. Nothing has been booted on hardware yet.
@@ -112,7 +112,6 @@ erasure.
 | CAN | `can0`, `can1` | RK3506 CAN-FD controllers |
 | Ethernet | `eth0`, `eth1` | RMII PHYs |
 | microSD | `mmcblk0` | card detect on GPIO0_B0 |
-| GPIO expander | PCA9555 @ I2C0 0x20 | consumers unknown |
 | RTC | DS1307 @ I2C0 0x68 | `rtc0` |
 | LEDs | `em300:led0..2`, `em300:som`, `em300:user` | polarity unqualified |
 | Keys | `KEY_PROG1` (front), `KEY_PROG2` (user2) | active-low |
@@ -121,11 +120,32 @@ erasure.
 Named GPIO lines on `gpiochip1` (use them by name from Circuits.GPIO):
 `DI0`, `DI1`, `DO0`, `DO1` (main-board I/O), `EXT_LINK`, `EXT_RESET`,
 `EXT_ERROR_LED` (extension bus), `UPS_DETECT`, `UPS_POWER_CTRL`, `WWAN_RESET`,
-`WATCHDOG_ENABLE`, `WATCHDOG_KICK`.
+`WATCHDOG_ENABLE`. The Wi-Fi module (AIC8800) and the HDMI bridge are not
+supported.
 
-The external GPIO watchdog and the SoC watchdogs stay disabled until their
-timeouts and reset coverage are qualified. The Wi-Fi module (AIC8800) and the
-HDMI bridge are not supported.
+## Watchdog (unqualified)
+
+The EM300 carries an external toggle-fed supervisor like the EC100's. Stock
+firmware leaves `WATCHDOG_ENABLE` (GPIO1_D0) at its pull-down level during
+boot; its application then drives it high and toggles `WATCHDOG_KICK`
+(GPIO1_D1) about every 10 s. This system hogs enable high in the kernel and
+feeds with gpio-wdt (`always-running`, `nowayout`, `hw_margin_ms` 10000, so
+about every 5 s). Heart opens `/dev/watchdog0` (`GPIO Watchdog`). The SoC
+watchdogs are disabled.
+
+Observed: stock firmware stays up with enable high and ~10 s feed intervals.
+Low-at-boot safety is inferred from boot behavior and pin pulls, not measured
+electrically. Enable polarity and the actual hardware timeout remain unqualified.
+Qualify with UART0 capture and a recovery path available:
+
+1. Confirm `/dev/watchdog0` exists and the board stays up.
+2. Stop the VM (`:init.stop()`); with `nowayout` feeding stops. The time from
+   the last feed to reset is the hardware timeout. Set the margin from it.
+3. If no reset occurs, investigate enable polarity and whether feeding really
+   stopped; lack of reset alone does not establish polarity. Testing enable-low
+   requires changing/releasing the kernel GPIO hog first, not overriding it with
+   Circuits.GPIO. If the external circuit is unusable, qualify `wdt0` instead.
+4. Repeat the EC100's A/B rollback test.
 
 ## Remaining qualification
 
