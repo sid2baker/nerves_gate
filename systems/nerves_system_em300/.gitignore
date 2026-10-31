@@ -1,0 +1,13 @@
+/_build/
+/dist/
+/deps/
+/.nerves_artifacts/
+/.nerves/
+/build.log
+/uart.log
+/resources/logs/
+/.expert/
+/docs/
+/iotrouter/
+*.img
+*.fw

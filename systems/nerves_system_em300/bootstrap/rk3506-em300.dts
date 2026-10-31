@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/dts-v1/;
+#include "rk3506.dtsi"
+#include "rk3506-u-boot.dtsi"
+
+/ {
+    model = "IOTRouter EM300 Nerves bootloader";
+    compatible = "iotrouter,em300", "rockchip,rk3506";
+    aliases { serial0 = &uart0; };
+    chosen {
+        stdout-path = "serial0:115200n8";
+        u-boot,spl-boot-order = &spi_nand;
+    };
+    memory@0 {
+        device_type = "memory";
+        reg = <0 0x20000000>;
+    };
+};
+
+&uart0 { status = "okay"; };
+
+/* Boot media: SPI NAND on FSPI (enabled with spi_nand by rk3506-u-boot.dtsi). */
+&spi_nor { status = "disabled"; };
+
+/* No reference-board keys, SD or USB drivers needed for NAND boot. */
+&saradc { status = "disabled"; };
+&mmc { status = "disabled"; };
+&usb2phy { status = "disabled"; };
+&u2phy_otg0 { status = "disabled"; };
+&usb20_otg0 { status = "disabled"; };

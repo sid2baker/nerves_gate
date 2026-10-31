@@ -1,0 +1,52 @@
+# Pinned Rockchip RK3506 source; board wiring is in rk3506-em300.dts.
+CONFIG_DEFAULT_DEVICE_TREE="rk3506-em300"
+CONFIG_OF_LIST="rk3506-em300"
+CONFIG_BAUDRATE=115200
+CONFIG_BOOTDELAY=2
+CONFIG_DEBUG_UART=y
+CONFIG_DEBUG_UART_BASE=0xff0a0000
+CONFIG_DEBUG_UART_CLOCK=24000000
+CONFIG_DEBUG_UART_SHIFT=2
+
+# Official rkbin supplies DDR/SPL/TEE. Keep SPL_OPTEE for the BSP FIT
+# generator; any source SPL built as a dependency is never packaged.
+CONFIG_ROCKCHIP_PRELOADER_ATAGS=y
+CONFIG_BIDRAM=y
+# CONFIG_TPL is not set
+# CONFIG_TPL_RAM is not set
+CONFIG_SPL_RAM=y
+CONFIG_SPL_OPTEE=y
+# CONFIG_SPL_AB is not set
+
+# Raw FIT boot, no Android/vendor DT replacement or display stack.
+# CONFIG_ANDROID_AB is not set
+# CONFIG_ANDROID_BOOT_IMAGE is not set
+# CONFIG_ANDROID_BOOTLOADER is not set
+# CONFIG_CMD_BOOT_ANDROID is not set
+# CONFIG_USING_KERNEL_DTB_V2 is not set
+# CONFIG_ROCKCHIP_VENDOR_PARTITION is not set
+# CONFIG_DM_VIDEO is not set
+# CONFIG_DISPLAY is not set
+# CONFIG_DRM_ROCKCHIP is not set
+CONFIG_CMD_BOOTM=y
+CONFIG_CMD_ENV=y
+CONFIG_CMD_SAVEENV=y
+CONFIG_FIT=y
+
+# SPI NAND through Rockchip's bad-block-mapping MTD block layer.
+CONFIG_MTD=y
+CONFIG_MTD_BLK=y
+CONFIG_MTD_DEVICE=y
+CONFIG_MTD_SPI_NAND=y
+CONFIG_ROCKCHIP_SFC=y
+CONFIG_CMD_MTD_BLK=y
+
+# Redundant 128 KiB environments in the "env" NAND partition, matching fwup's
+# uboot-environment and /etc/fw_env.config (flags/CRC header).
+CONFIG_ENV_IS_IN_BLK_DEV=y
+# CONFIG_ENV_IS_IN_MMC is not set
+# CONFIG_ENV_IS_NOWHERE is not set
+# Redundant env/bootcount legacy header options are set by bootstrap/patches.
+CONFIG_ENV_OFFSET=0x00800000
+CONFIG_ENV_SIZE=0x00020000
+CONFIG_BOOTCOUNT=y

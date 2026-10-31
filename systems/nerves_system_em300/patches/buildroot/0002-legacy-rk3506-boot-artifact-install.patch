@@ -1,0 +1,19 @@
+From: EC100 Nerves maintainers
+Subject: [PATCH] boot/uboot: skip mainline combined image for vendor RK3506
+
+The pinned 2017.09-derived RK3506 BSP emits u-boot.itb, not mainline's
+u-boot-rockchip.bin. Keep the rkbin dependency and TEE make argument; the
+system post-image script creates IDB and USB loader with official boot_merger.
+
+--- a/boot/uboot/uboot.mk
++++ b/boot/uboot/uboot.mk
+@@ -245,7 +245,9 @@
+ define UBOOT_INSTALL_UBOOT_ROCKCHIP_BIN
+ 	$(INSTALL) -D -m 0644 $(@D)/u-boot-rockchip.bin $(BINARIES_DIR)/u-boot-rockchip.bin
+ endef
++ifneq ($(call qstrip,$(BR2_TARGET_UBOOT_BOARD_DEFCONFIG)),rk3506)
+ UBOOT_POST_INSTALL_IMAGES_HOOKS += UBOOT_INSTALL_UBOOT_ROCKCHIP_BIN
++endif
+ ifneq ($(ROCKCHIP_RKBIN_BL31_FILENAME),)
+ UBOOT_MAKE_OPTS += BL31=$(BINARIES_DIR)/$(notdir $(ROCKCHIP_RKBIN_BL31_FILENAME))
+ endif

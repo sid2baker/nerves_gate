@@ -1,0 +1,31 @@
+#!/bin/sh
+# Write a kernel FIT from stdin to an EM300 raw NAND slot and verify it.
+#
+# Usage: em300-write-kernel kernel_a|kernel_b
+#
+# fwup pipes the resource here. Bad blocks are skipped the same way U-Boot's
+# Rockchip MTD block layer skips them when it reads the slot.
+set -eu
+
+case "${1:-}" in
+    kernel_a) dev=/dev/mtd3 ;;
+    kernel_b) dev=/dev/mtd4 ;;
+    *) echo "em300-write-kernel: expected kernel_a or kernel_b" >&2; exit 2 ;;
+esac
+
+# Refuse to write unless the device really is the named partition.
+name=$(cat "/sys/class/mtd/$(basename "$dev")/name")
+test "$name" = "$1" || { echo "em300-write-kernel: $dev is '$name', not $1" >&2; exit 1; }
+
+image=$(mktemp)
+readback=$(mktemp)
+trap 'rm -f "$image" "$readback"' EXIT
+
+cat > "$image"
+size=$(wc -c < "$image")
+test "$size" -gt 0 || { echo "em300-write-kernel: empty input" >&2; exit 1; }
+
+flash_erase -q "$dev" 0 0
+nandwrite -q -p "$dev" "$image"
+nanddump -q --bb=skipbad -l $(((size + 2047) / 2048 * 2048)) -f "$readback" "$dev"
+cmp -n "$size" "$image" "$readback"

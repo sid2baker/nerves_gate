@@ -1,0 +1,23 @@
+Subject: [PATCH] mmc: core: reject NULL vqmmc supplies
+
+The Rockchip SD shutdown path calls mmc_regulator_set_vqmmc() even for
+SPI hosts. mmc_spi does not acquire the MMC regulator supplies, leaving
+vqmmc NULL. IS_ERR() does not reject NULL, so shutdown dereferences it in
+regulator_is_supported_voltage().
+
+Treat NULL like an unavailable regulator, preserving the existing error
+return and behavior for valid supplies.
+
+Link: https://github.com/armbian/linux-rockchip/issues/563
+
+--- a/drivers/mmc/core/regulator.c
++++ b/drivers/mmc/core/regulator.c
+@@ -182,7 +182,7 @@ int mmc_regulator_set_vqmmc(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	int ret, volt, min_uV, max_uV;
+ 
+ 	/* If no vqmmc supply then we can't change the voltage */
+-	if (IS_ERR(mmc->supply.vqmmc))
++	if (IS_ERR_OR_NULL(mmc->supply.vqmmc))
+ 		return -EINVAL;
+ 
+ 	switch (ios->signal_voltage) {

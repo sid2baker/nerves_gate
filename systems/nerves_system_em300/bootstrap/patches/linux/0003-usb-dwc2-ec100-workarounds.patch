@@ -1,0 +1,73 @@
+Subject: [PATCH] usb: dwc2: retain EC100 gadget workarounds
+
+Keep the existing EC100 DWC2 changes together as downstream workarounds.
+This combines the previous reset and bulk OUT patches without changing
+kernel behavior; it does not establish a shared root cause.
+
+Reconnect with no session-valid signal:
+
+On EC100's debug/download connector, PHY BVALID and DWC2 BSESVLD remain
+low even during working gadget traffic. Unplug suspends the controller
+without reporting a session disconnect. The reset on reconnect then
+disconnects the old gadget session, putting it in L3, but skips core
+reinitialization because BSESVLD is low. EP0 setup requests subsequently
+fail with -EAGAIN.
+
+For a fixed peripheral, accept the received USB reset as sufficient to
+reinitialize a previously connected gadget. Retain the connected guard
+and the existing session-valid requirement for OTG operation. This does
+not fake VBUS status, change host mode, or treat suspend as disconnect.
+Reconnect tests passed with this workaround, but its suitability as a
+generic DWC2 fix remains unresolved. The upstream RFC was closed.
+
+Bulk OUT receive guard (experimental):
+
+Boot-connected Ethernet can stop receiving when the host sends bulk OUT
+traffic before the gadget netdevice opens. Delaying host traffic until
+the netdevice is ready avoids the observed failure. The precise
+controller failure is still unconfirmed.
+
+Explicitly set NAK when configuring a bulk OUT endpoint, so making the
+endpoint active does not rely on its previous NAK state while there is no
+receive request. dwc2_hsotg_start_req() already clears NAK after
+programming the receive buffer and transfer size. Leave EP0, IN and
+periodic endpoints unchanged.
+
+Retain this guard as part of the working local stack, not as a proven fix.
+The successful guarded test received bulk traffic late and did not
+exercise the failing early-traffic sequence; an unguarded late-traffic
+test also passed. The experimental upstream PR was closed. Missing
+session-valid signaling does not establish that this guard is necessary.
+
+Link: https://github.com/armbian/linux-rockchip/pull/579
+Link: https://github.com/armbian/linux-rockchip/pull/580
+
+---
+diff --git a/drivers/usb/dwc2/gadget.c b/drivers/usb/dwc2/gadget.c
+--- a/drivers/usb/dwc2/gadget.c
++++ b/drivers/usb/dwc2/gadget.c
+@@ -3792,7 +3792,13 @@
+ 		/* Reset device address to zero */
+ 		dwc2_clear_bit(hsotg, DCFG, DCFG_DEVADDR_MASK);
+ 
+-		if (usb_status & GOTGCTL_BSESVLD && connected)
++		/*
++		 * Fixed peripherals may lack usable VBUS sensing. A bus reset
++		 * still requires reinitialization after disconnecting the old
++		 * session, otherwise EP0 remains inactive in L3.
++		 */
++		if (connected && ((usb_status & GOTGCTL_BSESVLD) ||
++				  hsotg->dr_mode == USB_DR_MODE_PERIPHERAL))
+ 			dwc2_hsotg_core_init_disconnected(hsotg, true);
+ 	}
+ 
+@@ -4171,6 +4177,9 @@
+ 
+ 	case USB_ENDPOINT_XFER_BULK:
+ 		epctrl |= DXEPCTL_EPTYPE_BULK;
++		/* Keep OUT NAKed until start_req() installs a receive buffer. */
++		if (!dir_in)
++			epctrl |= DXEPCTL_SNAK;
+ 		break;
+ 
+ 	case USB_ENDPOINT_XFER_INT:

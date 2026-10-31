@@ -1,0 +1,562 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * IOTRouter EM300 board configuration.
+ *
+ * Wiring comes from the stock EM300 device tree and the GPIO consumers of its
+ * vendor services. Lines without a qualified Linux driver are named but left
+ * unclaimed so userspace (Circuits.GPIO) can own them explicitly.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+
+/* Reservations must precede the root nodes in the included SoC tree. */
+/memreserve/ 0x00063000 0x0000b000;
+
+#include "rk3506.dtsi"
+
+/* The stock EM300 CPU operating-point table (identical to EC100). */
+/delete-node/ &cpu0_opp_table;
+
+/ {
+    cpu0_opp_table: cpu0-opp-table {
+        compatible = "operating-points-v2";
+        opp-shared;
+        nvmem-cells = <&cpu_leakage>;
+        nvmem-cell-names = "leakage";
+        rockchip,pvtm-voltage-sel = <
+            0 1584 0
+            1585 1619 1
+            1620 1654 2
+            1655 1689 3
+            1690 1724 4
+            1725 1759 5
+            1760 1794 6
+            1795 9999 7
+        >;
+        rockchip,pvtm-pvtpll;
+        rockchip,pvtm-offset = <0x18>;
+        rockchip,pvtm-sample-time = <500>;
+        rockchip,pvtm-freq = <1608000>;
+        rockchip,pvtm-volt = <1000000>;
+        rockchip,pvtm-ref-temp = <40>;
+        rockchip,pvtm-temp-prop = <0 0>;
+        rockchip,pvtm-thermal-zone = "soc-thermal";
+        rockchip,grf = <&pvtpll_core>;
+        rockchip,temp-hysteresis = <5000>;
+        rockchip,low-temp = <10000>;
+        rockchip,low-temp-min-volt = <900000>;
+
+        opp-600000000 {
+            opp-hz = /bits/ 64 <600000000>;
+            opp-microvolt = <850000 850000 1000000>;
+            clock-latency-ns = <40000>;
+            opp-suspend;
+            status = "okay";
+        };
+        opp-800000000 {
+            opp-hz = /bits/ 64 <800000000>;
+            opp-microvolt = <850000 850000 1000000>;
+            clock-latency-ns = <40000>;
+            status = "okay";
+        };
+        opp-1008000000 {
+            opp-hz = /bits/ 64 <1008000000>;
+            opp-microvolt = <850000 850000 1000000>;
+            opp-microvolt-L0 = <875000 875000 1000000>;
+            clock-latency-ns = <40000>;
+            status = "okay";
+        };
+        opp-1200000000 {
+            opp-hz = /bits/ 64 <1200000000>;
+            opp-microvolt = <850000 850000 1000000>;
+            opp-microvolt-L0 = <875000 875000 1000000>;
+            clock-latency-ns = <40000>;
+            status = "okay";
+        };
+    };
+};
+
+/ {
+    model = "IOTRouter EM300 (Nerves)";
+    compatible = "iotrouter,em300", "rockchip,rk3506";
+
+    aliases {
+        serial0 = &uart0;
+        mmc0 = &mmc;
+    };
+
+    chosen {
+        stdout-path = "serial0:115200n8";
+        bootargs = "earlycon=uart8250,mmio32,0xff0a0000 console=ttyS0,115200 rootwait ro";
+    };
+
+    memory@0 {
+        device_type = "memory";
+        reg = <0x00000000 0x20000000>;
+    };
+
+    reserved-memory {
+        /delete-node/ drm-logo@0;
+        /delete-node/ linux,cma;
+
+        /* Inherit the vendor trust@0 reservation: base 0, size 0x62000. */
+    };
+
+    /* LED polarity is provisional: the stock services drive these lines but
+     * the physical on-state is not qualified.
+     */
+    leds {
+        compatible = "gpio-leds";
+        pinctrl-names = "default";
+        pinctrl-0 = <&led0_pin &led1_pin &led2_pin &som_led_pin &user_led_pin>;
+
+        led0 {
+            label = "em300:led0";
+            gpios = <&gpio1 RK_PC6 GPIO_ACTIVE_HIGH>;
+            default-state = "off";
+        };
+
+        led1 {
+            label = "em300:led1";
+            gpios = <&gpio1 RK_PC5 GPIO_ACTIVE_HIGH>;
+            default-state = "off";
+        };
+
+        led2 {
+            label = "em300:led2";
+            gpios = <&gpio1 RK_PC4 GPIO_ACTIVE_HIGH>;
+            default-state = "off";
+        };
+
+        som {
+            label = "em300:som";
+            gpios = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>;
+            default-state = "off";
+        };
+
+        user {
+            label = "em300:user";
+            gpios = <&gpio4 RK_PB3 GPIO_ACTIVE_HIGH>;
+            default-state = "off";
+        };
+    };
+
+    gpio-keys {
+        compatible = "gpio-keys";
+        pinctrl-names = "default";
+        pinctrl-0 = <&key_pin &user2_key_pin>;
+
+        key {
+            label = "Front key";
+            linux,code = <KEY_PROG1>;
+            gpios = <&gpio1 RK_PC7 GPIO_ACTIVE_LOW>;
+        };
+
+        user2 {
+            label = "User2 key";
+            linux,code = <KEY_PROG2>;
+            gpios = <&gpio4 RK_PB2 GPIO_ACTIVE_LOW>;
+        };
+    };
+
+    vcc12v_dc: vcc12v-dc {
+        compatible = "regulator-fixed";
+        regulator-name = "vcc12v_dc";
+        regulator-always-on;
+        regulator-boot-on;
+        regulator-min-microvolt = <12000000>;
+        regulator-max-microvolt = <12000000>;
+    };
+
+    vcc_sys: vcc-sys {
+        compatible = "regulator-fixed";
+        regulator-name = "vcc_sys";
+        regulator-always-on;
+        regulator-boot-on;
+        regulator-min-microvolt = <5000000>;
+        regulator-max-microvolt = <5000000>;
+        vin-supply = <&vcc12v_dc>;
+    };
+
+    /* CPU rail: PWM0 channel 0, inverse polarity (as stock). */
+    vdd_arm: vdd-arm {
+        compatible = "pwm-regulator";
+        pwms = <&pwm0_4ch_0 0 5000 1>;
+        regulator-name = "vdd_arm";
+        regulator-min-microvolt = <710000>;
+        regulator-max-microvolt = <1207000>;
+        regulator-init-microvolt = <1011000>;
+        regulator-always-on;
+        regulator-boot-on;
+        regulator-settling-time-up-us = <250>;
+        pwm-supply = <&vcc_sys>;
+    };
+
+    vcc_3v3: vcc-3v3 {
+        compatible = "regulator-fixed";
+        regulator-name = "vcc_3v3";
+        regulator-always-on;
+        regulator-boot-on;
+        regulator-min-microvolt = <3300000>;
+        regulator-max-microvolt = <3300000>;
+        vin-supply = <&vcc_sys>;
+    };
+
+    mmcio: mmcio-gpio-regulator {
+        compatible = "regulator-gpio";
+        regulator-name = "mmcio-gpio-supply";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <3300000>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&mmcio_voltage_pin>;
+        gpios = <&gpio0 RK_PD0 GPIO_ACTIVE_HIGH>;
+        gpios-states = <0>;
+        states = <3300000 1>, <1800000 0>;
+        startup-delay-us = <100000>;
+    };
+
+    /* Keep the Type-C host VBUS switch claimed and defaulting off. */
+    vcc5v0_otg0: vcc5v0-otg0-regulator {
+        compatible = "regulator-fixed";
+        regulator-name = "vcc5v0_otg0";
+        regulator-min-microvolt = <5000000>;
+        regulator-max-microvolt = <5000000>;
+        enable-active-high;
+        gpio = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&vcc5v0_otg0_en>;
+    };
+
+    /* 4G module power (stock "WWAN_POWER_PI", driven high). The module reset
+     * line WWAN_RST_PI (GPIO1_A4) is left unclaimed and named below.
+     */
+    vcc_4g: vcc-4g-regulator {
+        compatible = "regulator-fixed";
+        regulator-name = "vcc_4g";
+        regulator-always-on;
+        regulator-boot-on;
+        enable-active-high;
+        gpio = <&gpio1 RK_PA5 GPIO_ACTIVE_HIGH>;
+        pinctrl-names = "default";
+        pinctrl-0 = <&vcc_4g_en>;
+    };
+
+    vcc5v0_otg1: vcc5v0-otg1-regulator {
+        compatible = "regulator-fixed";
+        regulator-name = "vcc5v0_otg1";
+        regulator-boot-on;
+        regulator-always-on;
+        regulator-min-microvolt = <5000000>;
+        regulator-max-microvolt = <5000000>;
+    };
+};
+
+&cpu0 {
+    cpu-supply = <&vdd_arm>;
+};
+
+&pwm0_4ch_0 {
+    pinctrl-names = "active";
+    pinctrl-0 = <&rm_io21_pwm0_ch0>;
+    status = "okay";
+};
+
+/* PVTM calibration requires the board's thermal sensor. */
+&tsadc {
+    status = "okay";
+};
+
+/* Names follow the stock EM300 GPIO consumers. Unlisted lines are unknown. */
+&gpio1 {
+    gpio-line-names =
+        /* A0-A7 */
+        "UPS_DETECT", "UPS_POWER_CTRL", "", "", "WWAN_RESET", "", "", "",
+        /* B0-B7 */
+        "", "EXT_LINK", "", "", "EXT_ERROR_LED", "EXT_RESET", "", "",
+        /* C0-C7 */
+        "DI0", "DI1", "DO0", "DO1", "", "", "", "",
+        /* D0-D7 */
+        "WATCHDOG_ENABLE", "WATCHDOG_KICK", "", "", "", "", "", "";
+};
+
+/* UART0 serial console: 115200 baud. */
+&uart0 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&uart0_xfer_pins>;
+    status = "okay";
+};
+
+/* Field serial ports; transceiver types and direction control are unqualified. */
+&uart1 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&rm_io10_uart1_tx &rm_io7_uart1_rx>;
+    status = "okay";
+};
+
+&uart2 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&rm_io12_uart2_tx &rm_io11_uart2_rx>;
+    status = "okay";
+};
+
+&uart3 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&rm_io14_uart3_tx &rm_io13_uart3_rx>;
+    status = "okay";
+};
+
+&uart4 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&rm_io16_uart4_tx &rm_io15_uart4_rx>;
+    status = "okay";
+};
+
+/* Extension-module bus (921600 8N1), owned by the firmware's I/O domain. */
+&uart5 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&uart5m1_xfer_pins>;
+    status = "okay";
+};
+
+&i2c0 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&rm_io3_i2c0_scl &rm_io4_i2c0_sda>;
+    status = "okay";
+
+    /* Consumers are unknown except the unused HDMI bridge reset (line 2). */
+    pca9555: gpio@20 {
+        compatible = "nxp,pca9555";
+        reg = <0x20>;
+        gpio-controller;
+        #gpio-cells = <2>;
+    };
+
+    rtc@68 {
+        compatible = "dallas,ds1307";
+        reg = <0x68>;
+    };
+};
+
+&can0 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&rm_io20_can0_tx &rm_io19_can0_rx>;
+    assigned-clocks = <&cru CLK_CAN0>;
+    assigned-clock-rates = <300000000>;
+    status = "okay";
+};
+
+&can1 {
+    pinctrl-names = "default";
+    pinctrl-0 = <&rm_io18_can1_tx &rm_io17_can1_rx>;
+    assigned-clocks = <&cru CLK_CAN1>;
+    assigned-clock-rates = <300000000>;
+    status = "okay";
+};
+
+/* Internal 512 MiB SPI NAND. The layout must match nand-layout.txt and the
+ * Rockchip GPT; system tests check that they agree.
+ */
+&fspi {
+    status = "okay";
+
+    flash@0 {
+        compatible = "spi-nand";
+        reg = <0>;
+        spi-max-frequency = <100000000>;
+        spi-rx-bus-width = <4>;
+        spi-tx-bus-width = <1>;
+
+        partitions {
+            compatible = "fixed-partitions";
+            #address-cells = <1>;
+            #size-cells = <1>;
+
+            partition@0 {
+                label = "idblock";
+                reg = <0x00000000 0x00400000>;
+                read-only;
+            };
+
+            partition@400000 {
+                label = "uboot";
+                reg = <0x00400000 0x00400000>;
+                read-only;
+            };
+
+            partition@800000 {
+                label = "env";
+                reg = <0x00800000 0x00100000>;
+            };
+
+            partition@900000 {
+                label = "kernel_a";
+                reg = <0x00900000 0x01000000>;
+            };
+
+            partition@1900000 {
+                label = "kernel_b";
+                reg = <0x01900000 0x01000000>;
+            };
+
+            partition@2900000 {
+                label = "ubi";
+                reg = <0x02900000 0x1d600000>;
+            };
+        };
+    };
+};
+
+/* Removable microSD slot with card detect. */
+&mmc {
+    bus-width = <4>;
+    cap-sd-highspeed;
+    cap-mmc-highspeed;
+    max-frequency = <150000000>;
+    no-mmc;
+    no-sdio;
+    disable-wp;
+    cd-gpios = <&gpio0 RK_PB0 GPIO_ACTIVE_LOW>;
+    vmmc-supply = <&vcc_3v3>;
+    vqmmc-supply = <&mmcio>;
+    pinctrl-names = "default";
+    pinctrl-0 = <&sdmmc_clk_pins &sdmmc_cmd_pins &sdmmc_bus4_pins &sd_det_pin>;
+    status = "okay";
+};
+
+&gmac0 {
+    phy-mode = "rmii";
+    clock_in_out = "input";
+    snps,reset-gpio = <&gpio1 RK_PA3 GPIO_ACTIVE_LOW>;
+    snps,reset-active-low;
+    snps,reset-delays-us = <20000 20000 20000>;
+    pinctrl-names = "default";
+    pinctrl-0 = <&eth_rmii0_miim_pins &eth_rmii0_tx_bus2_pins
+                 &eth_rmii0_rx_bus2_pins &eth_rmii0_clk_pins>;
+    phy-handle = <&phy0>;
+    status = "okay";
+};
+
+&mdio0 {
+    phy0: ethernet-phy@0 {
+        compatible = "ethernet-phy-ieee802.3-c22";
+        reg = <0>;
+    };
+};
+
+&gmac1 {
+    phy-mode = "rmii";
+    clock_in_out = "input";
+    snps,reset-gpio = <&gpio1 RK_PA2 GPIO_ACTIVE_LOW>;
+    snps,reset-active-low;
+    snps,reset-delays-us = <20000 20000 20000>;
+    pinctrl-names = "default";
+    pinctrl-0 = <&eth_rmii1_miim_pins &eth_rmii1_tx_bus2_pins
+                 &eth_rmii1_rx_bus2_pins &eth_rmii1_clk_pins>;
+    phy-handle = <&phy1>;
+    status = "okay";
+};
+
+&mdio1 {
+    phy1: ethernet-phy@0 {
+        compatible = "ethernet-phy-ieee802.3-c22";
+        reg = <0>;
+    };
+};
+
+&usb2phy {
+    status = "okay";
+};
+
+&u2phy_otg0 {
+    /delete-property/ rockchip,low-power-mode;
+    rockchip,dis-u2-susphy;
+    /* Externally powered peripheral: never source Type-C host VBUS. */
+    /delete-property/ vbus-supply;
+    status = "okay";
+};
+
+&u2phy_otg1 {
+    phy-supply = <&vcc5v0_otg1>;
+    status = "okay";
+};
+
+/* Type-C setup port. No automatic OTG role switching. */
+&usb20_otg0 {
+    dr_mode = "peripheral";
+    status = "okay";
+};
+
+/* Internal USB hub: Quectel modem, Wi-Fi module and card reader. */
+&usb20_otg1 {
+    dr_mode = "host";
+    status = "okay";
+};
+
+&pinctrl {
+    user-controls {
+        led0_pin: led0-pin {
+            rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+
+        led1_pin: led1-pin {
+            rockchip,pins = <1 RK_PC5 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+
+        led2_pin: led2-pin {
+            rockchip,pins = <1 RK_PC4 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+
+        som_led_pin: som-led-pin {
+            rockchip,pins = <0 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+
+        user_led_pin: user-led-pin {
+            rockchip,pins = <4 RK_PB3 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+
+        key_pin: key-pin {
+            rockchip,pins = <1 RK_PC7 RK_FUNC_GPIO &pcfg_pull_up>;
+        };
+
+        user2_key_pin: user2-key-pin {
+            rockchip,pins = <4 RK_PB2 RK_FUNC_GPIO &pcfg_pull_up>;
+        };
+    };
+
+    mmcio {
+        mmcio_voltage_pin: mmcio-voltage-pin {
+            rockchip,pins = <0 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+
+        sd_det_pin: sd-det-pin {
+            rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>;
+        };
+    };
+
+    modem {
+        vcc_4g_en: vcc-4g-en {
+            rockchip,pins = <1 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+    };
+
+    usb {
+        vcc5v0_otg0_en: vcc5v0-otg0-en {
+            rockchip,pins = <0 RK_PB1 RK_FUNC_GPIO &pcfg_pull_none>;
+        };
+    };
+};
+
+/* The external watchdog (WATCHDOG_ENABLE/KICK) and the SoC watchdogs stay
+ * disabled until their timeouts and reset coverage are qualified.
+ */
+&wdt0 {
+    status = "disabled";
+};
+
+&wdt1 {
+    status = "disabled";
+};

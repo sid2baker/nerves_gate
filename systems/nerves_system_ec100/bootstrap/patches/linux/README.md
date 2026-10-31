@@ -6,6 +6,20 @@ track upstream fixes (0002 also has local additions); 0003 bundles downstream
 EC100 workarounds; 0004 identifies the board's cellular modem. Retain upstream
 fixes until our pinned kernel includes them, not merely until their PRs merge.
 
+## Shared patch maintenance
+
+EC100 and EM300 are independent systems, but currently carry identical kernel
+patches and Buildroot patches. When changing a shared fix, review both copies;
+keep any board-specific divergence explicit. From the repository root:
+
+```sh
+diff -ru --exclude=README.md systems/nerves_system_ec100/bootstrap/patches/linux systems/nerves_system_em300/bootstrap/patches/linux
+diff -ru systems/nerves_system_ec100/patches/buildroot systems/nerves_system_em300/patches/buildroot
+```
+
+U-Boot environment patches intentionally differ by storage medium. Matching
+patch bytes do not establish hardware qualification on another board.
+
 ## 0001 — Avoid an SD-card reboot crash
 
 [Patch](0001-mmc-handle-null-vqmmc-supply.patch): the SD shutdown path tries to use
