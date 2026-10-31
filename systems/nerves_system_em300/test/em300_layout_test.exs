@@ -13,7 +13,7 @@ defmodule EM300LayoutTest do
     end
 
     # Writes and U-Boot address partitions by these names.
-    assert Enum.map(Flash.layout(), &elem(&1, 0)) == ~w(uboot env kernel_a kernel_b ubi)
+    assert Enum.map(Flash.layout(), &elem(&1, 0)) == ~w(uboot env ubi)
     {_, start, count} = List.last(Flash.layout())
     assert (start + count) * 512 == 0x1FF00000
     assert Flash.board().sectors.first == start + count
@@ -36,9 +36,40 @@ defmodule EM300LayoutTest do
 
     # Linux numbers MTD devices in this order; fwup and fw_env.config rely on it.
     assert Enum.find_index(partitions, &(elem(&1, 0) == "env")) == 2
-    assert Enum.find_index(partitions, &(elem(&1, 0) == "kernel_a")) == 3
-    assert Enum.find_index(partitions, &(elem(&1, 0) == "kernel_b")) == 4
-    assert Enum.find_index(partitions, &(elem(&1, 0) == "ubi")) == 5
+    assert Enum.find_index(partitions, &(elem(&1, 0) == "ubi")) == 3
+  end
+
+  test "U-Boot attaches the same UBI partition and both sides name the same volumes" do
+    fragment = File.read!("bootstrap/uboot.config.fragment")
+    {_, start, count} = List.keyfind(Flash.layout(), "ubi", 0)
+
+    assert fragment =~
+             ~s{CONFIG_MTDPARTS_DEFAULT="mtdparts=spi-nand0:0x#{hex(count * 512) |> String.downcase()}@0x#{hex(start * 512) |> String.downcase()}(ubi)"\n}
+
+    assert fragment =~ "CONFIG_CMD_UBI=y\n"
+
+    volumes =
+      Regex.scan(~r/vol_id=(\d+)\n.*\nvol_name=(\w+)/, Flash.ubinize_config("r", "k"))
+      |> Map.new(fn [_, id, name] -> {name, "/dev/ubi0_#{id}"} end)
+
+    assert volumes == %{
+             "rootfs_a" => "/dev/ubi0_0",
+             "rootfs_b" => "/dev/ubi0_1",
+             "data" => "/dev/ubi0_2",
+             "kernel_a" => "/dev/ubi0_3",
+             "kernel_b" => "/dev/ubi0_4"
+           }
+
+    fwup = File.read!("fwup.conf")
+
+    for {slot, rootfs, kernel} <- [{"a", "rootfs_a", "kernel_a"}, {"b", "rootfs_b", "kernel_b"}] do
+      [task] = Regex.run(~r/task upgrade\.#{slot} \{.*?\n\}/s, fwup)
+      assert task =~ ~s|on-resource rootfs.img { ubi_volume_write("#{volumes[rootfs]}") }|
+      assert task =~ ~s|on-resource em300.itb { ubi_volume_write("#{volumes[kernel]}") }|
+    end
+
+    assert File.read!("rootfs_overlay/etc/erlinit.config") =~ "-m #{volumes["data"]}:/root:ubifs"
+    refute File.exists?("rootfs_overlay/usr/sbin/em300-write-kernel")
   end
 
   test "U-Boot, fwup and fw_env.config agree on the environment and kernel slots" do
@@ -55,12 +86,6 @@ defmodule EM300LayoutTest do
 
     assert File.read!("rootfs_overlay/etc/fw_env.config") =~
              ~r{/dev/mtdblock2\s+0x00000000\s+0x00020000\s+0x00020000\s+/dev/mtdblock2\s+0x00020000\s+0x00020000\s+0x00020000}
-
-    fwup = File.read!("fwup.conf")
-    {_, a, _} = List.keyfind(Flash.layout(), "kernel_a", 0)
-    {_, b, _} = List.keyfind(Flash.layout(), "kernel_b", 0)
-    assert fwup =~ ~s{define(FIT_A_SECTOR, "0x#{Integer.to_string(a, 16) |> String.downcase()}")}
-    assert fwup =~ ~s{define(FIT_B_SECTOR, "0x#{Integer.to_string(b, 16) |> String.downcase()}")}
   end
 
   test "real fwup creates the factory environment and gates upgrades" do
@@ -83,14 +108,14 @@ defmodule EM300LayoutTest do
             "a.nerves_fw_platform=em300",
             "a.nerves_fw_application_part0_devpath=/dev/ubi0_2",
             "a.nerves_fw_application_part0_fstype=ubifs",
-            "fit_a_sector=0x4800",
-            "fit_b_sector=0xc800",
-            "boot_a=setenv rootvol rootfs_a; setenv rootdev /dev/ubiblock0_0; setenv fit_sector $fit_a_sector; run boot_slot"
+            "em300_layout=ubi-kernels",
+            "boot_a=setenv rootvol rootfs_a; setenv rootdev /dev/ubiblock0_0; setenv kernelvol kernel_a; run boot_slot",
+            "boot_b=setenv rootvol rootfs_b; setenv rootdev /dev/ubiblock0_1; setenv kernelvol kernel_b; run boot_slot"
           ],
           do: assert(entry in entries, "env missing #{entry}")
 
       # Escaped ${name} must survive both archive creation and application.
-      assert Enum.any?(entries, &(&1 =~ "mtd_blk read $kernel_addr_r $fit_sector $fit_blocks"))
+      assert Enum.any?(entries, &(&1 =~ "ubi part ubi && ubi read $kernel_addr_r $kernelvol"))
       assert Enum.any?(entries, &(&1 =~ "ubi.block=0,$rootvol root=$rootdev"))
     end
 
@@ -108,6 +133,41 @@ defmodule EM300LayoutTest do
              )
 
     assert status != 0 and output =~ "requires --unsafe"
+
+    # NAND installed before UBI kernel volumes is rejected, never rewritten.
+    old = Path.join(tmp, "old-env.img")
+    File.write!(old, :binary.copy(<<0xFF>>, 0x800 * 512))
+    old_conf = Path.join(tmp, "old-env.conf")
+    old_fw = Path.join(tmp, "old-env.fw")
+
+    File.write!(old_conf, """
+    uboot-environment env {
+        block-offset = 0
+        block-count = 256
+        block-offset-redund = 256
+    }
+    task env {
+        on-init {
+            uboot_clearenv(env)
+            uboot_setenv(env, "nerves_fw_active", "a")
+            uboot_setenv(env, "upgrade_available", "0")
+            uboot_setenv(env, "a.nerves_fw_platform", "em300")
+            uboot_setenv(env, "a.nerves_fw_architecture", "arm")
+        }
+    }
+    """)
+
+    assert {_, 0} = System.cmd(fwup, ["-c", "-f", old_conf, "-o", old_fw])
+    assert {_, 0} = System.cmd(fwup, ["-a", "-q", "-i", old_fw, "-t", "env", "-d", old])
+
+    assert {output, status} =
+             System.cmd(
+               fwup,
+               ["-a", "-q", "--unsafe", "-i", firmware, "-t", "upgrade", "-d", old],
+               stderr_to_stdout: true
+             )
+
+    assert status != 0 and output =~ "reprovision over MaskROM"
   end
 
   test "ops.fw reports, validates and reverts on the env partition" do
@@ -165,7 +225,6 @@ defmodule EM300LayoutTest do
         assert Enum.map(staged.writes, &elem(&1, 0)) == [
                  "idblock",
                  "uboot",
-                 "kernel_a",
                  "ubi",
                  "env"
                ]

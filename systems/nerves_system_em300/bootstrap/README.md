@@ -44,9 +44,8 @@ partition writes or reset. Normal OTA updates do not replace boot images.
 ## U-Boot integration
 
 The official SPL finds U-Boot through the GPT `uboot` partition. U-Boot reads
-NAND through Rockchip's MTD block layer, which maps each GPT partition around
-bad blocks; Linux writes kernel slots with `nandwrite -p`, which skips bad blocks
-the same way.
+its environment through Rockchip's MTD block layer and the slot's kernel FIT
+from a UBI volume (`ubi part ubi; ubi read`), the same `ubi0` Linux uses.
 
 `patches/uboot/` adapts the BSP for a redundant block-device environment,
 env-backed bootcount, current compilers, and Buildroot's TEE input. Missing or

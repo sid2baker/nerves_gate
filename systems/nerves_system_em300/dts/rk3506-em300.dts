@@ -412,18 +412,8 @@
             };
 
             partition@900000 {
-                label = "kernel_a";
-                reg = <0x00900000 0x01000000>;
-            };
-
-            partition@1900000 {
-                label = "kernel_b";
-                reg = <0x01900000 0x01000000>;
-            };
-
-            partition@2900000 {
                 label = "ubi";
-                reg = <0x02900000 0x1d600000>;
+                reg = <0x00900000 0x1f600000>;
             };
         };
     };

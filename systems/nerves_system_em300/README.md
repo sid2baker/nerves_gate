@@ -4,14 +4,15 @@
 the Rockchip RK3506B (3× Cortex-A7, 512 MiB RAM) with **512 MiB SPI NAND**.
 
 - Source-built U-Boot and Linux with pinned Rockchip DDR, SPL, and secure firmware
-- A/B firmware updates on SPI NAND (raw kernel FIT slots + UBI root filesystems)
+- A/B firmware updates on SPI NAND (kernel FITs and root filesystems in UBI volumes)
   with application validation and boot-count rollback
 - Persistent UBIFS application storage at `/data` (`/root`)
 - Ethernet, CAN, four field UARTs, the extension-module UART, microSD,
   DS1307 RTC, the external watchdog and a **115200 8N1** serial console
 
 **Status: bring-up.** Derived from the stock EM300 device tree and the
-`nerves_system_ec100` boot chain. Nothing has been booted on hardware yet.
+`nerves_system_ec100` boot chain. The raw-kernel layout booted on hardware; the
+UBI kernel-volume layout is not yet hardware-booted.
 
 ## Build
 
@@ -35,9 +36,7 @@ boot-image details are in [bootstrap/README.md](bootstrap/README.md).
 | `idblock` (DDR init + SPL copies) | 0 | 4 MiB | `mtd0`, read-only |
 | `uboot` (U-Boot/TEE FIT) | 4 MiB | 4 MiB | `mtd1`, read-only |
 | `env` (redundant U-Boot env at +0, +128 KiB) | 8 MiB | 1 MiB | `mtd2` / `mtdblock2` |
-| `kernel_a` (raw kernel FIT) | 9 MiB | 16 MiB | `mtd3` |
-| `kernel_b` (raw kernel FIT) | 25 MiB | 16 MiB | `mtd4` |
-| `ubi` | 41 MiB | 470 MiB | `mtd5` → `ubi0` |
+| `ubi` | 9 MiB | 502 MiB | `mtd3` → `ubi0` |
 | Reserved for Rockchip bad-block/GPT data | 511 MiB | 1 MiB | — |
 
 UBI volumes on `ubi0`:
@@ -46,7 +45,13 @@ UBI volumes on `ubi0`:
 | ---: | --- | ---: | --- |
 | 0 | `rootfs_a` | 128 MiB | SquashFS, `/dev/ubiblock0_0` when slot A boots |
 | 1 | `rootfs_b` | 128 MiB | SquashFS, `/dev/ubiblock0_1` when slot B boots |
-| 2 | `data` | rest (~190 MiB) | UBIFS at `/root`, formatted by UBIFS on first mount |
+| 2 | `data` | rest (~205 MiB) | UBIFS at `/root`, formatted by UBIFS on first mount |
+| 3 | `kernel_a` | 8 MiB | kernel FIT, read by U-Boot `ubi read` when slot A boots |
+| 4 | `kernel_b` | 8 MiB | kernel FIT, read by U-Boot `ubi read` when slot B boots |
+
+U-Boot attaches the same `ubi` partition (`CONFIG_MTDPARTS_DEFAULT`) with UBI
+defaults matching Linux, so kernels get UBI's bad-block handling, wear levelling
+and atomic volume updates.
 
 The layout is defined once per consumer: `bootstrap/parameter.txt` (Rockchip
 GPT used by SPL/U-Boot and `rkdeveloptool`), the device tree's fixed partitions
@@ -70,7 +75,7 @@ MIX_TARGET=em300 mix em300.flash
 The task builds firmware, stages the factory images offline (environment from
 the archive's `factory-env` task, UBI image with `rootfs_a` from the archive),
 asks for confirmation, reads a full NAND backup to `em300-backups/`, erases the
-NAND, writes GPT, two IDB copies outside GPT's erase block, U-Boot, kernel slot A, the UBI image and the
+NAND, writes GPT, two IDB copies outside GPT's erase block, U-Boot, the UBI image (slot A kernel and root filesystem) and the
 environment, reads back every region and resets the board.
 
 USB commands use `sudo -n` by default; authenticate beforehand or use `--no-sudo`
@@ -79,13 +84,13 @@ with suitable USB permissions. Other options are `--no-reset`, `--yes` and
 
 ## OTA updates
 
-The `.fw` upgrade tasks write the inactive slot outside fwup's destination:
+The `.fw` upgrade tasks write the inactive slot's kernel and root filesystem
+volumes with fwup's atomic `ubi_volume_write`, which requires `fwup --unsafe`.
+No board script runs during an update.
 
-- the root filesystem with `ubi_volume_write("/dev/ubi0_N")` (atomic UBI update);
-- the kernel FIT with `/usr/sbin/em300-write-kernel`, which erases the raw slot,
-  writes it with `nandwrite -p` and verifies a `nanddump` readback.
-
-Both require `fwup --unsafe`. The destination (`nerves_fw_devpath`) is the env
+Upgrades require `em300_layout=ubi-kernels` in the environment. NAND installed
+with the earlier raw kernel partitions is rejected ("reprovision over MaskROM");
+it is never migrated in place. The destination (`nerves_fw_devpath`) is the env
 partition `/dev/mtdblock2`, where fwup updates the redundant environment as on
 block-device systems. Applications must pass `--unsafe` to `ssh_subsystem_fwup`
 and `Nerves.Runtime.FwupOps` (`fwup_extra_options: ["--unsafe"]`), and set the

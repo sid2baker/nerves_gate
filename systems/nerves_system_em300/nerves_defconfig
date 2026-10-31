@@ -100,9 +100,6 @@ BR2_PACKAGE_BLUEZ5_UTILS_CLIENT=y
 # Kernel slots are raw NAND partitions written by fwup through these tools;
 # UBI tools are for inspection and data-volume reset.
 BR2_PACKAGE_MTD=y
-BR2_PACKAGE_MTD_FLASH_ERASE=y
-BR2_PACKAGE_MTD_NANDDUMP=y
-BR2_PACKAGE_MTD_NANDWRITE=y
 BR2_PACKAGE_MTD_UBIUPDATEVOL=y
 BR2_PACKAGE_MTD_UBINFO=y
 

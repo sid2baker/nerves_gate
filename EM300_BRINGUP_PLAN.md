@@ -50,13 +50,13 @@ stable I/O identities. Writes are confirmed by echo and never blindly replayed.
 `systems/nerves_system_em300`, derived from `nerves_system_ec100`:
 
 - NAND layout (GPT `bootstrap/parameter.txt` = DT fixed partitions):
-  `idblock` 4 MiB, `uboot` 4 MiB, `env` 1 MiB (redundant env), `kernel_a`/`kernel_b`
-  16 MiB raw FIT slots, `ubi` 470 MiB with `rootfs_a`/`rootfs_b` (SquashFS via
-  ubiblock) and `data` (UBIFS at `/root`); 1 MiB tail reserved.
+  `idblock` 4 MiB, `uboot` 4 MiB, `env` 1 MiB (redundant env), `ubi`
+  502 MiB with `rootfs_a`/`rootfs_b` (SquashFS via ubiblock), `data` (UBIFS at
+  `/root`) and `kernel_a`/`kernel_b` FIT volumes; 1 MiB tail reserved.
 - U-Boot: BSP `rk3506_defconfig` with SPI NAND, env in the block device through
   Rockchip's bad-block-mapping MTD block layer, A/B + bootcount env from fwup.
-- fwup 1.17 `ubi_volume_write` for root filesystems, `em300-write-kernel`
-  (erase, `nandwrite -p`, readback) for kernel slots; destination `/dev/mtdblock2`.
+- fwup 1.17 `ubi_volume_write` for kernel and root filesystem volumes;
+  U-Boot `ubi read` boots the kernel; destination `/dev/mtdblock2`.
   Requires `--unsafe`. Standard Nerves validate/revert/status via `ops.fw`.
 - `mix em300.flash`: MaskROM install (backup, `ef`, `gpt`, `wl` for redundant IDB copies, `wlx`,
   readback, reset). Requires host `ubinize` (mtd-utils).

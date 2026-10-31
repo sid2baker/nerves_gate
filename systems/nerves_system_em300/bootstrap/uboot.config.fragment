@@ -33,13 +33,20 @@ CONFIG_CMD_ENV=y
 CONFIG_CMD_SAVEENV=y
 CONFIG_FIT=y
 
-# SPI NAND through Rockchip's bad-block-mapping MTD block layer.
+# SPI NAND. The environment uses Rockchip's MTD block layer; kernels are
+# read from UBI volumes (`ubi part ubi`, `ubi read`), like Linux's ubi0.
+# UBI fastmap and bad-block reserve use the same defaults as Linux.
+# The single U-Boot MTD partition mirrors bootstrap/parameter.txt (tested).
 CONFIG_MTD=y
 CONFIG_MTD_BLK=y
 CONFIG_MTD_DEVICE=y
 CONFIG_MTD_SPI_NAND=y
 CONFIG_ROCKCHIP_SFC=y
 CONFIG_CMD_MTD_BLK=y
+CONFIG_CMD_UBI=y
+CONFIG_MTDIDS_DEFAULT="spi-nand0=spi-nand0"
+CONFIG_MTDPARTS_DEFAULT="mtdparts=spi-nand0:0x1f600000@0x00900000(ubi)"
+# CONFIG_CMD_UBIFS is not set
 
 # Redundant 128 KiB environments in the "env" NAND partition, matching fwup's
 # uboot-environment and /etc/fw_env.config (flags/CRC header).

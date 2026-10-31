@@ -7,7 +7,18 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+### Breaking changes
+
+- Kernel FITs live in UBI volumes `kernel_a`/`kernel_b` (IDs 3/4), read by
+  U-Boot `ubi read` and written by fwup `ubi_volume_write`. The raw kernel
+  partitions and the `em300-write-kernel` script are removed; the UBI partition
+  now starts at 9 MiB. Upgrades require `em300_layout=ubi-kernels`; NAND
+  installed with the earlier layout must be reprovisioned over MaskROM.
+
 ### Fixed
+
+- OTA no longer runs a board script from the running firmware. The removed
+  raw-slot writer used commands absent from the target, so OTA always failed.
 
 - Load the Wi-Fi regulatory database after the root filesystem is available and
   use Linux regulatory rules instead of the driver's permissive custom table.
@@ -27,10 +38,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Initial Nerves system for the IOTRouter EM300 (RK3506, 512 MiB SPI NAND),
   derived from `nerves_system_ec100`.
-- SPI NAND layout with raw A/B kernel FIT slots, a redundant U-Boot environment
-  partition and UBI volumes for A/B SquashFS root filesystems and UBIFS data.
-- fwup A/B upgrades using `ubi_volume_write` and a verified raw kernel-slot
-  writer; runtime validate, revert, status and factory-reset operations.
+- SPI NAND layout with a redundant U-Boot environment partition and UBI volumes
+  for A/B kernel FITs, A/B SquashFS root filesystems and UBIFS data.
+- fwup A/B upgrades using `ubi_volume_write`; runtime validate, revert, status
+  and factory-reset operations.
 - `mix em300.flash` MaskROM factory installation with full NAND backup and
   readback verification.
 - EM300 device tree: Ethernet, CAN, four field UARTs, the extension-module

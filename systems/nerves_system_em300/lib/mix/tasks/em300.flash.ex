@@ -8,9 +8,9 @@ defmodule Mix.Tasks.Em300.Flash do
   Builds the firmware, stages the factory images offline, detects exactly one
   EM300 in MaskROM, loads the temporary USB loader, and asks before erasing the
   whole SPI NAND. It then writes the GPT from `em300-parameter.txt`,
-  redundant IDB loader copies outside GPT's erase block, U-Boot, the redundant environment, kernel slot A and
-  the UBI image (rootfs_a, empty rootfs_b, empty data), reading back every
-  region. Reset happens only after successful verification.
+  redundant IDB loader copies outside GPT's erase block, U-Boot, the redundant
+  environment and the UBI image (slot A kernel and root filesystem, empty slot B
+  volumes, empty data), reading back every region. Reset happens only after successful verification.
 
   A full NAND backup is read before erasing and saved with all staged images
   under `em300-backups/`. This is factory installation, NOT an OTA update.
@@ -206,7 +206,7 @@ defmodule Mix.Tasks.Em300.Flash do
 
     ubi = Path.join(output, "ubi.img")
     config = Path.join(output, "ubinize.cfg")
-    File.write!(config, ubinize_config(rootfs))
+    File.write!(config, ubinize_config(rootfs, kernel))
     cmd!(ubinize, ["-o", ubi, "-p", to_string(@peb), "-m", to_string(@page), config])
 
     staged = %{
@@ -214,7 +214,6 @@ defmodule Mix.Tasks.Em300.Flash do
       writes: [
         {"idblock", idblock_copies},
         {"uboot", uboot},
-        {"kernel_a", kernel},
         {"ubi", ubi},
         # The environment makes slot A bootable, so it is written last.
         {"env", env}
@@ -248,7 +247,8 @@ defmodule Mix.Tasks.Em300.Flash do
   end
 
   @doc false
-  def ubinize_config(rootfs) do
+  def ubinize_config(rootfs, kernel) do
+    # Volume IDs are the /dev/ubi0_N nodes used by fwup.conf and erlinit.config.
     """
     [rootfs_a]
     mode=ubi
@@ -272,6 +272,21 @@ defmodule Mix.Tasks.Em300.Flash do
     vol_name=data
     vol_size=1MiB
     vol_flags=autoresize
+
+    [kernel_a]
+    mode=ubi
+    vol_id=3
+    vol_type=dynamic
+    vol_name=kernel_a
+    vol_size=8MiB
+    image=#{kernel}
+
+    [kernel_b]
+    mode=ubi
+    vol_id=4
+    vol_type=dynamic
+    vol_name=kernel_b
+    vol_size=8MiB
     """
   end
 
