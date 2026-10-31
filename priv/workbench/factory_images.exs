@@ -1,4 +1,4 @@
-# Preloaded in an isolated EC100 Mix process. Resolve build metadata only;
+# Preloaded in an isolated EC100 or EM300 Mix process. Resolve build metadata only;
 # never start firmware applications, compile device code, or access USB.
 defmodule Mix.Tasks.Dev.FactoryImages do
   use Mix.Task

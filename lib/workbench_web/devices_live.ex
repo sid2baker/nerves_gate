@@ -64,7 +64,7 @@ defmodule WorkbenchWeb.DevicesLive do
         <p class="ui-help">
           LAN mDNS and Tailnet peers named nerves-gate* are found automatically. A gateway joins once its node accepts the development cookie.
         </p>
-        <.link navigate="/provision" class="ui-text-link">Provision a new EC100 over USB</.link>
+        <.link navigate="/provision" class="ui-text-link">Provision a new EC100 or EM300 over USB</.link>
       </.panel>
     </main>
     """

@@ -100,14 +100,14 @@ defmodule Workbench.MixProject do
   defp firmware(args) do
     {options, targets} = OptionParser.parse!(args, strict: [env: :string])
     target = List.first(targets) || "x86_64"
-    env = options[:env] || "dev"
-
-    unless length(targets) <= 1 and
-             {target, env} in [{"x86_64", "dev"}, {"ec100", "dev"}, {"ec100", "prod"}],
-           do: Mix.raise("Usage: mix firmware [x86_64 | ec100] [--env dev | prod]")
-
+    env = %{"dev" => :dev, "prod" => :prod}[options[:env] || "dev"]
     Mix.Task.run("app.config")
-    env = if env == "prod", do: :prod, else: :dev
+
+    unless length(targets) <= 1 and Workbench.Builds.buildable?(target, env) do
+      boards = Enum.join(["x86_64" | Workbench.Builds.physical_targets()], " | ")
+      Mix.raise("Usage: mix firmware [#{boards}] [--env dev | prod]")
+    end
+
     Workbench.Builds.firmware!(target, &Mix.shell().info(&1), env)
   end
 

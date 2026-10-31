@@ -1,13 +1,35 @@
 defmodule Workbench.FactoryProvisioning do
-  @moduledoc "Reviewed MASKROM provisioning. Shares ec100.flash's staging, backup and verified-write engine."
+  @moduledoc """
+  Reviewed MaskROM provisioning for RK3506 boards. The selected image's platform
+  chooses the board; each board's system task (`ec100.flash`, `em300.flash`) owns
+  its staging, backup and verified-write engine.
+  """
   @ttl 600_000
-  @boot_files ~w(ec100-maskrom-loader.bin idbloader.img u-boot.itb)
+
+  # USB cannot tell the boards apart (all enumerate as an RK3506), so the image's
+  # platform selects the board and the physically confirmed erase phrase names it.
+  # Each physical board's system provides `Mix.Tasks.<Board>.Flash`, which owns
+  # the board's facts (`board/0`) and its staging/backup/verified-write engine.
+  # Workbench uses its public functions, never its interactive Mix task.
+  def board!(platform) do
+    unless platform in Workbench.Builds.physical_targets(),
+      do: raise(ArgumentError, "Choose Nerves Gate firmware for a physical board")
+
+    engine = Module.concat([Mix.Tasks, Macro.camelize(platform), Flash])
+
+    unless Code.ensure_loaded?(engine) do
+      source = "systems/nerves_system_#{platform}/lib/mix/tasks/#{platform}.flash.ex"
+      Code.require_file(Path.join(Workbench.root(), source))
+    end
+
+    Map.put(engine.board(), :engine, engine)
+  end
 
   def review!(params, report \\ fn _ -> :ok end) do
     original = params["firmware"]
 
     unless Enum.any?(Workbench.Builds.images(), &(&1.path == original)),
-      do: raise(ArgumentError, "Select an available EC100 firmware image; build or refresh first")
+      do: raise(ArgumentError, "Select an available firmware image; build or refresh first")
 
     unless params["sudo"] in [nil, "true", "false"],
       do: raise(ArgumentError, "Choose direct USB access or noninteractive sudo")
@@ -26,29 +48,30 @@ defmodule Workbench.FactoryProvisioning do
       if File.stat!(original).size > 512 * 1024 * 1024, do: raise("Firmware exceeds 512 MiB")
       File.cp!(original, snapshot)
       image = Workbench.FirmwareUpdate.image!(snapshot)
-      compatible!(image)
-      report.("Resolving the selected build's EC100 boot artifacts")
-      images = system_images!(original)
-      copy_boot_files!(images, dir)
-      files = ["image.fw" | @boot_files]
+      platform = compatible!(image)
+      board = board!(platform)
+      report.("Resolving the selected build's #{board.name} boot artifacts")
+      images = system_images!(original, platform)
+      copy_boot_files!(images, dir, board)
+      files = ["image.fw" | board.boot_files]
       hashes = Map.new(files, &{&1, Workbench.FirmwareUpdate.hash!(Path.join(dir, &1))})
       for name <- files, do: File.chmod!(Path.join(dir, name), 0o400)
 
-      output = Path.join(backup_directory(), random())
+      output = Path.join(backup_directory(platform), random())
       File.mkdir_p!(Path.dirname(output))
       File.chmod!(Path.dirname(output), 0o700)
       # Reject clearly insufficient space before touching USB at all. Once the
       # RAM loader reports capacity, enforce the full device-specific budget.
       space!(
         free_space!(Path.dirname(output)),
-        required_space(2_261_026, File.stat!(snapshot).size, backup?)
+        required_space(board.sectors.first, File.stat!(snapshot).size, backup?)
       )
 
       run = runner(sudo, report)
       location = device!(run.(["ld"]), "Maskrom")
-      report.("Loading temporary USB transport into RAM only; no eMMC writes")
-      run.(["db", loader!(dir, hashes["ec100-maskrom-loader.bin"])])
-      sectors = probe!(run, location, 10)
+      report.("Loading temporary USB transport into RAM only; no #{board.storage} writes")
+      run.(["db", loader!(dir, board, hashes[board.loader])])
+      sectors = probe!(run, board, location, 10)
       required = required_space(sectors, File.stat!(snapshot).size, backup?)
       available = free_space!(Path.dirname(output))
       space!(available, required)
@@ -58,8 +81,11 @@ defmodule Workbench.FactoryProvisioning do
         public: %{
           kind: :factory,
           token: random(),
+          platform: platform,
+          board: board.name,
+          storage: board.storage,
           location: location,
-          confirmation: erase_confirmation(location, backup?),
+          confirmation: erase_confirmation(board, location, backup?),
           firmware: original,
           version: image["meta-version"],
           sha256: hashes["image.fw"],
@@ -83,9 +109,9 @@ defmodule Workbench.FactoryProvisioning do
     end
   end
 
-  def backup_directory do
+  def backup_directory(platform) do
     Application.get_env(:nerves_gate_workbench, :backup_directory) ||
-      Path.join(to_string(:filename.basedir(:user_data, ~c"nerves_gate")), "ec100-backups")
+      Path.join(to_string(:filename.basedir(:user_data, ~c"nerves_gate")), "#{platform}-backups")
   end
 
   def confirmation!(plan, token, text, identified) do
@@ -97,7 +123,7 @@ defmodule Workbench.FactoryProvisioning do
         raise ArgumentError, "Factory review expired; re-enter MASKROM and review again"
 
       identified != "true" ->
-        raise ArgumentError, "Physically verify the attached board is an EC100"
+        raise ArgumentError, "Physically verify the attached board is an #{plan.public.board}"
 
       text != plan.public.confirmation ->
         raise ArgumentError, "Type the exact erase confirmation"
@@ -117,10 +143,11 @@ defmodule Workbench.FactoryProvisioning do
       end
 
       space!(free_space!(Path.dirname(plan.public.backup)), plan.public.required_space)
+      board = board!(plan.public.platform)
       run = runner(plan.public.sudo, report)
-      transport!(run, plan.public.location, plan.sectors)
+      transport!(run, board, plan.public.location, plan.sectors)
 
-      flash = engine!()
+      flash = board.engine
       report.("Preparing the factory image; no device writes yet")
       files = apply(flash, :prepare!, [plan.snapshot, plan.dir, plan.sectors, plan.public.backup])
       File.chmod!(plan.public.backup, 0o700)
@@ -128,18 +155,20 @@ defmodule Workbench.FactoryProvisioning do
 
       report.(
         if backup?,
-          do: "Backing up the entire eMMC user area before any writes",
+          do: "Backing up the entire #{board.storage} before any writes",
           else: "Full backup explicitly skipped; every write will still be read back and verified"
       )
 
+      # Re-verify identity and capacity before every command that changes the
+      # device; reads (ld, rfi, rl) are admitted by the surrounding checks.
       guarded_run = fn args ->
-        if hd(args) in ["wl", "rd"],
-          do: transport!(run, plan.public.location, plan.sectors)
+        unless hd(args) in ["ld", "rfi", "rl"],
+          do: transport!(run, board, plan.public.location, plan.sectors)
 
         run.(args)
       end
 
-      transport!(run, plan.public.location, plan.sectors)
+      transport!(run, board, plan.public.location, plan.sectors)
 
       space!(free_space!(Path.dirname(plan.public.backup)), plan.public.required_space)
 
@@ -151,7 +180,7 @@ defmodule Workbench.FactoryProvisioning do
         [backup: backup?]
       ])
 
-      report.("Every written region verified. Resetting the EC100")
+      report.("Every written region verified. Resetting the #{board.name}")
       guarded_run.(["rd"])
       backup_notice = if backup?, do: "Full backup saved.", else: "Full backup skipped."
 
@@ -168,8 +197,8 @@ defmodule Workbench.FactoryProvisioning do
   def cleanup(plan), do: File.rm_rf!(plan.dir)
 
   @doc false
-  def loader!(dir, expected_hash) do
-    path = Path.join(dir, "ec100-maskrom-loader.bin")
+  def loader!(dir, board, expected_hash) do
+    path = Path.join(dir, board.loader)
 
     with {:ok, %{type: :regular, size: size}} when size > 0 <- File.stat(path),
          {:ok, bytes} <- File.read(path),
@@ -183,7 +212,7 @@ defmodule Workbench.FactoryProvisioning do
 
   @doc false
   def command_label(["db", _]),
-    do: "Loading the verified review's RAM transport (no eMMC writes)"
+    do: "Loading the verified review's RAM transport (no flash writes)"
 
   def command_label(args), do: "rkdeveloptool " <> Enum.join(args, " ")
 
@@ -194,11 +223,11 @@ defmodule Workbench.FactoryProvisioning do
     detail =
       cond do
         hd(args) == "db" and String.contains?(output, "Creating Comm Object failed") ->
-          "The RAM loader opened, but rkdeveloptool could not open or claim the EC100 USB connection. " <>
+          "The RAM loader opened, but rkdeveloptool could not open or claim the RK3506 USB connection. " <>
             usb_access_help(sudo) <> " Listing a device with ld does not prove download access."
 
         hd(args) == "db" and String.contains?(output, "Opening loader failed") ->
-          "rkdeveloptool could not read or parse the reviewed RAM loader. Check the selected EC100 boot artifacts and rkdeveloptool installation."
+          "rkdeveloptool could not read or parse the reviewed RAM loader. Check the selected board's boot artifacts and rkdeveloptool installation."
 
         true ->
           "USB command failed (#{code}): #{String.slice(output, 0, 500)}. " <>
@@ -219,11 +248,12 @@ defmodule Workbench.FactoryProvisioning do
 
   @doc false
   def compatible!(image) do
-    unless image["meta-platform"] == "ec100" and image["meta-architecture"] == "arm" and
+    unless image["meta-platform"] in Workbench.Builds.physical_targets() and
+             image["meta-architecture"] == "arm" and
              image["meta-product"] == "nerves_gate" and is_binary(image["meta-version"]),
-           do: raise(ArgumentError, "Choose Nerves Gate firmware for the physical EC100")
+           do: raise(ArgumentError, "Choose Nerves Gate firmware for a physical board")
 
-    :ok
+    image["meta-platform"]
   end
 
   @doc false
@@ -249,33 +279,38 @@ defmodule Workbench.FactoryProvisioning do
       do:
         raise(
           ArgumentError,
-          "Connect exactly one RK3506 EC100#{if mode == :transport, do: "", else: " in #{mode} mode"} at the reviewed USB location"
+          "Connect exactly one RK3506 board#{if mode == :transport, do: "", else: " in #{mode} mode"} at the reviewed USB location"
         )
 
     location
   end
 
   @doc false
-  def capacity!(text) do
+  def capacity!(text, board) do
     case Regex.run(~r/Flash Size:\s*(\d+)\s+Sectors/i, text) do
       [_, n] ->
         sectors = String.to_integer(n)
-        if sectors < 2_261_026 or sectors > 0xFFFFFFFF, do: raise("Unsupported eMMC capacity")
+
+        unless sectors in board.sectors,
+          do: raise("Unsupported #{board.name} #{board.storage} capacity")
+
         sectors
 
       _ ->
-        raise "Could not read eMMC capacity"
+        raise "Could not read #{board.storage} capacity"
     end
   end
 
   @doc false
   def backup_enabled!(value) when value in [nil, "true"], do: true
   def backup_enabled!("false"), do: false
-  def backup_enabled!(_), do: raise(ArgumentError, "Choose whether to create a full eMMC backup")
+  def backup_enabled!(_), do: raise(ArgumentError, "Choose whether to create a full flash backup")
 
   @doc false
-  def erase_confirmation(location, true), do: "ERASE EC100 #{location}"
-  def erase_confirmation(location, false), do: "ERASE EC100 #{location} WITHOUT BACKUP"
+  def erase_confirmation(board, location, true), do: "ERASE #{board.name} #{location}"
+
+  def erase_confirmation(board, location, false),
+    do: "ERASE #{board.name} #{location} WITHOUT BACKUP"
 
   @doc false
   def required_space(sectors, firmware_bytes, backup? \\ true),
@@ -297,9 +332,9 @@ defmodule Workbench.FactoryProvisioning do
   # read-only flash-info command, not that label, proves transport readiness.
   # Bracket it with identity checks and pin capacity before every write/reset.
   @doc false
-  def transport!(run, location, expected_sectors \\ nil) do
+  def transport!(run, board, location, expected_sectors \\ nil) do
     device!(run.(["ld"]), :transport, location)
-    sectors = capacity!(run.(["rfi"]))
+    sectors = capacity!(run.(["rfi"]), board)
     device!(run.(["ld"]), :transport, location)
 
     if expected_sectors != nil and sectors != expected_sectors,
@@ -312,21 +347,21 @@ defmodule Workbench.FactoryProvisioning do
     sectors
   end
 
-  defp probe!(run, location, attempts) do
-    transport!(run, location)
+  defp probe!(run, board, location, attempts) do
+    transport!(run, board, location)
   rescue
     # Only read-only readiness failures are retried. Identity/USB-location or
     # capacity mismatch (ArgumentError) abort immediately.
     error in RuntimeError ->
       if attempts <= 1, do: reraise(error, __STACKTRACE__)
       Process.sleep(1_000)
-      probe!(run, location, attempts - 1)
+      probe!(run, board, location, attempts - 1)
   end
 
-  defp copy_boot_files!(images, dir) do
+  defp copy_boot_files!(images, dir, board) do
     hashes = File.read!(Path.join(images, "bootloader.sha256"))
 
-    for name <- @boot_files do
+    for name <- board.boot_files do
       destination = Path.join(dir, name)
       File.cp!(Path.join(images, name), destination)
       expected = Workbench.FirmwareUpdate.hash!(destination) <> "  " <> name
@@ -338,11 +373,11 @@ defmodule Workbench.FactoryProvisioning do
     File.cp!(Path.join(images, "bootloader.sha256"), Path.join(dir, "bootloader.sha256"))
   end
 
-  defp system_images!(firmware) do
+  defp system_images!(firmware, platform) do
     ["firmware", "_build", build, "nerves", "images", _] =
       Path.split(Path.relative_to(firmware, Workbench.root()))
 
-    [_, env] = Regex.run(~r/\Aec100_([a-z][a-z0-9_]*)\z/, build)
+    [_, env] = Regex.run(~r/\A#{platform}_([a-z][a-z0-9_]*)\z/, build)
 
     script = Path.join(Workbench.root(), "priv/workbench/factory_images.exs")
 
@@ -352,7 +387,7 @@ defmodule Workbench.FactoryProvisioning do
         timeout: 60_000,
         stderr_to_stdout: true,
         env: [
-          {"MIX_TARGET", "ec100"},
+          {"MIX_TARGET", platform},
           {"MIX_ENV", env},
           {"NERVES_GATE_LOCAL_DEPS", "1"},
           {"NERVES_SYSTEM", nil},
@@ -369,23 +404,9 @@ defmodule Workbench.FactoryProvisioning do
       end)
 
     unless status == 0 and encoded,
-      do: raise("Build EC100 firmware first; cannot resolve boot artifacts")
+      do: raise("Build #{String.upcase(platform)} firmware first; cannot resolve boot artifacts")
 
     Base.decode64!(encoded)
-  end
-
-  defp engine! do
-    # Use the existing CLI's public staging/write functions, never run its
-    # interactive Mix task or duplicate its boot-layout/backup/readback logic.
-    module = Mix.Tasks.Ec100.Flash
-
-    unless Code.ensure_loaded?(module),
-      do:
-        Code.require_file(
-          Path.join(Workbench.root(), "systems/nerves_system_ec100/lib/mix/tasks/ec100.flash.ex")
-        )
-
-    module
   end
 
   defp runner(sudo, report) do

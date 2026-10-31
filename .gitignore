@@ -27,9 +27,11 @@
 **/.nerves/
 **/build.log
 /ec100-backups/
+em300-backups/
 
 # Tailscale binaries installed explicitly for each firmware architecture.
 /firmware/rootfs_overlay/ec100/usr/sbin/tailscaled
+/firmware/rootfs_overlay/em300/usr/sbin/tailscaled
 /firmware/rootfs_overlay/x86_64/usr/sbin/tailscaled
 
 # If the VM crashes, it generates a dump, let's ignore it too.

@@ -35,7 +35,7 @@ defmodule Scenarios.Cases.SystemArtifact do
              :ssh_subsystem_fwup,
              :precheck_callback
            ]) ==
-             {NervesGate.Recovery.EC100, :firmware_precheck, []}
+             {NervesGate.Recovery, :firmware_precheck, []}
 
     serial = Scenarios.Device.rpc(vm, Nerves.Runtime, :serial_number, [])
     # :inet.gethostname/0 drops everything from the first dot of the QEMU serial.
@@ -59,7 +59,7 @@ defmodule Scenarios.Cases.SystemArtifact do
              :error
 
     assert {:ok, _mount} = Scenarios.Device.rpc(vm, NervesGate.Recovery.DataInit, :check_data, [])
-    assert Scenarios.Device.rpc(vm, NervesGate.Board, :get, [:recovery_adapter]) == nil
+    assert Scenarios.Device.rpc(vm, NervesGate.Board, :get, [:indicators]) == nil
     refute Scenarios.Device.rpc(vm, Code, :ensure_loaded?, [Workbench.Application])
   end
 

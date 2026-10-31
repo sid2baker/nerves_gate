@@ -30,7 +30,14 @@ defmodule WorkbenchWeb.FirmwarePageTest do
     assert Floki.find(empty, "#physical-checks [phx-click=check]") |> length() == 3
     assert Floki.find(empty, "#scenarios, #manual-controls") == []
 
-    images = [%{path: "/built/ec100.fw", version: "0.2.0-dev", build: "ec100_dev/nerves_gate.fw"}]
+    images = [
+      %{
+        path: "/built/ec100.fw",
+        target: "ec100",
+        version: "0.2.0-dev",
+        build: "ec100_dev/nerves_gate.fw"
+      }
+    ]
 
     review = %{
       kind: :firmware,
@@ -78,7 +85,13 @@ defmodule WorkbenchWeb.FirmwarePageTest do
       render_component(&WorkbenchWeb.FirmwareLive.render/1, assigns(confirm_reset: false))
       |> Floki.parse_document!()
 
-    assert Floki.find(firmware, "#build-firmware select[name=target] option[value=ec100]") != []
+    for target <- ["x86_64", "ec100", "em300"],
+        do:
+          assert(
+            Floki.find(firmware, "#build-firmware select[name=target] option[value=#{target}]") !=
+              []
+          )
+
     assert Floki.find(firmware, "#simulator-lifecycle #start-devices") != []
 
     assert Floki.find(

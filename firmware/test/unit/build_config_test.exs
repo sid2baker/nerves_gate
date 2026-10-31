@@ -1,8 +1,8 @@
 defmodule NervesGate.BuildConfigTest do
   use ExUnit.Case, async: false
 
-  test "only EC100 selects the ECM modem and both targets protect input before networking" do
-    for target <- [:ec100, :x86_64] do
+  test "only EC100 selects the ECM modem and all targets protect input before networking" do
+    for target <- [:ec100, :em300, :x86_64] do
       config = Config.Reader.read!("config/config.exs", env: :dev, target: target)
 
       assert config[:nerves_runtime][:init_module] == NervesGate.Recovery.DataInit
@@ -18,37 +18,64 @@ defmodule NervesGate.BuildConfigTest do
       # Hardware settings have one owner, not parallel top-level defaults.
       for key <- Map.keys(board), do: refute(Keyword.has_key?(config[:nerves_gate], key))
 
-      if target == :ec100 do
-        assert board == %{
-                 cellular: %{
-                   interface: "wwan0",
-                   sim_detect_level: 1,
-                   config: %{
-                     type: VintageNetECM,
-                     vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
-                   }
-                 },
-                 hardware_adapter: {NervesGate.Hardware.EC100, nil},
-                 indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"},
-                 recovery_adapter: {NervesGate.Recovery.EC100, nil},
-                 data_partition: "/sys/class/block/mmcblk0p3/dev",
-                 plugins_device: "/dev/mmcblk1p1"
-               }
+      case target do
+        :ec100 ->
+          assert board == %{
+                   cellular: %{
+                     interface: "wwan0",
+                     sim_detect_level: 1,
+                     config: %{
+                       type: VintageNetECM,
+                       vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
+                     }
+                   },
+                   ports: %{
+                     can: ["can0", "can1"],
+                     serial: [
+                       {"ttyS3", "rs485", "RS485 · automatic direction · 9600 8N1"},
+                       {"ttyS4", "rs485", "RS485 · automatic direction · 9600 8N1"}
+                     ]
+                   },
+                   indicators: %{
+                     leds: %{run: "ec100:run", user1: "ec100:user1", user2: "ec100:user2"},
+                     button: "gpio-keys"
+                   },
+                   data: {:ext4, "/sys/class/block/mmcblk0p3/dev"},
+                   plugins_device: "/dev/mmcblk1p1"
+                 }
 
-        assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
-      else
-        assert board == %{
-                 cellular: nil,
-                 hardware_adapter: nil,
-                 indicators_adapter: nil,
-                 recovery_adapter: nil,
-                 data_partition: "/sys/class/block/vda4/dev",
-                 plugins_device: "/dev/vdb"
-               }
+          assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
 
-        # runtime.exs supplies USB and the real eth2 IP from the virtual disk serial.
-        # There is no shared static management address in the compiled configuration.
-        assert config[:vintage_net][:config] == []
+        :em300 ->
+          # Unqualified EM300 peripherals stay disabled; ttyS5 belongs to the I/O domain.
+          assert %{
+                   cellular: nil,
+                   indicators: nil,
+                   data: {:ubifs, "/dev/ubi0_2"},
+                   plugins_device: "/dev/mmcblk0p1",
+                   ports: %{can: ["can0", "can1"], serial: serial}
+                 } = board
+
+          assert Enum.map(serial, &elem(&1, 0)) == ["ttyS1", "ttyS2", "ttyS3", "ttyS4"]
+          assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
+
+          # Slot writes and data reset run outside fwup's env-partition destination.
+          assert config[:nerves_runtime][:devpath] == "/dev/mtdblock2"
+          assert config[:nerves_runtime][:fwup_extra_options] == ["--unsafe"]
+          assert config[:ssh_subsystem_fwup][:fwup_extra_options] == ["--unsafe"]
+
+        :x86_64 ->
+          assert board == %{
+                   cellular: nil,
+                   ports: nil,
+                   indicators: nil,
+                   data: {:ext4, "/sys/class/block/vda4/dev"},
+                   plugins_device: "/dev/vdb"
+                 }
+
+          # runtime.exs supplies USB and the real eth2 IP from the virtual disk serial.
+          # There is no shared static management address in the compiled configuration.
+          assert config[:vintage_net][:config] == []
       end
     end
   end
@@ -113,9 +140,19 @@ defmodule NervesGate.BuildConfigTest do
     project = Mix.Project.get()
     previous_env = Mix.env()
     previous_target = Mix.target()
+    previous_local = System.get_env("NERVES_GATE_LOCAL_DEPS")
+    # EM300 is unpublished; its builds always use local system sources.
+    System.put_env("NERVES_GATE_LOCAL_DEPS", "1")
 
     try do
-      for {target, env} <- [host: :dev, host: :test, host: :docs, x86_64: :dev, ec100: :prod] do
+      for {target, env} <- [
+            host: :dev,
+            host: :test,
+            host: :docs,
+            x86_64: :dev,
+            ec100: :prod,
+            em300: :prod
+          ] do
         Mix.env(env)
         Mix.target(target)
         listeners = project.project()[:listeners]
@@ -127,6 +164,10 @@ defmodule NervesGate.BuildConfigTest do
     after
       Mix.env(previous_env)
       Mix.target(previous_target)
+
+      if previous_local,
+        do: System.put_env("NERVES_GATE_LOCAL_DEPS", previous_local),
+        else: System.delete_env("NERVES_GATE_LOCAL_DEPS")
     end
   end
 end

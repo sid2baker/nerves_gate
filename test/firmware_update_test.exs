@@ -32,6 +32,20 @@ defmodule Workbench.FirmwareUpdateTest do
         ] do
       assert_raise ArgumentError, fn -> FirmwareUpdate.compatible!(image, incompatible) end
     end
+
+    # EC100 and EM300 images are rejected on the other board, in both directions.
+    em300_image = %{image | "meta-platform" => "em300"}
+    em300 = %{device | "target" => "em300", "platform" => "em300"}
+    assert FirmwareUpdate.compatible!(em300_image, em300) == :ok
+    assert_raise ArgumentError, fn -> FirmwareUpdate.compatible!(em300_image, device) end
+    assert_raise ArgumentError, fn -> FirmwareUpdate.compatible!(image, em300) end
+
+    # A simulator image or gateway is never a physical update.
+    x86 = %{device | "target" => "x86_64", "platform" => "x86_64"}
+
+    assert_raise ArgumentError, fn ->
+      FirmwareUpdate.compatible!(%{image | "meta-platform" => "x86_64"}, x86)
+    end
   end
 
   test "confirmation must match this unexpired review and exact hostname" do

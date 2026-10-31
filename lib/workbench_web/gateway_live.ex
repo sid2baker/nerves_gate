@@ -24,7 +24,7 @@ defmodule WorkbenchWeb.GatewayLive do
 
     socket =
       socket
-      |> assign(node: node, gateway: gateway, confirm_run: nil, images: Workbench.Builds.images())
+      |> assign(node: node, gateway: gateway, confirm_run: nil, images: images(gateway))
       |> put_bench(Runner.snapshot())
 
     if gateway do
@@ -59,14 +59,14 @@ defmodule WorkbenchWeb.GatewayLive do
   def handle_event("review_firmware", %{"firmware" => path}, socket) do
     if Enum.any?(socket.assigns.images, &(&1.path == path)),
       do: command(socket, Workbench.Jobs.review_firmware(socket.assigns.gateway.node, path)),
-      else: command(socket, {:error, "Select an available EC100 image"})
+      else: command(socket, {:error, "Select an available image for this gateway's board"})
   end
 
   def handle_event("confirm_firmware", %{"review_id" => token, "address" => address}, socket),
     do: command(socket, Workbench.Jobs.confirm_firmware(token, address))
 
   def handle_event("refresh_images", _, socket),
-    do: {:noreply, assign(socket, :images, Workbench.Builds.images())}
+    do: {:noreply, assign(socket, :images, images(socket.assigns.gateway))}
 
   def handle_event("mode", %{"mode" => mode}, socket),
     do: command(socket, Runner.mode(socket.assigns.sim_id, mode))
@@ -209,10 +209,10 @@ defmodule WorkbenchWeb.GatewayLive do
               name="firmware"
               required
               disabled={@images == []}
-              aria-label="EC100 firmware image"
+              aria-label="Firmware image for this gateway's board"
             >
               <option :for={image <- @images} value={image.path}>
-                {image.version} · {image.build}
+                {String.upcase(image.target)} {image.version} · {image.build}
               </option>
             </select>
             <.button
@@ -439,4 +439,10 @@ defmodule WorkbenchWeb.GatewayLive do
 
   defp observation(id, name, label, good),
     do: %{id: id, name: name, label: label, tone: if(good, do: "good", else: "neutral")}
+
+  # Offer only images built for this gateway's board; review checks it again.
+  defp images(%{identity: %{target: target}}),
+    do: Enum.filter(Workbench.Builds.images(), &(&1.target == target))
+
+  defp images(_), do: []
 end

@@ -6,6 +6,9 @@ defmodule Workbench.FactoryProvisioningTest do
   @loader "DevNo=1 Vid=0x2207,Pid=0x350f,LocationID=101 Loader\n"
   @flash_info "Flash Info:\n\tFlash Size: 7471104 Sectors\n"
 
+  defp ec100, do: Factory.board!("ec100")
+  defp em300, do: Factory.board!("em300")
+
   test "working RAM transport may retain the Maskrom label; identity brackets flash-info" do
     for listing <- [@maskrom, @loader] do
       run = fn command ->
@@ -17,12 +20,12 @@ defmodule Workbench.FactoryProvisioningTest do
         end
       end
 
-      assert Factory.transport!(run, "101") == 7_471_104
+      assert Factory.transport!(run, ec100(), "101") == 7_471_104
       assert_receive {:command, ["ld"]}
       assert_receive {:command, ["rfi"]}
       assert_receive {:command, ["ld"]}
       refute_receive {:command, _}, 0
-      assert Factory.transport!(run, "101", 7_471_104) == 7_471_104
+      assert Factory.transport!(run, ec100(), "101", 7_471_104) == 7_471_104
       assert_receive {:command, ["ld"]}
       assert_receive {:command, ["rfi"]}
       assert_receive {:command, ["ld"]}
@@ -36,7 +39,7 @@ defmodule Workbench.FactoryProvisioningTest do
         ["rfi"] -> result
       end
 
-      assert_raise RuntimeError, fn -> Factory.transport!(run, "101") end
+      assert_raise RuntimeError, fn -> Factory.transport!(run, ec100(), "101") end
     end
 
     run = fn
@@ -44,7 +47,9 @@ defmodule Workbench.FactoryProvisioningTest do
       ["rfi"] -> raise "USB command failed"
     end
 
-    assert_raise RuntimeError, ~r/USB command failed/, fn -> Factory.transport!(run, "101") end
+    assert_raise RuntimeError, ~r/USB command failed/, fn ->
+      Factory.transport!(run, ec100(), "101")
+    end
   end
 
   test "transport refuses ambiguous, unsupported or relocated devices before querying capacity" do
@@ -61,7 +66,7 @@ defmodule Workbench.FactoryProvisioningTest do
         command -> flunk("must not query or write an unverified device: #{inspect(command)}")
       end
 
-      assert_raise ArgumentError, fn -> Factory.transport!(run, "101") end
+      assert_raise ArgumentError, fn -> Factory.transport!(run, ec100(), "101") end
     end
   end
 
@@ -80,7 +85,7 @@ defmodule Workbench.FactoryProvisioningTest do
           @flash_info
       end
 
-      assert_raise ArgumentError, fn -> Factory.transport!(run, "101") end
+      assert_raise ArgumentError, fn -> Factory.transport!(run, ec100(), "101") end
     end
   end
 
@@ -91,7 +96,7 @@ defmodule Workbench.FactoryProvisioningTest do
     end
 
     assert_raise ArgumentError, ~r/Device capacity changed; no write or reset authorized/, fn ->
-      Factory.transport!(run, "101", 7_471_105)
+      Factory.transport!(run, ec100(), "101", 7_471_105)
     end
   end
 
@@ -113,10 +118,26 @@ defmodule Workbench.FactoryProvisioningTest do
   end
 
   test "capacity and conservative disk budget reject unsafe preparation" do
-    assert Factory.capacity!("Flash Size: 7471104 Sectors") == 7_471_104
-    assert_raise RuntimeError, fn -> Factory.capacity!("Flash Size: 100 Sectors") end
-    assert_raise RuntimeError, fn -> Factory.capacity!("Flash Size: 4294967296 Sectors") end
-    assert_raise RuntimeError, fn -> Factory.capacity!("Flash Size: 4GB") end
+    assert Factory.capacity!("Flash Size: 7471104 Sectors", ec100()) == 7_471_104
+    assert_raise RuntimeError, fn -> Factory.capacity!("Flash Size: 100 Sectors", ec100()) end
+
+    assert_raise RuntimeError, fn ->
+      Factory.capacity!("Flash Size: 4294967296 Sectors", ec100())
+    end
+
+    assert_raise RuntimeError, fn -> Factory.capacity!("Flash Size: 4GB", ec100()) end
+
+    # EM300: exactly the 512 MiB SPI NAND whose layout ends at 0x1FF00000.
+    assert Factory.capacity!("Flash Size: 1048576 Sectors", em300()) == 1_048_576
+
+    for sectors <- [1_046_527, 2_097_152, 7_471_104] do
+      assert_raise RuntimeError, ~r/Unsupported EM300 SPI NAND capacity/, fn ->
+        Factory.capacity!("Flash Size: #{sectors} Sectors", em300())
+      end
+    end
+
+    # An eMMC-sized device never passes as an EM300, nor a NAND-sized one as EC100.
+    assert_raise RuntimeError, fn -> Factory.capacity!("Flash Size: 1048576 Sectors", ec100()) end
     required = Factory.required_space(7_471_104, 50_000_000)
     assert required > 7_471_104 * 512 * 3
     assert Factory.space!(required, required) == :ok
@@ -140,8 +161,9 @@ defmodule Workbench.FactoryProvisioningTest do
     skipped = Factory.required_space(sectors, 50_000_000, false)
     assert full - skipped == sectors * 512
     assert skipped > sectors * 512 * 2
-    assert Factory.erase_confirmation("101", true) == "ERASE EC100 101"
-    assert Factory.erase_confirmation("101", false) == "ERASE EC100 101 WITHOUT BACKUP"
+    assert Factory.erase_confirmation(ec100(), "101", true) == "ERASE EC100 101"
+    assert Factory.erase_confirmation(ec100(), "101", false) == "ERASE EC100 101 WITHOUT BACKUP"
+    assert Factory.erase_confirmation(em300(), "101", true) == "ERASE EM300 101"
   end
 
   test "skipping backup is bound into the reviewed erase phrase" do
@@ -150,7 +172,7 @@ defmodule Workbench.FactoryProvisioningTest do
         kind: :factory,
         token: "token",
         backup_enabled: false,
-        confirmation: Factory.erase_confirmation("101", false)
+        confirmation: Factory.erase_confirmation(ec100(), "101", false)
       },
       expires: System.monotonic_time(:millisecond) + 60_000
     }
@@ -162,7 +184,7 @@ defmodule Workbench.FactoryProvisioningTest do
     assert Factory.confirmation!(plan, "token", "ERASE EC100 101 WITHOUT BACKUP", "true") == :ok
   end
 
-  test "firmware must match the physical EC100 product and architecture" do
+  test "firmware must match a physical board's product and architecture" do
     image = %{
       "meta-platform" => "ec100",
       "meta-architecture" => "arm",
@@ -170,7 +192,8 @@ defmodule Workbench.FactoryProvisioningTest do
       "meta-version" => "0.2.0-dev"
     }
 
-    assert Factory.compatible!(image) == :ok
+    assert Factory.compatible!(image) == "ec100"
+    assert Factory.compatible!(%{image | "meta-platform" => "em300"}) == "em300"
 
     for key <- Map.keys(image) do
       assert_raise ArgumentError, fn -> Factory.compatible!(Map.delete(image, key)) end
@@ -178,6 +201,7 @@ defmodule Workbench.FactoryProvisioningTest do
 
     for {key, value} <- [
           {"meta-platform", "x86_64"},
+          {"meta-platform", "ec100_qemu"},
           {"meta-architecture", "x86_64"},
           {"meta-product", "other"}
         ] do
@@ -187,7 +211,7 @@ defmodule Workbench.FactoryProvisioningTest do
 
   test "confirmation binds token, expiry, erase phrase and physical identification" do
     plan = %{
-      public: %{kind: :factory, token: "token", confirmation: "ERASE EC100 101"},
+      public: %{kind: :factory, token: "token", board: "EC100", confirmation: "ERASE EC100 101"},
       expires: System.monotonic_time(:millisecond) + 60_000
     }
 
@@ -217,17 +241,18 @@ defmodule Workbench.FactoryProvisioningTest do
   test "RAM download only receives an existing, readable, hash-verified staged loader", %{
     tmp_dir: dir
   } do
-    path = Path.join(dir, "ec100-maskrom-loader.bin")
+    board = em300()
+    path = Path.join(dir, board.loader)
     bytes = "reviewed loader"
     hash = Base.encode16(:crypto.hash(:sha256, bytes), case: :lower)
 
     assert_raise RuntimeError, ~r/No USB download was attempted/, fn ->
-      Factory.loader!(dir, hash)
+      Factory.loader!(dir, board, hash)
     end
 
     File.write!(path, bytes)
     File.chmod!(path, 0o400)
-    assert Factory.loader!(dir, hash) == path
+    assert Factory.loader!(dir, board, hash) == path
 
     File.chmod!(path, 0o600)
 
@@ -235,7 +260,7 @@ defmodule Workbench.FactoryProvisioningTest do
       File.write!(path, contents)
 
       assert_raise RuntimeError, ~r/missing, unreadable or changed/, fn ->
-        Factory.loader!(dir, hash)
+        Factory.loader!(dir, board, hash)
       end
     end
 
@@ -243,14 +268,14 @@ defmodule Workbench.FactoryProvisioningTest do
     File.mkdir!(path)
 
     assert_raise RuntimeError, ~r/No USB download was attempted/, fn ->
-      Factory.loader!(dir, hash)
+      Factory.loader!(dir, board, hash)
     end
   end
 
   test "RAM transport progress does not expose an expiring command for manual replay" do
     label = Factory.command_label(["db", "/temporary/factory-reviews/review/loader.bin"])
     assert label =~ "RAM transport"
-    assert label =~ "no eMMC writes"
+    assert label =~ "no flash writes"
     refute label =~ "/temporary"
     refute label =~ "rkdeveloptool db"
     assert Factory.command_label(["rfi"]) == "rkdeveloptool rfi"
@@ -299,5 +324,19 @@ defmodule Workbench.FactoryProvisioningTest do
     Factory.cleanup(%{dir: snapshot, public: %{backup: backup}})
     refute File.exists?(snapshot)
     assert File.read!(Path.join(backup, "emmc-before.img")) == "preserve"
+  end
+
+  test "each board's system flash task provides the staging and verified-write engine" do
+    for platform <- Workbench.Builds.physical_targets() do
+      %{engine: module, name: name, loader: loader, boot_files: files, sectors: %Range{}} =
+        Factory.board!(platform)
+
+      assert name == String.upcase(platform)
+      assert function_exported?(module, :prepare!, 4)
+      assert function_exported?(module, :install!, 5)
+      assert loader in files
+    end
+
+    assert_raise ArgumentError, fn -> Factory.board!("x86_64") end
   end
 end

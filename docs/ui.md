@@ -142,7 +142,7 @@ not restricted to USB. QEMU reports EC100 peripherals as unavailable. The UI has
 | Develop → Firmware | `/develop/firmware` | Build, owned QEMU lifecycle/wiring, results and action log |
 | Gateway → Scenarios | `/devices/:node/scenarios` | Confirm QEMU runs and inspect results |
 | Gateway → Manual debugging | `/devices/:node/manual` | Acquire owned QEMU control, inject reversible faults and release control |
-| Provision | `/provision` | Initial EC100 MASKROM provisioning with destructive review, backup and readbacks |
+| Provision | `/provision` | Initial EC100/EM300 MASKROM provisioning with destructive review, backup and readbacks |
 
 Physical pages offer the separate `Scenarios.physical/0` catalogue: readiness,
 operator-assisted Ethernet/4G failover, and physical-button reboot observation.

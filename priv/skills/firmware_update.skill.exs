@@ -5,7 +5,7 @@ defmodule Workbench.Skill.FirmwareUpdate do
     name("firmware-update")
 
     description(
-      "Review and apply explicitly authorized physical EC100 firmware through the attached Workbench."
+      "Review and apply explicitly authorized physical EC100 or EM300 firmware through the attached Workbench."
     )
 
     markdown("""
@@ -25,7 +25,8 @@ defmodule Workbench.Skill.FirmwareUpdate do
 
     ```elixir
     {:ok, gateway} = Workbench.Gateways.fetch(:"nerves_gate@100.120.69.127")
-    {:ok, review_job} = Workbench.Jobs.review_firmware(gateway.node, "firmware/_build/ec100_dev/nerves/images/nerves_gate.fw")
+    image = "firmware/_build/\#{gateway.identity.target}_dev/nerves/images/nerves_gate.fw"
+    {:ok, review_job} = Workbench.Jobs.review_firmware(gateway.node, image)
     Workbench.Jobs.fetch(review_job) # wait for :awaiting_confirmation; show review to user
     ```
 

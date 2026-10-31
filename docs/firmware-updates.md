@@ -7,7 +7,9 @@ provisioning over USB. Finding or connecting a gateway never authorizes a write.
 
 On **Develop → Firmware**, choose EC100 or x86_64 and build. Builds run in an
 isolated process, never flash hardware, and show the resulting `.fw` path.
-Alternatively run `mix firmware ec100` or `mix firmware x86_64` at the root.
+Alternatively run `mix firmware ec100`, `mix firmware em300` or `mix firmware x86_64`
+at the root. EM300 builds need the locally built, unpublished
+`nerves_system_em300` artifact (see `systems/nerves_system_em300/README.md`).
 See [system releases](releases.md#systems) for local system builds.
 
 ## Reviewed EC100 update
@@ -84,40 +86,53 @@ upload reboots into the new slot; verify the new boot before any further update.
 
 ## Initial USB factory provisioning
 
-**Provision** (`/provision`) replaces the EC100 bootloader, partition layout,
-firmware and data. It needs separate explicit authorization. Normal A/B updates
-do not require this procedure.
+**Provision** (`/provision`) replaces the bootloader, storage layout, firmware and
+data of a physical EC100 (eMMC) or EM300 (SPI NAND). It needs separate explicit
+authorization. Normal A/B updates do not require this procedure.
 
-1. Build EC100 firmware. Install `rkdeveloptool` and provide USB access with udev
-   or explicitly selected noninteractive `sudo -n` after `sudo -v`. The UI never
-   stores or requests a sudo password.
-2. Identify the intended board, connect its Type-C download port and enter MASKROM
-   per the board instructions. Disconnect other Rockchip devices; keep stable
-   power. The FTDI UART is not the flashing link.
+Both boards enumerate as the same RK3506, so USB cannot tell them apart. The
+selected image's `meta-platform` chooses the board: its boot artifacts, accepted
+capacity range and flash engine (`ec100.flash` or `em300.flash` from the board's
+system). The board name is part of the erase confirmation.
+
+1. Build firmware for the board. Install `rkdeveloptool` and provide USB access
+   with udev or explicitly selected noninteractive `sudo -n` after `sudo -v`. The
+   UI never stores or requests a sudo password. EM300 staging also needs
+   `ubinize` (mtd-utils).
+2. Identify the intended board and enter MASKROM: EC100 through its Type-C
+   download port per the board instructions; EM300 by holding the LOADER key while
+   applying power, then connecting USB-C. Disconnect other Rockchip devices; keep
+   stable power. A serial UART is not the flashing link.
 3. Select the image/backup mode and load RAM transport for review. This checks for
    exactly one RK3506, privately snapshots image/boot inputs, loads RAM transport,
-   reads eMMC capacity and checks disk space. It does not write eMMC.
-4. Check USB location, image hash/version, capacity, backup mode and artifact path.
-   A full eMMC backup defaults on. Required free space is three times capacity with
-   backup, twice without, plus firmware size and 256 MiB.
-5. Acknowledge the physical board and type `ERASE EC100 <USB location>` (plus
+   reads the flash capacity (EC100 eMMC range, or exactly the EM300's 512 MiB NAND)
+   and checks disk space. It does not write flash.
+4. Check board, USB location, image hash/version, capacity, backup mode and
+   artifact path. A full flash backup defaults on. Required free space is three
+   times capacity with backup, twice without, plus firmware size and 256 MiB.
+5. Acknowledge the physical board and type `ERASE <BOARD> <USB location>` (plus
    ` WITHOUT BACKUP` when skipping backup). Confirmation is one-use and expires.
-   The shared flash engine backs up if selected, writes, and reads back every
-   region. Readback verification is mandatory; boot0/boot1 are untouched.
+   The board's flash engine backs up if selected, writes, and reads back every
+   region. Readback verification is mandatory. EC100 leaves eMMC boot0/boot1
+   untouched; EM300 erases the entire NAND (including the vendor system and
+   vendor-storage area) before writing the IDB loader, GPT, U-Boot, kernel slot A,
+   the UBI image and the environment. Identity and capacity are rechecked before
+   every device-changing command.
 6. Reset occurs only after all readbacks pass. This proves the storage write, not
    a healthy firmware boot. After the board joins the network it can appear in the
    verified directory. Check its identity and health separately; no browser/USB
    reconnect heuristic is used as proof.
 
 Backups, checksums and readbacks remain outside the checkout, normally under
-`~/.local/share/nerves_gate/ec100-backups/`, including after failure. The review
+`~/.local/share/nerves_gate/<board>-backups/` (`ec100-backups`, `em300-backups`),
+including after failure. The review
 shows the exact path; hosts may set `:nerves_gate_workbench, :backup_directory`.
 Keep the original backup: a later attempt may back up partially written contents.
 Old backup directories are never moved, deleted or uploaded automatically.
 
 ### Safety and troubleshooting
 
-- USB VID/PID/location identify a controller, not a verified EC100 serial. Never
+- USB VID/PID/location identify a controller, not a verified board or serial. Never
   swap boards, disconnect or run another flasher during an operation.
 - Location and capacity are rechecked before installation and every write/reset.
   RAM readiness requires a fresh flash-info query, not a `Maskrom` label.

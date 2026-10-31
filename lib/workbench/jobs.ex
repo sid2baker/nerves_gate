@@ -104,17 +104,21 @@ defmodule Workbench.Jobs do
   def handle_call(_, _, %{task: task} = state) when task != nil,
     do: {:reply, {:error, "Finish the current job first"}, state}
 
-  def handle_call({:build, target}, _, state) when target in ["x86_64", "ec100"] do
+  def handle_call({:build, target}, _, state) do
     lifecycle = Scenarios.Runner.snapshot().lifecycle
 
-    if target == "x86_64" and (lifecycle.status != :stopped or lifecycle.prepared),
-      do:
-        {:reply, {:error, "Reset and stop simulated devices before rebuilding QEMU firmware"},
-         state},
-      else: start(state, "firmware", target, &{:ok, Workbench.Builds.firmware!(target, &1)})
-  end
+    cond do
+      not Workbench.Builds.buildable?(target, :dev) ->
+        {:reply, {:error, "Choose x86_64 or a physical board"}, state}
 
-  def handle_call({:build, _}, _, state), do: {:reply, {:error, "Choose EC100 or x86_64"}, state}
+      target == "x86_64" and (lifecycle.status != :stopped or lifecycle.prepared) ->
+        {:reply, {:error, "Reset and stop simulated devices before rebuilding QEMU firmware"},
+         state}
+
+      true ->
+        start(state, "firmware", target, &{:ok, Workbench.Builds.firmware!(target, &1)})
+    end
+  end
 
   def handle_call({:plugin, kind, path}, _, state) do
     run =

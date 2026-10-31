@@ -63,6 +63,7 @@ defmodule WorkbenchWeb.FirmwareLive do
           <select name="target" aria-label="Firmware build target">
             <option value="x86_64">x86_64 · simulated QEMU</option>
             <option value="ec100">EC100 · physical hardware</option>
+            <option value="em300">EM300 · physical hardware (SPI NAND, bring-up)</option>
           </select>
           <.button type="submit" disabled={@job.status == :running}>Build firmware</.button>
         </form>
@@ -71,7 +72,7 @@ defmodule WorkbenchWeb.FirmwareLive do
         </p>
         <.job :if={@job.kind == "firmware"} job={@job} />
         <p class="ui-help">
-          Physical EC100 image ready? <.link navigate="/devices" class="ui-text-link">Choose a gateway to review an update</.link>, or <.link
+          Physical EC100 or EM300 image ready? <.link navigate="/devices" class="ui-text-link">Choose a gateway to review an update</.link>, or <.link
             navigate="/provision"
             class="ui-text-link"
           >provision new hardware over USB</.link>.

@@ -1,6 +1,6 @@
 defmodule Workbench.FirmwareUpdate do
   @moduledoc """
-  Reviewed physical EC100 firmware update. Identity, health and plugin-artifact
+  Reviewed physical gateway (EC100, EM300) firmware update. Identity, health and plugin-artifact
   preflight use distribution; the image is uploaded once over SSH (`fwup`
   subsystem) pinned to the host-key fingerprints the gateway reported over that
   authenticated distribution connection; success is a new healthy boot of the
@@ -46,7 +46,7 @@ defmodule Workbench.FirmwareUpdate do
           :ok
 
         found ->
-          raise "Plugin artifacts changed under existing versions: #{inspect(found)}. Give each changed plugin a new version in its mix.exs, rebuild with mix firmware ec100, then Refresh images and Review again. Existing device selections stay unchanged; no firmware sent."
+          raise "Plugin artifacts changed under existing versions: #{inspect(found)}. Give each changed plugin a new version in its mix.exs, rebuild with mix firmware #{before["target"]}, then Refresh images and Review again. Existing device selections stay unchanged; no firmware sent."
       end
 
       %{
@@ -313,7 +313,10 @@ defmodule Workbench.FirmwareUpdate do
   end
 
   def compatible!(image, device) do
-    unless image["meta-platform"] == "ec100" and device["target"] == "ec100" and
+    # An image for one board never reaches another: the archive, the running
+    # firmware's target and its platform must all name the same physical board.
+    unless image["meta-platform"] in Workbench.Builds.physical_targets() and
+             device["target"] == image["meta-platform"] and
              image["meta-platform"] == device["platform"] and
              is_binary(image["meta-architecture"]) and
              image["meta-architecture"] == device["architecture"] and
@@ -323,7 +326,7 @@ defmodule Workbench.FirmwareUpdate do
            do:
              raise(
                ArgumentError,
-               "Firmware metadata and source revision do not match a physical EC100 gateway"
+               "Firmware metadata and source revision do not match this physical gateway's board"
              )
 
     :ok

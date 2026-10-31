@@ -8,7 +8,7 @@ defmodule NervesGate.Indicators do
   """
   use GenServer
   alias NervesGate.{Alarms, Error, Network, Observations, Recovery, Remote}
-  alias NervesGate.Indicators.{Button, Policy}
+  alias NervesGate.Indicators.{Button, Policy, Sysfs}
 
   @leds [:run, :user1, :user2]
   @tick_ms 125
@@ -38,7 +38,6 @@ defmodule NervesGate.Indicators do
   def unavailable do
     %{
       available: false,
-      simulated: false,
       button: %{available: false, armed: false, feedback: "normal", last_pressed_at: nil},
       led: %{
         available: false,
@@ -60,8 +59,9 @@ defmodule NervesGate.Indicators do
 
     state = %{
       name: __MODULE__,
-      adapter: NervesGate.Board.get(:indicators_adapter),
-      recovery_adapter: NervesGate.Board.get(:recovery_adapter),
+      # Board LED names by role and recovery button input name; nil when unqualified.
+      leds: get_in(NervesGate.Board.get(:indicators) || %{}, [:leds]),
+      button_name: get_in(NervesGate.Board.get(:indicators) || %{}, [:button]),
       poll_ms: Keyword.get(opts, :poll_ms, 5_000),
       identify_ms: Keyword.get(opts, :identify_ms, 5_000),
       recovery_ms: Keyword.get(opts, :recovery_ms, 15_000),
@@ -236,7 +236,7 @@ defmodule NervesGate.Indicators do
     fault = Enum.any?(state.values, fn {_, value} -> is_nil(value) end)
     error = if fault, do: state.error || :led_unavailable
 
-    if state.adapter != nil and state.fault != fault,
+    if state.leds != nil and state.fault != fault,
       do: Alarms.report(:led_restore_failed, state.name, fault)
 
     publish(%{state | fault: fault, error: error})
@@ -277,16 +277,11 @@ defmodule NervesGate.Indicators do
     if Enum.all?(state.values, fn {_, value} -> not is_nil(value) end),
       do:
         {:ok, %{state | identify_until: System.monotonic_time(:millisecond) + state.identify_ms}},
-      else:
-        {{:error,
-          %{
-            code: "led_unavailable",
-            message: "A status LED is unavailable or controlled by a kernel trigger."
-          }}, state}
+      else: {{:error, led_error(:led_unavailable)}, state}
   end
 
-  defp connect_button(%{button: nil, adapter: {module, context}} = state) do
-    case safely(fn -> module.open_button(self(), context) end, :error) do
+  defp connect_button(%{button: nil, button_name: name} = state) when is_binary(name) do
+    case safely(fn -> Sysfs.open_button(self(), name) end, :error) do
       {:ok, pid, path} -> %{state | button: %{pid: pid, path: path}, gesture: Button.new()}
       _ -> state
     end
@@ -315,7 +310,7 @@ defmodule NervesGate.Indicators do
 
   defp button_action(action, %{recovery: %{action: nil}} = state)
        when action in [:reboot, :factory_reset] do
-    task = Task.async(fn -> Recovery.execute(state.recovery_adapter, action) end)
+    task = Task.async(fn -> Recovery.execute(action) end)
     timer = Process.send_after(self(), {:recovery_timeout, task.ref}, state.recovery_ms)
 
     %{
@@ -356,43 +351,15 @@ defmodule NervesGate.Indicators do
     render(%{state | worker: nil, gesture: Button.new(), recovery: recovery})
   end
 
-  defp read_led(%{adapter: {module, context}}, led),
-    do:
-      safely(
-        fn -> module.read_led(led, context) end,
-        {:error,
-         %{
-           code: "led_unavailable",
-           message: "A status LED is unavailable or controlled by a kernel trigger."
-         }}
-      )
+  defp read_led(%{leds: leds}, led) when leds != nil,
+    do: safely(fn -> Sysfs.read_led(Map.fetch!(leds, led)) end, :error)
 
-  defp read_led(_, _),
-    do:
-      {:error,
-       %{
-         code: "led_unavailable",
-         message: "A status LED is unavailable or controlled by a kernel trigger."
-       }}
+  defp read_led(_, _), do: :error
 
-  defp write_led(%{adapter: {module, context}}, led, value),
-    do:
-      safely(
-        fn -> module.write_led(led, value, context) end,
-        {:error,
-         %{
-           code: "led_unavailable",
-           message: "A status LED is unavailable or controlled by a kernel trigger."
-         }}
-      )
+  defp write_led(%{leds: leds}, led, value) when leds != nil,
+    do: safely(fn -> Sysfs.write_led(Map.fetch!(leds, led), value) end, :error)
 
-  defp write_led(_, _, _),
-    do:
-      {:error,
-       %{
-         code: "led_unavailable",
-         message: "A status LED is unavailable or controlled by a kernel trigger."
-       }}
+  defp write_led(_, _, _), do: :error
 
   defp safely(fun, fallback) do
     fun.()
@@ -404,8 +371,7 @@ defmodule NervesGate.Indicators do
 
   defp public(state) do
     %{
-      available: state.adapter != nil,
-      simulated: match?({NervesGate.Indicators.Host, _}, state.adapter),
+      available: state.leds != nil,
       button: %{
         available: state.button != nil,
         armed: state.gesture.released_at != nil,

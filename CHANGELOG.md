@@ -12,7 +12,8 @@
 - Workbench is one attachable hidden development node with a verified gateway directory and shared projection-driven pages for physical and simulated gateways. Disconnected gateways retain their last-seen time. Pi and Mix clients use distribution; the internal HTTP control API, split physical pages, `mix app.console`, separate simulator BEAM and private EPMD namespace are removed.
 - QEMU management uses explicitly prepared bridge/TAP hardware and firmware-owned EPMD at the guest IP. Run `mix dev.network setup --subnet <private-/24>` before QEMU use and explicit cleanup afterward. Existing disposable disks with loopback-index serials require an authorized reset; physical devices are not migrated.
 
-- Renamed the physical inventory domain to `NervesGate.Hardware` and its adapter configuration to `hardware_adapter`, with no old-name aliases.
+- Renamed the physical inventory domain to `NervesGate.Hardware`, with no old-name aliases.
+- Board hardware is declared as data: `ports`, `indicators` (LED names and recovery button input) and `data` (`{:ext4, sysfs_dev}` or `{:ubifs, volume}`) replace `hardware_adapter`, `indicators_adapter`, `recovery_adapter` and `data_partition`. `NervesGate.Recovery` replaces `NervesGate.Recovery.EC100`; there are no aliases.
 
 - Hardware now exposes exclusive plugin assignments, not built-in capture/Modbus diagnostics. Removed bus diagnostic commands and SDK CAN/RS485 transport proxies; plugins own direct supervised I/O. Assignment and enablement changes require checked stop of both affected plugins; target startup is separately explicit in the reviewed operation.
 
@@ -35,6 +36,7 @@
 
 ### Added
 
+- EM300 (RK3506B, SPI NAND) firmware target and Workbench support for builds, MASKROM provisioning, firmware updates and the gateway directory. The unpublished `nerves_system_em300` builds only with `NERVES_GATE_LOCAL_DEPS=1`; the modem, LEDs, recovery button and extension I/O stay disabled until qualified on hardware.
 - Gateway **I/O** page (`/io`): every plugin input and output with availability, latest Reading, quality, monotonic freshness, writer, desired target and Status (`Confirmed`/`Pending`/`Mismatch`/`Unknown`) with its reason, Apply outcome, evidence and the plugin's declared release behaviour. Manual claim/set/release goes through `NervesGate.IO.Manual`, the single manual writer that owns claims independently of browser tabs and shares the I/O domain's exclusive admission. `NervesGate.IO.snapshot/0` reads all endpoints; output snapshots add caller-relative `owned?`.
 - Read-only Workbench diagnostics and inspection: `mix dev.doctor`, `mix gateway.list/inspect/logs` and `mix dev.job [ID]`. Jobs and Runner expose owner/session-qualified operation IDs and bounded history. Wait timeouts do not cancel work; uncertain outcomes block further maintenance/control instead of authorizing retries.
 - Plugin configuration storage: one opaque, atomically replaced term per running plugin version under the plugin's SD data directory, keyed by the actual managed caller's activation. Older versions' terms are preserved; restores decode safely and never delete corrupt files.

@@ -33,33 +33,44 @@ defmodule NervesGate.Recovery.DataInit do
 
   @doc false
   def check_data do
-    with {:ok, device} <- File.read(NervesGate.Board.fetch!(:data_partition)) do
-      data_mount(MountInfo.get_mounts!(), String.trim(device))
+    with {:ok, source} <- data_source(NervesGate.Board.fetch!(:data)) do
+      data_mount(MountInfo.get_mounts!(), source)
     end
   end
 
+  # Block-device data is identified by its device number. A UBIFS volume has an
+  # anonymous device number, so it is identified by its mount source.
+  defp data_source({:ext4, device_number_file}) do
+    case File.read(device_number_file) do
+      {:ok, device} -> {:ok, {"ext4", :major_minor, String.trim(device)}}
+      _ -> unavailable("ext4")
+    end
+  end
+
+  defp data_source({:ubifs, volume}), do: {:ok, {"ubifs", :mount_source, volume}}
+
   @doc false
-  def data_mount(mounts, device) do
+  def data_mount(mounts, {fs_type, key, value}) do
     case Enum.filter(mounts, &(&1.mount_point == "/root")) do
-      [%{major_minor: ^device, root: "/", fs_type: "ext4"} = mount] ->
-        if Enum.all?(
-             [mount.mount_options, mount.super_options],
-             &("rw" in &1 and "ro" not in &1)
-           ),
+      [%{root: "/", fs_type: ^fs_type} = mount] ->
+        if Map.fetch!(mount, key) == value and
+             Enum.all?(
+               [mount.mount_options, mount.super_options],
+               &("rw" in &1 and "ro" not in &1)
+             ),
            do: {:ok, mount},
-           else:
-             {:error,
-              %{
-                code: "data_partition_unavailable",
-                message: "The EC100 data partition is not mounted read-write as ext4."
-              }}
+           else: unavailable(fs_type)
 
       _ ->
-        {:error,
-         %{
-           code: "data_partition_unavailable",
-           message: "The EC100 data partition is not mounted read-write as ext4."
-         }}
+        unavailable(fs_type)
     end
+  end
+
+  defp unavailable(fs_type) do
+    {:error,
+     %{
+       code: "data_partition_unavailable",
+       message: "The data partition is not mounted read-write as #{fs_type}."
+     }}
   end
 end

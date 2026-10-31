@@ -72,7 +72,7 @@ defmodule WorkbenchWeb.OverviewLive do
         <.link navigate="/devices" class="dev-summary-card"><h2>Gateways</h2><p>
           Status, checks and reviewed updates.
         </p></.link>
-        <.link navigate="/provision" class="dev-summary-card"><h2>Provision a new EC100</h2><p>
+        <.link navigate="/provision" class="dev-summary-card"><h2>Provision a new EC100 or EM300</h2><p>
           Factory USB installation.
         </p></.link>
       </div>

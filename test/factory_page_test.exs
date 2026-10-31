@@ -13,13 +13,17 @@ defmodule WorkbenchWeb.FactoryPageTest do
     assert Floki.attribute(empty, "#factory-backup option:first-child", "value") == ["true"]
     assert Floki.find(empty, "#factory-backup option[value=false]") != []
     assert Floki.text(empty) =~ "RAM"
-    assert Floki.text(empty) =~ "not a verified EC100 serial number"
+    assert Floki.text(empty) =~ "not a verified board or serial number"
+    assert Floki.text(empty) =~ "EC100 and EM300 look the"
 
     review = %{
       kind: :factory,
       token: "factory-token",
       location: "101",
       confirmation: "ERASE EC100 101",
+      platform: "ec100",
+      board: "EC100",
+      storage: "eMMC",
       version: "0.2.0-dev",
       firmware: "/images/ec100.fw",
       backup: "/backups/review",
@@ -48,7 +52,8 @@ defmodule WorkbenchWeb.FactoryPageTest do
     assert Floki.find(document, "#confirm-factory input[name=confirmation][required]") != []
     assert Floki.attribute(document, "input[name=review_id]", "value") == ["factory-token"]
     assert Floki.text(document) =~ "ERASE EC100 101"
-    assert Floki.text(document) =~ "full eMMC user-area backup"
+    assert Floki.text(document) =~ "full eMMC backup"
+    assert Floki.text(document) =~ "intended EC100"
     assert WorkbenchWeb.Components.job_path(job) == "/provision"
 
     no_backup =
@@ -66,6 +71,24 @@ defmodule WorkbenchWeb.FactoryPageTest do
     assert Floki.text(skipped) =~ "ERASE EC100 101 WITHOUT BACKUP"
     assert Floki.text(Floki.find(skipped, "#confirm-factory button")) =~ "WITHOUT BACKUP"
     refute Floki.text(skipped) =~ "will be saved before the first write"
+
+    em300 =
+      Map.merge(review, %{
+        platform: "em300",
+        board: "EM300",
+        storage: "SPI NAND",
+        confirmation: "ERASE EM300 101"
+      })
+
+    nand =
+      render_component(&WorkbenchWeb.FactoryLive.render/1, assigns(job: %{job | review: em300}))
+      |> Floki.parse_document!()
+
+    assert Floki.text(nand) =~ "EM300 · SPI NAND"
+    assert Floki.text(nand) =~ "ERASE EM300 101"
+    assert Floki.text(nand) =~ "full SPI NAND backup"
+    assert Floki.text(Floki.find(nand, "#confirm-factory button")) =~ "provision EM300"
+    refute Floki.text(Floki.find(nand, "#factory-review, #confirm-factory")) =~ "EC100"
   end
 
   test "failed factory review highlights its actual error and explains temporary cleanup" do
@@ -73,9 +96,9 @@ defmodule WorkbenchWeb.FactoryPageTest do
       job()
       | status: :failed,
         kind: "factory_review",
-        output: "Loading the verified review's RAM transport (no eMMC writes)",
+        output: "Loading the verified review's RAM transport (no flash writes)",
         result:
-          "The RAM loader opened, but rkdeveloptool could not open or claim the EC100 USB connection."
+          "The RAM loader opened, but rkdeveloptool could not open or claim the RK3506 USB connection."
     }
 
     document =

@@ -24,7 +24,10 @@ defmodule Workbench.BuildConfigTest do
           ["unknown"],
           ["x86_64", "--env", "prod"],
           ["ec100", "--env", "test"],
-          ["ec100", "extra"]
+          ["ec100", "extra"],
+          ["em300", "--env", "test"],
+          ["em300", "extra"],
+          ["em300", "ec100"]
         ] do
       assert_raise Mix.Error, ~r/Usage: mix firmware/, fn -> firmware.(args) end
     end

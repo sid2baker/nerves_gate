@@ -34,7 +34,7 @@ connection loop. Use the project target for source work, not device inspection.
 With the user-owned `mix dev` running, and after explicit operator authorization:
 
 ```sh
-mix firmware.update nerves-gate.example.ts.net            # built EC100 image
+mix firmware.update nerves-gate.example.ts.net            # dev image for its board
 mix firmware.update GATEWAY path/to/image.fw --sha256 SHA # non-interactive
 ```
 
@@ -259,8 +259,8 @@ Both UIs share assets defined in `firmware/config/assets.exs`; Tailwind scans
 `firmware/lib/` and root `lib/`. Volt handles workbench asset changes automatically
 while `mix dev` is running.
 
-Run firmware builds from the repository root, for example `mix firmware ec100`
-or `mix firmware ec100 --env prod`. The workbench's Build action and local QEMU
+Run firmware builds from the repository root, for example `mix firmware ec100`,
+`mix firmware ec100 --env prod` or `mix firmware em300` (local system artifact only). The workbench's Build action and local QEMU
 builds use the same pipeline: compile assets on the host, then run the target
 firmware build in an isolated process. Asset failures stop packaging. Volt never
 runs on the device. No separate asset command or environment flag is required.

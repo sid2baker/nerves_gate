@@ -117,7 +117,8 @@ defmodule Workbench.PluginInstall do
 
   @doc false
   def compatible!(device, requirement) do
-    unless device.product == "nerves_gate" and device.target in ["ec100", "x86_64"] and
+    unless device.product == "nerves_gate" and
+             device.target in ["x86_64" | Workbench.Builds.physical_targets()] and
              is_binary(device.serial) and device.serial != "" and is_binary(device.boot_id) and
              device.storage_ready and is_binary(device.card_id) and not device.installed and
              device.platform_compatible and is_binary(requirement) and

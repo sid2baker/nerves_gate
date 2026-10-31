@@ -137,9 +137,6 @@ defmodule NervesGateWeb.SettingsLive do
       <.setting_row label="Runtime">
         Elixir {@projection.system.elixir} · OTP {@projection.system.otp}
       </.setting_row>
-      <.notice :if={@projection.indicators.simulated}>
-        Preview mode · simulated button, LEDs and recovery. Workstation hardware is never used.
-      </.notice>
       <.notice :if={@projection.indicators.led.error} tone="warning" role="alert">
         {@projection.indicators.led.error.message}
       </.notice>
@@ -194,9 +191,8 @@ defmodule NervesGateWeb.SettingsLive do
           and all LEDs blink fast from 30 seconds. Identify resumes current status afterward.
         </p>
         <p class="ui-help">
-          After startup or input loss, release once to arm the button. Factory reset is simulated
-          in preview. On EC100 it deletes all saved data, including network settings and credentials,
-          then reboots. Physical reset qualification is still pending. Failed recovery is never
+          After startup or input loss, release once to arm the button. Factory reset deletes all
+          saved data, including network settings and credentials, then reboots. Physical reset qualification is still pending. Failed recovery is never
           automatically retried. RUN may stay on after an abrupt VM failure.
         </p>
         <p :if={@projection.indicators.button.last_pressed_at} id="button-last-press" class="ui-help">

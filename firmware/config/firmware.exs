@@ -1,6 +1,6 @@
 import Config
 
-# Shared device settings, imported by ec100.exs and x86_64.exs only.
+# Shared device settings, imported by ec100.exs, em300.exs and x86_64.exs only.
 # Nothing in this file configures the workstation UI. The platform files add
 # only real hardware differences; the device application is otherwise identical.
 config :nerves_gate,
@@ -63,9 +63,9 @@ config :nerves_runtime,
   startup_guard_enabled: true,
   init_module: NervesGate.Recovery.DataInit
 
-# Uploads and EC100 button recovery share one boot-lifetime interlock.
+# Uploads and button recovery share one boot-lifetime interlock.
 config :ssh_subsystem_fwup,
-  precheck_callback: {NervesGate.Recovery.EC100, :firmware_precheck, []}
+  precheck_callback: {NervesGate.Recovery, :firmware_precheck, []}
 
 # Nerves 2 ordering is explicit: data initialization must precede Tailscale,
 # VintageNet, SSH, time persistence, and application services.

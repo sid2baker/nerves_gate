@@ -3,7 +3,7 @@ import_config "firmware.exs"
 
 # Physical EC100 hardware. Shared device services are in firmware.exs.
 config :nerves_gate, :board, %{
-  data_partition: "/sys/class/block/mmcblk0p3/dev",
+  data: {:ext4, "/sys/class/block/mmcblk0p3/dev"},
   # Removable SPI SD card; provision its first partition as ext4 separately.
   plugins_device: "/dev/mmcblk1p1",
   cellular: %{
@@ -15,9 +15,19 @@ config :nerves_gate, :board, %{
       vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
     }
   },
-  hardware_adapter: {NervesGate.Hardware.EC100, nil},
-  recovery_adapter: {NervesGate.Recovery.EC100, nil},
-  indicators_adapter: {NervesGate.Indicators.EC100, "/sys/class/leds"}
+  # ttyS3/ttyS4 are the RS485 field ports.
+  ports: %{
+    can: ["can0", "can1"],
+    serial: [
+      {"ttyS3", "rs485", "RS485 · automatic direction · 9600 8N1"},
+      {"ttyS4", "rs485", "RS485 · automatic direction · 9600 8N1"}
+    ]
+  },
+  # Status LEDs by role and the KEY_PROG1 input that drives reboot/factory-reset recovery.
+  indicators: %{
+    leds: %{run: "ec100:run", user1: "ec100:user1", user2: "ec100:user2"},
+    button: "gpio-keys"
+  }
 }
 
 # USB recovery is independent of LAN trials. Its DHCP server serves only USB.

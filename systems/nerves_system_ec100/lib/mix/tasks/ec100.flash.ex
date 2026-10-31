@@ -91,6 +91,17 @@ defmodule Mix.Tasks.Ec100.Flash do
     end
   end
 
+  @doc "Board facts for Workbench provisioning."
+  def board do
+    %{
+      name: "EC100",
+      storage: "eMMC",
+      loader: "ec100-maskrom-loader.bin",
+      boot_files: ~w(ec100-maskrom-loader.bin idbloader.img u-boot.itb),
+      sectors: 2_261_026..0xFFFFFFFF
+    }
+  end
+
   @doc false
   def device!(listing) do
     rows = String.split(listing, "\n") |> Enum.filter(&String.contains?(&1, "DevNo="))
@@ -132,7 +143,7 @@ defmodule Mix.Tasks.Ec100.Flash do
   # without a USB device. fwup remains authoritative for OS/env/partition data.
   @doc false
   def prepare!(firmware, images, sectors, output) do
-    if sectors < 2_261_026 or sectors > 0xFFFFFFFF, do: Mix.raise("Unsupported eMMC capacity")
+    unless sectors in board().sectors, do: Mix.raise("Unsupported eMMC capacity")
     if File.exists?(output), do: Mix.raise("Output already exists: #{output}")
     fwup = executable!("fwup")
     cmd!(fwup, ["-V", "-i", firmware])

@@ -24,7 +24,7 @@ defmodule NervesGate.Hardware do
         %{
           available:
             Process.whereis(__MODULE__) != nil and
-              (ports != [] or NervesGate.Board.get(:hardware_adapter) != nil),
+              (ports != [] or NervesGate.Board.get(:ports) != nil),
           ports:
             Enum.map(ports, fn port ->
               setting = assignments.ports[port.name] || %{enabled: false, plugin: nil}
@@ -54,9 +54,9 @@ defmodule NervesGate.Hardware do
 
   def handle_info(:poll, previous) do
     ports =
-      case NervesGate.Board.get(:hardware_adapter) do
-        {adapter, options} -> adapter.snapshot(options)
-        _ -> []
+      case NervesGate.Board.get(:ports) do
+        nil -> []
+        board_ports -> NervesGate.Hardware.Ports.snapshot(board_ports)
       end
 
     ethernet =

@@ -9,7 +9,11 @@ defmodule Workbench.BuildsTest do
           {"ec100_dev", "ec100", "nerves_gate", "0.2.0-dev"},
           {"ec100_prod", "ec100", "nerves_gate", "0.1.0"},
           {"ec100_wrong", "x86_64", "nerves_gate", "0.2.0-dev"},
-          {"ec100_other", "ec100", "other", "0.2.0-dev"}
+          {"ec100_other", "ec100", "other", "0.2.0-dev"},
+          {"em300_dev", "em300", "nerves_gate", "0.3.0-dev"},
+          # A board's archive in the other board's build directory is not offered.
+          {"em300_prod", "ec100", "nerves_gate", "0.4.0"},
+          {"ec100_mixed", "em300", "nerves_gate", "0.5.0"}
         ] do
       dir = Path.join(root, "firmware/_build/#{profile}/nerves/images")
       File.mkdir_p!(dir)
@@ -35,7 +39,13 @@ defmodule Workbench.BuildsTest do
     )
 
     images = Workbench.Builds.images(root)
-    assert Enum.sort(Enum.map(images, & &1.version)) == ["0.1.0", "0.2.0-dev"]
+
+    assert Enum.sort(Enum.map(images, &{&1.target, &1.version})) == [
+             {"ec100", "0.1.0"},
+             {"ec100", "0.2.0-dev"},
+             {"em300", "0.3.0-dev"}
+           ]
+
     assert Enum.all?(images, &File.regular?(&1.path))
     assert Workbench.Builds.images(Path.join(root, "empty")) == []
   end

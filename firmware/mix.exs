@@ -1,6 +1,6 @@
 defmodule NervesGate.MixProject do
   use Mix.Project
-  @targets [:ec100, :x86_64]
+  @targets [:ec100, :em300, :x86_64]
   @external_resource Path.expand("../VERSION", __DIR__)
   @version @external_resource |> File.read!() |> String.trim()
 
@@ -123,11 +123,19 @@ defmodule NervesGate.MixProject do
     tag =
       app |> Atom.to_string() |> String.replace_prefix("nerves_", "") |> String.replace("_", "-")
 
+    # EM300 has no published artifact yet. Do not direct users to a nonexistent tag.
     options =
-      if System.get_env("NERVES_GATE_LOCAL_DEPS") == "1" do
-        [path: "../#{source}"]
-      else
-        [github: "sid2baker/nerves_gate", tag: "#{tag}/v#{version}", subdir: source]
+      cond do
+        System.get_env("NERVES_GATE_LOCAL_DEPS") == "1" ->
+          [path: "../#{source}"]
+
+        app == :nerves_system_em300 ->
+          Mix.raise(
+            "#{app} #{version} is unpublished. Build it locally and set NERVES_GATE_LOCAL_DEPS=1."
+          )
+
+        true ->
+          [github: "sid2baker/nerves_gate", tag: "#{tag}/v#{version}", subdir: source]
       end
 
     {app, version, options ++ [runtime: false, targets: target]}
@@ -185,6 +193,7 @@ defmodule NervesGate.MixProject do
   defp system_dependencies do
     case Mix.target() do
       :ec100 -> [system_dependency(:nerves_system_ec100, "0.3.0", :ec100)]
+      :em300 -> [system_dependency(:nerves_system_em300, "0.1.0-dev", :em300)]
       :x86_64 -> [system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)]
       :host -> []
     end

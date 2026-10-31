@@ -7,11 +7,14 @@ unless {config_target(), config_env()} in [
          {:host, :docs},
          {:x86_64, :dev},
          {:ec100, :dev},
-         {:ec100, :prod}
+         {:ec100, :prod},
+         {:em300, :dev},
+         {:em300, :prod}
        ] do
   raise """
   Unsupported build: MIX_TARGET=#{config_target()} MIX_ENV=#{config_env()}.
-  Supported builds: host/dev, host/test, host/docs, x86_64/dev, ec100/dev, ec100/prod.
+  Supported builds: host/dev, host/test, host/docs, x86_64/dev, ec100/dev, ec100/prod,
+  em300/dev, em300/prod.
   Run QEMU scenarios with mix test; they use x86_64/dev firmware.
   """
 end
@@ -44,6 +47,6 @@ config :nerves_gate, NervesGateWeb.Endpoint,
   live_view: [signing_salt: "nerves-gate-live"]
 
 # MIX_TARGET selects where this code runs, not the device the host connects to.
-# host.exs: workstation. ec100.exs / x86_64.exs: device + shared firmware.exs.
+# host.exs: workstation. ec100.exs / em300.exs / x86_64.exs: device + shared firmware.exs.
 # runtime.exs is loaded later at startup.
 import_config "#{config_target()}.exs"

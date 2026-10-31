@@ -31,7 +31,7 @@ defmodule WorkbenchWeb.FactoryLive do
     <main class="ui-main ui-stack bench" id="factory-page">
       <.back_link navigate="/devices">Existing gateways and routine updates</.back_link>
       <.page_header
-        eyebrow="Provision · Physical EC100 · initial USB installation"
+        eyebrow="Provision · Physical EC100 or EM300 · initial USB installation"
         title="Factory provisioning"
         description="Replace factory firmware over USB MASKROM. This is not a routine SSH update."
       />
@@ -40,13 +40,24 @@ defmodule WorkbenchWeb.FactoryLive do
           <strong>Destructive: replaces the bootloader, partition layout, firmware and application data.</strong>
         </p>
         <p>
-          Connect exactly one EC100 to the workstation running mix dev, using its Type-C
-          download port, and put it in MASKROM mode. The FTDI serial console cannot flash it.
-          Keep stable power connected and follow the board's watchdog/download-jumper instructions.
+          Connect exactly one board to the workstation running mix dev and put it in MASKROM mode.
+          Keep stable power connected. A serial console cannot flash it.
         </p>
+        <ul>
+          <li>
+            EC100: use its Type-C download port and follow the board's watchdog/download-jumper
+            instructions. Installs to eMMC.
+          </li>
+          <li>
+            EM300: hold the LOADER key while applying power, then connect its USB-C port.
+            Installs to SPI NAND and erases the entire NAND, including the vendor system and its
+            vendor-storage data. EM300 support is in bring-up; keep the vendor recovery image.
+          </li>
+        </ul>
         <p>
-          USB identifies an RK3506, not a verified EC100 serial number. You must physically
-          identify the board. Do not unplug, replace it, or connect another Rockchip device during review/install.
+          USB identifies an RK3506, not a verified board or serial number: EC100 and EM300 look the
+          same. The selected image chooses the board. You must physically identify it. Do not unplug,
+          replace it, or connect another Rockchip device during review/install.
         </p>
       </.notice>
       <ol class="dev-workflow-steps" aria-label="Provisioning stages">
@@ -55,13 +66,14 @@ defmodule WorkbenchWeb.FactoryLive do
         <li>3 · Verify writes and reconnect</li>
       </ol>
       <.panel title="1 · Prepare and review" icon="port">
-        <.link navigate="/develop/firmware" class="ui-text-link">Build an EC100 image</.link>
+        <.link navigate="/develop/firmware" class="ui-text-link">Build an EC100 or EM300 image</.link>
         <p>
-          Build EC100 firmware first. Review verifies the image and boot artifacts, loads a temporary
-          USB transport into RAM, reads eMMC capacity and checks artifact/backup disk space. Review writes nothing to eMMC.
+          Build firmware for the board first. Review verifies the image and boot artifacts, loads a temporary
+          USB transport into RAM, reads the flash capacity and checks artifact/backup disk space. Review writes nothing to flash.
+          EM300 staging also requires ubinize (mtd-utils) on the workbench host.
         </p>
         <form id="review-factory" phx-submit="review_factory" class="ui-stack">
-          <label for="factory-image">EC100 firmware</label>
+          <label for="factory-image">Board firmware</label>
           <select
             id="factory-image"
             name="firmware"
@@ -69,10 +81,10 @@ defmodule WorkbenchWeb.FactoryLive do
             disabled={@images == [] or @job.status == :running}
           >
             <option :for={image <- @images} value={image.path}>
-              {image.version} · {image.build}
+              {String.upcase(image.target)} · {image.version} · {image.build}
             </option>
           </select>
-          <label for="factory-backup">Full eMMC backup</label>
+          <label for="factory-backup">Full flash backup</label>
           <select id="factory-backup" name="backup" disabled={@job.status == :running}>
             <option value="true">Create full backup (recommended)</option>
             <option value="false">
@@ -111,9 +123,10 @@ defmodule WorkbenchWeb.FactoryLive do
         <.setting_row label="USB location">
           {@review.location} · not a unique board identity
         </.setting_row>
+        <.setting_row label="Board">{@review.board} · {@review.storage}</.setting_row>
         <.setting_row label="Firmware">{@review.version} · {@review.firmware}</.setting_row>
-        <.setting_row label="eMMC capacity">{bytes(@review.capacity)}</.setting_row>
-        <.setting_row label="Full eMMC backup">
+        <.setting_row label={"#{@review.storage} capacity"}>{bytes(@review.capacity)}</.setting_row>
+        <.setting_row label={"Full #{@review.storage} backup"}>
           {if Map.get(@review, :backup_enabled, true), do: "Enabled", else: "SKIPPED"}
         </.setting_row>
         <.setting_row label="Artifact/readback directory">{@review.backup}</.setting_row>
@@ -123,7 +136,7 @@ defmodule WorkbenchWeb.FactoryLive do
         <code>SHA-256: {@review.sha256}</code>
         <p>
           <%= if Map.get(@review, :backup_enabled, true) do %>
-            A full eMMC user-area backup and checksum will be saved before the first write.
+            A full {@review.storage} backup and checksum will be saved before the first write.
           <% else %>
             <strong>No full backup will be made. Existing firmware and data cannot be recovered from this run.</strong>
           <% end %>
@@ -143,14 +156,14 @@ defmodule WorkbenchWeb.FactoryLive do
           <input type="hidden" name="review_id" value={@review.token} />
           <label>
             <input type="checkbox" name="identified" value="true" required />
-            I physically verified this is the intended EC100 and accept erasing all existing data.
+            I physically verified this is the intended {@review.board} and accept erasing all existing data.
           </label>
           <label for="factory-confirmation">Type {@review.confirmation}</label>
           <input id="factory-confirmation" name="confirmation" autocomplete="off" required />
           <.button type="submit" variant="danger" disabled={@job.status == :running}>
             {if Map.get(@review, :backup_enabled, true),
-              do: "Back up, erase and provision EC100",
-              else: "Erase and provision EC100 WITHOUT BACKUP"}
+              do: "Back up, erase and provision #{@review.board}",
+              else: "Erase and provision #{@review.board} WITHOUT BACKUP"}
           </.button>
         </form>
       </.panel>

@@ -180,7 +180,8 @@ defmodule Workbench.Gateways do
       Node.connect(candidate.node) &&
         :erpc.call(candidate.node, NervesGate.System, :info, [], 3_000)
 
-    if is_map(info) and info[:node] == candidate.node and info[:target] in ["ec100", "x86_64"] do
+    if is_map(info) and info[:node] == candidate.node and
+         info[:target] in ["x86_64" | Workbench.Builds.physical_targets()] do
       serial = :erpc.call(candidate.node, Nerves.Runtime, :serial_number, [], 3_000)
       identity = Map.put(info, :serial, serial)
       Map.merge(candidate, %{connected: true, identity: identity, last_seen: now(), error: nil})
