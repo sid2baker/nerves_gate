@@ -409,13 +409,17 @@ defmodule Workbench.FactoryProvisioning do
     Base.decode64!(encoded)
   end
 
+  @doc false
+  def command_timeout([operation | _]) when operation in ["rl", "wl", "wlx"], do: 1_800_000
+  def command_timeout(_args), do: 30_000
+
   defp runner(sudo, report) do
     rk = executable!("rkdeveloptool")
 
     fn args ->
       report.(command_label(args))
       {command, argv} = if sudo, do: {executable!("sudo"), ["-n", rk | args]}, else: {rk, args}
-      timeout = if hd(args) in ["rl", "wl"], do: 1_800_000, else: 30_000
+      timeout = command_timeout(args)
 
       case Workbench.FirmwareCommand.run(command, argv, timeout: timeout, stderr_to_stdout: true) do
         {out, 0} ->

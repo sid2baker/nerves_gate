@@ -9,6 +9,20 @@ defmodule Workbench.FactoryProvisioningTest do
   defp ec100, do: Factory.board!("ec100")
   defp em300, do: Factory.board!("em300")
 
+  test "bulk reads and both write commands share a bounded thirty-minute timeout" do
+    for args <- [
+          ["rl", "0", "1048576", "backup.img"],
+          ["wl", "8192", "uboot.img"],
+          ["wlx", "ubi", "ubi.img"]
+        ] do
+      assert Factory.command_timeout(args) == 1_800_000
+    end
+
+    for operation <- ["ld", "rfi", "db", "ef", "ul", "gpt", "rd"] do
+      assert Factory.command_timeout([operation]) == 30_000
+    end
+  end
+
   test "working RAM transport may retain the Maskrom label; identity brackets flash-info" do
     for listing <- [@maskrom, @loader] do
       run = fn command ->
