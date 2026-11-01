@@ -7,7 +7,7 @@ namespace. There is one lifecycle manager: `NervesGate.Plugins`.
 ## Installation and discovery
 
 `plugins/selection.exs` explicitly selects independent plugin projects. Root
-`mix firmware x86_64` or `mix firmware ec100` builds them in isolated host Mix
+`mix firmware x86_64`, `mix firmware ec100` or `mix firmware em300` builds them in isolated host Mix
 processes, validates the complete selection and includes immutable artifacts under
 the firmware application's `priv/plugins`. A build-generated `inventory.term`
 identifies entry points, versions, dependency/module reservations and digests.
@@ -28,11 +28,16 @@ The initial selection contains:
   platform inputs and repeatable outputs. Definitions use plugin configuration storage.
   RTU requires enabled exclusive RS485 assignment and explicit operator approval; no
   automatic discovery. Saving and starting are explicit, separate actions.
+- `iotrouter_expansion`: experimental EM300 card discovery and digital I/O through
+  an explicitly assigned expansion bus. Reset/start is separate from plugin start
+  and changes card outputs to their power-on state. Only captured D1600/D0016N
+  layouts are accepted; electrical qualification remains outstanding. See its
+  [README](../plugins/iotrouter_expansion/README.md).
 
 New plugins are stopped/disabled. Starting them starts their supervision trees;
 it does not configure Ethernet, advertise routes or connect to equipment. Saved
-started intent can be restored after reboot, but these two plugins deliberately
-forget their volatile equipment/sharing configuration and require explicit action.
+started intent can be restored after reboot, but these plugins do not reopen their
+equipment transports or sharing automatically; explicit action is required.
 
 ## Dependencies
 
@@ -40,7 +45,9 @@ Each project declares and locks its own libraries. The package includes its
 non-platform runtime dependency closure, including `yamodbus` for the Modbus
 plugin. Missing optional OTP dependencies are allowed; missing required dependencies
 are not. The Modbus plugin declares `circuits_uart` but uses firmware's exact 1.7.0
-native driver; its native payload is never included in the plugin archive.
+native driver. The expansion plugin additionally uses firmware's `circuits_gpio`
+2.3.1 for the resource's named lines; neither native payload is included in plugin
+archives.
 
 SDK, Phoenix/LiveView and other supported platform libraries are supplied once by
 firmware and checked for compatible/exact versions. Private dependency names and

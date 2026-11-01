@@ -9,7 +9,7 @@ Routine CI never boots a device. Required checks:
 - **firmware-ec100:** separate dev/prod builds using the locked, fingerprinted system;
   no flashing or booting. Only verified downloads are cached, never native ports.
 - **plugins:** create, test and package two generated plugins against the local SDK,
-  plus both selected plugin test suites (`plugins/tailnet_subrouter` and `plugins/modbus`).
+  plus the selected plugin test suites (Tailnet subnet router, Modbus and IOTRouter expansion).
 
 `qemu.yml` is dispatched manually or runs weekly on Monday at 03:00 UTC on main. It runs `mix setup` and `mix scenario.ci all --device gateway_a` on
 disposable devices with portable TCG (KVM is optional), and keeps logs but never
@@ -23,7 +23,7 @@ artifacts have their own workflows. Neither runs from routine CI. See
 ## Local gates and project scope
 
 Run `mix check` at the root before commits. It runs compile/format/tests for root
-and SDK, tests a generated plugin and both bundled plugins, builds shared assets, and runs firmware
+and SDK, tests a generated plugin and the selected bundled plugins, builds shared assets, and runs firmware
 compile/format/tests, JS checks, strict credo, zero-clone and architecture/smell
 checks. No session or device starts. `mix ci` adds firmware dialyzer and belongs to
 the operator; target builds are separate CI jobs. Passing `mix check` is not a

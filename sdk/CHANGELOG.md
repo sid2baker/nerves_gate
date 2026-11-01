@@ -9,7 +9,7 @@
 - `Network.claim_local/3` accepts any board-defined interface name; the SDK checks only its shape and the firmware rejects anything that is not the caller's assigned Ethernet resource. It no longer hard-codes `eth0`/`eth1`.
 - Local Ethernet claims require an enabled exclusive assignment to the actual managed plugin. Declare `:ethernet` in `nerves_gate_hardware`; a network plugin-role flag alone grants no access. Hardware resources include Ethernet interfaces and network observations expose the assigned plugin.
 - Removed CAN/RS485 claim, subscription and byte-I/O APIs. Plugins query their caller-derived exclusive assignments through `Hardware.resources/0` and supervise ordinary transport libraries directly. Reassignment requires checked whole-plugin stop; Internet/local-network leases retain their separate platform contract.
-- `circuits_uart` is a shared firmware library, never a private plugin native payload; packaging records its exact compatible platform version.
+- `circuits_uart` and `circuits_gpio` are shared firmware libraries, never private plugin native payloads; packaging records their exact compatible platform versions. SDK 0.2.0-dev.8 firmware supplies GPIO support; plugins use named lines from their assigned resource, without taking over busy lines.
 
 - Phoenix/LiveView and Req HTTP libraries are shared with firmware, not bundled as private copies. Packaging records exact shared platform versions, including transitive dependencies; align application lockfiles with the target firmware before rebuilding.
 

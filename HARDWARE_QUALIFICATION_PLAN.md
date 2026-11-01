@@ -243,8 +243,22 @@ than substituting a fallback or widening the test's scope.
 
 - One supervised plugin owns the assigned expansion resource, UART and reset/link
   lines. Core provides checked ownership and I/O contracts, not the device protocol.
-- Implement discovery, cyclic input and echo-confirmed output through existing SDK
-  and I/O APIs. Never blindly replay uncertain output writes or auto-activate modules.
+- Experimental implementation: `plugins/iotrouter_expansion` provides discovery,
+  cyclic input and echo-confirmed output through the existing SDK/I/O APIs. Host
+  tests are not physical acceptance. Qualify reset timing, stream loss, checked
+  native cleanup and output authority on a safe fixture before field use.
+  Never blindly replay non-repeatable writes or auto-activate modules.
+- Initial physical smoke run discovered D1600 v3/D0016N v1 and confirmed DO0/DO8
+  on/off via card echo. DI0/DI8 never changed with the operator-reported loopbacks:
+  electrical loopback acceptance did not pass. Check wiring, input electrical mode
+  and encoding before claiming working DI. Outputs were restored false, claims and
+  Desires released, bus/plugin stopped. Link GPIO reported inactive despite streaming;
+  its meaning/polarity is unqualified. This is not independent native-cleanup proof.
+- Warm bus restart is blocked: both initial 0.1.0 and paced 0.1.1-dev.1 can discover
+  both cards after a gateway boot, but a later bus stop/start times out searching
+  for card 2. Captured 25 ms command pacing alone did not fix it. Establish reset
+  propagation/timing and downstream state before another proposed fix; do not
+  increase deadlines, retry resets blindly or call cold-start discovery acceptance.
 - Qualify digital input encoding with authorized stimulus; analog formats and
   configuration bytes remain unresolved. Opening a page must not operate equipment.
 

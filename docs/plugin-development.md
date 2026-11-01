@@ -6,7 +6,9 @@ equipment semantics. No custom adapter framework or separate web server is neede
 
 ## Selected plugins
 
-`plugins/selection.exs` selects `plugins/tailnet_subrouter` and `plugins/modbus`.
+`plugins/selection.exs` selects `plugins/tailnet_subrouter`, `plugins/modbus` and
+`plugins/iotrouter_expansion`. The experimental expansion driver opens only its
+assigned bus on explicit Start; see its [README](../plugins/iotrouter_expansion/README.md).
 Each project declares its dependencies normally. The Modbus plugin declares
 `{:yamodbus, "== 0.1.0"}`; its private library code is bundled with it. It
 also declares `circuits_uart` 1.7.0, supplied natively by firmware and never included

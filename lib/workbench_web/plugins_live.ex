@@ -121,13 +121,13 @@ defmodule WorkbenchWeb.PluginsLive do
         icon="network"
         id="firmware-plugin-sources"
       >
-        <form :for={plugin <- ["tailnet_subrouter", "modbus"]} phx-submit="open_plugin">
+        <form :for={project <- Workbench.PluginBuild.projects()} phx-submit="open_plugin">
           <input
             type="hidden"
             name="plugin[path]"
-            value={Path.join([Workbench.root(), "plugins", plugin])}
+            value={Path.expand(project, Workbench.root())}
           />
-          <.button type="submit" variant="secondary">Open {plugin} source</.button>
+          <.button type="submit" variant="secondary">Open {Path.basename(project)} source</.button>
         </form>
         <p class="ui-help">Change plugins/selection.exs and rebuild firmware to bundle plugins.</p>
       </.panel>

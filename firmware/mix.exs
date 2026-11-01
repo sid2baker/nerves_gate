@@ -163,6 +163,7 @@ defmodule NervesGate.MixProject do
       {:alarmist, "~> 0.4.2"},
       {:property_table, "~> 0.3.4"},
       {:circuits_uart, "~> 1.6"},
+      {:circuits_gpio, "~> 2.3"},
       {:input_event, "~> 1.4"},
       # Host tooling must never start the workstation VPN.
       {:tailscaled_ex, "~> 0.6.0", runtime: Mix.target() != :host},

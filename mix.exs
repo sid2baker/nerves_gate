@@ -133,8 +133,8 @@ defmodule Workbench.MixProject do
     Mix.Tasks.Format.run(["--check-formatted"])
     Mix.Task.run("test", ["--max-cases", "4"])
 
-    for plugin <- ["tailnet_subrouter", "modbus"],
-        do: Workbench.Plugins.test!(Path.join([__DIR__, "plugins", plugin]))
+    for project <- Workbench.PluginBuild.projects(),
+        do: Workbench.Plugins.test!(Path.expand(project, __DIR__))
   end
 
   # Host-only native orchestration. Nerves device builds and user apps run

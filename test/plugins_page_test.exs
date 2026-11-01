@@ -22,8 +22,8 @@ defmodule WorkbenchWeb.PluginsPageTest do
              "value"
            ) ==
              Enum.map(
-               ["tailnet_subrouter", "modbus"],
-               &Path.join([Workbench.root(), "plugins", &1])
+               Workbench.PluginBuild.projects(),
+               &Path.expand(&1, Workbench.root())
              )
 
     assert Floki.find(document, "button[phx-value-kind=test]") == []

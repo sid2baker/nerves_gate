@@ -54,6 +54,8 @@
 
 ### Added
 
+- Experimental IOTRouter expansion-card plugin for the EM300's assigned bus. Explicit reset/start discovers captured D1600/D0016N layouts and exposes digital inputs and repeatable outputs with card echo evidence through the existing I/O page. No automatic activation or transport startup; unknown/analog cards are rejected. Requires SDK 0.2.0-dev.8 firmware with shared GPIO support; electrical qualification remains outstanding.
+
 - System-artifact tooling selects the system from the Nerves build plan, including EM300, and requires matching source/legal archives and checksums for physical systems. Automatic publication remains limited to its existing workflow targets.
 
 - EM300 (RK3506B, SPI NAND) firmware target and Workbench support for builds, MASKROM provisioning, firmware updates and the gateway directory. The unpublished `nerves_system_em300` builds only with `NERVES_GATE_LOCAL_DEPS=1`; the modem, LEDs, recovery button and extension I/O stay disabled until qualified on hardware.

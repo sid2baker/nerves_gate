@@ -3,9 +3,13 @@ defmodule Workbench.PluginBuild do
   alias NervesGate.Plugins.{Artifact, Metadata}
   alias NervesGateSDK.Package
 
+  @doc "Selected plugin source directories, relative to the checkout root."
+  def projects,
+    do: Code.eval_file(Path.join(Workbench.root(), "plugins/selection.exs")) |> elem(0)
+
   def build!(report \\ fn _ -> :ok end) do
     root = Workbench.root()
-    projects = Code.eval_file(Path.join(root, "plugins/selection.exs")) |> elem(0)
+    projects = projects()
     destination = Path.join(root, "firmware/priv/plugins")
     stage = destination <> ".#{Base.encode16(:crypto.strong_rand_bytes(8))}"
     File.mkdir_p!(stage)

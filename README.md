@@ -28,7 +28,9 @@ Nothing flashes physical hardware unless you explicitly confirm it.
 ## Plugins
 
 `plugins/selection.exs` selects independent OTP projects for firmware. The initial
-selection contains `tailnet_subrouter` and read-only Modbus TCP/RTU using `yamodbus`.
+selection contains `tailnet_subrouter`, Modbus TCP/RTU using `yamodbus`, and the
+experimental [IOTRouter expansion driver](plugins/iotrouter_expansion/README.md).
+Plugins and their equipment transports start only through explicit controls.
 Their private pure-BEAM libraries are bundled with them; SDK/LiveView stay shared.
 
 ```sh

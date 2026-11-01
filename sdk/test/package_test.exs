@@ -2,6 +2,13 @@ defmodule NervesGateSDK.PackageTest do
   use ExUnit.Case, async: false
   alias NervesGateSDK.Package
 
+  test "native GPIO and UART are shared platform dependencies, never private payloads" do
+    for app <- [:circuits_gpio, :circuits_uart] do
+      assert app in Package.shared_apps()
+      assert app in Package.common_apps()
+    end
+  end
+
   setup_all do
     [{module, beam}] =
       Code.compile_string("""

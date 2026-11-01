@@ -121,3 +121,5 @@ jobs:
           mise exec -- mix plugin.package plugins/tailnet_subrouter
           mise exec -- mix plugin.test plugins/modbus
           mise exec -- mix plugin.package plugins/modbus
+          mise exec -- mix plugin.test plugins/iotrouter_expansion
+          mise exec -- mix plugin.package plugins/iotrouter_expansion

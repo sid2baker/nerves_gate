@@ -167,9 +167,10 @@ The SDK is not a sandbox; trusted code can bypass coordination conventions.
 
 Ordinary TCP connections need no hardware assignment. Reconfiguring a dedicated
 local Ethernet interface requires its assignment plus `Network.claim_local/3`.
-`Network.Interface.assigned_plugin` is a public read model for plugin UIs, not authority. UART's native driver is platform
-provided; plugins declare compatible `circuits_uart` and packaging excludes its
-native payload while recording an exact version requirement. No native plugin
+`Network.Interface.assigned_plugin` is a public read model for plugin UIs, not authority. UART and GPIO native drivers are
+platform provided; plugins declare compatible `circuits_uart`/`circuits_gpio` and
+packaging excludes their native payloads while recording exact version
+requirements. A resource's `gpios` names its GPIO lines. No native plugin
 binaries are introduced. See [hardware assignments](../docs/hardware.md).
 
 ## Equipment ownership

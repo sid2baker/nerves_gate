@@ -12,9 +12,9 @@ defmodule NervesGateSDK.Package do
     eex runtime_tools tools syntax_tools xmerl sasl os_mon ssh nerves_gate_sdk
     jason telemetry phoenix_pubsub phoenix phoenix_live_view phoenix_html phoenix_template
     plug plug_crypto mime websock websock_adapter castore req finch mint hpax nimble_pool nimble_options
-    circuits_uart elixir_make)a
+    circuits_uart circuits_gpio elixir_make)a
   @common ~w(jason telemetry phoenix_pubsub phoenix phoenix_live_view phoenix_html phoenix_template
-    plug plug_crypto mime websock websock_adapter castore req finch mint hpax nimble_pool nimble_options circuits_uart)a
+    plug plug_crypto mime websock websock_adapter castore req finch mint hpax nimble_pool nimble_options circuits_uart circuits_gpio)a
 
   @doc "Reject plugin-contributed native libraries, executables and direct NIF loaders. This is a packaging policy, not a sandbox."
   def pure_beam(%{files: files}) do
