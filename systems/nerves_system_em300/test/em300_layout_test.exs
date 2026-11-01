@@ -23,6 +23,12 @@ defmodule EM300LayoutTest do
     |> Enum.each(fn [{_, start, count}, {_, next, _}] -> assert start + count == next end)
   end
 
+  test "SoC CAN controllers are disabled because EM300 has no CAN connectors" do
+    dts = File.read!("dts/rk3506-em300.dts")
+    assert dts =~ "&can0 {\n    status = \"disabled\";\n};"
+    assert dts =~ "&can1 {\n    status = \"disabled\";\n};"
+  end
+
   test "device-tree partitions match the GPT, after the 4 MiB IDB area" do
     dts = File.read!("dts/rk3506-em300.dts")
 

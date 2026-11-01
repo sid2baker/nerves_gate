@@ -7,12 +7,12 @@ the Rockchip RK3506B (3× Cortex-A7, 512 MiB RAM) with **512 MiB SPI NAND**.
 - A/B firmware updates on SPI NAND (kernel FITs and root filesystems in UBI volumes)
   with application validation and boot-count rollback
 - Persistent UBIFS application storage at `/data` (`/root`)
-- Ethernet, CAN, four field UARTs, the extension-module UART, microSD,
+- Ethernet, four RS485 UARTs, the extension-module UART, microSD,
   DS1307 RTC, the external watchdog and a **115200 8N1** serial console
 
-**Status: bring-up.** Derived from the stock EM300 device tree and the
-`nerves_system_ec100` boot chain. The raw-kernel layout booted on hardware; the
-UBI kernel-volume layout is not yet hardware-booted.
+**Status: bring-up.** The UBI kernel-volume layout has booted and completed
+an A-to-B OTA update on hardware. Physical Ethernet jack mapping and field-bus
+electrical qualification remain incomplete.
 
 ## Build
 
@@ -112,15 +112,18 @@ erasure.
 | Function | Linux | Notes |
 | --- | --- | --- |
 | Console | `ttyS0` (UART0) | 115200 8N1 |
-| Field serial | `ttyS1`–`ttyS4` | UART1–4; transceiver types unqualified |
+| RS485 | `ttyS1`–`ttyS4` | Four ports per vendor specification; wiring electrically unqualified |
 | Extension modules | `ttyS5` (UART5 M1) | 921600 8N1 daisy-chain bus |
-| CAN | `can0`, `can1` | RK3506 CAN-FD controllers |
-| Ethernet | `eth0`, `eth1` | RMII PHYs |
+| Ethernet | `eth0`, `eth1` | Two RMII interfaces observed; three physical jacks (WAN + two LAN), mapping unqualified |
 | microSD | `mmcblk0` | card detect on GPIO0_B0 |
 | RTC | DS1307 @ I2C0 0x68 | `rtc0` |
 | LEDs | `em300:led0..2`, `em300:som`, `em300:user` | polarity unqualified |
 | Keys | `KEY_PROG1` (front), `KEY_PROG2` (user2) | active-low |
 | 4G modem | Quectel `2c7c:6002` | powered at boot; reset line unclaimed |
+
+EM300 exposes no CAN ports; SoC CAN controllers are disabled. Linux interface
+count is not a physical jack count. No independent `eth2` is declared without
+verified hardware mapping.
 
 Named GPIO lines on `gpiochip1` (use them by name from Circuits.GPIO):
 `DI0`, `DI1`, `DO0`, `DO1` (main-board I/O), `EXT_LINK`, `EXT_RESET`,

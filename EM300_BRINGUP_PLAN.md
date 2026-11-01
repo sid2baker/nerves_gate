@@ -23,8 +23,12 @@ device tree, `dmesg`, MTD partition dumps, root filesystem archive, UART capture
 - Stock: Buildroot 2024.02, Rockchip 6.1.99-rt, vendor U-Boot (unsigned FITs),
   SPI NAND mtdparts + UBI root. `reboot loader` and an unpopulated LOADER
   (SARADC ch0 MaskROM) key are available.
-- Peripherals: 2× RMII Ethernet, 2× CAN-FD, UART1–4 field ports, UART5
-  extension bus, PCA9555, DS1307, Quectel `2c7c:6002`, AIC8800 Wi-Fi.
+- Stock Linux enables two RMII Ethernet and two SoC CAN controllers. This is
+  not the connector inventory: EM300 exposes no CAN ports and has three
+  Ethernet jacks (WAN + two LAN). Only `eth0`/`eth1` were observed; physical
+  mapping is unqualified. UART1–4 are RS485 per the vendor specification;
+  UART5 is the extension bus. Other stock declarations include PCA9555,
+  DS1307, Quectel `2c7c:6002`, AIC8800 Wi-Fi.
 - GPIO consumers named: main-board DI0/1, DO0/1, LEDs, key, UPS, modem,
   external watchdog, extension link/reset/error LED.
 

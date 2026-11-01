@@ -17,6 +17,11 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Disable the SoC CAN controllers: EM300 has no exposed CAN ports. The hardware
+  declaration no longer presents them as plugin resources. Three physical
+  Ethernet jacks (WAN + two LAN) must not be confused with the two Linux GMAC
+  interfaces; their physical mapping is not yet qualified.
+
 - OTA no longer runs a board script from the running firmware. The removed
   raw-slot writer used commands absent from the target, so OTA always failed.
 

@@ -360,20 +360,13 @@
     };
 };
 
+/* The SoC has CAN controllers, but EM300 exposes no CAN ports. */
 &can0 {
-    pinctrl-names = "default";
-    pinctrl-0 = <&rm_io20_can0_tx &rm_io19_can0_rx>;
-    assigned-clocks = <&cru CLK_CAN0>;
-    assigned-clock-rates = <300000000>;
-    status = "okay";
+    status = "disabled";
 };
 
 &can1 {
-    pinctrl-names = "default";
-    pinctrl-0 = <&rm_io18_can1_tx &rm_io17_can1_rx>;
-    assigned-clocks = <&cru CLK_CAN1>;
-    assigned-clock-rates = <300000000>;
-    status = "okay";
+    status = "disabled";
 };
 
 /* Internal 512 MiB SPI NAND. The layout must match nand-layout.txt and the
