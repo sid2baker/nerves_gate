@@ -13,6 +13,7 @@ defmodule NervesGate.Recovery.DataInit do
     Nerves.Runtime.Init.init_application_partition()
 
     with {:ok, _mount} <- check_data(),
+         :ok <- NervesGate.Network.Vintage.check_saved_cellular(),
          :ok <- NervesGate.Network.Vintage.prepare_cellular_input() do
       :ignore
     end

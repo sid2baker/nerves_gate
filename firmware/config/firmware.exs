@@ -118,11 +118,11 @@ config :tailscaled_ex,
   manage_daemon: true,
   tun: :kernel
 
-# Network owns one atomic settings record; VintageNet never restores per-interface
-# files. Each platform adds its independent recovery/management connection.
+# VintageNet persists confirmed interface configurations. Trials remain ephemeral.
+# Each platform adds its independent recovery/management connection.
 config :vintage_net,
   route_metric_fun: {NervesGate.Network.RouteMetric, :compute_metric, 2},
-  persistence: VintageNet.Persistence.Null,
+  persistence: VintageNet.Persistence.FlatFile,
   config: []
 
 # Build keys seed the device-owned store once. Settings owns later additions

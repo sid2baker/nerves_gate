@@ -4,7 +4,7 @@
 
 ### Breaking changes
 
-- Network settings are one atomic schema-1 record, not VintageNet interface files or a `br0` metadata bridge. VintageNet persistence is disabled. Existing per-interface settings are preserved and rejected with an explicit recovery message; external reprovisioning requires separate authorization. No migration or reset runs during upgrade.
+- Network settings are VintageNet's own saved interface configs, with no `br0` metadata bridge, extra metadata or separate store; roles and cellular policy are read back from them. Earlier saved layouts are rejected and preserved; reflash or reprovision those gateways. A failed or interrupted save blocks further changes because interface writes are not a whole-device transaction.
 
 - Ethernet configuration, commissioning and SDK local claims use board-declared interface IDs rather than a fixed two-port list. Gateway and Workbench views use board labels; EM300 shows WAN/LAN. SDK 0.2.0-dev.7 accepts board-defined interface names, with ownership and capability checked by firmware.
 

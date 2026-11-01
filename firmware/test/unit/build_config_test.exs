@@ -151,8 +151,8 @@ defmodule NervesGate.BuildConfigTest do
         assert Map.keys(port) -- [:id, :kind, :label, :assignable, :gpios] == []
       end
 
-      # Only Network's validated intent is restored, never old driver terms.
-      assert config[:vintage_net][:persistence] == VintageNet.Persistence.Null
+      # Confirmed interface configs are VintageNet's own saved files.
+      assert config[:vintage_net][:persistence] == VintageNet.Persistence.FlatFile
 
       # A dedicated WAN must be one of the board's Ethernet resources.
       if internet = config[:nerves_gate][:board][:internet_port] do

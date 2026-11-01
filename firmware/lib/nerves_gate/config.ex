@@ -1,5 +1,5 @@
 defmodule NervesGate.Config do
-  @moduledoc "Network input validation and port-role helpers. Persistence belongs to Network.Settings."
+  @moduledoc "Network input validation and port-role helpers. Persistence belongs to Network.Vintage."
   import Bitwise
 
   @doc """

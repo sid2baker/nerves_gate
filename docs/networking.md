@@ -300,12 +300,19 @@ an assigned LAN must be disabled and unassigned before becoming Internet. Networ
 trials are blocked while a local lease or unresolved cleanup exists. 4G backup
 needs an Ethernet uplink.
 
-Network stores one schema-1 JSON record at `/data/nerves_gate/network.json`; the
-trial exists only in memory. Confirmation syncs a temporary file, atomically
-renames it and syncs its directory. VintageNet persistence is disabled. Unsupported
-records, stale interface IDs, or any old files in VintageNet's persistence
-directory fail closed without being imported, rewritten or erased. See the
-[public API](action-api.md) for the settings format.
+Confirmed settings are VintageNet's own saved interface configs, with no extra
+metadata or separate store. No saved configs means factory settings. On load,
+each port's config gives its role (address: Internet; IP disabled: plugin;
+link disabled: off), and the modem config gives the APN and carrier profile;
+with an Ethernet Internet port cellular is the backup, otherwise the only uplink.
+The result is accepted only if this firmware would save exactly the same configs.
+Trials and temporary plugin addresses use `persist: false`.
+Interface writes are not a whole-device transaction: a failed or interrupted save
+blocks further changes until its outcome is inspected through recovery access.
+Unsupported saved layouts (including a separate JSON record or metadata bridge)
+are preserved and rejected, never imported, rewritten or erased. Saved modem
+configs must match this board's qualified driver and wiring before VintageNet
+starts. See the [public API](action-api.md) for the settings format.
 
 First setup **through verified USB** saves automatically after successful
 application, within an internal 15-second deadline. Verification uses the

@@ -422,11 +422,10 @@ See [optional plugin UI](plugins.md#optional-ui).
 
 | Owner/store | Durable state |
 | --- | --- |
-| VintageNet | Confirmed interface settings |
+| VintageNet | Confirmed interface settings; Network reads its settings back from them |
 | Tailscale | Device identity and preferences |
 | Settings PropertyTable | Small private settings, including SIM-bound PIN and APN-bound PAP |
 | SSH | Authorized public keys |
-| Network.Settings: `/data/nerves_gate/network.json` | One schema-1 confirmed network intent record; atomic replacement |
 | Network.Local: `/data/nerves_gate/local_network.json` | Temporary link/route ownership and incomplete cleanup; never enable intent |
 | Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |

@@ -18,8 +18,9 @@ system, and board configs remain the source of hardware declarations.
 - EM300 has booted Nerves, passed initial provisioning/readback and a healthy OTA
   update, and retained plugin-storage data across reboot. This is not rollback or
   full peripheral qualification.
-- Ethernet IDs and labels are board-driven. Network owns one atomic settings record;
-  obsolete VintageNet files are preserved and rejected, not migrated or erased.
+- Ethernet IDs and labels are board-driven. Confirmed settings use VintageNet's
+  per-interface persistence, without a metadata bridge. Unsupported saved layouts
+  are preserved and rejected, not migrated or erased.
 - EM300's expansion bus is a plugin-assignable resource. It is not an implemented
   expansion-card driver or a set of automatically discovered core I/O channels.
 

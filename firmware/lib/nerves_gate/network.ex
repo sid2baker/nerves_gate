@@ -16,7 +16,7 @@ defmodule NervesGate.Network do
   current trial, settings and interfaces. Subscribe with `observe/0` before
   reading; notifications are hints to read again, not complete status maps.
 
-  Network.Settings owns one atomic saved-intent record; VintageNet only applies it.
+  Network.Vintage owns interface persistence through VintageNet's built-in store.
   Failed restoration sets `:network_restore_failed`; successful restoration clears it.
   """
   use GenServer
@@ -708,7 +708,7 @@ defmodule NervesGate.Network do
   end
 
   defp save(state, from),
-    do: work(state, :save, from, fn -> NervesGate.Network.Settings.save(state.trial.network) end)
+    do: work(state, :save, from, fn -> NervesGate.Network.Vintage.save(state.trial.network) end)
 
   defp restore(state, reason, from, result) do
     state =
@@ -873,7 +873,7 @@ defmodule NervesGate.Network do
   defp cellular_fault(_), do: nil
 
   defp load(timeout, local) do
-    case bounded(fn -> NervesGate.Network.Settings.load() end, timeout) do
+    case bounded(fn -> NervesGate.Network.Vintage.load() end, timeout) do
       # Do not flush a surviving claimed address on a Network restart before
       # its advertised route has been withdrawn. Boot-time VintageNet restore
       # is independent; the journal still blocks all new access until cleanup.

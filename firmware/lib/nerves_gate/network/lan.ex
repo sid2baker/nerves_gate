@@ -1,5 +1,5 @@
 defmodule NervesGate.Network.LAN do
-  @moduledoc "Independent board Ethernet links. No bridges, IPv6 autoconfiguration or persistence."
+  @moduledoc "Independent board Ethernet links. No bridges or IPv6 autoconfiguration."
   @behaviour VintageNet.Technology
 
   @impl true
