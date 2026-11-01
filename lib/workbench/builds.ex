@@ -1,15 +1,20 @@
 defmodule Workbench.Builds do
   @moduledoc "Explicit isolated firmware builds and local image selection."
 
-  # Physical boards. x86_64 is the QEMU simulator: buildable, but never
-  # provisioned or updated through the physical image lists.
-  @physical ["ec100", "em300"]
+  # One catalogue for build admission, physical image selection and the picker.
+  @targets [
+    %{id: "x86_64", label: "x86_64 · simulated QEMU", physical: false},
+    %{id: "ec100", label: "EC100 · physical hardware", physical: true},
+    %{id: "em300", label: "EM300 · physical hardware (SPI NAND)", physical: true}
+  ]
 
-  def physical_targets, do: @physical
+  def targets, do: @targets
+  def physical_targets, do: for(%{id: id, physical: true} <- @targets, do: id)
 
   @doc "Whether `firmware!/3` builds this target and environment."
-  def buildable?(target, env),
-    do: (target == "x86_64" and env == :dev) or (target in @physical and env in [:dev, :prod])
+  def buildable?(target, env) do
+    Enum.any?(@targets, &(&1.id == target and (env == :dev or (&1.physical and env == :prod))))
+  end
 
   def images(root \\ Workbench.root()) do
     Path.wildcard(Path.join(root, "firmware/_build/*/nerves/images/*.fw"))
@@ -23,7 +28,7 @@ defmodule Workbench.Builds do
           target = metadata["meta-platform"]
 
           # A physical board's archive, in that board's own build directory.
-          if target in @physical and String.starts_with?(build, target <> "_") and
+          if target in physical_targets() and String.starts_with?(build, target <> "_") and
                metadata["meta-product"] == "nerves_gate" and
                metadata["meta-architecture"] == "arm" and is_binary(metadata["meta-version"]) do
             [
@@ -60,7 +65,7 @@ defmodule Workbench.Builds do
       do:
         raise(
           ArgumentError,
-          "Build x86_64 (dev) or a physical board: #{Enum.join(@physical, ", ")}"
+          "Build x86_64 (dev) or a physical board: #{Enum.join(physical_targets(), ", ")}"
         )
 
     Workbench.BuildLock.run!(fn ->

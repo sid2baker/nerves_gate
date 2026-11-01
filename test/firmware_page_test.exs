@@ -85,12 +85,13 @@ defmodule WorkbenchWeb.FirmwarePageTest do
       render_component(&WorkbenchWeb.FirmwareLive.render/1, assigns(confirm_reset: false))
       |> Floki.parse_document!()
 
-    for target <- ["x86_64", "ec100", "em300"],
-        do:
-          assert(
-            Floki.find(firmware, "#build-firmware select[name=target] option[value=#{target}]") !=
-              []
-          )
+    assert Floki.attribute(firmware, "#build-firmware select[name=target] option", "value") ==
+             Enum.map(Workbench.Builds.targets(), & &1.id)
+
+    for target <- Workbench.Builds.targets() do
+      assert Floki.find(firmware, "#build-firmware option[value=#{target.id}]") |> Floki.text() ==
+               target.label
+    end
 
     assert Floki.find(firmware, "#simulator-lifecycle #start-devices") != []
 

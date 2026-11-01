@@ -66,7 +66,7 @@ separately authorized release, update templates and plugins to the stable requir
 No runtime
 capability probe substitutes for the device installer's SDK requirement check.
 
-The platform, SDK and two systems have separate release streams. Selected plugins
+The platform, SDK and each system have separate release streams. Selected plugins
 and their dependency closures ship with platform firmware. Older firmware,
 simulator and generator Hex packages remain published; retiring them is a
 separate, explicit action.
@@ -102,14 +102,17 @@ MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.art
 requires the authorized main-branch GitHub workflow. Exact notes come from the
 system's dated changelog. The system defines the download tag in `artifact_sites`.
 Pending source comparison prevents reuse of a tag after fingerprint inputs change;
-repairs to the publisher alone do not change system inputs.
+repairs to the publisher alone do not change system inputs. The task reads the
+selected system from the Nerves build plan, including EM300; it has no separate
+target-to-system table. EM300 publication is not enabled in the automatic workflow.
+Its development version remains rejected by the stable-version gate.
 
-Both systems use Nerves 2's explicit `mix nerves.artifact.build`. The shared task
+All systems use Nerves 2's explicit `mix nerves.artifact.build`. The shared task
 runs Buildroot `make source` before compilation, using Buildroot's configured
 mirrors and checksum validation. The Nerves download cache is saved even after
 failure. No board-specific downloader or toolchain-source manifest is used.
 
-QEMU needs its fingerprinted binary archive. EC100 also collects Buildroot
+QEMU needs its fingerprinted binary archive. Physical systems also collect Buildroot
 `legal-info`, installed external-toolchain notices/configuration, the matching
 system/Buildroot recipes and a checksum manifest. See the [source collection
 limits](../systems/nerves_system_ec100/SOURCES.md#buildroot-source-and-license-collection):

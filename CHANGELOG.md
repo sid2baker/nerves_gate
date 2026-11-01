@@ -54,6 +54,8 @@
 
 ### Added
 
+- System-artifact tooling selects the system from the Nerves build plan, including EM300, and requires matching source/legal archives and checksums for physical systems. Automatic publication remains limited to its existing workflow targets.
+
 - EM300 (RK3506B, SPI NAND) firmware target and Workbench support for builds, MASKROM provisioning, firmware updates and the gateway directory. The unpublished `nerves_system_em300` builds only with `NERVES_GATE_LOCAL_DEPS=1`; the modem, LEDs, recovery button and extension I/O stay disabled until qualified on hardware.
 - Gateway **I/O** page (`/io`): every plugin input and output with availability, latest Reading, quality, monotonic freshness, writer, desired target and Status (`Confirmed`/`Pending`/`Mismatch`/`Unknown`) with its reason, Apply outcome, evidence and the plugin's declared release behaviour. Manual claim/set/release goes through `NervesGate.IO.Manual`, the single manual writer that owns claims independently of browser tabs and shares the I/O domain's exclusive admission. `NervesGate.IO.snapshot/0` reads all endpoints; output snapshots add caller-relative `owned?`.
 - Read-only Workbench diagnostics and inspection: `mix dev.doctor`, `mix gateway.list/inspect/logs` and `mix dev.job [ID]`. Jobs and Runner expose owner/session-qualified operation IDs and bounded history. Wait timeouts do not cancel work; uncertain outcomes block further maintenance/control instead of authorizing retries.

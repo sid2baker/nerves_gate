@@ -2,6 +2,33 @@ defmodule Workbench.ArtifactReleaseTest do
   use ExUnit.Case, async: false
   alias Mix.Tasks.Nerves.Artifact.Release, as: Release
 
+  test "system selection comes from the build plan, including EM300" do
+    for app <- [:nerves_system_ec100, :nerves_system_em300, :nerves_system_ec100_qemu] do
+      package = %{app: app}
+      plan = %{actions: [{Nerves.BuildAction.NervesV1System, [app: app]}], packages: [package]}
+      assert Release.system_package!(plan) == package
+    end
+
+    assert_raise Mix.Error, fn -> Release.system_package!(%{actions: [], packages: []}) end
+
+    assert_raise Mix.Error, fn ->
+      Release.system_package!(%{
+        actions: [{Nerves.BuildAction.NervesV1System, [app: :missing]}],
+        packages: []
+      })
+    end
+  end
+
+  test "EM300 requires its own binary, sources and checksum manifest" do
+    binary = "nerves_system_em300-portable-0.1.3-ABC1234.tar.gz"
+
+    assert Release.asset_names(:nerves_system_em300, binary) == [
+             binary,
+             "nerves_system_em300-sources-0.1.3-ABC1234.tar.gz",
+             "SHA256SUMS"
+           ]
+  end
+
   test "EC100 publication requires the binary, source archive and checksum manifest" do
     binary = "nerves_system_ec100-portable-0.2.1-ABC1234.tar.gz"
     source = "nerves_system_ec100-sources-0.2.1-ABC1234.tar.gz"

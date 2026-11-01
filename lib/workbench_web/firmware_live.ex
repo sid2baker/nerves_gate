@@ -41,6 +41,8 @@ defmodule WorkbenchWeb.FirmwareLive do
     do: {:noreply, assign(socket, bench: Runner.snapshot(), error: nil, confirm_reset: false)}
 
   def render(assigns) do
+    assigns = assign(assigns, :build_targets, Workbench.Builds.targets())
+
     ~H"""
     <main class="ui-main ui-stack bench" id="firmware-page">
       <.page_header
@@ -61,9 +63,7 @@ defmodule WorkbenchWeb.FirmwareLive do
       <.panel title="1. Build firmware" icon="port" id="firmware-build">
         <form id="build-firmware" phx-submit="build" class="ui-actions">
           <select name="target" aria-label="Firmware build target">
-            <option value="x86_64">x86_64 · simulated QEMU</option>
-            <option value="ec100">EC100 · physical hardware</option>
-            <option value="em300">EM300 · physical hardware (SPI NAND, bring-up)</option>
+            <option :for={target <- @build_targets} value={target.id}>{target.label}</option>
           </select>
           <.button type="submit" disabled={@job.status == :running}>Build firmware</.button>
         </form>
@@ -72,7 +72,7 @@ defmodule WorkbenchWeb.FirmwareLive do
         </p>
         <.job :if={@job.kind == "firmware"} job={@job} />
         <p class="ui-help">
-          Physical EC100 or EM300 image ready? <.link navigate="/devices" class="ui-text-link">Choose a gateway to review an update</.link>, or <.link
+          Physical image ready? <.link navigate="/devices" class="ui-text-link">Choose a gateway to review an update</.link>, or <.link
             navigate="/provision"
             class="ui-text-link"
           >provision new hardware over USB</.link>.

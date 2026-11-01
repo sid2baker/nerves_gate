@@ -1,6 +1,23 @@
 defmodule Workbench.BuildsTest do
   use ExUnit.Case, async: true
 
+  test "the target catalogue drives admission and physical image selection" do
+    targets = Workbench.Builds.targets()
+    assert Enum.uniq_by(targets, & &1.id) == targets
+
+    assert Workbench.Builds.physical_targets() ==
+             for(%{id: id, physical: true} <- targets, do: id)
+
+    for target <- targets do
+      assert Workbench.Builds.buildable?(target.id, :dev)
+      assert Workbench.Builds.buildable?(target.id, :prod) == target.physical
+      refute Workbench.Builds.buildable?(target.id, :test)
+      assert is_binary(target.label) and target.label != ""
+    end
+
+    refute Workbench.Builds.buildable?("unknown", :dev)
+  end
+
   @tag :tmp_dir
   test "firmware options come from actual compatible local archives, not directory names", %{
     tmp_dir: root

@@ -6,6 +6,28 @@ defmodule NervesGateWeb.NetworkEditorTest do
 
   @base %{"mode" => "ports", "eth0" => nil, "eth1" => nil}
 
+  test "Internet choices use the device projection's interface IDs and board labels" do
+    projection = projection(@base)
+    prototype = %{present: true, link: false, connection: :disconnected, addresses: []}
+
+    ports =
+      for {name, label} <- [{"wan9", "WAN"}, {"lan7", "North LAN"}, {"lan8", "South LAN"}],
+          do: Map.merge(prototype, %{name: name, label: label})
+
+    document =
+      put_in(projection.connections.ports, ports)
+      |> socket()
+      |> Phoenix.Component.assign(step: 2)
+      |> page()
+
+    for port <- ports do
+      assert [_] = Floki.find(document, "input[value=#{port.name}]")
+      assert Floki.text(document) =~ port.label
+    end
+
+    assert Floki.find(document, "input[value=eth0], input[value=eth1]") == []
+  end
+
   test "source choices depend on detected hardware, not unlocked SIM or registration" do
     for {present, supported} <- [{false, true}, {nil, true}, {true, false}] do
       document =
