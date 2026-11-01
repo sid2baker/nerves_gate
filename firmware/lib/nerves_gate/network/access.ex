@@ -22,7 +22,7 @@ defmodule NervesGate.Network.Access do
   end
 
   defp independent?(observed, local) do
-    (Map.get(observed, :ports, []) ++ [Map.get(observed, :bridge, %{})])
+    Map.get(observed, :ports, [])
     |> Enum.flat_map(&Map.get(&1, :addresses, []))
     |> Enum.all?(fn ip -> not Config.overlap?(local, 30, ip.address, ip.prefix_length) end)
   end

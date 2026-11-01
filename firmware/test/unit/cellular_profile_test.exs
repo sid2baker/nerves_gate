@@ -26,19 +26,6 @@ defmodule NervesGate.Cellular.ProfileTest do
     end)
   end
 
-  test "saved drivers are checked before any controller can open the UART" do
-    assert :ok = NervesGate.Cellular.Profile.check_saved(%{type: VintageNet.Technology.Null})
-    config = %{type: VintageNetECM, vintage_net_ecm: %{modem: NervesGate.Cellular.Modem}}
-    assert :ok = NervesGate.Cellular.Profile.check_saved(config)
-
-    stale = put_in(config.vintage_net_ecm.modem, NervesGate.MissingCellularModem)
-
-    assert {:error, %{code: "cellular_saved_config_unavailable"}} =
-             NervesGate.Cellular.Profile.check_saved(stale)
-
-    assert stale.vintage_net_ecm.modem == NervesGate.MissingCellularModem
-  end
-
   test "ECM uses the selected APN, fixed AT port, context 1 and DHCP" do
     assert NervesGate.Cellular.Profile.get() == @profile
     assert {:ok, [{"wwan0", config}]} = NervesGate.Cellular.Profile.configurations(@network)

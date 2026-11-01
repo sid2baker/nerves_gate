@@ -63,30 +63,6 @@ defmodule NervesGate.Cellular.Profile do
     end
   end
 
-  @doc false
-  def check_saved(%{type: VintageNet.Technology.Null}), do: :ok
-
-  def check_saved(%{type: VintageNetECM, vintage_net_ecm: options}) when is_map(options) do
-    modem = Map.get(options, :modem, VintageNetECM.Modem.Quectel)
-
-    if is_atom(modem) and Code.ensure_loaded?(modem) and
-         Enum.all?(VintageNetECM.Modem.behaviour_info(:callbacks), fn {name, arity} ->
-           function_exported?(modem, name, arity)
-         end),
-       do: :ok,
-       else: {:error, saved_error()}
-  end
-
-  def check_saved(_), do: {:error, saved_error()}
-
-  defp saved_error do
-    %{
-      code: "cellular_saved_config_unavailable",
-      message:
-        "Saved cellular configuration is unsupported by this firmware. Startup stopped before opening the modem. Use an explicitly authorized reprovisioning procedure; settings were not changed."
-    }
-  end
-
   defp technology_key(%{vintage_net_ecm: options}) when is_map(options), do: :vintage_net_ecm
 
   defp technology_key(%{vintage_net_qmi: options}) when is_map(options), do: :vintage_net_qmi

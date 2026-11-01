@@ -139,7 +139,7 @@ defmodule NervesGateWeb.NetworkForm do
 
   def static_defaults(params, prefix, observed) do
     if params[prefix <> "_ip"] in [nil, ""] do
-      observed = observed || %{ports: [], bridge: nil, usb: nil}
+      observed = observed || %{ports: [], usb: nil}
 
       name = internet_port(params, observed.ports)
       interface = Enum.find(observed.ports, &(&1.name == name))

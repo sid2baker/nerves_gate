@@ -26,21 +26,22 @@ defmodule NervesGate.PolicyTest do
     assert Policy.value(:fast, 0) != Policy.value(:fast, 125)
   end
 
-  test "current independent network settings round-trip without role adaptation" do
-    internet = %{"role" => "internet", "address" => Config.address_defaults()}
-    network = %{"mode" => "ports", "eth0" => internet, "eth1" => nil}
+  test "Ethernet configurations never create a metadata bridge" do
+    network = %{
+      "mode" => "ports",
+      "eth0" => %{"role" => "internet", "address" => Config.address_defaults()},
+      "eth1" => nil
+    }
 
     for current <- [Config.defaults()["network"], network] do
       configs = current |> NervesGate.Network.Vintage.configurations() |> Map.new()
-      assert {:ok, ^current} = NervesGate.Network.Vintage.from_configurations(configs)
+      assert Enum.sort(Map.keys(configs)) == Enum.sort(NervesGate.Board.ethernet())
+      refute Map.has_key?(configs, "br0")
     end
 
-    configs = network |> NervesGate.Network.Vintage.configurations() |> Map.new()
-    unknown = put_in(configs["eth0"][:nerves_gate_role], "unsupported")
-    assert {:error, _} = NervesGate.Network.Vintage.from_configurations(unknown)
-    joined = put_in(configs["br0"][:vintage_net_bridge][:interfaces], ["eth0", "eth1"])
-    assert {:error, _} = NervesGate.Network.Vintage.from_configurations(joined)
-    assert_raise ArgumentError, fn -> NervesGate.Network.LAN.normalize(joined["br0"]) end
+    assert_raise ArgumentError, fn ->
+      NervesGate.Network.LAN.normalize(%{vintage_net_bridge: %{interfaces: ["eth0", "eth1"]}})
+    end
   end
 
   test "4G supports only isolated plugin links and rejects joined settings" do
@@ -55,8 +56,7 @@ defmodule NervesGate.PolicyTest do
 
     assert {:ok, ^network} = Config.validate_network(network)
     configs = NervesGate.Network.Vintage.configurations(network)
-    {"br0", bridge} = List.keyfind(configs, "br0", 0)
-    assert bridge.vintage_net_bridge.interfaces == []
+    refute List.keymember?(configs, "br0", 0)
 
     for unsupported <- [
           %{"mode" => "shared", "equipment" => Config.address_defaults()},

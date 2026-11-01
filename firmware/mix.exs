@@ -39,7 +39,6 @@ defmodule NervesGate.MixProject do
           :ex_unit,
           :tailscaled_ex,
           :vintage_net,
-          :vintage_net_bridge,
           :vintage_net_ecm,
           :vintage_net_ethernet
         ]
@@ -181,7 +180,6 @@ defmodule NervesGate.MixProject do
        override: true,
        runtime: Mix.target() != :host},
       {:vintage_net_wifi, "~> 0.12.12", targets: [:em300]},
-      {:vintage_net_bridge, "~> 0.10.3", runtime: Mix.target() != :host},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
       {:vintage_net_ecm, "~> 0.2.1", runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},

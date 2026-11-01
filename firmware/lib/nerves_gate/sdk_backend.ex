@@ -237,7 +237,6 @@ defmodule NervesGate.SDKBackend do
     interfaces =
       Enum.map(observed.ports, &ethernet_interface(&1, status, assignments)) ++
         [
-          interface(observed.bridge, :other),
           interface(observed.usb, :usb),
           interface(observed.cellular, :cellular)
         ]

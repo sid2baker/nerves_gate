@@ -56,10 +56,7 @@ defmodule Scenarios.Cases.MissingTrialNic do
       observed = status.network.observed
       removed = Enum.find(observed.ports, &(&1.name == "eth0"))
 
-      remaining = [
-        observed.bridge,
-        observed.usb | Enum.reject(observed.ports, &(&1.name == "eth0"))
-      ]
+      remaining = [observed.usb | Enum.reject(observed.ports, &(&1.name == "eth0"))]
 
       current = Scenarios.Device.rpc(vm, Process, :whereis, [VintageNet.RouteManager])
 

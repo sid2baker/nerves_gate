@@ -217,7 +217,7 @@ The published SDK backend contract is the only plugin-facing variation point.
 
 | Owner | Responsibility |
 | --- | --- |
-| VintageNet | Interfaces, saved network settings, connectivity, DNS and routes |
+| VintageNet | Interfaces, connectivity, DNS and routes; no saved-state authority |
 | Tailscale | Identity, preferences, enrollment and VPN routes |
 | Network | Single admission/worker for trials, cellular and plugin leases; USB auto-save/rollback |
 | Network.Local | Lease transitions, overlap/readiness policy, route journal and owned cleanup |
@@ -400,6 +400,7 @@ See [optional plugin UI](plugins.md#optional-ui).
 | Tailscale | Device identity and preferences |
 | Settings PropertyTable | Small private settings, including SIM-bound PIN and APN-bound PAP |
 | SSH | Authorized public keys |
+| Network.Settings: `/data/nerves_gate/network.json` | One schema-1 confirmed network intent record; atomic replacement |
 | Network.Local: `/data/nerves_gate/local_network.json` | Temporary link/route ownership and incomplete cleanup; never enable intent |
 | Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
@@ -407,10 +408,11 @@ See [optional plugin UI](plugins.md#optional-ui).
 | IO: `/data/nerves_gate/io.term` | Schema 2 input/output definitions only (outputs with evidence and release declarations); no Desires, Readings or Authority |
 | Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data; the board's `plugins_slot` names the card slot by sysfs hardware path |
 
-Both targets require writable ext4 data before data users start. Unreadable saved
-network settings fail closed. Trials and monotonic deadlines live in RAM;
-confirmation saves through VintageNet. **Multi-interface saves are not
-transactional**; see [rollback](networking.md#saving-and-rollback). Startup installs
+Targets require their declared data filesystem mounted read-write before data
+users start. Unreadable or unsupported saved network settings fail closed. Trials
+and monotonic deadlines live in RAM; confirmation commits one Network-owned
+record. Old VintageNet settings are preserved and rejected, never migrated;
+see [rollback](networking.md#saving-and-rollback). Startup installs
 default-deny IPv4 forwarding before enabling forwarding.
 
 Card insertion never formats media. Storage commissioning is explicit and Plugins

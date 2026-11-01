@@ -55,7 +55,7 @@ defmodule NervesGate.Network.Local do
 
     others =
       Enum.reject(observed.ports, &(&1.name == scope.interface)) ++
-        Enum.reject([observed.bridge, observed.usb, Map.get(observed, :cellular)], &is_nil/1) ++
+        Enum.reject([observed.usb, Map.get(observed, :cellular)], &is_nil/1) ++
         Map.get(observed, :management, [])
 
     saved =

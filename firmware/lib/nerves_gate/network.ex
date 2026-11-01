@@ -16,7 +16,7 @@ defmodule NervesGate.Network do
   current trial, settings and interfaces. Subscribe with `observe/0` before
   reading; notifications are hints to read again, not complete status maps.
 
-  VintageNet owns saved settings.
+  Network.Settings owns one atomic saved-intent record; VintageNet only applies it.
   Failed restoration sets `:network_restore_failed`; successful restoration clears it.
   """
   use GenServer
@@ -136,6 +136,7 @@ defmodule NervesGate.Network do
       worker: nil,
       proposal_reply: nil,
       recovering: match?({:restore, _}, error),
+      commit_unknown: false,
       observed: nil,
       cellular: Cellular.cached(),
       cellular_controller: nil,
@@ -690,12 +691,18 @@ defmodule NervesGate.Network do
   end
 
   defp complete(state, %{operation: operation, from: from}, {:error, reason}) do
-    reason = if operation == :save, do: {:save, reason}, else: {:apply, reason}
+    reason =
+      case {operation, reason} do
+        {:save, {:worker_failed, _}} -> {:save, :network_commit_unknown}
+        {:save, reason} -> {:save, reason}
+        _ -> {:apply, reason}
+      end
+
     restore(state, reason, from, {:error, reason})
   end
 
   defp save(state, from),
-    do: work(state, :save, from, fn -> NervesGate.Network.Vintage.save(state.trial.network) end)
+    do: work(state, :save, from, fn -> NervesGate.Network.Settings.save(state.trial.network) end)
 
   defp restore(state, reason, from, result) do
     state =
@@ -705,7 +712,12 @@ defmodule NervesGate.Network do
       end
       |> clear_trial()
 
-    state = %{state | recovering: true, error: if(reason == :cancelled, do: nil, else: reason)}
+    state = %{
+      state
+      | recovering: true,
+        error: if(reason == :cancelled, do: nil, else: reason),
+        commit_unknown: state.commit_unknown or reason == {:save, :network_commit_unknown}
+    }
 
     work(state, :restore, {from, result}, fn ->
       NervesGate.Network.Vintage.restore(state.config["network"])
@@ -720,15 +732,18 @@ defmodule NervesGate.Network do
 
   defp interrupt(state, reason) do
     reason =
-      if match?(%{operation: :restore}, state.worker) do
-        {:restore, reason}
-      else
-        reason
+      case state.worker do
+        %{operation: :save} -> {:save, :network_commit_unknown}
+        %{operation: :restore} -> {:restore, reason}
+        _ -> reason
       end
 
     {state, from} = stop_work(state)
     restore(state, reason, from, {:error, reason})
   end
+
+  defp expire(%{worker: %{operation: :save}} = state, _from),
+    do: interrupt(state, :expired)
 
   defp expire(state, from) do
     {state, waiting} = stop_work(state)
@@ -792,6 +807,7 @@ defmodule NervesGate.Network do
       cellular: state.cellular,
       error: error(state.error),
       recovering: state.recovering,
+      commit_unknown: state.commit_unknown,
       ready: ready?(state),
       phase: phase(state),
       local: Local.public(state.local)
@@ -851,7 +867,7 @@ defmodule NervesGate.Network do
   defp cellular_fault(_), do: nil
 
   defp load(timeout, local) do
-    case bounded(fn -> NervesGate.Network.Vintage.load() end, timeout) do
+    case bounded(fn -> NervesGate.Network.Settings.load() end, timeout) do
       # Do not flush a surviving claimed address on a Network restart before
       # its advertised route has been withdrawn. Boot-time VintageNet restore
       # is independent; the journal still blocks all new access until cleanup.
@@ -908,6 +924,13 @@ defmodule NervesGate.Network do
 
   defp error({:apply, _}),
     do: %{code: "apply_failed", message: "Could not apply settings. Restoring saved settings."}
+
+  defp error({:save, :network_commit_unknown}),
+    do: %{
+      code: "network_commit_unknown",
+      message:
+        "The network settings commit outcome is unknown. Further changes are blocked. Inspect the settings through recovery access; do not retry confirmation blindly."
+    }
 
   defp error({:save, _}),
     do: %{code: "save_failed", message: "Could not save settings. Restoring saved settings."}

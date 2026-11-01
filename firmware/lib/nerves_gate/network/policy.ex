@@ -56,6 +56,15 @@ defmodule NervesGate.Network.Policy do
            "Saved settings could not be used. Inspect them with recovery SSH or serial; an explicitly authorized change is required. No saved settings were rewritten."
        }}
 
+  def available(%{commit_unknown: true}),
+    do:
+      {:error,
+       %{
+         code: "network_commit_unknown",
+         message:
+           "The saved network intent is uncertain. Inspect it through recovery access before restarting Network; further changes are blocked."
+       }}
+
   def available(%{recovering: true}),
     do:
       {:error,

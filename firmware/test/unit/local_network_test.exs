@@ -260,7 +260,7 @@ defmodule NervesGate.Network.LocalTest do
     assert Sharing.change(:sharing_disable, params, routes) == {:ok, routes}
   end
 
-  test "application enablement round trips without an IP address or Internet route" do
+  test "application enablement configures no IP address or Internet route" do
     network = status().config["network"]
     assert {:ok, ^network} = Config.validate_network(network)
 
@@ -270,8 +270,6 @@ defmodule NervesGate.Network.LocalTest do
 
     assert configs["eth1"].ipv4 == %{method: :disabled}
     refute configs["eth1"].nerves_gate_disabled
-    assert {:ok, reconstructed} = Vintage.from_configurations(configs)
-    assert reconstructed["eth1"] == %{"role" => "plugin", "address" => nil}
     disabled = Vintage.configurations(%{network | "eth1" => nil}) |> Map.new()
     assert disabled["eth1"].nerves_gate_disabled
   end

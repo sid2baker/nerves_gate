@@ -22,7 +22,7 @@ on recovery. USER2 follows Alarmist severity, including dependency alarms; no al
 means *no known alarms*, not proof of health.
 
 Internet means VintageNet's per-interface `connection` on the permitted uplinks
-(Ethernet/`br0` and optionally the modem), never USB or the global best connection.
+(Ethernet and optionally the modem), never USB or the global best connection.
 Working 4G backup counts as Internet: USER1 can stay solid while USER2 warns about
 backup use or unavailable cellular. Before ports are assigned, a unique Internet
 candidate may show online without raising alarms. `:lan` is not Internet, and

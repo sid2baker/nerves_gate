@@ -105,12 +105,12 @@ lifecycle and `Cellular.Authentication` owns private APN-bound PAP.
 commands. Public `Cellular` operations share Network's single worker: there is no
 separate Cellular GenServer or second UART owner.
 
-Before VintageNet restores saved connections, startup checks the saved cellular
-configuration and its modem callback module. An unavailable/incompatible saved
-driver fails startup visibly, before opening the UART; it is not aliased, silently
-migrated or erased. Deployments with incompatible saved settings need a separately
-authorized reprovision/reset procedure. A build alone is not permission to erase
-network settings, plugin data or credentials.
+Saved Network settings contain intent, never a modem callback module. The current
+board supplies the driver when Network applies that intent. VintageNet persistence
+is disabled, so it cannot restore an old driver before Network validation. Old
+per-interface files are preserved and rejected, not imported. Deployments with
+incompatible saved settings need separately authorized external reprovisioning.
+A build alone is not permission to erase network settings, plugin data or credentials.
 
 The qualified EC100 driver keeps its existing AT controller available for SIM
 setup even while the Internet source is LAN. This control-only configuration has
@@ -293,8 +293,12 @@ an assigned LAN must be disabled and unassigned before becoming Internet. Networ
 trials are blocked while a local lease or unresolved cleanup exists. 4G backup
 needs an Ethernet uplink.
 
-VintageNet stores interface settings; the trial exists only in memory. Unreadable
-saved settings fail closed. See the [public API](action-api.md) for the format.
+Network stores one schema-1 JSON record at `/data/nerves_gate/network.json`; the
+trial exists only in memory. Confirmation syncs a temporary file, atomically
+renames it and syncs its directory. VintageNet persistence is disabled. Unsupported
+records, stale interface IDs, or any old files in VintageNet's persistence
+directory fail closed without being imported, rewritten or erased. See the
+[public API](action-api.md) for the settings format.
 
 First setup **through verified USB** saves automatically after successful
 application, within an internal 15-second deadline. Verification uses the
@@ -314,9 +318,10 @@ Rollback is device-owned and continues if the browser disconnects. Restart loads
 saved settings, never an unconfirmed trial. Failed restoration raises an alarm and
 retries with new proposals blocked.
 
-**Saving several interfaces is not a transaction.** An interrupted confirmation can
-save some interfaces but not others, and rollback cannot undo those writes. Keep
-USB or serial recovery available.
+All network intent is committed as one record, never one file per interface. A
+write failure before replacement preserves the previous confirmed record. A timeout
+or a failure to sync after replacement has an uncertain outcome; inspect rather
+than retrying blindly. Keep USB or serial recovery available.
 
 ## Tailscale
 
@@ -468,7 +473,7 @@ VPN or reset DNS.
 
 Firmware serves the UI on **all IPv4 interfaces, port 4000**, without sign-in:
 anyone who can reach it can change settings and add SSH keys. Keep it on trusted
-networks. Before VintageNet restores saved connections, firmware installs IPv4
+networks. Before VintageNet starts, firmware installs IPv4
 and IPv6 INPUT rules on `wwan+`: accept established/related replies, allow IPv4
 DHCP server replies (UDP 67 → 68), and drop everything else. Rules are placed
 before existing INPUT rules and installation is idempotent. Installation failure

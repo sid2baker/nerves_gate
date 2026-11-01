@@ -42,11 +42,7 @@ defmodule Scenarios.Cases.StorageReboot do
     assert status.network.pending == nil
     refute status.network.desired == rejected
 
-    if status.network.setup_completed do
-      assert status.network.desired == saved
-    else
-      assert status.network.desired == %{"mode" => "unconfigured"}
-      assert status.network.error != nil
-    end
+    assert status.network.setup_completed
+    assert status.network.desired == saved
   end
 end

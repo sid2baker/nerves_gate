@@ -45,7 +45,7 @@ defmodule NervesGate.NetworkDefaultsTest do
       configs =
         Config.defaults()["network"] |> NervesGate.Network.Vintage.configurations() |> Map.new()
 
-      assert Enum.sort(Map.keys(configs)) == Enum.sort(["br0" | ids])
+      assert Enum.sort(Map.keys(configs)) == Enum.sort(ids)
       for id <- ids, do: assert(configs[id].ipv4 == %{method: :dhcp})
     end
   end
@@ -69,6 +69,6 @@ defmodule NervesGate.NetworkDefaultsTest do
     configs = network |> NervesGate.Network.Vintage.configurations() |> Map.new()
     assert configs["eth0"].ipv4 == %{method: :dhcp}
     assert configs["eth1"].ipv4 == %{method: :disabled}
-    assert {:ok, ^network} = NervesGate.Network.Vintage.from_configurations(%{})
+    refute Map.has_key?(configs, "br0")
   end
 end
