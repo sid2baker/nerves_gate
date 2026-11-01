@@ -1,5 +1,5 @@
 defmodule NervesGate.Network.RouteMetric do
-  @moduledoc "VintageNet's normal Internet-first policy, including our shared LAN and named modem."
+  @moduledoc "VintageNet's normal Internet-first policy, including our metadata bridge and named modem."
 
   def compute_metric(name, info) do
     # A connectivity check can finish after hot-unplug. Consult the kernel, not

@@ -60,7 +60,6 @@ defmodule NervesGate.Observations.Network do
 
   defp ethernet_interfaces(_, nil), do: [nil]
   defp ethernet_interfaces(%{"mode" => "unconfigured"}, observed), do: observed.ports
-  defp ethernet_interfaces(%{"mode" => "shared"}, observed), do: [observed.bridge]
 
   defp ethernet_interfaces(network, observed) do
     name = Config.role_port(network, "internet")
@@ -69,7 +68,6 @@ defmodule NervesGate.Observations.Network do
 
   defp expected?(nil), do: false
   defp expected?(%{"mode" => "unconfigured"}), do: false
-  defp expected?(%{"mode" => "shared"}), do: true
 
   defp expected?(network),
     do: Config.cellular?(network) or Config.role_port(network, "internet") != nil

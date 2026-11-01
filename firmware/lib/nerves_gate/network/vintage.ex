@@ -132,7 +132,7 @@ defmodule NervesGate.Network.Vintage do
 
   @doc "Reconstruct the form from VintageNet settings; only mode and port-role labels are extra metadata."
   def from_configurations(configs) when map_size(configs) == 0,
-    do: {:ok, Config.defaults()["network"]}
+    do: Config.validate_network(Config.defaults()["network"])
 
   def from_configurations(%{"br0" => %{vintage_net_bridge: %{interfaces: [_ | _]}}}),
     do:

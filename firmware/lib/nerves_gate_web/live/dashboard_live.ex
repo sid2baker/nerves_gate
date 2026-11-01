@@ -62,7 +62,6 @@ defmodule NervesGateWeb.DashboardLive do
     do: "4G backup in use"
 
   defp internet_detail(%{connections: %{internet: %{mode: "cellular"}}}, _), do: "4G modem"
-  defp internet_detail(%{connections: %{mode: "shared"}}, _), do: "Shared Ethernet network"
 
   defp internet_detail(projection, settings) do
     port =

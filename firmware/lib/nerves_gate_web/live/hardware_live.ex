@@ -19,9 +19,7 @@ defmodule NervesGateWeb.HardwareLive do
 
     ports =
       Enum.reject(assigns.projection.hardware.ports, fn port ->
-        not port.assignable or
-          (port.kind == :ethernet and
-             (network["mode"] == "shared" or port.id == internet))
+        not port.assignable or (port.kind == :ethernet and port.id == internet)
       end)
 
     sections =

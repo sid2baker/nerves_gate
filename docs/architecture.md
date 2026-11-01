@@ -197,19 +197,21 @@ combining their credentials. Plugin storage administration belongs to Settings.
 
 ## Board configuration
 
-Each device target declares wiring in `:nerves_gate, :board`:
-`firmware/config/ec100.exs` for EC100 and `x86_64.exs` for owned QEMU, not arbitrary
-PCs. `NervesGate.Board` supplies modem, bus, indicator, recovery and storage
-configuration. QEMU leaves unsupported EC100 peripherals unavailable rather than
-providing fake plugin backends.
+Each device target declares its hardware once in `:nerves_gate, :board`:
+`firmware/config/ec100.exs`, `em300.exs` and `x86_64.exs` (owned QEMU, not
+arbitrary PCs). Keys: `ports` (plugin and Ethernet resources), `internet_port`
+(optional factory WAN), `cellular` (modem profile), `indicators` (LED roles and
+button), `data` (application data volume) and `plugins_slot` (SD card slot by sysfs
+path). `NervesGate.Board` reads them; domains own the behaviour. Absent keys mean
+unsupported, never a fake backend.
 
 The BSP owns drivers, device trees, boot and Linux device naming. Board config
-selects actual hardware; domains own policy. The network model currently has two
-LAN ports. EM300 and a three-port layout are not implemented.
+selects actual hardware; domains own policy. Network configures the board's
+declared `:ethernet` resources, keyed by interface name; one resource is one Linux
+interface, not necessarily one jack.
 
 Fixed infrastructure is called directly: `Network.Vintage` and `Remote.Tailscaled`.
-Board-selected buses, indicators and recovery remain real
-variation points, as does the published SDK backend contract.
+The published SDK backend contract is the only plugin-facing variation point.
 
 ## Device ownership and supervision
 

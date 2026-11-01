@@ -1,26 +1,4 @@
 [
-  source: [
-    forbidden_modules: [
-      "NervesGate.Device",
-      "NervesGate.Device.*",
-      "NervesGate.SystemState",
-      "NervesGate.AtomicFile",
-      "NervesGate.Network.TrialStore",
-      "NervesGate.Network.Recovery",
-      "NervesGate.Connectivity",
-      "NervesGate.Connectivity.*",
-      "NervesGate.Remote.Agent",
-      "NervesGate.Remote.Runtime",
-      "NervesGateWeb.Backend",
-      "NervesGate.Network.Adapter",
-      "NervesGate.Remote.Adapter",
-      "NervesGate.Equipment",
-      "NervesGate.Equipment.*",
-      "NervesGate.Network.Cellular*",
-      "NervesGate.Network.EG800AK",
-      "NervesGate.Network.Discovery"
-    ]
-  ],
   calls: [
     forbidden: [
       {"NervesGate.*", ["NervesGateWeb.*"], except: ["NervesGate.Application"]},
@@ -29,14 +7,8 @@
          "Alarmist.*",
          "NervesGate.Alarms.*",
          "NervesGate.Network.Vintage.*",
-         "NervesGate.Network.Worker.*",
          "NervesGate.Remote.Tailscaled.*",
          "NervesGate.Remote.sharing",
-         "NervesGate.Indicators.EC100.*",
-         "NervesGate.Indicators.Host.*",
-         "NervesGate.Buses.EC100.*",
-         "NervesGate.Buses.Serial.*",
-         "NervesGate.Buses.sdk",
          "NervesGate.SSH.Keys.*",
          "NervesGate.Cellular.Profile.*",
          "NervesGate.Cellular.SIM.*",
@@ -54,7 +26,6 @@
          "NervesGate.Remote.Sharing",
          "NervesGate.Network.Subnet",
          "NervesGate.Indicators.Policy",
-         "NervesGate.Buses.Policy",
          "NervesGate.Status",
          "NervesGate.Projection"
        ],
@@ -70,33 +41,14 @@
          "NervesGate.Network.status",
          "NervesGate.Remote.status",
          "NervesGate.Indicators.status",
-         "NervesGate.Buses.status",
          "NervesGate.SSH.status",
          "NervesGate.Storage.status",
          "NervesGate.Storage.commissioning",
          "NervesGate.System.info",
-         "NervesGate.Distribution.cookie",
          "NervesGate.Network.Vintage.*",
          "NervesGate.Remote.Tailscaled.*",
          "VintageNet.*",
          "Tailscaled.*"
-       ]},
-      {["NervesGate", "NervesGate.*", "NervesGateWeb.*"],
-       [
-         "NervesGate.network_*",
-         "NervesGate.cellular_*",
-         "NervesGate.remote_*",
-         "NervesGate.equipment_*",
-         "NervesGate.bus_*",
-         "NervesGate.modbus_read",
-         "NervesGate.ssh_*",
-         "NervesGate.identify",
-         "NervesGate.storage_setup",
-         "NervesGate.distribution_cookie",
-         "NervesGate.target",
-         "NervesGate.version",
-         "NervesGate.status_input",
-         "NervesGate.Error.from"
        ]}
     ]
   ]

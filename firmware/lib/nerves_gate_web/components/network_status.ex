@@ -39,11 +39,6 @@ defmodule NervesGateWeb.NetworkStatus do
   def lan_internet(assigns) do
     interfaces =
       case assigns.projection.connections.mode do
-        "shared" ->
-          List.wrap(
-            assigns.projection.network.observed && assigns.projection.network.observed.bridge
-          )
-
         "unconfigured" ->
           assigns.projection.connections.ports
 
@@ -61,7 +56,7 @@ defmodule NervesGateWeb.NetworkStatus do
       </p>
       <section :for={interface <- @interfaces} data-internet-port={interface.name}>
         <.setting_row label="Port">
-          {if interface.name == "br0", do: "Joined LAN 1 + LAN 2", else: port_label(interface.name)}
+          {port_label(interface.name)}
         </.setting_row>
         <.setting_row label="Cable">
           {cable_status(interface)}
@@ -110,7 +105,6 @@ defmodule NervesGateWeb.NetworkStatus do
   defp method_label(_), do: "Unknown"
 
   defp uplink_label(nil), do: "Not identified"
-  defp uplink_label("br0"), do: "Joined LAN"
   defp uplink_label(name) when name in ["eth0", "eth1"], do: port_label(name)
   defp uplink_label(_), do: "4G modem"
 
@@ -124,6 +118,5 @@ defmodule NervesGateWeb.NetworkStatus do
   def port_label("eth1"), do: "LAN 2"
   def port_label(_), do: "Ethernet"
   def role_label("internet"), do: "Internet"
-  def role_label("shared"), do: "Shared network"
   def role_label(_), do: "Unassigned"
 end

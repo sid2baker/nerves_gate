@@ -34,7 +34,7 @@ defmodule Scenarios.Cases.Churn do
   end
 
   defp assert_port_arrangements(vm, saved) do
-    unsupported = %{"mode" => "shared", "equipment" => saved["eth0"]["address"]}
+    unsupported = %{"mode" => "bridged", "equipment" => saved["eth0"]["address"]}
     assert {:error, _} = Scenarios.Device.rpc(vm, NervesGate.Network, :propose, [unsupported])
     assert Scenarios.Device.status(vm).network.desired == saved
     enabled = Map.put(saved, "eth1", %{"role" => "plugin", "address" => nil})

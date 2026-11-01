@@ -112,6 +112,11 @@ defmodule NervesGate.BuildConfigTest do
         assert is_boolean(port.assignable)
         assert Map.keys(port) -- [:id, :kind, :label, :assignable, :gpios] == []
       end
+
+      # A dedicated WAN must be one of the board's Ethernet resources.
+      if internet = config[:nerves_gate][:board][:internet_port] do
+        assert %{kind: :ethernet} = Enum.find(ports, &(&1.id == internet))
+      end
     end
   end
 
