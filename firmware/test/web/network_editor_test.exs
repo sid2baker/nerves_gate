@@ -309,7 +309,6 @@ defmodule NervesGateWeb.NetworkEditorTest do
   defp projection(network, present \\ true, supported \\ true) do
     observed = %{
       cellular: %{present: present, connection: :unknown, addresses: [], apn: ""},
-      bridge: nil,
       ports: [],
       usb: nil
     }

@@ -1,24 +1,26 @@
 # Firmware builds and device updates
 
-The Workbench separates reviewed SSH A/B updates from destructive initial EC100
-provisioning over USB. Finding or connecting a gateway never authorizes a write.
+The Workbench separates reviewed SSH A/B updates from destructive initial
+provisioning over USB for EC100 and EM300. Finding or connecting a gateway never
+authorizes a write.
 
 ## Build
 
-On **Develop → Firmware**, choose EC100 or x86_64 and build. Builds run in an
-isolated process, never flash hardware, and show the resulting `.fw` path.
+On **Develop → Firmware**, choose a target from the build catalogue and build.
+Builds run in an isolated process, never flash hardware, and show the resulting
+`.fw` path.
 Alternatively run `mix firmware ec100`, `mix firmware em300` or `mix firmware x86_64`
 at the root. EM300 builds need the locally built, unpublished
 `nerves_system_em300` artifact (see `systems/nerves_system_em300/README.md`).
 See [system releases](releases.md#systems) for local system builds.
 
-## Reviewed EC100 update
+## Reviewed physical gateway update
 
 1. On **Devices**, select a verified connected physical gateway. Candidates connect
    over distribution with development cookie `mycookie`; disconnected entries show
    their last-seen time. Adding an address does not upload anything.
-2. On the gateway page, select an EC100 image and request a review. Review privately
-   snapshots the exact archive, checks platform/product/architecture and full build
+2. On the gateway page, select an image for that gateway's board and request a review.
+   Review privately snapshots the exact archive, checks platform/product/architecture and full build
    revision, reads identity and health over distribution, checks saved immutable
    plugin artifacts against the image, and verifies SSH trust/authentication.
 3. Compare the gateway address, serial, versions and SHA-256. Type the exact
@@ -144,4 +146,6 @@ Old backup directories are never moved, deleted or uploaded automatically.
   listing works. Fix udev access or choose sudo; close other flashers.
 - Never replay commands from expired `_build/factory-reviews/` snapshots.
 
-The terminal equivalent is `MIX_TARGET=ec100 mix ec100.flash` in `firmware/`.
+The terminal equivalents in `firmware/` are `MIX_TARGET=ec100 mix ec100.flash`
+and `MIX_TARGET=em300 mix em300.flash`. They use different board-owned engines;
+never choose one solely from the shared USB controller identity.

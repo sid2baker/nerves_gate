@@ -84,15 +84,17 @@ See [management network](qemu-management-network.md) for privileges and cleanup.
 system/toolchain, and checks these prerequisites. It neither builds firmware nor
 boots devices. QEMU's amd64 daemon is installed by `Tailscaled.Installer` before
 target compilation, with an explicit Tailscale 1.104.1 archive checksum and cache
-under `firmware/_build/setup/`. The EC100's qualified ARM daemon is unchanged;
-EC100 builds additionally need the published EC100 system artifact.
+under `firmware/_build/setup/`. Physical targets use their system's ARM daemon;
+they also require the selected board's system artifact. EC100 uses its published
+artifact; EM300 currently requires a locally built, unpublished artifact. See
+[firmware builds](firmware-updates.md#build).
 
 ## Commands
 
 | Command | Action |
 | --- | --- |
 | `mix setup` | Prepare tools and artifacts |
-| `mix firmware [x86_64 \| ec100] [--env dev \| prod]` | Build assets and selected pure-BEAM plugins on the host, then firmware in an isolated process; never boots a device |
+| `mix firmware [x86_64 \| ec100 \| em300] [--env dev \| prod]` | Build assets and selected pure-BEAM plugins on the host, then firmware in an isolated process; never boots a device |
 | `mix dev [PLUGIN_DIRECTORY] [--config PATH] [--port 4000]` | Start the workbench; optionally open a plugin project |
 | `mix dev.status`, `mix dev.doctor` | Read session identity, loaded protocol compatibility and prerequisites; doctor never repairs anything |
 | `mix dev.stop` | Gracefully stop this checkout's idle session; excludes active jobs/runs |

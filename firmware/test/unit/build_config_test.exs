@@ -1,6 +1,44 @@
 defmodule NervesGate.BuildConfigTest do
   use ExUnit.Case, async: false
 
+  test "physical boards share platform services and management contracts in dev and prod" do
+    for env <- [:dev, :prod] do
+      ec100 = Config.Reader.read!("config/config.exs", env: env, target: :ec100)
+      em300 = Config.Reader.read!("config/config.exs", env: env, target: :em300)
+
+      # Board facts and identity vary; do not grow a second platform configuration.
+      shared = fn config ->
+        config[:nerves_gate] |> Keyword.drop([:board, :target]) |> Map.new()
+      end
+
+      assert shared.(ec100) == shared.(em300)
+      services = ec100[:nerves_gate][:services]
+
+      for service <- [
+            NervesGate.Network,
+            NervesGate.Remote,
+            NervesGate.SSH,
+            NervesGate.Hardware,
+            NervesGate.Storage,
+            NervesGate.IO,
+            NervesGate.SDKBackend,
+            NervesGate.Plugins,
+            NervesGate.ProjectionServer,
+            NervesGateWeb.Endpoint
+          ] do
+        assert service in services
+      end
+
+      for app <- [:tailscaled_ex, :nerves_ssh] do
+        assert ec100[app] == em300[app], "#{app} differs between physical targets in #{env}"
+      end
+
+      # Recovery links may differ physically; their persistence/admission policy may not.
+      assert Keyword.drop(ec100[:vintage_net], [:config]) ==
+               Keyword.drop(em300[:vintage_net], [:config])
+    end
+  end
+
   test "only EC100 selects the ECM modem and all targets protect input before networking" do
     for target <- [:ec100, :em300, :x86_64] do
       config = Config.Reader.read!("config/config.exs", env: :dev, target: target)

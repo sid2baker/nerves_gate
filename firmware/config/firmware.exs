@@ -57,7 +57,7 @@ config :nerves, :erlinit, update_clock: true
 
 # Sends the Heart init handshake required by HEART_INIT_TIMEOUT in vm.args.
 # Validate firmware only after OTP applications start; internet is not required.
-# DataInit runs Nerves' normal mount/format, requires writable ext4 data, and
+# DataInit runs Nerves' normal mount/format, requires the board's writable data volume, and
 # installs cellular INPUT protection before networking/data users start.
 config :nerves_runtime,
   startup_guard_enabled: true,

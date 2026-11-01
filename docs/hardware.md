@@ -1,4 +1,22 @@
-# Hardware assignments and Modbus
+# Hardware resources and plugin assignments
+
+## Shared platform, different boards
+
+EC100 and EM300 share the [platform contract](architecture.md#shared-platform-contract):
+commission networking and remote access, inspect hardware, then explicitly enable
+plugins to use it. Resource IDs, labels, presence and eligibility come from the
+board inventory, not a shared connector count or a board-name branch in a plugin.
+Plugins declare the hardware kinds they support and consume assigned resources.
+
+This does not promise matching peripherals. EM300's modem and front indicators
+are physically present but disabled in board config pending qualification; that is
+not a missing remote-access or plugin service. Firmware support, observed presence
+and electrical qualification are separate facts. Do not substitute EC100 settings
+for unqualified EM300 hardware. Current declarations live in
+`firmware/config/<target>.exs`; remaining work is tracked in
+[`HARDWARE_QUALIFICATION_PLAN.md`](../HARDWARE_QUALIFICATION_PLAN.md).
+
+## Inventory
 
 `config/<target>.exs` declares each board resource once (`id`, `kind`, `label`,
 `assignable` and optional named `gpios`). The device tree makes Linux devices
@@ -13,8 +31,10 @@ frames or issues Modbus reads.
 Kinds describe which class of plugin may own a resource: `:ethernet`, `:rs485`,
 `:can`, `:iotrouter_expansion` (SDK `Hardware.kinds/0`). EC100 declares two RS485
 ports; EM300 declares four and no CAN resources. EM300 has three physical
-Ethernet jacks (WAN + two LAN), but stock Linux exposes two RMII interfaces;
-the physical mapping is unqualified, not a verified third independent interface.
+Ethernet jacks (WAN + two LAN), but Linux exposes two RMII interfaces. Vendor
+configuration identifies `eth0` as WAN and `eth1` as LAN; the LAN switch topology
+and independent per-jack status remain unqualified. There is no third independent
+Ethernet resource.
 The EM300 expansion resource is `ttyS5` plus the
 `EXT_RESET` and `EXT_LINK` GPIOs, not independently assignable lines.
 `EXT_ERROR_LED` is excluded until its semantics are known. A future expansion

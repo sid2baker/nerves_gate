@@ -1,6 +1,9 @@
 # Gateway UI
 
-EC100 and QEMU devices serve the same UI from `firmware/lib/nerves_gate_web/`.
+EC100, EM300 and owned QEMU devices serve the same UI from
+`firmware/lib/nerves_gate_web/`.
+Commissioning and remote access follow the same workflow; hardware controls reflect
+the device's declared capabilities, not an assumed EC100 inventory.
 Open the device's gateway URL, linked from the developer workbench. Gateway
 Elixir/HEEx changes require rebuilding firmware; use disposable QEMU devices for
 this development loop.
@@ -79,8 +82,8 @@ The standard UI configures gateway interfaces, not connected equipment. Equipmen
 names, Modbus units/registers, S7 endpoints and polling belong to plugins.
 Hardware shows network observations, not bus diagnostics.
 
-Ethernet addressing, routes and bridging remain Network-owned. An assigned LAN
-starts without IPv4, DHCP, DNS, a default route or bridge. Its plugin requests isolated
+Ethernet addressing and routes remain Network-owned; no LAN bridge is configured.
+An assigned LAN starts without IPv4, DHCP, DNS, a default route or bridge. Its plugin requests isolated
 local addressing through a process-owned SDK claim; active or unresolved claims block
 platform network changes. Disabled independent ports are explicitly held down.
 Unsupported saved network settings are rejected and kept for an explicitly
@@ -96,7 +99,8 @@ affected plugins. Target startup is an optional, default-off reviewed choice; no
 connection/sharing command is replayed and the previous owner is not restarted.
 Hardware offers cross-plugin visibility, release and advanced maintenance access.
 Post-commit startup failure is shown as partial completion. UI controls never replace
-backend admission. EM300/extension-card enumeration is not implemented. See [hardware](hardware.md).
+backend admission. EM300 board resources are listed; discovery of cards behind its
+expansion bus is not implemented. See [hardware](hardware.md).
 
 Neighbor discovery belongs to plugins. Hardware has no neighbor inventory, labels,
 scan or sharing controls.
@@ -116,8 +120,9 @@ The first plugin network API supports one isolated Ethernet claim per gateway.
   advanced PIN/security controls appear once the SIM is ready. Use trusted
   management access and HTTPS for remote entry.
 - **Hardware:** pages distinguish unsupported targets, missing devices, disabled ports
-  and active operations. See [CAN/RS485](hardware.md).
-- **Identify** (Settings) blinks the status LEDs, then resumes current patterns.
+  and active operations. See [hardware resources](hardware.md).
+- **Identify** (Settings), when supported by the board, blinks the status LEDs,
+  then resumes current patterns.
   There is no web reboot or reset. See [LEDs and button](indicators.md).
 
 Gateway commands call public domain APIs locally on the device serving the page;
@@ -126,7 +131,8 @@ explicit private reads cached only in the requesting view, never the projection.
 Runtime cookies are read only on an explicit reveal in Remote access, retained
 only in that requesting view, and cleared on hide, node change or device loss.
 Cookie display, like SIM controls, is available over trusted management interfaces,
-not restricted to USB. QEMU reports EC100 peripherals as unavailable. The UI has no sign-in; see
+not restricted to USB. QEMU declares only its own resources; it does not emulate
+EC100/EM300 field peripherals. The UI has no sign-in; see
 [HTTP exposure](networking.md#local-recovery-and-http-exposure).
 
 ## Developer workbench

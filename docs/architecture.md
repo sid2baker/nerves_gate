@@ -1,32 +1,58 @@
 # Architecture
 
 Nerves Gate has three core projects (root, firmware and SDK), firmware-selected
-plugin projects and two Nerves system projects, not an umbrella. Device domains hide commands, admission, deadlines and persistence behind
-named APIs. EC100 and owned QEMU devices run the same application with different
-board profiles and target binaries. The workstation runs the workbench and owns
-disposable QEMU hardware; it does not run device services.
+plugin projects and independent Nerves system projects, not an umbrella. Device
+domains hide commands, admission, deadlines and persistence behind named APIs.
+EC100, EM300 and owned QEMU devices run the same application with different board
+profiles and target binaries. The workstation runs the workbench and owns disposable
+QEMU hardware; it does not run device services.
+
+## Shared platform contract
+
+EC100 and EM300 provide the same foundation, not identical hardware:
+
+- **Commissioning:** configure a board-declared Internet connection, with independent
+  local recovery access. Factory preferences belong to board config; saved settings
+  are never silently changed to match a new default.
+- **Remote access:** explicit Tailscale enrollment, observable connection state and
+  device-owned SSH keys. Discovery and reachability are not authorization. The
+  gateway UI is for trusted networks, not an Internet-facing authenticated service.
+- **Hardware:** a labeled inventory of declared resources and their observed presence.
+  Unsupported, absent, assigned and usable are different states; a declaration does
+  not qualify electrical behavior or prove connected equipment.
+- **Plugins and I/O:** explicit installation, assignment, activation and equipment
+  commands through the same SDK and I/O contracts. Core owns admission, addressing,
+  persistence and cleanup; plugins own equipment protocols and transport workers.
+
+Do not add board-specific commissioning flows, a second SDK or dummy resources to
+make inventories look alike. Domains consume board facts and report unsupported
+capabilities explicitly. Board-specific storage and flash behavior stays in its
+owning implementation; sharing a user workflow does not mean sharing a NAND/eMMC
+layout or flash engine. Owned QEMU exercises the shared contracts, not physical
+peripheral qualification.
 
 ## Projects and dependencies
 
 | Project | OTP application | Build/runtime role | Version |
 | --- | --- | --- | --- |
 | Root | `:nerves_gate_workbench` | Host tooling, workbench and simulator | Root `VERSION` |
-| `firmware/` | `:nerves_gate` | Host-compiled helpers/checks; EC100 or QEMU runtime | Root `VERSION` |
+| `firmware/` | `:nerves_gate` | Host-compiled helpers/checks; shared gateway runtime | Root `VERSION` |
 | `sdk/` | `:nerves_gate_sdk` | Typed plugin contract and packaging; no application supervisor | `sdk/VERSION` |
 | `plugins/tailnet_subrouter/` | `:tailnet_subrouter` | Selected, disabled-on-first-boot subnet plugin | Plugin `mix.exs` |
 | `plugins/modbus/` | `:modbus_plugin` | Selected Modbus TCP/RTU client/server plugin with yamodbus | Plugin `mix.exs` |
-| `systems/nerves_system_ec100/` | `:nerves_system_ec100` | ARM Linux, toolchain, boot and board support | System `VERSION` |
+| `systems/nerves_system_ec100/` | `:nerves_system_ec100` | ARM Linux, toolchain, boot and eMMC board support | System `VERSION` |
+| `systems/nerves_system_em300/` | `:nerves_system_em300` | ARM Linux, toolchain, boot and SPI NAND/UBI board support | System `VERSION` |
 | `systems/nerves_system_ec100_qemu/` | `:nerves_system_ec100_qemu` | x86_64/musl Linux, toolchain and QEMU support | System `VERSION` |
 
 ```text
 root (always host) ──path──→ sdk
                   └─path──→ firmware (host, runtime: false) ──path──→ sdk
 
-firmware (ec100/x86_64) ──→ selected system source + fingerprinted artifact
+firmware (ec100/em300/x86_64) ──→ selected system source + fingerprinted artifact
 ```
 
-SDK calls use the fixed `NervesGate.SDKBackend.call/2` firmware entry point on both
-EC100 and QEMU. The SDK invokes it in the actual caller's process without a Mix
+SDK calls use the fixed `NervesGate.SDKBackend.call/2` firmware entry point on every
+device target. The SDK invokes it in the actual caller's process without a Mix
 dependency on firmware or configurable backend selection. Missing firmware reports
 `:runtime_unavailable`; loaded firmware with unavailable services reports
 `:unavailable`. UI plugins declare their shared Phoenix/LiveView dependencies directly;

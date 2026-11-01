@@ -66,7 +66,6 @@ defmodule NervesGate.Network.LocalTest do
           interface.("eth0", [%{address: "192.0.2.2", prefix_length: 24}]),
           interface.("eth1", [])
         ],
-        bridge: interface.("br0", []),
         usb: interface.("usb0", [%{address: "172.31.211.1", prefix_length: 30}]),
         cellular: nil
       }

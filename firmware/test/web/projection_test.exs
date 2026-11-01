@@ -75,6 +75,7 @@ defmodule NervesGateWeb.ProjectionTest do
     interface = fn name, addresses ->
       %{
         name: name,
+        label: NervesGate.Board.label(name),
         present: true,
         link: addresses != [],
         state: :configured,
@@ -100,7 +101,6 @@ defmodule NervesGateWeb.ProjectionTest do
         interface.("eth1", [])
       ],
       usb: interface.("usb0", [%{address: "172.31.220.1", prefix_length: 30}]),
-      bridge: interface.("br0", []),
       cellular: nil,
       cellular_supported: false
     }
