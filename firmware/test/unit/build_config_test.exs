@@ -42,7 +42,7 @@ defmodule NervesGate.BuildConfigTest do
                      button: "gpio-keys"
                    },
                    data: {:ext4, "/sys/class/block/mmcblk0p3/dev"},
-                   plugins_device: "/dev/mmcblk1p1"
+                   plugins_slot: %{path: "devices/platform/ff130000.spi", partition: 1}
                  }
 
           assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
@@ -53,7 +53,10 @@ defmodule NervesGate.BuildConfigTest do
                    cellular: nil,
                    indicators: nil,
                    data: {:ubifs, "/dev/ubi0_2"},
-                   plugins_device: "/dev/mmcblk0p1",
+                   plugins_slot: %{
+                     path: "devices/platform/ff780000.usb/usb1/1-1/1-1.3",
+                     partition: 1
+                   },
                    ports: ports
                  } = board
 
@@ -84,7 +87,7 @@ defmodule NervesGate.BuildConfigTest do
                    ],
                    indicators: nil,
                    data: {:ext4, "/sys/class/block/vda4/dev"},
-                   plugins_device: "/dev/vdb"
+                   plugins_slot: %{path: "devices/pci0000:00/0000:00:10.0", partition: nil}
                  }
 
           # runtime.exs supplies USB and the real eth2 IP from the virtual disk serial.

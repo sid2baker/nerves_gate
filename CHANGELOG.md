@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Board key `plugins_slot: %{path: sysfs_hardware_path, partition: n | nil}` replaces `plugins_device`. Storage resolves the plugin card below the slot's hardware path instead of trusting a kernel device name. This fixes EM300, whose microSD slot is a USB card reader (`sd*`), not `mmcblk0`. QEMU pins the virtual SD disk to PCI slot `0x10`.
+
 - EM300 no longer advertises the SoC CAN controllers as physical ports. System 0.1.3-dev disables them; three physical Ethernet jacks are documented separately from the two observed Linux interfaces pending verified mapping.
 
 - Hardware assignment, SDK candidates and Hardware pages derive from board-defined resources and runtime presence. URLs now use `/hardware/:id`; positional LAN/RS485/CAN URLs are removed. SDK 0.2.0-dev.6 replaces `:serial` with `:rs485` and `:iotrouter_expansion`, and adds board labels and resource GPIOs. EM300 exposes its four RS485 ports and its expansion bus with `EXT_RESET`/`EXT_LINK`. Saved assignment IDs are structurally validated and retained, but ineligible enabled assignments block plugin activation. Modbus 0.4.3 and Tailnet 0.1.10 require the new SDK; older plugin configurations remain version-scoped.

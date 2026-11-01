@@ -154,7 +154,7 @@ defmodule NervesGate.Storage do
     current = card()
     state = if current != state.card, do: %{state | card: current, error: nil}, else: state
 
-    if not current.present and device() != nil and root_mount() != nil,
+    if not current.present and slot() != nil and root_mount() != nil,
       do: cmd("umount", ["-l", mountpoint()])
 
     {:noreply, state |> automount() |> publish()}
@@ -435,7 +435,7 @@ defmodule NervesGate.Storage do
   defp ready?(state),
     do:
       state.choice == :use and state.worker == nil and
-        (state.card.present or device() == nil) and mounted_root?()
+        (state.card.present or slot() == nil) and mounted_root?()
 
   defp view(state),
     do:
@@ -458,7 +458,44 @@ defmodule NervesGate.Storage do
          do: File.rename(file <> ".tmp", file)
   end
 
-  defp device, do: NervesGate.Board.get(:plugins_device)
+  # The board names the card slot by its sysfs hardware path, never by a kernel
+  # device name: enumeration order differs between boards (an SPI slot, a USB
+  # card reader, a virtio disk) and other disks may take the same name.
+  defp slot, do: NervesGate.Board.get(:plugins_slot)
+
+  defp device do
+    case slot() do
+      %{path: path, partition: partition} -> slot_device(path, partition)
+      nil -> nil
+    end
+  end
+
+  @doc false
+  # Exactly one block device below the slot's hardware path with the declared
+  # partition number (`nil` = whole disk); anything else is no card.
+  def slot_device(path, partition, sys \\ "/sys") do
+    prefix = Path.join(sys, path) <> "/"
+
+    matches =
+      for entry <- Path.wildcard(Path.join(sys, "class/block/*")),
+          {:ok, link} <- [File.read_link(entry)],
+          String.starts_with?(Path.expand(link, Path.dirname(entry)), prefix),
+          block_partition(entry) == partition,
+          do: "/dev/" <> Path.basename(entry)
+
+    case matches do
+      [device] -> device
+      _ -> nil
+    end
+  end
+
+  defp block_partition(entry) do
+    case File.read(Path.join(entry, "partition")) do
+      {:ok, number} -> String.to_integer(String.trim(number))
+      {:error, _} -> nil
+    end
+  end
+
   defp mountpoint, do: Application.get_env(:nerves_gate, :plugins_mount, "/mnt/plugins")
 
   defp root_mount, do: Enum.find(mounts(), &(&1.mount_point == mountpoint()))
@@ -471,14 +508,17 @@ defmodule NervesGate.Storage do
   end
 
   defp source?(mount) do
-    case device() do
+    cond do
       # Externally provisioned mount.
-      nil ->
+      slot() == nil ->
         true
 
-      path ->
+      path = device() ->
         File.read("/sys/class/block/#{Path.basename(path)}/dev") ==
           {:ok, mount.major_minor <> "\n"}
+
+      true ->
+        false
     end
   end
 

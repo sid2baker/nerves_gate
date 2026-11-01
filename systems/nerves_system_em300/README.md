@@ -115,7 +115,7 @@ erasure.
 | RS485 | `ttyS1`–`ttyS4` | Four ports per vendor specification; wiring electrically unqualified |
 | Extension modules | `ttyS5` (UART5 M1) | 921600 8N1 daisy-chain bus |
 | Ethernet | `eth0`, `eth1` | Two RMII interfaces observed; three physical jacks (WAN + two LAN), mapping unqualified |
-| microSD | `mmcblk0` | card detect on GPIO0_B0 |
+| microSD | `sd*` via Genesys `05e3:0761` USB reader on hub port `1-1.3` | the SoC SD controller (`mmc0`) is not wired to the slot |
 | RTC | DS1307 @ I2C0 0x68 | `rtc0` |
 | LEDs | `em300:led0..2`, `em300:som`, `em300:user` | polarity unqualified |
 | Keys | `KEY_PROG1` (front), `KEY_PROG2` (user2) | active-low |

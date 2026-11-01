@@ -27,7 +27,7 @@ defmodule Scenarios.Cases.SdPlugins do
       vm,
       Application,
       :put_env,
-      [:nerves_gate, :board, %{board | plugins_device: nil}],
+      [:nerves_gate, :board, %{board | plugins_slot: nil}],
       30_000
     )
 
@@ -263,14 +263,17 @@ defmodule Scenarios.Cases.SdPlugins do
     await(fn -> storage.().ready end)
     assert "preserved" = Scenarios.Device.rpc(vm, File, :read!, [marker], 30_000)
 
-    # Refuse the mounted firmware disk, without a platform/target switch.
+    # Refuse the mounted firmware disk, without a platform/target switch: point
+    # the slot at the system disk's hardware path (whole disk).
     board = Scenarios.Device.rpc(vm, Application, :fetch_env!, [:nerves_gate, :board], 30_000)
+    {:ok, link} = Scenarios.Device.rpc(vm, File, :read_link, ["/sys/class/block/vda"], 30_000)
+    system_disk = link |> Path.expand("/sys/class/block") |> Path.relative_to("/sys")
 
     Scenarios.Device.rpc(
       vm,
       Application,
       :put_env,
-      [:nerves_gate, :board, %{board | plugins_device: "/dev/vda"}],
+      [:nerves_gate, :board, %{board | plugins_slot: %{path: system_disk, partition: nil}}],
       30_000
     )
 

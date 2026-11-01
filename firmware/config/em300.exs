@@ -7,8 +7,10 @@ import_config "firmware.exs"
 config :nerves_gate, :board, %{
   # UBIFS on the UBI "data" volume, mounted by erlinit at /root.
   data: {:ubifs, "/dev/ubi0_2"},
-  # Removable microSD slot; provision its first partition as ext4 separately.
-  plugins_device: "/dev/mmcblk0p1",
+  # The microSD slot is wired to a Genesys USB card reader on internal hub port
+  # 1-1.3, not to the SoC's SD controller. Plugin data uses the card's first
+  # partition (ext4).
+  plugins_slot: %{path: "devices/platform/ff780000.usb/usb1/1-1/1-1.3", partition: 1},
   cellular: nil,
   # Plugin-assignable Linux resources; `kind` says which plugin may own them.
   # Three physical Ethernet jacks are specified (WAN + 2 LAN), but stock Linux

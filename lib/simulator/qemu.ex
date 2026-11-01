@@ -44,13 +44,14 @@ defmodule Simulator.Qemu do
         "driver=raw,node-name=disk,file=storage",
         "-device",
         "virtio-blk-pci,drive=disk,werror=report,rerror=report",
-        # Second virtio disk (/dev/vdb): the plugin SD card.
+        # Second virtio disk: the plugin SD card. Its fixed PCI slot is the
+        # hardware path firmware/config/x86_64.exs declares for the card.
         "-blockdev",
         "driver=file,node-name=sd-file,filename=#{sd_path(vm)}",
         "-blockdev",
         "driver=raw,node-name=sd,file=sd-file",
         "-device",
-        "virtio-blk-pci,id=sd-card,drive=sd,werror=report,rerror=report"
+        "virtio-blk-pci,id=sd-card,drive=sd,addr=0x10,werror=report,rerror=report"
       ] ++
         Network.arguments(vm.dir, "127.0.0.1", vm.usb.port, vm.usb, vm.management) ++
         [

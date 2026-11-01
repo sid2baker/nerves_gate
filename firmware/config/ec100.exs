@@ -4,8 +4,9 @@ import_config "firmware.exs"
 # Physical EC100 hardware. Shared device services are in firmware.exs.
 config :nerves_gate, :board, %{
   data: {:ext4, "/sys/class/block/mmcblk0p3/dev"},
-  # Removable SPI SD card; provision its first partition as ext4 separately.
-  plugins_device: "/dev/mmcblk1p1",
+  # Removable SD slot on SPI1 (mmc-spi). Plugin data uses the card's first
+  # partition (ext4).
+  plugins_slot: %{path: "devices/platform/ff130000.spi", partition: 1},
   cellular: %{
     interface: "wwan0",
     # SIM slot insertion is active-high.

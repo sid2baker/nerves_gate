@@ -6,8 +6,8 @@ import_config "firmware.exs"
 # EC100 buses, LEDs or the recovery button: the board declares only its two LANs.
 config :nerves_gate, :board, %{
   data: {:ext4, "/sys/class/block/vda4/dev"},
-  # The simulator's prepared ext4 virtual SD card.
-  plugins_device: "/dev/vdb",
+  # The simulator's prepared whole-disk ext4 virtual SD card on PCI slot 0x10.
+  plugins_slot: %{path: "devices/pci0000:00/0000:00:10.0", partition: nil},
   cellular: nil,
   ports: [
     %{id: "eth0", kind: :ethernet, label: "LAN 1", assignable: true},

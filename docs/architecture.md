@@ -403,7 +403,7 @@ See [optional plugin UI](plugins.md#optional-ui).
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
 | Plugins: `/data/nerves_gate/hardware.term` | Bounded exclusive port assignment and enablement intent |
 | IO: `/data/nerves_gate/io.term` | Schema 2 input/output definitions only (outputs with evidence and release declarations); no Desires, Readings or Authority |
-| Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data |
+| Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data; the board's `plugins_slot` names the card slot by sysfs hardware path |
 
 Both targets require writable ext4 data before data users start. Unreadable saved
 network settings fail closed. Trials and monotonic deadlines live in RAM;
