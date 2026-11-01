@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Factory network settings come from the board. EM300 declares `internet_port: "eth0"` (the WAN jack, as in the vendor firmware), so a gateway without saved settings uses it with DHCP and leaves `eth1` disabled until assigned. EC100 keeps DHCP on both ports with the Internet port found automatically.
+
 - Gateways request `tag:nerves-gate` before Tailscale login and on name changes (`tailscaled_ex` 0.6.0). The tailnet's `tagOwners` must allow the enrolling identity; tagged nodes are tag-owned with key expiry disabled. Remote status shows granted tags and warns when the discovery tag is missing. Existing nodes are never forced to re-authenticate.
 
 - Board key `plugins_slot: %{path: sysfs_hardware_path, partition: n | nil}` replaces `plugins_device`. Storage resolves the plugin card below the slot's hardware path instead of trusting a kernel device name. This fixes EM300, whose microSD slot is a USB card reader (`sd*`), not `mmcblk0`. QEMU pins the virtual SD disk to PCI slot `0x10`.

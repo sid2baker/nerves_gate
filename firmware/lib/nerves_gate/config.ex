@@ -2,7 +2,23 @@ defmodule NervesGate.Config do
   @moduledoc "Pure network input validation and port-role helpers. Persistence belongs to VintageNet."
   import Bitwise
 
-  def defaults, do: from_network(%{"mode" => "unconfigured"})
+  @doc """
+  Factory settings. A board with a dedicated WAN (`:board` `:internet_port`) uses
+  it with DHCP and leaves the other Ethernet ports disabled. Otherwise every
+  Ethernet port runs DHCP and whichever reaches the Internet is used.
+  """
+  def defaults do
+    case NervesGate.Board.get(:internet_port) do
+      nil ->
+        from_network(%{"mode" => "unconfigured"})
+
+      port ->
+        ports(nil)
+        |> Map.put(port, %{"role" => "internet", "address" => address_defaults()})
+        |> Map.put("mode", "ports")
+        |> from_network()
+    end
+  end
 
   def from_network(network),
     do: %{"setup_completed" => network["mode"] != "unconfigured", "network" => network}

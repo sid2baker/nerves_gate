@@ -2,9 +2,14 @@
 
 ## Port roles
 
-LAN 1 is `eth0`; LAN 2 is `eth1`. Hardware lists only free, non-Internet LANs. On
-a fresh gateway both try DHCP. A single verified Internet port is suggested first,
-otherwise a single linked, addressed port; ambiguous connections require a choice.
+LAN 1 is `eth0`; LAN 2 is `eth1`. Hardware lists only free, non-Internet LANs.
+Factory settings come from the board: with no saved settings, a board without a
+dedicated WAN (EC100, QEMU) runs DHCP on every Ethernet port and reaches the
+Internet through whichever port gets a working lease. A single verified Internet
+port is suggested first, otherwise a single linked, addressed port; ambiguous
+connections require a choice before saving. A board that declares `internet_port`
+(EM300: `eth0`, its WAN jack) starts with that port as the DHCP Internet port and
+the other ports disabled. Saved settings always take precedence.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change when a cable disappears or moves. Use

@@ -51,6 +51,7 @@ defmodule NervesGate.BuildConfigTest do
           # Unqualified EM300 peripherals stay disabled; the expansion bus is a plugin resource.
           assert %{
                    cellular: nil,
+                   internet_port: "eth0",
                    indicators: nil,
                    data: {:ubifs, "/dev/ubi0_2"},
                    plugins_slot: %{

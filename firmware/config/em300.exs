@@ -12,10 +12,13 @@ config :nerves_gate, :board, %{
   # partition (ext4).
   plugins_slot: %{path: "devices/platform/ff780000.usb/usb1/1-1/1-1.3", partition: 1},
   cellular: nil,
+  # Factory network: the WAN jack (eth0) with DHCP. The stock vendor firmware
+  # runs DHCP on eth0 and bridges eth1 as its LAN.
+  internet_port: "eth0",
   # Plugin-assignable Linux resources; `kind` says which plugin may own them.
-  # Three physical Ethernet jacks are specified (WAN + 2 LAN), but stock Linux
-  # exposes only eth0/eth1. The jack-to-interface mapping is not qualified;
-  # do not invent an eth2 resource or assume three independent interfaces.
+  # Three physical Ethernet jacks are specified (WAN + 2 LAN), but Linux exposes
+  # only eth0 (WAN) and eth1 (LAN). Do not invent an eth2 resource or assume
+  # independent LAN jacks.
   # The vendor specifies 4x RS485 on UART1-4 (electrically unqualified here).
   # The expansion bus is ttyS5 (921600 8N1) with the module reset and link lines,
   # one resource for a plugin speaking the IOTRouter expansion protocol.
