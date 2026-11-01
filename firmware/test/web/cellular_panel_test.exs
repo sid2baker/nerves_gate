@@ -12,6 +12,21 @@ defmodule NervesGateWeb.CellularPanelTest do
     refute Floki.text(document) =~ "RSSI"
   end
 
+  test "connection settings show the APN the modem uses, also for Automatic" do
+    document = panel(%{sim: :ready, apn: "web.example"}, settings: true)
+    assert Floki.text(document) =~ "APN in use"
+    assert Floki.text(document) =~ "web.example"
+  end
+
+  test "traffic shows kernel byte counters, or that they are not reported" do
+    assert NervesGateWeb.NetworkStatus.traffic_label(%{
+             traffic: %{received: 1_234_567, sent: 980}
+           }) == "1.2 MB received, 980 B sent since start"
+
+    assert NervesGateWeb.NetworkStatus.traffic_label(%{traffic: nil}) == "Not reported"
+    assert NervesGateWeb.NetworkStatus.traffic_label(nil) == "Not reported"
+  end
+
   test "PIN form is a single attempt, before connecting, without draft/recovery or values" do
     document = panel(%{sim: :pin_required, pin_attempts_remaining: 3}, connect: true)
     assert [_] = Floki.find(document, "form[phx-submit=unlock-connect][phx-auto-recover=ignore]")

@@ -150,6 +150,7 @@ defmodule NervesGateWeb.CellularPanel do
         <.setting_row label="Signal">
           {if is_integer(@cellular.signal_dbm), do: "#{@cellular.signal_dbm} dBm", else: "Unknown"}
         </.setting_row>
+        <.setting_row label="APN in use">{text(@cellular.apn)}</.setting_row>
         <.setting_row label="Carrier profile APN">
           {if @cellular.provider, do: @cellular.provider.apn, else: "Not identified"}
         </.setting_row>
@@ -161,6 +162,9 @@ defmodule NervesGateWeb.CellularPanel do
         <.setting_row label="IP addresses">
           <code :for={ip <- (@interface && Map.get(@interface, :addresses, [])) || []}>{ip.address}/{ip.prefix_length}</code>
           <span :if={@interface == nil or Map.get(@interface, :addresses, []) == []}>Not assigned</span>
+        </.setting_row>
+        <.setting_row label="Traffic">
+          {NervesGateWeb.NetworkStatus.traffic_label(@interface)}
         </.setting_row>
         <.button
           phx-click="reconnect"

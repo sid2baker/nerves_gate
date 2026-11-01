@@ -25,6 +25,12 @@ defmodule NervesGate.Cellular.AuthenticationTest do
     assert command =~ "AT+QICSGP=2,1,"
   end
 
+  test "reads the APN a context really uses" do
+    {:ok, lines} = @context
+    assert Authentication.context_apn(lines, 1) == "internet.example"
+    assert Authentication.context_apn(lines, 2) == nil
+  end
+
   test "switching APNs clears stale modem credentials, never reuses another APN's PAP" do
     other = {:ok, [~s(+CGDCONT: 1,"IP","other.example","0.0.0.0",0,0)]}
 

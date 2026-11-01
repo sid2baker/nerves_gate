@@ -101,7 +101,8 @@ defmodule NervesGate.Cellular.Authentication do
 
   def command(_, _, _), do: @setup_error
 
-  defp context_apn(lines, context_id) do
+  @doc false
+  def context_apn(lines, context_id) do
     # The actual context may belong to a trial, not saved desired settings.
     Enum.find_value(lines, fn line ->
       case Regex.run(~r/\A\+CGDCONT:\s*#{context_id},"IP","([a-zA-Z0-9.-]{0,100})",/, line) do

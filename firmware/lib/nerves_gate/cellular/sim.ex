@@ -497,13 +497,24 @@ defmodule NervesGate.Cellular.SIM do
 
     %{
       data
-      | provider: settings.provider,
+      | apn: data_apn(name, config),
+        provider: settings.provider,
         provider_options: settings.options,
         error: settings.error
     }
   end
 
   defp provider_settings(data, _), do: data
+
+  # The APN the modem's data context really uses; Automatic saves none.
+  defp data_apn(name, config) do
+    with {:data, _} <- Modem.connection_mode(config),
+         {:ok, lines} <- Modem.command(name, "AT+CGDCONT?") do
+      Authentication.context_apn(lines, get_in(config, [:vintage_net_ecm, :context_id]) || 1)
+    else
+      _ -> nil
+    end
+  end
 
   defp mobile(name, key) do
     case VintageNet.get(["interface", name, "mobile", key]) do

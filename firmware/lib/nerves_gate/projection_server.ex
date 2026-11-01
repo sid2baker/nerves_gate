@@ -11,6 +11,8 @@ defmodule NervesGate.ProjectionServer do
   alias NervesGate.Projection
 
   @domains [:network, :remote, :indicators, :hardware, :ssh, :storage]
+  # Interface byte counters change without property events.
+  @traffic_ms 5_000
 
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
 
@@ -21,6 +23,7 @@ defmodule NervesGate.ProjectionServer do
   @impl true
   def init(_) do
     bind()
+    Process.send_after(self(), :traffic, @traffic_ms)
     inputs = Map.new([:system | @domains], &{&1, read(&1)})
     {:ok, %{projection: Projection.new(inputs), clients: %{}, dirty: MapSet.new()}}
   end
@@ -45,6 +48,11 @@ defmodule NervesGate.ProjectionServer do
   def handle_info(:subscribe, state) do
     bind()
     {:noreply, dirty(state, @domains)}
+  end
+
+  def handle_info(:traffic, state) do
+    Process.send_after(self(), :traffic, @traffic_ms)
+    {:noreply, dirty(state, [:network])}
   end
 
   def handle_info(:refresh, state) do

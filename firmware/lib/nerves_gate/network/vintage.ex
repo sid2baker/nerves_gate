@@ -388,8 +388,26 @@ defmodule NervesGate.Network.Vintage do
       addresses: addresses(get(name, "addresses") || []),
       master: master(name),
       gateway: ip_string(List.first(List.wrap(dhcp[:router])) || ipv4[:gateway]),
-      nameservers: Enum.map(List.wrap(dhcp[:dns] || ipv4[:name_servers]), &ip_string/1)
+      nameservers: Enum.map(List.wrap(dhcp[:dns] || ipv4[:name_servers]), &ip_string/1),
+      traffic: traffic(name)
     }
+  end
+
+  # Kernel byte counters since the interface was created (reset by reboots and
+  # by the modem recreating its interface); nil when the interface is absent.
+  defp traffic(name) do
+    with {:ok, rx} <- counter(name, "rx_bytes"),
+         {:ok, tx} <- counter(name, "tx_bytes") do
+      %{received: rx, sent: tx}
+    else
+      _ -> nil
+    end
+  end
+
+  defp counter(name, key) do
+    with {:ok, text} <- File.read("/sys/class/net/#{name}/statistics/#{key}"),
+         {value, _} <- Integer.parse(text),
+         do: {:ok, value}
   end
 
   defp ip_string(nil) do

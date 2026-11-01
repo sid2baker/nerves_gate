@@ -70,6 +70,7 @@ defmodule NervesGateWeb.NetworkStatus do
           <code :for={ip <- interface.addresses}>{ip.address}/{ip.prefix_length}</code>
         </.setting_row>
         <.setting_row label="Internet">{connection_label(interface.connection)}</.setting_row>
+        <.setting_row label="Traffic">{traffic_label(interface)}</.setting_row>
         <div class="ui-stack">
           <.setting_row label="Gateway">{interface.gateway || "Not reported"}</.setting_row>
           <.setting_row label="DNS servers">
@@ -91,6 +92,17 @@ defmodule NervesGateWeb.NetworkStatus do
       _ -> connection_label(projection.connections.internet.cellular)
     end
   end
+
+  @doc "Kernel byte counters since the interface came up."
+  def traffic_label(%{traffic: %{received: received, sent: sent}}),
+    do: "#{bytes(received)} received, #{bytes(sent)} sent since start"
+
+  def traffic_label(_), do: "Not reported"
+
+  defp bytes(n) when n >= 1_000_000_000, do: "#{Float.round(n / 1_000_000_000, 2)} GB"
+  defp bytes(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)} MB"
+  defp bytes(n) when n >= 1_000, do: "#{Float.round(n / 1_000, 1)} kB"
+  defp bytes(n), do: "#{n} B"
 
   def connection_label(:internet), do: "Internet available"
   def connection_label(:lan), do: "Connected, no verified Internet"

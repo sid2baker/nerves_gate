@@ -48,6 +48,7 @@ defmodule NervesGate.Cellular do
       operator: nil,
       signal_dbm: nil,
       access_technology: nil,
+      apn: nil,
       provider: nil,
       provider_options: [],
       refreshed_at: nil,
