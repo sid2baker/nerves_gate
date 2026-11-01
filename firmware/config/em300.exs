@@ -23,8 +23,8 @@ config :nerves_gate, :board, %{
   # The expansion bus is ttyS5 (921600 8N1) with the module reset and link lines,
   # one resource for a plugin speaking the IOTRouter expansion protocol.
   ports: [
-    %{id: "eth0", kind: :ethernet, label: "LAN 1", assignable: true},
-    %{id: "eth1", kind: :ethernet, label: "LAN 2", assignable: true},
+    %{id: "eth0", kind: :ethernet, label: "WAN", assignable: true},
+    %{id: "eth1", kind: :ethernet, label: "LAN", assignable: true},
     %{id: "ttyS1", kind: :rs485, label: "RS485 1", assignable: true},
     %{id: "ttyS2", kind: :rs485, label: "RS485 2", assignable: true},
     %{id: "ttyS3", kind: :rs485, label: "RS485 3", assignable: true},

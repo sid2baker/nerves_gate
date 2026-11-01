@@ -139,7 +139,7 @@ defmodule NervesGate.Network.Vintage do
       {:error, "Only independent Ethernet interfaces are supported; saved state was not changed."}
 
   def from_configurations(configs) do
-    ports = Map.new(["eth0", "eth1"], &{&1, saved_port(configs[&1])})
+    ports = Map.new(NervesGate.Board.ethernet(), &{&1, saved_port(configs[&1])})
 
     network =
       case get_in(configs, ["br0", :nerves_gate_mode]) do
@@ -194,7 +194,8 @@ defmodule NervesGate.Network.Vintage do
   defp saved_address(_), do: nil
 
   defp saved_configurations do
-    Enum.reduce_while(["eth0", "eth1", "br0"], {:ok, %{}}, fn name, {:ok, configs} ->
+    Enum.reduce_while(NervesGate.Board.ethernet() ++ ["br0"], {:ok, %{}}, fn name,
+                                                                             {:ok, configs} ->
       case VintageNet.Persistence.call(:load, [name]) do
         {:ok, config} -> {:cont, {:ok, Map.put(configs, name, config)}}
         {:error, :enoent} -> {:cont, {:ok, configs}}
@@ -206,14 +207,14 @@ defmodule NervesGate.Network.Vintage do
   defp configs(%{"mode" => "unconfigured"}) do
     [
       {"br0", metadata_config()}
-      | Enum.map(["eth0", "eth1"], &{&1, port_config(%{method: :dhcp})})
+      | Enum.map(NervesGate.Board.ethernet(), &{&1, port_config(%{method: :dhcp})})
     ]
   end
 
   defp configs(%{"mode" => "ports"} = network) do
     [
       {"br0", metadata_config()}
-      | Enum.map(["eth0", "eth1"], fn name ->
+      | Enum.map(NervesGate.Board.ethernet(), fn name ->
           address =
             if get_in(network, [name, "address"]) do
               ipv4(network[name]["address"])
@@ -253,7 +254,7 @@ defmodule NervesGate.Network.Vintage do
   end
 
   @doc false
-  def apply_local(name, address) when name in ["eth0", "eth1"] do
+  def apply_local(name, address) do
     ipv4 = if address, do: ipv4(address), else: %{method: :disabled}
     config = port_config(ipv4) |> Map.put(:nerves_gate_role, "plugin")
     configure(name, config, System.monotonic_time(:millisecond) + 8_000, true)
@@ -289,10 +290,13 @@ defmodule NervesGate.Network.Vintage do
 
   # Modem registration can take minutes. Accept the standard technology's
   # configuration without making carrier registration a LAN trial prerequisite.
-  defp configure(name, config, _deadline, _force) when name not in ["eth0", "eth1", "br0"],
-    do: VintageNet.configure(name, config, persist: false)
-
   defp configure(name, config, deadline, force) do
+    if name in NervesGate.Board.ethernet() or name == "br0",
+      do: configure_lan(name, config, deadline, force),
+      else: VintageNet.configure(name, config, persist: false)
+  end
+
+  defp configure_lan(name, config, deadline, force) do
     with :ok <- settled(name, deadline, true),
          :ok <- reset_if_needed(name, config, deadline, force),
          :ok <- VintageNet.configure(name, config, persist: false) do
@@ -352,7 +356,12 @@ defmodule NervesGate.Network.Vintage do
     %{
       simulated: false,
       bridge: interface("br0"),
-      ports: Enum.map(ethernet_interfaces(), &interface/1),
+      # Board labels travel with observations so remote read-only views need no board.
+      ports:
+        Enum.map(
+          NervesGate.Board.ethernet(),
+          &Map.put(interface(&1), :label, NervesGate.Board.label(&1))
+        ),
       usb: interface("usb0"),
       management: management_interfaces(),
       cellular_supported: NervesGate.Cellular.Profile.get() != nil,
@@ -360,14 +369,10 @@ defmodule NervesGate.Network.Vintage do
     }
   end
 
-  defp ethernet_interfaces do
-    for %{kind: :ethernet, id: id} <- NervesGate.Board.get(:ports) || [], do: id
-  end
-
   defp management_interfaces do
     Application.get_env(:vintage_net, :config, [])
     |> Enum.map(fn {name, _} -> name end)
-    |> Enum.reject(&(&1 in (ethernet_interfaces() ++ ["br0", "usb0"])))
+    |> Enum.reject(&(&1 in (NervesGate.Board.ethernet() ++ ["br0", "usb0"])))
     |> Enum.map(&interface/1)
   end
 

@@ -57,7 +57,8 @@ defmodule NervesGate.Network.LAN do
     }
   end
 
-  def to_raw_config(ifname, config, opts) when ifname in ["eth0", "eth1"] do
+  # Network configures only the board's Ethernet resources with this technology.
+  def to_raw_config(ifname, config, opts) do
     raw = VintageNetEthernet.to_raw_config(ifname, %{config | type: VintageNetEthernet}, opts)
 
     # Also runs when VintageNet configures a newly appeared port.
@@ -91,7 +92,7 @@ defmodule NervesGate.Network.LAN do
 
   # Only independent ports are supported. USB is never touched.
   def isolate_ports do
-    Enum.reduce_while(["eth0", "eth1"], :ok, fn name, :ok ->
+    Enum.reduce_while(NervesGate.Board.ethernet(), :ok, fn name, :ok ->
       case detach(name) do
         :ok -> {:cont, :ok}
         error -> {:halt, error}
@@ -107,7 +108,7 @@ defmodule NervesGate.Network.LAN do
     end
   end
 
-  def disable_member_ipv6(ifname) when ifname in ["eth0", "eth1", "br0"] do
+  def disable_member_ipv6(ifname) when is_binary(ifname) do
     case File.write("/proc/sys/net/ipv6/conf/#{ifname}/disable_ipv6", "1") do
       # Kernels without IPv6 need no action.
       {:error, :enoent} -> :ok

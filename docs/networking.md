@@ -2,7 +2,10 @@
 
 ## Port roles
 
-LAN 1 is `eth0`; LAN 2 is `eth1`. Hardware lists only free, non-Internet LANs.
+Interface IDs and labels come from the board's Ethernet resources. EC100 and
+QEMU label `eth0`/`eth1` as LAN 1/LAN 2; EM300 labels them WAN/LAN. A resource
+represents a Linux interface, not an independently controllable physical jack.
+Hardware lists only free, non-Internet interfaces.
 Factory settings come from the board: with no saved settings, a board without a
 dedicated WAN (EC100, QEMU) runs DHCP on every Ethernet port and reaches the
 Internet through whichever port gets a working lease. A single verified Internet
@@ -13,7 +16,7 @@ the other ports disabled. Saved settings always take precedence.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
 Saved assignments never change when a cable disappears or moves. Use
-**Overview → Internet** for the uplink and **Hardware → LAN 1 / LAN 2** to enable
+**Overview → Internet** for the uplink and **Hardware → the port's board label** to enable
 and exclusively assign a free, non-Internet port to one plugin. This uses the same
 reviewed, checked-stop assignment as RS485/CAN. Assignment sets no IPv4 address and
 starts no DHCP client, DNS, default route, bridge or advertisement. Disabling holds

@@ -10,7 +10,8 @@ defmodule NervesGate.Network.Local do
          true <-
            network[interface] == nil or
              network[interface] == %{"role" => "plugin", "address" => nil},
-         true <- interface in ["eth0", "eth1"] and is_integer(prefix) and prefix in 1..30,
+         true <-
+           interface in NervesGate.Board.ethernet() and is_integer(prefix) and prefix in 1..30,
          {:ok, address} <-
            Config.validate_address(%{
              "ip_method" => "static",
@@ -292,7 +293,8 @@ defmodule NervesGate.Network.Local do
             "route_owned" => owned
           } = record} <- Jason.decode(bytes),
          true <-
-           map_size(record) == 4 and interface in ["eth0", "eth1"] and is_boolean(owned) and
+           map_size(record) == 4 and interface in NervesGate.Board.ethernet() and
+             is_boolean(owned) and
              is_integer(prefix) and prefix in 1..30,
          {:ok, normalized} <-
            Config.validate_address(%{

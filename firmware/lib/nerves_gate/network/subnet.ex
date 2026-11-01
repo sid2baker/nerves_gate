@@ -24,7 +24,8 @@ defmodule NervesGate.Network.Subnet do
 
   def build(_, _), do: {:error, :invalid_subnet}
 
-  def build(interface, address, prefix) when interface in ["eth0", "eth1"] and prefix in 1..30 do
+  # Callers check the interface against the board's Ethernet resources.
+  def build(interface, address, prefix) when is_binary(interface) and prefix in 1..30 do
     with {:ok, ip} <- Config.ipv4(address) do
       network = (integer(ip) >>> (32 - prefix)) <<< (32 - prefix)
 

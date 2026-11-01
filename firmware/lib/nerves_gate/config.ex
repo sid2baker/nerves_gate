@@ -27,14 +27,17 @@ defmodule NervesGate.Config do
   def internet(network), do: (network && network["internet"]) || %{"mode" => "ethernet"}
   def cellular?(network), do: internet(network)["mode"] in ["cellular", "backup"]
 
-  def validate_network(network) when is_map(network) do
-    with {:ok, ethernet} <- validate_ethernet(Map.delete(network, "internet")),
+  @doc "Validate against declared Ethernet IDs, never transient interface presence."
+  def validate_network(network, ethernet_ids \\ NervesGate.Board.ethernet())
+
+  def validate_network(network, ethernet_ids) when is_map(network) do
+    with {:ok, ethernet} <- validate_ethernet(Map.delete(network, "internet"), ethernet_ids),
          :ok <- validate_internet(Map.merge(ethernet, Map.take(network, ["internet"]))) do
       {:ok, Map.merge(ethernet, Map.take(network, ["internet"]))}
     end
   end
 
-  def validate_network(_), do: {:error, "Network settings must be an object."}
+  def validate_network(_, _), do: {:error, "Network settings must be an object."}
 
   defp validate_internet(%{"internet" => %{"mode" => "ethernet"} = internet})
        when map_size(internet) == 1, do: :ok
@@ -94,18 +97,16 @@ defmodule NervesGate.Config do
     %{"ip_method" => "dhcp", "static_ip" => nil, "subnet_mask" => nil, "gateway" => nil}
   end
 
-  defp validate_ethernet(%{"mode" => "unconfigured"} = network) when map_size(network) == 1 do
+  defp validate_ethernet(%{"mode" => "unconfigured"} = network, _) when map_size(network) == 1 do
     {:ok, network}
   end
 
-  defp validate_ethernet(%{"mode" => "ports", "eth0" => left, "eth1" => right} = network)
-       when map_size(network) == 3 do
-    with {:ok, left} <- validate_port(left),
-         {:ok, right} <- validate_port(right),
-         true <-
-           is_nil(left) or is_nil(right) or left["role"] != right["role"] or
-             left["role"] == "plugin" do
-      {:ok, %{network | "eth0" => left, "eth1" => right}}
+  # One entry per board Ethernet resource, no others.
+  defp validate_ethernet(%{"mode" => "ports"} = network, names) do
+    with true <- Enum.sort(Map.keys(network)) == Enum.sort(["mode" | names]),
+         {:ok, ports} <- validate_ports(Map.take(network, names)),
+         true <- Enum.count(ports, fn {_, port} -> port["role"] == "internet" end) <= 1 do
+      {:ok, Map.merge(network, ports)}
     else
       _ ->
         {:error,
@@ -113,8 +114,17 @@ defmodule NervesGate.Config do
     end
   end
 
-  defp validate_ethernet(_) do
+  defp validate_ethernet(_, _) do
     {:error, "Choose independent Internet or plugin ports. Saved settings are never rewritten."}
+  end
+
+  defp validate_ports(ports) do
+    Enum.reduce_while(ports, {:ok, %{}}, fn {name, port}, {:ok, acc} ->
+      case validate_port(port) do
+        {:ok, port} -> {:cont, {:ok, Map.put(acc, name, port)}}
+        error -> {:halt, error}
+      end
+    end)
   end
 
   defp validate_port(nil), do: {:ok, nil}
@@ -134,9 +144,11 @@ defmodule NervesGate.Config do
   defp validate_port(_), do: {:error, :invalid_port}
 
   @doc "Explicit port assignments."
-  def ports(%{"mode" => "ports"} = network), do: Map.take(network, ["eth0", "eth1"])
+  # Reading an already validated settings object must also work in Workbench,
+  # which has no local board. Admission validates these keys against the device.
+  def ports(%{"mode" => "ports"} = network), do: Map.drop(network, ["mode", "internet"])
 
-  def ports(_), do: %{"eth0" => nil, "eth1" => nil}
+  def ports(_), do: Map.new(NervesGate.Board.ethernet(), &{&1, nil})
 
   def role_port(network, role) do
     Enum.find_value(ports(network), fn {name, port} ->

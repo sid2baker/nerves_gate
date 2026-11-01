@@ -23,7 +23,10 @@ defmodule NervesGateWeb.NetworkStatus do
         id="internet-backup-status"
         class="ui-help"
       >
-        Preferred usable uplink: {uplink_label(@projection.connections.internet.selected)}
+        Preferred usable uplink: {uplink_label(
+          @projection.connections.internet.selected,
+          @projection.connections.ports
+        )}
       </p>
       <.notice :if={!@projection.network.observed}>Connection status is unavailable.</.notice>
       <.notice :if={@projection.network.recovering} tone="warning">
@@ -56,7 +59,7 @@ defmodule NervesGateWeb.NetworkStatus do
       </p>
       <section :for={interface <- @interfaces} data-internet-port={interface.name}>
         <.setting_row label="Port">
-          {port_label(interface.name)}
+          {port_label(interface.name, @projection.connections.ports)}
         </.setting_row>
         <.setting_row label="Cable">
           {cable_status(interface)}
@@ -104,19 +107,21 @@ defmodule NervesGateWeb.NetworkStatus do
   defp method_label("static"), do: "Static"
   defp method_label(_), do: "Unknown"
 
-  defp uplink_label(nil), do: "Not identified"
-  defp uplink_label(name) when name in ["eth0", "eth1"], do: port_label(name)
-  defp uplink_label(_), do: "4G modem"
+  defp uplink_label(nil, _), do: "Not identified"
+
+  defp uplink_label(name, ports) do
+    if Enum.any?(ports, &(&1.name == name)), do: port_label(name, ports), else: "4G modem"
+  end
 
   def cable_status(nil), do: "Not configured"
   def cable_status(%{present: false}), do: "Not installed"
   def cable_status(%{link: true}), do: "Cable connected"
   def cable_status(_), do: "No cable"
 
-  # Technical interface names remain available under diagnostics.
-  def port_label("eth0"), do: "LAN 1"
-  def port_label("eth1"), do: "LAN 2"
-  def port_label(_), do: "Ethernet"
+  @doc "The board label of an observed Ethernet port; interface names stay under diagnostics."
+  def port_label(name, ports),
+    do: Enum.find_value(ports, "Ethernet", &(&1.name == name && Map.get(&1, :label)))
+
   def role_label("internet"), do: "Internet"
   def role_label(_), do: "Unassigned"
 end

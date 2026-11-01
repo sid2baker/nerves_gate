@@ -514,14 +514,10 @@ defmodule NervesGateWeb.NetworkEditor do
               description="Use the detected connection."
             />
             <:option
-              value="eth0"
-              title="LAN 1"
-              description={internet_status("eth0", @projection.connections.ports)}
-            />
-            <:option
-              value="eth1"
-              title="LAN 2"
-              description={internet_status("eth1", @projection.connections.ports)}
+              :for={port <- @projection.connections.ports}
+              value={port.name}
+              title={NetworkStatus.port_label(port.name, @projection.connections.ports)}
+              description={Network.Suggestions.status(port)}
             />
             <:option value="" title="Not now" />
           </.choice_group>
@@ -655,11 +651,4 @@ defmodule NervesGateWeb.NetworkEditor do
   defp submit_label(_, _, _, _), do: "Apply changes"
   defp missing_profile?("provider:" <> id, options), do: !Enum.any?(options, &(&1["id"] == id))
   defp missing_profile?(_, _), do: false
-
-  defp internet_status(name, ports) do
-    case Enum.find(ports, &(&1.name == name)) do
-      nil -> "Not installed"
-      port -> Network.Suggestions.status(port)
-    end
-  end
 end

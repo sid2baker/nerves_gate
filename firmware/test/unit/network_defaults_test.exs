@@ -14,7 +14,12 @@ defmodule NervesGate.NetworkDefaultsTest do
   end
 
   test "without a dedicated WAN every port runs DHCP and the Internet port is found automatically" do
-    Application.put_env(:nerves_gate, :board, %{})
+    board =
+      Elixir.Config.Reader.read!("config/config.exs", env: :dev, target: :ec100)[:nerves_gate][
+        :board
+      ]
+
+    Application.put_env(:nerves_gate, :board, board)
 
     assert Config.defaults() == %{
              "setup_completed" => false,
@@ -28,8 +33,30 @@ defmodule NervesGate.NetworkDefaultsTest do
     assert configs["eth1"].ipv4 == %{method: :dhcp}
   end
 
+  test "Ethernet policy works with zero, one or three nonstandard resources" do
+    for ids <- [[], ["wan9"], ["wan9", "lan7", "lan8"]] do
+      ports = for id <- ids, do: %{id: id, kind: :ethernet, label: id, assignable: true}
+      Application.put_env(:nerves_gate, :board, %{ports: ports})
+      assert NervesGate.Board.ethernet() == ids
+      settings = Map.put(Map.new(ids, &{&1, nil}), "mode", "ports")
+      assert {:ok, ^settings} = Config.validate_network(settings)
+      assert {:error, _} = Config.validate_network(Map.put(settings, "unknown0", nil))
+
+      configs =
+        Config.defaults()["network"] |> NervesGate.Network.Vintage.configurations() |> Map.new()
+
+      assert Enum.sort(Map.keys(configs)) == Enum.sort(["br0" | ids])
+      for id <- ids, do: assert(configs[id].ipv4 == %{method: :dhcp})
+    end
+  end
+
   test "a board's dedicated WAN is the factory Internet port with DHCP" do
-    Application.put_env(:nerves_gate, :board, %{internet_port: "eth0"})
+    board =
+      Elixir.Config.Reader.read!("config/config.exs", env: :dev, target: :em300)[:nerves_gate][
+        :board
+      ]
+
+    Application.put_env(:nerves_gate, :board, board)
     network = Config.defaults()["network"]
 
     assert network == %{

@@ -401,31 +401,32 @@ defmodule WorkbenchWeb.GatewayLive do
         "Device",
         if(available, do: "Available", else: "Unavailable"),
         available
-      ),
-      port_observation(projection, "eth0"),
-      port_observation(projection, "eth1"),
-      observation(
-        "internet",
-        "Internet",
-        if(available, do: String.capitalize(internet), else: "Unknown"),
-        available && internet == "online"
-      ),
-      observation(
-        "tailscale",
-        "Tailscale",
-        if(available, do: NervesGateWeb.RemoteStatus.label(projection.remote), else: "Unknown"),
-        available && projection.remote.available && projection.remote.state == "online"
       )
-    ]
+    ] ++
+      Enum.map(projection.connections.ports, &port_observation(projection, &1)) ++
+      [
+        observation(
+          "internet",
+          "Internet",
+          if(available, do: String.capitalize(internet), else: "Unknown"),
+          available && internet == "online"
+        ),
+        observation(
+          "tailscale",
+          "Tailscale",
+          if(available, do: NervesGateWeb.RemoteStatus.label(projection.remote), else: "Unknown"),
+          available && projection.remote.available && projection.remote.state == "online"
+        )
+      ]
   end
 
-  defp port_observation(projection, name) do
-    port = Enum.find(projection.connections.ports, &(&1.name == name))
-    label = Enum.join([name | role(port)], " · ")
+  defp port_observation(projection, port) do
+    name = port.name
+    label = Enum.join([port.label | role(port)], " · ")
 
     value =
       cond do
-        not projection.device.available or is_nil(port) -> "Unknown"
+        not projection.device.available -> "Unknown"
         not port.present -> "Not installed"
         port.link -> "Link up"
         true -> "Link down"

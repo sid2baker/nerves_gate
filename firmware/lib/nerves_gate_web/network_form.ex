@@ -28,8 +28,8 @@ defmodule NervesGateWeb.NetworkForm do
         {:error,
          "More than one network is connected. Choose an Internet port, or choose Not now."}
 
-      internet not in [nil, "eth0", "eth1"] ->
-        {:error, "Choose LAN 1, LAN 2, or Not now."}
+      internet != nil and not Map.has_key?(Config.ports(base), internet) ->
+        {:error, "Choose an Internet port, or Not now."}
 
       true ->
         with {:ok, _} <- Config.validate_network(base) do
@@ -53,11 +53,9 @@ defmodule NervesGateWeb.NetworkForm do
   end
 
   defp plugin_ports(base) do
-    Enum.reduce(Config.ports(base), %{"mode" => "ports", "eth0" => nil, "eth1" => nil}, fn {name,
-                                                                                            port},
-                                                                                           acc ->
-      if port && port["role"] == "plugin", do: Map.put(acc, name, port), else: acc
-    end)
+    for {name, port} <- Config.ports(base), into: %{"mode" => "ports"} do
+      {name, if(port && port["role"] == "plugin", do: port)}
+    end
   end
 
   defp ambiguous_internet?(params, ports, internet) do

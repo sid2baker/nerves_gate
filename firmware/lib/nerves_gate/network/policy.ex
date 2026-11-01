@@ -7,7 +7,7 @@ defmodule NervesGate.Network.Policy do
     ports = Config.ports(network)
     observed = status.observed || %{ports: []}
 
-    if interface in ["eth0", "eth1"] and network["mode"] == "ports" and
+    if interface in NervesGate.Board.ethernet() and network["mode"] == "ports" and
          get_in(ports, [interface, "role"]) != "internet" and
          Enum.any?(observed.ports, &(&1.name == interface and &1.present and &1.master == nil)),
        do: :ok,
@@ -22,7 +22,7 @@ defmodule NervesGate.Network.Policy do
   def hardware_change(network, assignments) do
     assigned =
       for {name, setting} <- assignments,
-          name in ["eth0", "eth1"] and (setting.enabled or setting.plugin != nil),
+          name in NervesGate.Board.ethernet() and (setting.enabled or setting.plugin != nil),
           do: name
 
     conflict =

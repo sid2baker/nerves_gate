@@ -3,7 +3,7 @@ defmodule NervesGateWeb.DashboardLive do
   alias NervesGate.Config
   alias NervesGateWeb.RemoteStatus
   import NervesGateWeb.CoreComponents
-  import NervesGateWeb.NetworkStatus, only: [port_label: 1]
+  import NervesGateWeb.NetworkStatus, only: [port_label: 2]
 
   on_mount({NervesGateWeb.Observations, :status})
 
@@ -69,6 +69,8 @@ defmodule NervesGateWeb.DashboardLive do
         do: projection.connections.suggested_internet_port,
         else: Config.role_port(settings, "internet")
 
-    if port, do: port_label(port), else: "Choose an Internet connection"
+    if port,
+      do: port_label(port, projection.connections.ports),
+      else: "Choose an Internet connection"
   end
 end

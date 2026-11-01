@@ -19,7 +19,8 @@ defmodule NervesGateSDK.APITest do
 
   test "invalid input never reaches the firmware" do
     assert {:error, :invalid_topic} = Events.subscribe(:credentials)
-    assert {:error, :invalid_local_network} = Network.claim_local("usb0", "192.168.50.2", 24)
+    assert {:error, :invalid_local_network} = Network.claim_local("", "192.168.50.2", 24)
+    assert {:error, :invalid_local_network} = Network.claim_local(:eth1, "192.168.50.2", 24)
     assert {:error, :invalid_local_network} = Network.claim_local("eth1", "192.168.50.2", 32)
     assert {:error, :invalid_claim} = Network.advertise_local(:anything)
     assert {:error, :invalid_claim} = Network.release_local(:anything)

@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Ethernet configuration, commissioning and SDK local claims use board-declared interface IDs rather than a fixed two-port list. Gateway and Workbench views use board labels; EM300 shows WAN/LAN. SDK 0.2.0-dev.7 accepts board-defined interface names, with ownership and capability checked by firmware.
+
 - Factory network settings come from the board. EM300 declares `internet_port: "eth0"` (the WAN jack, as in the vendor firmware), so a gateway without saved settings uses it with DHCP and leaves `eth1` disabled until assigned. EC100 keeps DHCP on both ports with the Internet port found automatically.
 
 - Gateways request `tag:nerves-gate` before Tailscale login and on name changes (`tailscaled_ex` 0.6.0). The tailnet's `tagOwners` must allow the enrolling identity; tagged nodes are tag-owned with key expiry disabled. Remote status shows granted tags and warns when the discovery tag is missing. Existing nodes are never forced to re-authenticate.

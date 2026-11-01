@@ -58,11 +58,11 @@ defmodule NervesGateSDK.Network do
           }
   end
 
-  @doc "Claim an enabled Ethernet interface exclusively assigned to this managed plugin. No DHCP, default route, DNS or advertisement is started. The calling process owns the claim."
+  @doc "Claim an enabled Ethernet interface exclusively assigned to this managed plugin. No DHCP, default route, DNS or advertisement is started. The calling process owns the claim. Interface names are board-defined; the firmware rejects anything that is not this plugin's assigned Ethernet resource."
   @spec claim_local(String.t(), String.t(), 1..30) :: {:ok, reference()} | {:error, term()}
   def claim_local(interface, address, prefix)
-      when interface in ["eth0", "eth1"] and is_binary(address) and is_integer(prefix) and
-             prefix in 1..30,
+      when is_binary(interface) and byte_size(interface) in 1..15 and is_binary(address) and
+             is_integer(prefix) and prefix in 1..30,
       do: Backend.call(:network_claim_local, [interface, address, prefix])
 
   def claim_local(_, _, _), do: {:error, :invalid_local_network}
