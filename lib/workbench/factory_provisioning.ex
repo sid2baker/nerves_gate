@@ -386,13 +386,7 @@ defmodule Workbench.FactoryProvisioning do
         cd: Path.join(Workbench.root(), "firmware"),
         timeout: 60_000,
         stderr_to_stdout: true,
-        env: [
-          {"MIX_TARGET", platform},
-          {"MIX_ENV", env},
-          {"NERVES_GATE_LOCAL_DEPS", "1"},
-          {"NERVES_SYSTEM", nil},
-          {"NERVES_GATE_DEVICE_NODE", nil}
-        ]
+        env: Workbench.Builds.target_env(platform, env)
       )
 
     encoded =

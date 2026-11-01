@@ -60,6 +60,20 @@ defmodule Workbench.Builds do
     end)
   end
 
+  @doc """
+  Environment of an isolated target Mix process. Everything that inspects a
+  build (such as factory boot artifacts) uses it, so it resolves the same system.
+  """
+  def target_env(target, env) do
+    [
+      {"MIX_TARGET", target},
+      {"MIX_ENV", to_string(env)},
+      {"NERVES_GATE_LOCAL_DEPS", System.get_env("NERVES_GATE_LOCAL_DEPS")},
+      {"NERVES_SYSTEM", nil},
+      {"NERVES_GATE_DEVICE_NODE", nil}
+    ]
+  end
+
   def firmware!(target \\ "x86_64", report \\ fn _ -> :ok end, env \\ :dev) do
     unless buildable?(target, env),
       do:
@@ -76,15 +90,7 @@ defmodule Workbench.Builds do
         Simulator.BuildOutput.run(
           "mix",
           ["firmware", "--overwrite"],
-          [
-            cd: Path.join(Workbench.root(), "firmware"),
-            env: [
-              {"MIX_TARGET", target},
-              {"MIX_ENV", Atom.to_string(env)},
-              {"NERVES_GATE_LOCAL_DEPS", "1"},
-              {"NERVES_GATE_DEVICE_NODE", nil}
-            ]
-          ],
+          [cd: Path.join(Workbench.root(), "firmware"), env: target_env(target, env)],
           report
         )
 
