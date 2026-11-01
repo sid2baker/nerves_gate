@@ -151,7 +151,22 @@ defmodule WorkbenchWeb.GatewayLive do
           >{label}</.link>
         </nav>
 
-        <.panel :if={@tab == :devices} title="Observed device" icon="network" id="device-summary">
+        <.notice
+          :if={@tab == :devices && !observations_supported?(@projection)}
+          tone="warning"
+          title="Unsupported device observations"
+          id="unsupported-observations"
+        >
+          This firmware's observations do not support the current Workbench. Update the
+          gateway firmware using the reviewed update below; no device settings were changed.
+        </.notice>
+
+        <.panel
+          :if={@tab == :devices && observations_supported?(@projection)}
+          title="Observed device"
+          icon="network"
+          id="device-summary"
+        >
           <div class="bench-summary">
             <div
               :for={item <- summary(@projection)}
@@ -390,6 +405,17 @@ defmodule WorkbenchWeb.GatewayLive do
   defp owner_label(%{owner: :manual}), do: "Manual control owns the device"
   defp owner_label(%{owner: nil}), do: "Ready"
   defp owner_label(%{owner: run}), do: "Run ##{run} owns the device"
+
+  # Reject unsupported remote observations, rather than inventing labels from
+  # this host's board or interpreting old firmware as the current read contract.
+  defp observations_supported?(%{connections: %{ports: ports}}) when is_list(ports) do
+    Enum.all?(ports, fn
+      %{label: label} when is_binary(label) -> true
+      _ -> false
+    end)
+  end
+
+  defp observations_supported?(_), do: false
 
   defp summary(projection) do
     available = projection.device.available

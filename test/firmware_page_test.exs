@@ -73,6 +73,27 @@ defmodule WorkbenchWeb.FirmwarePageTest do
     assert Floki.text(document) =~ "reviewed-hash"
   end
 
+  test "unsupported remote port observations do not crash or hide firmware updates" do
+    status = NervesGate.Projection.disconnected().status
+    port = %{name: "eth0", present: true, link: true, role: "internet"}
+    old = put_in(status, [:connections, :ports], [port])
+    document = gateway_page(gateway(), projection: old)
+
+    assert Floki.find(document, "#unsupported-observations")
+           |> Floki.text()
+           |> String.replace(~r/\s+/, " ") =~
+             "Update the gateway firmware"
+
+    assert Floki.find(document, "#device-summary") == []
+    assert Floki.find(document, "#firmware-update #review-firmware") != []
+    assert Floki.find(document, "#identity") != []
+
+    current = put_in(status, [:connections, :ports], [Map.put(port, :label, "WAN")])
+    document = gateway_page(gateway(), projection: current)
+    assert Floki.find(document, "#unsupported-observations") == []
+    assert Floki.text(Floki.find(document, "#device-summary")) =~ "WAN"
+  end
+
   test "simulated gateway: bench panels instead of physical checks and updates" do
     simulated = gateway(%{node: :"nerves_gate@10.203.42.2", source: :qemu, sim_id: :gateway_a})
     document = gateway_page(simulated)

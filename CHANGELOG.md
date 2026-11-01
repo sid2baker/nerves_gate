@@ -99,6 +99,8 @@
 
 - Factory review resolves boot artifacts with the same Mix environment as the firmware build, so it finds the selected build's system instead of requiring an unpublished local one.
 
+- Workbench gateway pages show a firmware-update notice for unsupported remote port observations instead of crashing.
+
 - Gateway pages serve an explicit favicon instead of requesting a missing icon.
 
 - Explicit `mix dev.network setup` can recreate an unchanged recorded QEMU management network after reboot when every bridge/TAP is absent. Partial or conflicting interfaces still require inspection and cleanup; ordinary startup never changes host networking.
