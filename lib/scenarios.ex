@@ -70,6 +70,7 @@ defmodule Scenarios do
     Enum.map(
       [
         Scenarios.Cases.HardwareReadiness,
+        Scenarios.Cases.PhysicalRemoteAccess,
         Scenarios.Cases.HardwareBackup,
         Scenarios.Cases.ButtonReboot
       ],

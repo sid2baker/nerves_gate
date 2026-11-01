@@ -48,7 +48,8 @@ inspection, building or discovery is not authorization to flash.
 ## Physical checks
 
 The gateway page offers the separate `Scenarios.physical/0` catalogue: readiness,
-operator-assisted Ethernet/4G failover, and physical-button reboot observation.
+read-only remote access/SSH verification, operator-assisted Ethernet/4G failover,
+and physical-button reboot observation.
 These run one at a time through Jobs, not the QEMU catalogue. Management must stay
 independent from the link under test. The operator unplugs/restores Ethernet or
 presses the button; the Workbench sends no physical reboot or switch command.

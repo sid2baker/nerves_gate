@@ -130,12 +130,37 @@ hardware documentation; unresolved blockers must not disappear during cleanup.
   No topology repair or settings rewrite was needed.
 - USB reports no link. Independent recovery has not been demonstrated for this
   session; do not interrupt the sole working management path.
-- Exploratory observations on older firmware are not candidate acceptance results.
-  The current candidate acceptance matrix remains untested.
+- Subsequent authorized exploratory tests are recorded below. No gateway network,
+  enrollment or SSH-key changes, successful hardware-assignment changes, equipment
+  connections, reboot or firmware upload were performed. One temporary plugin
+  definition was saved, restored across plugin restart, then deleted. The candidate
+  acceptance matrix remains untested.
 
 These are preliminary observations, not acceptance results or guarantees that the
 bench remains idle. Recheck session identity, device identity and admission before
 any later operation; do not copy private identifiers into this plan.
+
+### Exploratory live results (older EM300 firmware)
+
+Observed 2026-11-01 UTC. These results apply only to the older revision above, not a
+clean candidate containing the current changes. No EC100 is connected, so EC100
+acceptance is blocked on a fixture. The installed plugins tested were Modbus 0.4.3
+and Tailnet subnet-router 0.1.10; no plugin artifact was replaced.
+
+| Area | Result | Boundary / remaining work |
+| --- | --- | --- |
+| Configured topology | passed: official `hardware_readiness` scenario, validated firmware, no network conflicts | Does not prove fresh commissioning or new settings-store compatibility. |
+| Existing remote access | passed: official `physical_remote_access` scenario; authenticated online Tailscale with required tag, pinned SSH with existing key, specific authentication rejection for an ephemeral unregistered key | No logout/re-enrollment, key mutation or recovery-path test was performed. Transport errors do not count as authentication rejection. |
+| Hardware observations/admission | declared Ethernet, RS485 and expansion resources reported present; nonexistent-port review rejected; Internet-port confirmation rejected with `hardware_reserved`, assignments unchanged | No electrical qualification or successful physical-port assignment. Review creation alone does not grant ownership; final admission correctly rejected the protected uplink. |
+| Modbus plugin lifecycle/storage | passed: start restored zero connections with healthy storage, managed SDK candidates query succeeded; one temporary stopped loopback-client definition survived plugin restart, was deleted, and checked stop completed | No transport start, field traffic or I/O writes. No existing definition was modified; an empty configuration record remains after probe deletion. Resource assignment/reuse, real loopback I/O and device-reboot persistence remain untested. |
+| Subnet-router lifecycle | passed: start remained disabled with no local claim/routes; checked stop completed | No addressing, route advertisement or sharing was enabled. |
+| Post-test state | both bundled plugins stopped/disabled, assignments unchanged, Internet/remote access online and storage ready | No uncertain command outcome was observed. |
+| Persistence / fault recovery | untested on the current candidate | No reboot, failed-write injection, rollback, power interruption or destructive provisioning without an independent recovery path and bounded procedure. |
+
+The repeatable `physical_remote_access` case was added to the existing physical
+catalogue, not to the QEMU catalogue. It changes no credentials/settings and opens
+no SSH shell. Its host test ensures unsupported fixtures skip before access; its
+live execution passed through normal Jobs admission.
 
 ### Proposed order and permission boundaries
 

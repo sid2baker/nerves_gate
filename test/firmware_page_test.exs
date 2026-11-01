@@ -27,7 +27,10 @@ defmodule WorkbenchWeb.FirmwarePageTest do
     empty = gateway_page(gateway())
     assert Floki.find(empty, "#review-firmware select[disabled]") != []
     assert Floki.find(empty, "#review-firmware button[type=submit][disabled]") != []
-    assert Floki.find(empty, "#physical-checks [phx-click=check]") |> length() == 3
+
+    assert Floki.attribute(empty, "#physical-checks [phx-click=check]", "phx-value-scenario") ==
+             Enum.map(Scenarios.physical(), & &1.id)
+
     assert Floki.find(empty, "#scenarios, #manual-controls") == []
 
     images = [

@@ -32,6 +32,21 @@ defmodule Workbench.ScenariosTest do
     def run(_), do: exit(:control_outcome_unknown)
   end
 
+  test "physical remote access is explicit and skips before access on nonphysical fixtures" do
+    scenario = Scenarios.describe(Scenarios.Cases.PhysicalRemoteAccess)
+    assert scenario in Scenarios.physical()
+    assert scenario.opt_in
+    refute scenario.fresh_disk
+    refute scenario.all
+    assert scenario.requires == %{device: [], fixture: [:physical]}
+    refute scenario in Scenarios.all()
+
+    assert %{status: :skipped, detail: "Missing requirements: fixture:physical"} =
+             Scenarios.run(scenario, %{device: %{}}, fn -> send(self(), :prepared) end)
+
+    refute_received :prepared
+  end
+
   test "requirements distinguish device resources from fixture controls" do
     required = %{device: [:ethernet, :rs485], fixture: [:ethernet_link]}
 
@@ -195,7 +210,7 @@ defmodule Workbench.ScenariosTest do
 
     # Physical checks are separate: only physical gateways run them, one at a time.
     assert Enum.map(Scenarios.physical(), & &1.id) ==
-             ~w(hardware_readiness hardware_backup button_reboot)
+             ~w(hardware_readiness physical_remote_access hardware_backup button_reboot)
 
     for check <- Scenarios.physical(),
         do: assert(check.requires.fixture == [:physical] and check.opt_in)

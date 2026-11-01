@@ -58,7 +58,13 @@ defmodule NervesGate.Network do
   @doc "Restore saved settings for the matching trial."
   def cancel(id), do: trial(:cancel, id)
 
-  @doc "Read independent domain state, or nil while its owner is unavailable."
+  @doc """
+  Read independent domain state, or nil while its owner is unavailable.
+
+  `:ready` means an active trial is ready to confirm; it is false when no trial
+  exists. Use `ready?/2` for configured topology, or `NervesGate.System.hardware_info/0` for
+  the physical-readiness observation. Internet connectivity is separate.
+  """
   def status do
     case call(:status) do
       {:error, _} -> nil

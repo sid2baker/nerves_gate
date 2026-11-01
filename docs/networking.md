@@ -15,6 +15,13 @@ connections require a choice before saving. A board that declares `internet_port
 the other ports disabled. Saved settings always take precedence.
 Internet probes are interface-bound: a cable or DHCP lease is not proof of Internet.
 
+`Network.status().ready` (and projected `network.ready`) describes an active trial's
+readiness to confirm; it is false when no trial exists. It is not an idle gateway's
+health flag. `Network.ready?/2` checks configured topology, and
+`NervesGate.System.hardware_info/0` reports this separately from Internet health for
+the physical readiness scenario. Neither a false trial flag nor a working Internet
+connection alone diagnoses saved-topology failure.
+
 Saved assignments never change when a cable disappears or moves. Use
 **Overview → Internet** for the uplink and **Hardware → the port's board label** to enable
 and exclusively assign a free, non-Internet port to one plugin. This uses the same

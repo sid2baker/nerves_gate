@@ -231,7 +231,11 @@ authorized disposable target and manage cleanup. There is no configurable fixtur
 module, automatic discovery, physical attachment or grant of control from a node
 name. The only supplied **control** fixture is owned QEMU. Physical checks have
 their own explicit catalogue, `Scenarios.physical/0`, and run individually through
-Jobs on a verified connected gateway. Readiness uses distribution observations;
+Jobs on a verified connected gateway. `hardware_readiness` uses distribution
+observations. `physical_remote_access` checks enrollment/granted tags, SSH with the
+operator's existing key and host-key pinning, and rejection of an ephemeral
+unregistered key. It changes no keys, enrollment or settings and opens no SSH shell.
+A transport failure is not counted as proof of authentication rejection.
 Ethernet/4G failover and button-reboot checks are operator-attended procedures.
 Keep management independent from the link being tested. The human restores cables
 and controls the button; the Workbench sends no physical switch or reboot command.
