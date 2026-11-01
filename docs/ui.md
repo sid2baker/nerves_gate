@@ -168,7 +168,10 @@ projection stream. Discovery does not occupy the Jobs queue.
 
 Opening a page never starts devices, builds firmware or sends updates. Candidate
 sources are LAN mDNS, online Tailnet peers tagged `tag:nerves-gate`, manual hostnames/IPv4
-addresses and owned QEMU. URLs are not accepted. Tailnet discovery reads the local
+addresses and owned QEMU. URLs are not accepted. Each device is listed once: a
+verified gateway hides candidates at its own IPv4 addresses and its older
+disconnected entries with the same serial, so a Tailscale gateway shows its
+MagicDNS name and an unenrolled one its LAN address. Tailnet discovery reads the local
 daemon without changing VPN configuration. Names are hints: cookie connection and
 compiled firmware identity checks establish directory membership, not control
 authority. Physical gateways never receive QEMU controls. Gateway links use HTTPS

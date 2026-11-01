@@ -7,6 +7,9 @@ defmodule Workbench.Gateways do
   the same thing; `source: :qemu` only records that this session's simulator owns
   the virtual hardware. Owned QEMU guests, mDNS, Tailnet peers and manual addresses
   are just candidates to connect to. Disconnected entries keep `last_seen`.
+  Each device is listed once: a verified gateway hides candidates at its own IPv4
+  addresses (for example its LAN address when its node uses Tailscale) and its
+  older disconnected entries with the same serial.
   """
   use GenServer
 
@@ -184,13 +187,28 @@ defmodule Workbench.Gateways do
     if is_map(info) and info[:node] == candidate.node and
          info[:target] in ["x86_64" | Workbench.Builds.physical_targets()] do
       serial = :erpc.call(candidate.node, Nerves.Runtime, :serial_number, [], 3_000)
+      {:ok, interfaces} = :erpc.call(candidate.node, :inet, :getifaddrs, [], 3_000)
       identity = Map.put(info, :serial, serial)
-      Map.merge(candidate, %{connected: true, identity: identity, last_seen: now(), error: nil})
+
+      Map.merge(candidate, %{
+        connected: true,
+        identity: identity,
+        addresses: ipv4_addresses(interfaces),
+        last_seen: now(),
+        error: nil
+      })
     else
       unreachable(candidate, :not_a_gateway)
     end
   catch
     _, _ -> unreachable(candidate, :unreachable)
+  end
+
+  defp ipv4_addresses(interfaces) do
+    for {_, options} <- interfaces,
+        {:addr, {a, _, _, _} = ip} <- options,
+        a != 127,
+        do: to_string(:inet.ntoa(ip))
   end
 
   defp unreachable(candidate, error) do
@@ -220,7 +238,28 @@ defmodule Workbench.Gateways do
     Map.put(gateways, entry.node, entry)
   end
 
-  defp sorted(state), do: state.gateways |> Map.values() |> Enum.sort_by(&to_string(&1.node))
+  defp sorted(state),
+    do: state.gateways |> Map.values() |> unique() |> Enum.sort_by(&to_string(&1.node))
+
+  @doc false
+  def unique(gateways) do
+    verified = Enum.filter(gateways, & &1.identity)
+
+    Enum.reject(gateways, fn gateway ->
+      Enum.any?(verified, &(&1.node != gateway.node and same_device?(&1, gateway)))
+    end)
+  end
+
+  defp same_device?(verified, %{identity: nil, address: address}),
+    do: address in Map.get(verified, :addresses, [])
+
+  defp same_device?(
+         %{connected: true, identity: %{serial: serial}},
+         %{connected: false, identity: %{serial: serial}}
+       ),
+       do: true
+
+  defp same_device?(_, _), do: false
 
   defp publish(state) do
     Phoenix.PubSub.broadcast(NervesGate.PubSub, @topic, {:gateways, sorted(state)})
