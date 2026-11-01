@@ -2,6 +2,7 @@ defmodule NervesGateWeb.RemoteStatus do
   @moduledoc "Read-only Tailscale observations, shared by operations and settings."
   use Phoenix.Component
   import NervesGateWeb.CoreComponents
+  alias NervesGate.Remote.Policy
 
   attr(:remote, :map, required: true)
   attr(:title, :string, default: "This gateway")
@@ -20,6 +21,14 @@ defmodule NervesGateWeb.RemoteStatus do
       </p>
       <p :if={@remote.operation} role="status">{operation(@remote.operation)}</p>
       <.notice :if={@remote.error} tone="warning" role="alert">{@remote.error.message}</.notice>
+      <.notice
+        :if={Policy.tag_missing?(@remote)}
+        tone="warning"
+        role="status"
+        id="tailscale-tag-missing"
+      >
+        Tailscale has not granted {Policy.tag()}, so Workbench cannot discover this gateway. Allow it in the tailnet's tagOwners policy; an existing node may need to sign in again.
+      </.notice>
       <.notice :if={@remote.auth_state == "error" && @remote.error == nil} tone="warning" role="alert">
         Tailscale sign-in failed. Check your connection or auth key and try again.
       </.notice>
@@ -32,6 +41,9 @@ defmodule NervesGateWeb.RemoteStatus do
         </.setting_row>
         <.setting_row :if={@remote.dns_name} label="DNS name">
           <code>{@remote.dns_name}</code>
+        </.setting_row>
+        <.setting_row :if={@remote.tags not in [nil, []]} label="Tags">
+          {Enum.join(@remote.tags, ", ")}
         </.setting_row>
         <.setting_row label="Tailscale version">{@remote.version || "Unknown"}</.setting_row>
         <.setting_row :if={@remote.advertised_routes not in [nil, []]} label="Advertised routes">

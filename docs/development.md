@@ -19,9 +19,15 @@ gateways with `mycookie`, verifies firmware identity and tracks reconnects. It
 never boots devices or opens equipment connections. **Devices** shows the same directory.
 
 Tailnet discovery considers only online peers tagged `tag:nerves-gate`, never
-device names. Tag gateways in the tailnet's admin/policy; do not tag workstations
-or unrelated nodes, because Workbench tries a distribution connection to each
-tagged peer. Untagged gateways can still be added by hostname or IPv4 address.
+device names. Gateways request that tag before every Tailscale login and name
+change (`NervesGate.Remote.Policy.tag/0`); the tailnet's `tagOwners` must
+allow the enrolling user or auth key, otherwise Tailscale may refuse the login.
+Tagged gateways are tag-owned with key expiry disabled. Granted, not requested,
+tags decide discovery; the gateway's Remote page warns when the tag is missing.
+Existing untagged nodes may need an operator-initiated sign-in; firmware never
+forces one. Do not tag workstations or unrelated nodes, because Workbench tries a
+distribution connection to each tagged peer. Untagged gateways can still be added
+by hostname or IPv4 address.
 
 Reload Pi resources, then use the `dev-environment` executable skill: call
 `Workbench.Skill.DevEnvironment.attach("/absolute/path/to/nerves_gate")` through

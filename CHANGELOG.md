@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Gateways request `tag:nerves-gate` before Tailscale login and on name changes (`tailscaled_ex` 0.6.0). The tailnet's `tagOwners` must allow the enrolling identity; tagged nodes are tag-owned with key expiry disabled. Remote status shows granted tags and warns when the discovery tag is missing. Existing nodes are never forced to re-authenticate.
+
 - Board key `plugins_slot: %{path: sysfs_hardware_path, partition: n | nil}` replaces `plugins_device`. Storage resolves the plugin card below the slot's hardware path instead of trusting a kernel device name. This fixes EM300, whose microSD slot is a USB card reader (`sd*`), not `mmcblk0`. QEMU pins the virtual SD disk to PCI slot `0x10`.
 
 - EM300 no longer advertises the SoC CAN controllers as physical ports. System 0.1.3-dev disables them; three physical Ethernet jacks are documented separately from the two observed Linux interfaces pending verified mapping.

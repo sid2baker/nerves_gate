@@ -166,7 +166,7 @@ defmodule NervesGate.MixProject do
       {:circuits_uart, "~> 1.6"},
       {:input_event, "~> 1.4"},
       # Host tooling must never start the workstation VPN.
-      {:tailscaled_ex, "~> 0.5.0", runtime: Mix.target() != :host},
+      {:tailscaled_ex, "~> 0.6.0", runtime: Mix.target() != :host},
       # Compiled on the host like VintageNet, but started only by firmware.
       {:nerves_runtime, "~> 0.13", runtime: Mix.target() != :host},
       {:nerves_motd, "~> 0.1", targets: @targets},

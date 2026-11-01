@@ -10,6 +10,7 @@ defmodule NervesGate.Remote.Tailscaled do
       ["hostname"],
       ["dns_name"],
       ["ipv4"],
+      ["self", "tags"],
       ["version"],
       ["health"],
       ["configuration", "value"]
@@ -39,18 +40,16 @@ defmodule NervesGate.Remote.Tailscaled do
       ipv4: ip(Tailscaled.get(["ipv4"])),
       version: Tailscaled.get(["version"]),
       advertised_routes: config && config[:advertise_routes],
+      tags: tags(Tailscaled.get(["auth", "state"]), Tailscaled.get(["self", "tags"])),
       health: Tailscaled.get(["health"], [])
     }
   end
 
   def execute(:connect, %{hostname: hostname} = params) do
-    with :ok <- Tailscaled.update_configuration(%{hostname: hostname, accept_dns: false}) do
-      connect(params)
-    end
+    with :ok <- identity(hostname), do: connect(params)
   end
 
-  def execute(:configure, %{hostname: hostname}),
-    do: Tailscaled.update_configuration(%{hostname: hostname, accept_dns: false})
+  def execute(:configure, %{hostname: hostname}), do: identity(hostname)
 
   def execute(:disconnect, _) do
     Tailscaled.down()
@@ -95,6 +94,20 @@ defmodule NervesGate.Remote.Tailscaled do
          }}
     end
   end
+
+  # Tags are requested before login so first registration is tagged. Granting
+  # needs tailnet tagOwners; :ok only confirms the written preference.
+  defp identity(hostname),
+    do:
+      Tailscaled.update_configuration(%{
+        hostname: hostname,
+        accept_dns: false,
+        advertise_tags: [Policy.tag()]
+      })
+
+  # Granted tags are known only from an authenticated node's status.
+  defp tags(:authenticated, tags) when is_list(tags), do: tags
+  defp tags(_, _), do: nil
 
   defp prepare_route_ownership(:sharing_claim, %{scope: scope}),
     do: NervesGate.Network.Local.mark_advertising(scope)

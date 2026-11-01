@@ -12,7 +12,7 @@ defmodule Workbench.GatewaysTest do
   end
 
   test "Tailnet peers become candidates only when online and tagged, regardless of name" do
-    tag = ["tag:nerves-gate"]
+    tag = [NervesGate.Remote.Policy.tag()]
 
     status = %{
       "Peer" => %{

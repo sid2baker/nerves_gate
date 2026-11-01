@@ -2,6 +2,13 @@ defmodule NervesGate.Remote.Policy do
   @moduledoc "Pure command admission, public observation filtering and daemon outcome interpretation."
   alias NervesGate.Error
 
+  @doc "The Tailscale ACL tag every gateway requests; Workbench discovers peers granted it."
+  def tag, do: "tag:nerves-gate"
+
+  @doc "Whether an observed, authenticated identity lacks the granted discovery tag."
+  def tag_missing?(%{tags: tags}) when is_list(tags), do: tag() not in tags
+  def tag_missing?(_), do: false
+
   def unavailable do
     %{
       available: false,
@@ -13,6 +20,7 @@ defmodule NervesGate.Remote.Policy do
       ipv4: nil,
       version: nil,
       advertised_routes: nil,
+      tags: nil,
       health: [],
       operation: nil,
       error: nil,
@@ -111,6 +119,10 @@ defmodule NervesGate.Remote.Policy do
 
     defaults
     |> Map.merge(Map.take(observed, Map.keys(defaults)))
+    |> Map.update!(:tags, fn
+      tags when is_list(tags) -> Enum.filter(tags, &is_binary/1)
+      _ -> nil
+    end)
     |> Map.update!(:health, fn warnings ->
       for warning <- List.wrap(warnings), is_binary(warning) do
         warning

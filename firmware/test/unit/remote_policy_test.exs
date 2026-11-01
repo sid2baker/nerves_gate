@@ -4,6 +4,20 @@ defmodule NervesGate.RemotePolicyTest do
   test "auth keys are validated, transient and sanitized", do: assert_auth_keys()
   test "HTTPS Serve waits for an enrolled and usable identity", do: assert_serve_policy()
 
+  test "granted tags stay unknown until observed and drive the missing-tag notice" do
+    tag = Policy.tag()
+    assert tag == "tag:nerves-gate"
+    assert Policy.sanitize(%{}).tags == nil
+    assert Policy.sanitize(%{tags: :bad}).tags == nil
+    assert Policy.sanitize(%{tags: [tag, 1]}).tags == [tag]
+
+    remote = Policy.unavailable()
+    refute Policy.tag_missing?(remote)
+    assert Policy.tag_missing?(%{remote | tags: []})
+    assert Policy.tag_missing?(%{remote | tags: ["tag:ci"]})
+    refute Policy.tag_missing?(%{remote | tags: [tag]})
+  end
+
   test "only connect requires synchronized system time" do
     remote = %{Policy.unavailable() | available: true}
 
