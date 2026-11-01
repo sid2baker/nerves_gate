@@ -118,8 +118,8 @@ defmodule Scenarios.Cases.ProjectionStream do
           "/network",
           "/network/details",
           "/hardware",
-          "/hardware/lan/1",
-          "/hardware/lan/2",
+          "/hardware/eth0",
+          "/hardware/eth1",
           "/remote",
           "/settings",
           "/settings/storage",
@@ -173,7 +173,7 @@ defmodule Scenarios.Cases.ProjectionStream do
                  )
       end
 
-      if path == "/hardware/lan/2" do
+      if path == "/hardware/eth1" do
         page = Floki.parse_document!(response.body)
         assert [_] = Floki.find(page, "#hardware-assignment-form")
 
@@ -292,7 +292,7 @@ defmodule Scenarios.Cases.ProjectionStream do
   defp draft(socket, :lan) do
     ports =
       Map.new(socket.assigns.projection.hardware.ports, fn port ->
-        {port.name, %{enabled: port.enabled, plugin: port.assigned_plugin}}
+        {port.id, %{enabled: port.enabled, plugin: port.assigned_plugin}}
       end)
 
     socket =

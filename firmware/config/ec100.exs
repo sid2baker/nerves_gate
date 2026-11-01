@@ -15,14 +15,16 @@ config :nerves_gate, :board, %{
       vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
     }
   },
-  # ttyS3/ttyS4 are the RS485 field ports.
-  ports: %{
-    can: ["can0", "can1"],
-    serial: [
-      {"ttyS3", "rs485", "RS485 · automatic direction · 9600 8N1"},
-      {"ttyS4", "rs485", "RS485 · automatic direction · 9600 8N1"}
-    ]
-  },
+  # Plugin-assignable hardware; `kind` says which class of plugin may own it.
+  # The RS485 transceivers switch direction automatically.
+  ports: [
+    %{id: "eth0", kind: :ethernet, label: "LAN 1", assignable: true},
+    %{id: "eth1", kind: :ethernet, label: "LAN 2", assignable: true},
+    %{id: "ttyS3", kind: :rs485, label: "RS485 1", assignable: true},
+    %{id: "ttyS4", kind: :rs485, label: "RS485 2", assignable: true},
+    %{id: "can0", kind: :can, label: "CAN 1", assignable: true},
+    %{id: "can1", kind: :can, label: "CAN 2", assignable: true}
+  ],
   # Status LEDs by role and the KEY_PROG1 input that drives reboot/factory-reset recovery.
   indicators: %{
     leds: %{run: "ec100:run", user1: "ec100:user1", user2: "ec100:user2"},

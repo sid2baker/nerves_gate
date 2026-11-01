@@ -27,7 +27,7 @@ defmodule ModbusPlugin.UI do
       "id" => if(role == "server", do: "server1", else: "client1"),
       "role" => role,
       "transport" => "rtu",
-      "serial_port" => if(role == "server", do: "ttyS3", else: "ttyS4"),
+      "serial_port" => "",
       "authorized" => "false",
       "speed" => "9600",
       "parity" => "none",
@@ -92,7 +92,7 @@ defmodule ModbusPlugin.UI do
                 selected={@form[:serial_port].value == port.id}
                 disabled={!port.present?}
               >
-                {port_label(port.id)} — {assignment_label(port)}
+                {port.label} ({port.id}) — {assignment_label(port)}
               </option>
             </select></label>
             <p :if={@ports == []}>
@@ -456,9 +456,6 @@ defmodule ModbusPlugin.UI do
     :exit, _ -> %{}
   end
 
-  defp port_label("ttyS3"), do: "RS485 1 (ttyS3)"
-  defp port_label("ttyS4"), do: "RS485 2 (ttyS4)"
-
   defp assignment_label(port) do
     cond do
       !port.present? -> "Not detected"
@@ -476,12 +473,11 @@ defmodule ModbusPlugin.UI do
         &(&1.id == id and &1.present? and &1.enabled? and &1.assigned_plugin == "modbus_plugin")
       )
 
-  defp assignment_path("ttyS3"), do: "/hardware/rs485/1?plugin=modbus_plugin"
-  defp assignment_path("ttyS4"), do: "/hardware/rs485/2?plugin=modbus_plugin"
+  defp assignment_path(id), do: "/hardware/#{URI.encode_www_form(id)}?plugin=modbus_plugin"
 
   defp ports do
     case ModbusPlugin.ports() do
-      {:ok, ports} -> Enum.filter(ports, &(&1.kind == :serial))
+      {:ok, ports} -> Enum.filter(ports, &(&1.kind == :rs485))
       _ -> []
     end
   catch

@@ -160,7 +160,7 @@ defmodule TailnetSubrouter.UI do
   end
 
   defp ports({:ok, interfaces}),
-    do: Enum.filter(interfaces, &(&1.kind == :ethernet and &1.id in ["eth0", "eth1"]))
+    do: Enum.filter(interfaces, &(&1.kind == :ethernet))
 
   defp ports(_), do: []
 
@@ -175,8 +175,7 @@ defmodule TailnetSubrouter.UI do
     end
   end
 
-  defp assignment_path("eth0"), do: "/hardware/lan/1?plugin=tailnet_subrouter"
-  defp assignment_path("eth1"), do: "/hardware/lan/2?plugin=tailnet_subrouter"
+  defp assignment_path(id), do: "/hardware/#{URI.encode_www_form(id)}?plugin=tailnet_subrouter"
 
   defp selectable?(interfaces, id),
     do: Enum.any?(ports(interfaces), &(&1.id == id and unavailable_reason(&1) == nil))

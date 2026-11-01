@@ -104,7 +104,7 @@ defmodule NervesGateSDK.PackageTest do
 
   test "Ethernet is an explicit hardware capability; unknown and duplicate kinds are rejected",
        context do
-    for kinds <- [[:ethernet], [:serial, :can, :ethernet]] do
+    for kinds <- [[:ethernet], [:rs485, :can, :ethernet, :iotrouter_expansion]] do
       file =
         archive(context,
           env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_hardware: kinds]
@@ -113,7 +113,8 @@ defmodule NervesGateSDK.PackageTest do
       assert {:ok, _} = Package.read(file)
     end
 
-    for kinds <- [[:ethernet, :ethernet], [:usb], [:serial, :can, :ethernet, :other]] do
+    # :serial was replaced by specific kinds; plugins declaring it are rejected.
+    for kinds <- [[:ethernet, :ethernet], [:usb], [:serial], [:rs485, :can, :other]] do
       file =
         archive(context,
           env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_hardware: kinds]

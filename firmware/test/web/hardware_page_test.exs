@@ -39,18 +39,43 @@ defmodule NervesGateWeb.HardwarePageTest do
     defdelegate handle_info(message, socket), to: NervesGateWeb.PluginLive
   end
 
+  # EM300's real declaration: four RS485 ports and an expansion bus.
+  @em300 "config/em300.exs"
+         |> Config.Reader.read!(env: :dev, target: :em300)
+         |> get_in([:nerves_gate, :board, :ports])
+
   setup do
+    previous = Application.fetch_env(:nerves_gate, :board)
+    Application.put_env(:nerves_gate, :board, %{ports: @em300})
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:nerves_gate, :board, value)
+        :error -> Application.delete_env(:nerves_gate, :board)
+      end
+    end)
+
+    start_supervised!({PropertyTable, name: NervesGate.Properties})
+    start_supervised!(NervesGate.Hardware)
     start_supervised!(NervesGate.ProjectionServer)
     NervesGate.WebFixture.start_endpoint("hardware-page-test")
     :ok
   end
 
-  test "Hardware keeps all fixed ports visible without topology or local address editors" do
+  test "Hardware lists the board's declared resources by ID, grouped by kind" do
+    put_inventory(@em300)
     document = page("/hardware")
     assert Floki.text(document) =~ "Plugins configure connected equipment"
 
-    for path <- ["/hardware/lan/1", "/hardware/lan/2", "/hardware/rs485/1", "/hardware/can/2"],
-        do: assert(Floki.find(document, "a[href='#{path}']") != [])
+    for port <- @em300 do
+      assert [_] = Floki.find(document, "#hardware-#{port.kind} a[href='/hardware/#{port.id}']")
+      assert Floki.text(Floki.find(document, "#hardware-#{port.id}")) =~ port.label
+    end
+
+    assert Floki.text(Floki.find(document, "#hardware-iotrouter_expansion")) =~ "Expansion bus"
+
+    # Routes carry board IDs; undeclared IDs return to the list.
+    assert {:error, {:live_redirect, %{to: "/hardware"}}} = live("/hardware/ttyS9")
 
     assert [] = Floki.find(document, "#ethernet-arrangement, #lan-ports-editor, #lan-ports-form")
 
@@ -88,13 +113,13 @@ defmodule NervesGateWeb.HardwarePageTest do
     end)
 
     document = page("/hardware")
-    assert [] = Floki.find(document, "#hardware-lan-1")
-    assert [_] = Floki.find(document, "#hardware-lan-2")
-    port = page("/hardware/lan/2")
+    assert [] = Floki.find(document, "#hardware-eth0")
+    assert [_] = Floki.find(document, "#hardware-eth1")
+    port = page("/hardware/eth1")
     assert [_] = Floki.find(port, "#hardware-assignment-form")
     assert [_] = Floki.find(port, "select[name='assignment[plugin]']")
     assert [] = Floki.find(port, "#application-port-form")
-    reserved = page("/hardware/lan/1")
+    reserved = page("/hardware/eth0")
     assert [_] = Floki.find(reserved, "#hardware-reserved")
     assert [] = Floki.find(reserved, "#hardware-assignment-form")
 
@@ -155,7 +180,12 @@ defmodule NervesGateWeb.HardwarePageTest do
   end
 
   test "hardware routes highlight Hardware navigation" do
-    for path <- ["/hardware", "/hardware/lan/1", "/hardware/rs485/1", "/hardware/can/1"] do
+    for path <- [
+          "/hardware",
+          "/hardware/eth1",
+          "/hardware/ttyS1",
+          "/hardware/ttyS5"
+        ] do
       assert [_] =
                Floki.find(
                  page(path),
@@ -164,15 +194,16 @@ defmodule NervesGateWeb.HardwarePageTest do
     end
   end
 
-  test "serial hardware offers assignments and no built-in protocol or capture controls" do
+  test "RS485 hardware offers kind-eligible plugins and no built-in protocol controls" do
     port = %{
-      name: "ttyS3",
-      transport: "rs485",
+      id: "ttyS1",
+      kind: :rs485,
+      label: "RS485 1",
+      assignable: true,
       present: true,
       enabled: true,
-      profile: "9600 8N1",
-      claimed: true,
-      subscribers: 0
+      path: "/dev/ttyS1",
+      gpios: %{}
     }
 
     hardware = %{
@@ -188,8 +219,11 @@ defmodule NervesGateWeb.HardwarePageTest do
       Phoenix.LiveViewTest.render_component(&NervesGateWeb.HardwarePortLive.render/1,
         projection: %{hardware: hardware},
         hardware: %{
-          ports: %{"ttyS3" => %{enabled: true, plugin: "modbus_plugin"}},
-          capabilities: %{"modbus_plugin" => [:serial]},
+          ports: %{"ttyS1" => %{enabled: true, plugin: "modbus_plugin"}},
+          capabilities: %{
+            "modbus_plugin" => [:rs485],
+            "expansion_plugin" => [:iotrouter_expansion]
+          },
           error: nil,
           operation: false
         },
@@ -197,9 +231,10 @@ defmodule NervesGateWeb.HardwarePageTest do
         uncertain?: false,
         outcome: nil,
         draft: nil,
-        port_name: "ttyS3",
+        port_name: "ttyS1",
+        kind: :rs485,
         title: "RS485 1",
-        live_action: :rs485
+        live_action: :port
       )
       |> Floki.parse_document!()
 
@@ -219,6 +254,12 @@ defmodule NervesGateWeb.HardwarePageTest do
              Floki.find(
                document,
                "select[name='assignment[plugin]'] option[value='modbus_plugin'][selected]"
+             )
+
+    assert [] =
+             Floki.find(
+               document,
+               "select[name='assignment[plugin]'] option[value='expansion_plugin']"
              )
 
     assert [] =
@@ -278,4 +319,22 @@ defmodule NervesGateWeb.HardwarePageTest do
   end
 
   defp page(path), do: build_conn() |> get(path) |> html_response(200) |> Floki.parse_document!()
+  defp live(path), do: Phoenix.LiveViewTest.live(build_conn(), path)
+
+  # Change only this test's read model: every declared resource present and free.
+  defp put_inventory(ports) do
+    hardware = %{
+      NervesGate.Hardware.unavailable()
+      | available: true,
+        ports: Enum.map(ports, &Map.merge(&1, %{present: true, enabled: false, gpios: %{}}))
+    }
+
+    :sys.replace_state(NervesGate.ProjectionServer, fn state ->
+      %{
+        state
+        | projection:
+            NervesGate.Projection.apply(state.projection, {:replace, :hardware, hardware})
+      }
+    end)
+  end
 end

@@ -230,8 +230,8 @@ defmodule Workbench.ScenariosTest do
       hardware: %{
         available: true,
         ports: [
-          %{name: "can0", transport: "can", present: true, up: false},
-          %{name: "ttyS3", transport: "rs485", present: true, enabled: false}
+          %{id: "can0", kind: :can, present: true, up: false},
+          %{id: "ttyS3", kind: :rs485, present: true, enabled: false}
         ]
       }
     }

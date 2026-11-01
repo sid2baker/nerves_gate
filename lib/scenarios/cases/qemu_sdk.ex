@@ -25,9 +25,9 @@ defmodule Scenarios.Cases.QemuSdk do
     # QEMU exposes only virtual Ethernet ports, never RS485/CAN resources.
     inventory = Device.rpc(vm, NervesGate.Hardware, :inventory)
 
-    assert Enum.map(inventory, &{&1.name, &1.transport}) == [
-             {"eth0", "ethernet"},
-             {"eth1", "ethernet"}
+    assert Enum.map(inventory, &{&1.id, &1.kind}) == [
+             {"eth0", :ethernet},
+             {"eth1", :ethernet}
            ]
 
     assert {:error, :hardware_missing} =

@@ -10,22 +10,34 @@ config :nerves_gate, :board, %{
   # Removable microSD slot; provision its first partition as ext4 separately.
   plugins_device: "/dev/mmcblk0p1",
   cellular: nil,
-  # ttyS5 is the extension-module bus, owned by the I/O domain, not a plugin port.
-  ports: %{
-    can: ["can0", "can1"],
-    serial: [
-      {"ttyS1", "serial", "UART1 · transceiver unqualified"},
-      {"ttyS2", "serial", "UART2 · transceiver unqualified"},
-      {"ttyS3", "serial", "UART3 · transceiver unqualified"},
-      {"ttyS4", "serial", "UART4 · transceiver unqualified"}
-    ]
-  },
+  # Plugin-assignable Linux resources; `kind` says which plugin may own them.
+  # Three physical Ethernet jacks are specified (WAN + 2 LAN), but stock Linux
+  # exposes only eth0/eth1. The jack-to-interface mapping is not qualified;
+  # do not invent an eth2 resource or assume three independent interfaces.
+  # The vendor specifies 4x RS485 on UART1-4 (electrically unqualified here).
+  # The expansion bus is ttyS5 (921600 8N1) with the module reset and link lines,
+  # one resource for a plugin speaking the IOTRouter expansion protocol.
+  ports: [
+    %{id: "eth0", kind: :ethernet, label: "LAN 1", assignable: true},
+    %{id: "eth1", kind: :ethernet, label: "LAN 2", assignable: true},
+    %{id: "ttyS1", kind: :rs485, label: "RS485 1", assignable: true},
+    %{id: "ttyS2", kind: :rs485, label: "RS485 2", assignable: true},
+    %{id: "ttyS3", kind: :rs485, label: "RS485 3", assignable: true},
+    %{id: "ttyS4", kind: :rs485, label: "RS485 4", assignable: true},
+    %{
+      id: "ttyS5",
+      kind: :iotrouter_expansion,
+      label: "Expansion Bus",
+      assignable: true,
+      gpios: %{reset: "EXT_RESET", link: "EXT_LINK"}
+    }
+  ],
   # LED polarity and the front key are not qualified yet.
   indicators: nil
 }
 
-# fwup's destination is the NAND env partition. Slot writes (UBI volume and raw
-# kernel slot) and data-volume reset run outside it and need --unsafe; the
+# fwup's destination is the NAND env partition. UBI slot writes and data-volume
+# reset run outside it and need --unsafe; the
 # archives come from the read-only system image or a verified SSH upload.
 config :nerves_runtime, devpath: "/dev/mtdblock2", fwup_extra_options: ["--unsafe"]
 config :ssh_subsystem_fwup, fwup_extra_options: ["--unsafe"]

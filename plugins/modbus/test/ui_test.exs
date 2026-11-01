@@ -45,14 +45,19 @@ defmodule ModbusPlugin.UITest do
       ModbusPlugin.Store.put(
         %{},
         "server1",
-        Map.merge(defaults, %{"mappings" => mappings, "authorized" => "true"})
+        Map.merge(defaults, %{
+          "mappings" => mappings,
+          "authorized" => "true",
+          "serial_port" => "ttyS1"
+        })
       )
 
     connection = Map.merge(config, %{state: :stopped, values: nil, error: nil, read_at: nil})
 
     port = %NervesGateSDK.Hardware.Candidate{
-      id: "ttyS3",
-      kind: :serial,
+      id: "ttyS1",
+      label: "RS485 1",
+      kind: :rs485,
       present?: true,
       enabled?: false
     }
@@ -64,9 +69,9 @@ defmodule ModbusPlugin.UITest do
         status: %{storage: nil, connections: [connection]}
       )
 
-    assert html =~ "RS485 1 (ttyS3)"
+    assert html =~ "RS485 1 (ttyS1)"
     assert html =~ "Available for assignment"
-    assert html =~ "/hardware/rs485/1?plugin=modbus_plugin"
+    assert html =~ "/hardware/ttyS1?plugin=modbus_plugin"
     assert html =~ ~r/<button[^>]*phx-click="start"[^>]*disabled/
     assert ModbusPlugin.Connection.pid("server1") == nil
   end

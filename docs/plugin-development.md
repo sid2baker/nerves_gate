@@ -66,11 +66,12 @@ See [runtime](plugins.md) for dependency ownership and cleanup guarantees.
 
 Read-only hardware observations can be queried through the SDK. Protocol clients
 should use normal libraries/TCP. Claim exclusive shared resources only where needed:
-serial/CAN workers open exclusively assigned resources, and local Ethernet addressing
+RS485, CAN and IOTRouter expansion-bus workers open exclusively assigned resources, and local Ethernet addressing
 requires an exclusively assigned LAN plus a caller-owned network lease. Query assignments through
 `NervesGateSDK.Hardware.resources/0`. SDK 0.2.0-dev.5 adds read-only
 `Hardware.candidates/0` for setup forms; it exposes owner/permission without granting
-access. Save drafts before navigating to gateway-owned assignment review because
+access. Resource IDs and labels are board data: choose from candidates of a supported
+`kind` and link to `/hardware/<id>?plugin=<app>`, never a fixed port list. Save drafts before navigating to gateway-owned assignment review because
 checked unload closes plugin pages. There is no administrative assignment SDK API.
 Keep transport workers supervised by the plugin. There are no SDK
 bus transport proxies. Local-network addressing still uses platform leases; creating

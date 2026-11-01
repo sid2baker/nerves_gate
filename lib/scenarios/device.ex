@@ -73,8 +73,8 @@ defmodule Scenarios.Device do
     for {resource, supported} <- [
           ethernet: status.connections.ports != [],
           cellular: status.cellular.supported,
-          can: bus?(status.hardware, "can"),
-          rs485: bus?(status.hardware, "rs485")
+          can: bus?(status.hardware, :can),
+          rs485: bus?(status.hardware, :rs485)
         ],
         supported,
         do: resource
@@ -87,10 +87,13 @@ defmodule Scenarios.Device do
 
     ports =
       Enum.filter(status.hardware.ports, fn port ->
-        Map.get(%{"can" => :can, "rs485" => :rs485}, port.transport) in required
+        port.kind in required
       end)
 
-    missing = for port <- ethernet ++ ports, port.present != true, do: port.name
+    missing =
+      for port <- ethernet, port.present != true, do: port.name
+
+    missing = missing ++ for(port <- ports, port.present != true, do: port.id)
 
     missing =
       if :cellular in required and status.cellular.present != true,
@@ -101,8 +104,8 @@ defmodule Scenarios.Device do
     :ok
   end
 
-  defp bus?(%{available: true, ports: ports}, transport),
-    do: Enum.any?(ports, &(&1.transport == transport))
+  defp bus?(%{available: true, ports: ports}, kind),
+    do: Enum.any?(ports, &(&1.kind == kind))
 
   defp bus?(_, _), do: false
 

@@ -3,7 +3,7 @@ defmodule NervesGate.Linux.CAN do
   import Bitwise
   alias NervesGate.Linux.Netlink
 
-  def snapshot(name) when name in ["can0", "can1"] do
+  def snapshot(name) when is_binary(name) do
     with {:ok, index} <- :net.if_name2index(String.to_charlist(name)),
          {:ok, links} <- Netlink.request(18, 5, <<0::32, index::native-signed-32, 0::64>>),
          {16,

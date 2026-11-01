@@ -3,13 +3,16 @@ import_config "firmware.exs"
 
 # One QEMU development firmware, also used by all scenarios. Not the workstation.
 # Same application as EC100; only virtual hardware differs. QEMU does not emulate
-# EC100 buses, LEDs or the recovery button, so the board declares none.
+# EC100 buses, LEDs or the recovery button: the board declares only its two LANs.
 config :nerves_gate, :board, %{
   data: {:ext4, "/sys/class/block/vda4/dev"},
   # The simulator's prepared ext4 virtual SD card.
   plugins_device: "/dev/vdb",
   cellular: nil,
-  ports: nil,
+  ports: [
+    %{id: "eth0", kind: :ethernet, label: "LAN 1", assignable: true},
+    %{id: "eth1", kind: :ethernet, label: "LAN 2", assignable: true}
+  ],
   indicators: nil
 }
 

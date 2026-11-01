@@ -1,5 +1,10 @@
 defmodule NervesGate.Hardware do
-  @moduledoc "Allowlisted Ethernet and bus inventory. Plugins own assigned resources and protocols."
+  @moduledoc """
+  The board's plugin-assignable hardware with runtime presence. The board config
+  (`:board` `:ports`) is the only description of which resources exist; assignments,
+  SDK candidates and the Hardware pages all read this inventory. Plugins own the
+  assigned resources and their protocols.
+  """
   use GenServer
   alias NervesGate.Observations
 
@@ -12,6 +17,9 @@ defmodule NervesGate.Hardware do
     :exit, _ -> []
   end
 
+  @doc "The normalized inventory entry for a resource ID, or nil."
+  def fetch(id), do: Enum.find(inventory(), &(&1.id == id))
+
   def unavailable,
     do: %{available: false, ports: [], error: nil}
 
@@ -22,12 +30,10 @@ defmodule NervesGate.Hardware do
         assignments = NervesGate.Plugins.hardware()
 
         %{
-          available:
-            Process.whereis(__MODULE__) != nil and
-              (ports != [] or NervesGate.Board.get(:ports) != nil),
+          available: Process.whereis(__MODULE__) != nil,
           ports:
             Enum.map(ports, fn port ->
-              setting = assignments.ports[port.name] || %{enabled: false, plugin: nil}
+              setting = assignments.ports[port.id] || %{enabled: false, plugin: nil}
 
               Map.merge(port, %{
                 enabled: setting.enabled,
@@ -43,8 +49,10 @@ defmodule NervesGate.Hardware do
   end
 
   def init(_) do
-    send(self(), :poll)
-    {:ok, []}
+    ports = snapshot()
+    Observations.put(["hardware"], ports)
+    Process.send_after(self(), :poll, 2_000)
+    {:ok, ports}
   end
 
   def handle_call(:inventory, _, ports), do: {:reply, ports, ports}
@@ -53,24 +61,19 @@ defmodule NervesGate.Hardware do
     do: {:reply, [{Observations.table(), ["hardware"]}], ports}
 
   def handle_info(:poll, previous) do
-    ports =
-      case NervesGate.Board.get(:ports) do
-        nil -> []
-        board_ports -> NervesGate.Hardware.Ports.snapshot(board_ports)
-      end
-
-    ethernet =
-      case NervesGate.Network.Vintage.snapshot() do
-        %{ports: ports} ->
-          Enum.map(ports, &Map.merge(&1, %{transport: "ethernet", interface: &1.name}))
-
-        _ ->
-          []
-      end
-
-    ports = ethernet ++ ports
+    ports = snapshot()
     if ports != previous, do: Observations.put(["hardware"], ports)
     Process.send_after(self(), :poll, 2_000)
     {:noreply, ports}
+  end
+
+  defp snapshot do
+    network =
+      case NervesGate.Network.Vintage.snapshot() do
+        %{ports: ports} -> ports
+        _ -> []
+      end
+
+    NervesGate.Hardware.Ports.snapshot(NervesGate.Board.get(:ports) || [], network)
   end
 end

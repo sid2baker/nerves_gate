@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Version 0.1.10 requires SDK 0.2.0-dev.6 and chooses Ethernet resources by kind instead of fixed interface IDs. Assignment links use `/hardware/:id`. Older version-scoped configuration is preserved, not imported.
+
 - Version 0.1.9 offers gateway-owned LAN assignment review before volatile address setup. Review can explicitly start the target plugin but never configures or advertises a subnet; previous selections remain unchanged.
 
 ### Breaking changes

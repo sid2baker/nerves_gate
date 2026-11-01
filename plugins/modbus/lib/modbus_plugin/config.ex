@@ -9,11 +9,9 @@ defmodule ModbusPlugin.Config do
   @id ~r/\A[a-z][a-z0-9_]{0,31}\z/
   @host ~r/\A[a-zA-Z0-9.:%_-]+\z/
   @speeds [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115_200]
-  @serial_ports ["ttyS3", "ttyS4"]
   @max_mappings 64
 
   def speeds, do: @speeds
-  def serial_ports, do: @serial_ports
 
   def validate(id, params) when is_binary(id) and is_map(params) do
     role = role(params["role"])
@@ -67,7 +65,9 @@ defmodule ModbusPlugin.Config do
   defp valid_transport?(%{transport: "tcp", role: :server, port: port}), do: port in 1..65535
 
   defp valid_transport?(%{transport: "rtu"} = config) do
-    config.serial_port in @serial_ports and config.authorized and config.speed in @speeds and
+    is_binary(config.serial_port) and byte_size(config.serial_port) in 1..32 and
+      config.serial_port =~ ~r/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/ and config.authorized and
+      config.speed in @speeds and
       config.parity in [:none, :even, :odd] and config.stop_bits in [1, 2]
   end
 

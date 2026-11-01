@@ -362,13 +362,14 @@ defmodule NervesGate.Network do
          )}
   end
 
-  defp hardware_candidate(_, interface, _) when interface not in ["eth0", "eth1"],
-    do: {:error, :invalid_hardware_assignment}
+  defp hardware_candidate(state, interface, requested?) do
+    case NervesGate.Hardware.fetch(interface) do
+      %{kind: :ethernet, assignable: true} ->
+        if requested?, do: Policy.assignable(public(state), interface), else: :ok
 
-  defp hardware_candidate(_, _, false), do: :ok
-
-  defp hardware_candidate(state, interface, true) do
-    Policy.assignable(public(state), interface)
+      _ ->
+        {:error, :invalid_hardware_assignment}
+    end
   end
 
   defp hardware_network_change(network) do

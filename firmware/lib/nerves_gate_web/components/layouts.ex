@@ -76,7 +76,7 @@ defmodule NervesGateWeb.Layouts do
   end
 
   defp section(action) when action in [:plugins, :plugin], do: :plugins
-  defp section(action) when action in [:hardware, :lan, :rs485, :can], do: :hardware
+  defp section(action) when action in [:hardware, :port], do: :hardware
   defp section(action) when action in [:settings, :storage], do: :settings
   defp section(:io), do: :io
   defp section(_), do: :overview

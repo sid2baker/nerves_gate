@@ -33,8 +33,24 @@ defmodule NervesGate.SDKOwnershipTest do
     )
 
     :ok = Application.start(:resources_fixture)
+    start_supervised!({PropertyTable, name: NervesGate.Properties})
     hardware = start_supervised!(NervesGate.Hardware)
-    ports = for name <- ["ttyS3", "ttyS4", "can0"], do: %{name: name, present: true}
+
+    ports =
+      for {id, kind} <- [{"ttyS3", :rs485}, {"ttyS4", :rs485}, {"can0", :can}],
+          do: %{id: id, kind: kind, label: id, present: true, assignable: true, gpios: %{}}
+
+    expansion = %{
+      id: "ttyS5",
+      kind: :iotrouter_expansion,
+      label: "Expansion Bus",
+      assignable: true,
+      present: true,
+      path: "/dev/ttyS5",
+      gpios: %{reset: "EXT_RESET", link: "EXT_LINK"}
+    }
+
+    ports = ports ++ [expansion]
     :sys.replace_state(hardware, fn _ -> ports end)
     pid = Process.whereis(ResourceFixture)
 
@@ -50,6 +66,28 @@ defmodule NervesGate.SDKOwnershipTest do
       assert {:reply, {:ok, []}, ^state} =
                NervesGate.Plugins.handle_call(:resources, {pid, make_ref()}, state)
     end
+
+    state = %{
+      assignment_error: nil,
+      blocked: nil,
+      assignments: %{"ttyS5" => %{enabled: true, plugin: "resources_fixture"}},
+      entries: %{"resources_fixture" => %{active_version: "1.0.0", artifacts: %{"1.0.0" => %{}}}},
+      declared: %{{"resources_fixture", "1.0.0", %{}} => [:iotrouter_expansion]}
+    }
+
+    assert {:reply, {:ok, [resource]}, _} =
+             NervesGate.Plugins.handle_call(:resources, {pid, make_ref()}, state)
+
+    assert resource.id == "ttyS5"
+    assert resource.kind == :iotrouter_expansion
+    assert resource.label == "Expansion Bus"
+    assert resource.path == "/dev/ttyS5"
+    assert resource.gpios == %{reset: "EXT_RESET", link: "EXT_LINK"}
+
+    assert {:reply, {:ok, candidates}, _} =
+             NervesGate.Plugins.handle_call(:hardware_candidates, {pid, make_ref()}, state)
+
+    assert Enum.any?(candidates, &(&1.id == "ttyS5" and &1.kind == :iotrouter_expansion))
   end
 
   test "configuration storage derives plugin and version from the actual managed caller" do
@@ -110,14 +148,21 @@ defmodule NervesGate.SDKOwnershipTest do
     file = Path.join(dir, "hardware.term")
     assert :ok = Assignments.persist(file, ports)
     assert {:ok, ^ports} = Assignments.read(file)
+
+    # Persistence is structural: any well-formed ID is kept, including intent for
+    # hardware a board does not declare (for example ttyS1 on EM300 or a removed port).
+    other_board = Map.put(ports, "ttyS1", %{enabled: true, plugin: "modbus_plugin"})
+    assert :ok = Assignments.persist(file, other_board)
+    assert {:ok, ^other_board} = Assignments.read(file)
     bytes = File.read!(file)
 
-    assert {:error, :invalid_hardware_assignments} =
-             Assignments.persist(
-               file,
-               Map.put(ports, "ttyS0", %{enabled: true, plugin: "modbus_plugin"})
-             )
+    for bad <- ["", ".", "..", "../tty", String.duplicate("x", 33), :ttyS3] do
+      assert {:error, :invalid_hardware_assignments} =
+               Assignments.persist(file, Map.put(ports, bad, %{enabled: true, plugin: nil}))
+    end
 
+    many = Map.new(1..65, &{"port#{&1}", %{enabled: false, plugin: nil}})
+    assert {:error, :invalid_hardware_assignments} = Assignments.persist(file, many)
     assert File.read!(file) == bytes
   end
 
@@ -147,20 +192,38 @@ defmodule NervesGate.SDKOwnershipTest do
 
   test "protected, absent and wrong-kind resources cannot be assigned" do
     ports = [
-      %{name: "ttyS3", present: true},
-      %{name: "ttyS4", present: false},
-      %{name: "can0", present: true},
-      %{name: "eth1", present: true}
+      %{id: "ttyS3", kind: :rs485, present: true, assignable: true},
+      %{id: "ttyS4", kind: :rs485, present: false, assignable: true},
+      %{id: "can0", kind: :can, present: true, assignable: true},
+      %{id: "eth1", kind: :ethernet, present: true, assignable: true},
+      %{id: "ttyS5", kind: :iotrouter_expansion, present: true, assignable: true}
     ]
 
-    capabilities = %{"modbus_plugin" => [:serial], "tailnet_subrouter" => [:ethernet]}
+    capabilities = %{
+      "modbus_plugin" => [:rs485],
+      "tailnet_subrouter" => [:ethernet],
+      "expansion_plugin" => [:iotrouter_expansion]
+    }
+
     assert :ok = Assignments.validate("eth1", true, "tailnet_subrouter", ports, capabilities)
     assert :ok = Assignments.validate("ttyS3", true, "modbus_plugin", ports, capabilities)
     assert :ok = Assignments.validate("ttyS3", false, nil, ports, capabilities)
     assert :ok = Assignments.validate("ttyS4", false, nil, ports, capabilities)
 
-    assert {:error, :invalid_hardware_assignment} =
+    assert :ok =
+             Assignments.validate("ttyS5", true, "expansion_plugin", ports, capabilities)
+
+    assert {:error, :ineligible_plugin} =
+             Assignments.validate("ttyS5", true, "modbus_plugin", ports, capabilities)
+
+    # Undeclared hardware can be released but never newly assigned or enabled.
+    assert :ok = Assignments.validate("eth2", false, nil, ports, capabilities)
+
+    assert {:error, :hardware_missing} =
              Assignments.validate("eth2", true, "modbus_plugin", ports, capabilities)
+
+    assert {:error, :invalid_hardware_assignment} =
+             Assignments.validate("../eth2", false, nil, ports, capabilities)
 
     assert {:error, :hardware_missing} =
              Assignments.validate("ttyS4", true, "modbus_plugin", ports, capabilities)
@@ -170,6 +233,26 @@ defmodule NervesGate.SDKOwnershipTest do
 
     assert {:error, :ineligible_plugin} =
              Assignments.validate("ttyS3", true, "missing", ports, capabilities)
+  end
+
+  test "saved assignments are rechecked against the current board before activation" do
+    assignments = %{"old_port" => %{enabled: true, plugin: "modbus_plugin"}}
+
+    assert {:error, :hardware_missing} =
+             Assignments.validate_plugin("modbus_plugin", assignments, [], [:rs485])
+
+    port = %{id: "old_port", kind: :rs485, assignable: false, present: true}
+
+    assert {:error, :hardware_not_assignable} =
+             Assignments.validate_plugin("modbus_plugin", assignments, [port], [:rs485])
+
+    port = %{port | assignable: true}
+    assert :ok = Assignments.validate_plugin("modbus_plugin", assignments, [port], [:rs485])
+
+    assert {:error, :ineligible_plugin} =
+             Assignments.validate_plugin("modbus_plugin", assignments, [port], [:can])
+
+    assert :ok = Assignments.validate_plugin("other_plugin", assignments, [], [:rs485])
   end
 
   test "fixed SDK bridge forwards assignment queries from the actual caller", %{tmp_dir: dir} do

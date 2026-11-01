@@ -1,8 +1,25 @@
 # Hardware assignments and Modbus
 
-Hardware offers independent non-Internet `eth0`/`eth1` LAN ports alongside
-allowlisted EC100 `ttyS3`/`ttyS4` RS485 and `can0`/`can1` interfaces. Internet uplinks
-are managed under Internet, not displayed as assignable hardware. It never opens traffic sockets, captures frames or issues Modbus reads.
+`config/<target>.exs` declares each board resource once (`id`, `kind`, `label`,
+`assignable` and optional named `gpios`). The device tree makes Linux devices
+exist; it is not parsed at runtime. `NervesGate.Hardware.inventory/0` combines the
+board declarations with runtime presence. Assignment eligibility, plugin SDK
+candidates/resources and the Hardware pages consume this normalized inventory.
+Hardware groups resources by kind, and `/hardware/:id` addresses the real ID,
+not a positional port number. Internet uplinks are managed under Internet, not
+displayed as assignable hardware. Hardware never opens traffic sockets, captures
+frames or issues Modbus reads.
+
+Kinds describe which class of plugin may own a resource: `:ethernet`, `:rs485`,
+`:can`, `:iotrouter_expansion` (SDK `Hardware.kinds/0`). EC100 declares two RS485
+ports; EM300 declares four and no CAN resources. EM300 has three physical
+Ethernet jacks (WAN + two LAN), but stock Linux exposes two RMII interfaces;
+the physical mapping is unqualified, not a verified third independent interface.
+The EM300 expansion resource is `ttyS5` plus the
+`EXT_RESET` and `EXT_LINK` GPIOs, not independently assignable lines.
+`EXT_ERROR_LED` is excluded until its semantics are known. A future expansion
+plugin will own this bus, discover cards and expose channels through I/O; cards
+are not core hardware resources. No expansion plugin is installed automatically.
 There is no built-in capture/Modbus diagnostic API. Opening Hardware is read-only.
 
 ## Exclusive assignment
@@ -35,9 +52,11 @@ start failed is reported as partial completion, never rolled back or replayed.
 Busy/unknown cleanup or persistence blocks reuse. No forced takeover or automatic retry.
 
 Protected console, USB-management and Internet resources are not assignment
-candidates. Unsupported or absent ports cannot be assigned/enabled. A missing port's
-saved assignment remains visible; an operator may disable/unassign it without
-opening it. Missing plugin intent is retained, never silently reassigned.
+candidates. Unsupported, reserved or absent ports cannot be assigned/enabled.
+Persistence checks structure only, not a fixed list of board IDs. Saved intent
+for missing hardware is retained intact and rejects plugin activation; an
+operator can release it by ID through the administrative API without opening it.
+Missing plugin intent is retained, never silently reassigned.
 
 Administrative API:
 
@@ -59,7 +78,7 @@ intent is performed.
 `NervesGateSDK.Hardware.candidates/0` provides typed, read-only presence, assignment
 and permission for setup. It grants no resource access and does not replace Network
 admission. `NervesGateSDK.Hardware.resources/0` returns typed assigned/enabled allowlisted ports
-for the actual managed calling process. It accepts no plugin name or arbitrary path and
+for the actual managed calling process, including board labels and resource GPIOs. It accepts no plugin name or arbitrary path and
 opens no handles. Presence and assignment do not imply connected equipment. Plugins
 supervise their own libraries and transport workers, not SDK claim/byte-I/O proxies.
 The former CAN/RS485 SDK transport APIs are removed without compatibility shims.

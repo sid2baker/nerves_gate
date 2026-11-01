@@ -57,8 +57,8 @@ defmodule TailnetSubrouter.UITest do
         interfaces: {:ok, [port("eth0", internet?: true), port("eth1", assigned_plugin: nil)]}
       )
 
-    assert html =~ "/hardware/lan/2?plugin=tailnet_subrouter"
-    refute html =~ "/hardware/lan/1?plugin=tailnet_subrouter"
+    assert html =~ "/hardware/eth1?plugin=tailnet_subrouter"
+    refute html =~ "/hardware/eth0?plugin=tailnet_subrouter"
     assert html =~ "discard any unsaved address draft"
     assert TailnetSubrouter.status() == %{state: :disabled}
   end

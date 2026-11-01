@@ -4,6 +4,7 @@
 
 ### Breaking changes
 
+- Hardware kinds say which class of plugin may own a resource: `:ethernet`, `:can`, `:rs485` and `:iotrouter_expansion` (`Hardware.kinds/0`). `:serial` is removed; packages declaring it are rejected. `Hardware.Port` and `Hardware.Candidate` carry the board's `label`; ports carry their named `gpios`. Resource IDs are board-defined, never a fixed list.
 - Plugin terminology replaces application terminology: `Network.Interface.plugin_enabled?` replaces `application_enabled?`, and errors such as `application_not_running`/`applications_blocked` are now `plugin_not_running`/`plugins_blocked`. No aliases.
 - Local Ethernet claims require an enabled exclusive assignment to the actual managed plugin. Declare `:ethernet` in `nerves_gate_hardware`; a network plugin-role flag alone grants no access. Hardware resources include Ethernet interfaces and network observations expose the assigned plugin.
 - Removed CAN/RS485 claim, subscription and byte-I/O APIs. Plugins query their caller-derived exclusive assignments through `Hardware.resources/0` and supervise ordinary transport libraries directly. Reassignment requires checked whole-plugin stop; Internet/local-network leases retain their separate platform contract.

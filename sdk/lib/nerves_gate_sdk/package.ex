@@ -165,8 +165,8 @@ defmodule NervesGateSDK.Package do
 
   defp valid_hardware?(kinds),
     do:
-      is_list(kinds) and length(kinds) <= 3 and
-        Enum.all?(kinds, &(&1 in [:serial, :can, :ethernet])) and Enum.uniq(kinds) == kinds
+      is_list(kinds) and Enum.all?(kinds, &(&1 in NervesGateSDK.Hardware.kinds())) and
+        Enum.uniq(kinds) == kinds
 
   defp valid_ui?(main) do
     case Keyword.fetch(main.env, :nerves_gate_ui) do

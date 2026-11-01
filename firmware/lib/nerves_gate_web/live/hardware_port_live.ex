@@ -18,25 +18,21 @@ defmodule NervesGateWeb.HardwarePortLive do
      )}
   end
 
+  # The route carries the board's resource ID; unknown IDs return to the list.
   def handle_params(%{"id" => id} = params, _, socket) do
-    ports = %{
-      lan: %{"1" => "eth0", "2" => "eth1"},
-      rs485: %{"1" => "ttyS3", "2" => "ttyS4"},
-      can: %{"1" => "can0", "2" => "can1"}
-    }
-
-    case get_in(ports, [socket.assigns.live_action, id]) do
+    case NervesGate.Hardware.fetch(id) do
       nil ->
         {:noreply, push_navigate(socket, to: "/hardware")}
 
-      name ->
+      port ->
         plugin = params["plugin"]
         requested = if is_binary(plugin) and NervesGateSDK.Package.valid_name?(plugin), do: plugin
 
         {:noreply,
          assign(socket,
-           port_name: name,
-           title: "#{socket.assigns.live_action |> Atom.to_string() |> String.upcase()} #{id}",
+           port_name: port.id,
+           kind: port.kind,
+           title: port.label,
            requested_plugin: requested,
            assignment_form: nil,
            draft: nil
@@ -131,24 +127,23 @@ defmodule NervesGateWeb.HardwarePortLive do
        )}
 
   def render(assigns) do
-    observed = Enum.find(assigns.projection.hardware.ports, &(&1.name == assigns.port_name))
+    observed = Enum.find(assigns.projection.hardware.ports, &(&1.id == assigns.port_name))
     setting = assigns.hardware.ports[assigns.port_name] || %{enabled: false, plugin: nil}
 
     eligible =
-      for {plugin, kinds} <- assigns.hardware.capabilities,
-          NervesGate.Plugins.Assignments.kind(assigns.port_name) in kinds,
-          do: plugin
+      for {plugin, kinds} <- assigns.hardware.capabilities, assigns.kind in kinds, do: plugin
 
     requested = Map.get(assigns, :requested_plugin)
     form = assignment_form(Map.get(assigns, :assignment_form), requested, setting, eligible)
     selected = form["plugin"]
     start? = form["start_plugin"] == "true"
-    network = if assigns.live_action == :lan, do: assigns.projection.network.desired
+    network = if assigns.kind == :ethernet, do: assigns.projection.network.desired
 
     reserved =
-      assigns.live_action == :lan and
-        (network["mode"] != "ports" or
-           NervesGate.Config.role_port(network, "internet") == assigns.port_name)
+      (observed != nil and not observed.assignable) or
+        (assigns.kind == :ethernet and
+           (network["mode"] != "ports" or
+              NervesGate.Config.role_port(network, "internet") == assigns.port_name))
 
     assigns =
       assign(assigns,
@@ -168,8 +163,8 @@ defmodule NervesGateWeb.HardwarePortLive do
       Assign access here; configure equipment in its plugin. Assignment is not a connection. Opening this page never opens a port.
     </p>
     <.notice :if={@reserved} tone="warning" id="hardware-reserved">
-      This interface is reserved for Internet or is not yet an independent LAN.
-      <.link navigate="/network" class="ui-text-link">Manage Internet</.link>
+      This resource is reserved for the system or Internet.
+      <.link :if={@kind == :ethernet} navigate="/network" class="ui-text-link">Manage Internet</.link>
     </.notice>
     <p :if={@outcome} role="status">{@outcome}</p>
     <p :if={@hardware.error} role="alert">
@@ -190,7 +185,6 @@ defmodule NervesGateWeb.HardwarePortLive do
         <p :if={!@port || !@port.present}>
           Missing hardware can be released, but not newly assigned or enabled.
         </p>
-        <p :if={@port && Map.get(@port, :profile)}>{@port.profile}</p>
         <form
           :if={!@reserved}
           id="hardware-assignment-form"

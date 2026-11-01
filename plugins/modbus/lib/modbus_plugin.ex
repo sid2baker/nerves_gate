@@ -176,7 +176,7 @@ defmodule ModbusPlugin do
   defp assigned_transport(config) do
     with {:ok, resources} <- NervesGateSDK.Hardware.resources(),
          %{present?: true, path: path} when is_binary(path) <-
-           Enum.find(resources, &(&1.id == config.serial_port and &1.kind == :serial)) do
+           Enum.find(resources, &(&1.id == config.serial_port and &1.kind == :rs485)) do
       {:ok, Map.put(config, :serial_path, path)}
     else
       {:error, _} = error -> error

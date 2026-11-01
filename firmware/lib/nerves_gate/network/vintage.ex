@@ -352,7 +352,7 @@ defmodule NervesGate.Network.Vintage do
     %{
       simulated: false,
       bridge: interface("br0"),
-      ports: Enum.map(["eth0", "eth1"], &interface/1),
+      ports: Enum.map(ethernet_interfaces(), &interface/1),
       usb: interface("usb0"),
       management: management_interfaces(),
       cellular_supported: NervesGate.Cellular.Profile.get() != nil,
@@ -360,10 +360,14 @@ defmodule NervesGate.Network.Vintage do
     }
   end
 
+  defp ethernet_interfaces do
+    for %{kind: :ethernet, id: id} <- NervesGate.Board.get(:ports) || [], do: id
+  end
+
   defp management_interfaces do
     Application.get_env(:vintage_net, :config, [])
     |> Enum.map(fn {name, _} -> name end)
-    |> Enum.reject(&(&1 in ["eth0", "eth1", "br0", "usb0"]))
+    |> Enum.reject(&(&1 in (ethernet_interfaces() ++ ["br0", "usb0"])))
     |> Enum.map(&interface/1)
   end
 

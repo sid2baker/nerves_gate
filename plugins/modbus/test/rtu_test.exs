@@ -16,7 +16,7 @@ defmodule ModbusPlugin.RTUTest do
     for change <- [
           %{"authorized" => false},
           %{"serial_port" => "/dev/ttyS0"},
-          %{"serial_port" => "ttyS0"},
+          %{"serial_port" => "../ttyS0"},
           %{"speed" => 9601},
           %{"parity" => "mark"},
           %{"stop_bits" => 3},
@@ -25,6 +25,10 @@ defmodule ModbusPlugin.RTUTest do
       assert {:error, :invalid_configuration} =
                Config.validate("one", Map.merge(params(), change))
     end
+
+    # Saving checks structure, never board topology. Assignment is checked at Start.
+    assert {:ok, %{serial_port: "ttyS1"}} =
+             Config.validate("em300", Map.put(params(), "serial_port", "ttyS1"))
 
     {:ok, configs} = Store.put(%{}, "unassigned", params())
     state = %{configs: configs, error: nil, monitors: %{}}

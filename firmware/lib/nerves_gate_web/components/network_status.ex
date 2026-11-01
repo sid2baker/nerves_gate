@@ -114,28 +114,6 @@ defmodule NervesGateWeb.NetworkStatus do
   defp uplink_label(name) when name in ["eth0", "eth1"], do: port_label(name)
   defp uplink_label(_), do: "4G modem"
 
-  def lan_ports(projection) do
-    settings =
-      (projection.network.pending && projection.network.pending.network) ||
-        projection.network.desired
-
-    Enum.map([{"1", "eth0"}, {"2", "eth1"}], fn {id, name} ->
-      role =
-        if settings && settings["mode"] == "shared" do
-          "shared"
-        else
-          get_in(NervesGate.Config.ports(settings), [name, "role"]) || "unassigned"
-        end
-
-      %{
-        id: id,
-        name: name,
-        role: role,
-        observed: Enum.find(projection.connections.ports, &(&1.name == name))
-      }
-    end)
-  end
-
   def cable_status(nil), do: "Not configured"
   def cable_status(%{present: false}), do: "Not installed"
   def cable_status(%{link: true}), do: "Cable connected"

@@ -232,12 +232,13 @@ defmodule NervesGate.Plugins do
 
   def handle_call(:hardware_candidates, _, state) do
     ports =
-      for port <- NervesGate.Hardware.inventory() do
-        setting = state.assignments[port.name] || %{enabled: false, plugin: nil}
+      for port <- NervesGate.Hardware.inventory(), port.assignable do
+        setting = state.assignments[port.id] || %{enabled: false, plugin: nil}
 
         %NervesGateSDK.Hardware.Candidate{
-          id: port.name,
-          kind: Assignments.kind(port.name),
+          id: port.id,
+          kind: port.kind,
+          label: port.label,
           present?: port.present,
           enabled?: setting.enabled,
           assigned_plugin: setting.plugin
@@ -255,9 +256,12 @@ defmodule NervesGate.Plugins do
          %{enabled: true, plugin: plugin} when plugin == owner.app <- state.assignments[port] do
       {capabilities, state} = capabilities(state)
 
-      if Assignments.kind(port) in Map.get(capabilities, plugin, []),
-        do: {:reply, :ok, state},
-        else: {:reply, {:error, :hardware_not_assigned}, state}
+      resource = NervesGate.Hardware.fetch(port)
+
+      if resource != nil and resource.assignable and
+           resource.kind in Map.get(capabilities, plugin, []),
+         do: {:reply, :ok, state},
+         else: {:reply, {:error, :hardware_not_assigned}, state}
     else
       {:error, _} = error -> {:reply, error, state}
       _ -> {:reply, {:error, :hardware_not_assigned}, state}
@@ -269,7 +273,7 @@ defmodule NervesGate.Plugins do
          {:ok, owner} <- Owner.resolve(pid) do
       assigned =
         for port <- NervesGate.Hardware.inventory(),
-            %{enabled: true, plugin: plugin} <- [state.assignments[port.name]],
+            %{enabled: true, plugin: plugin} <- [state.assignments[port.id]],
             plugin == owner.app,
             do: port
 
@@ -277,15 +281,15 @@ defmodule NervesGate.Plugins do
       kinds = Map.get(capabilities, owner.app, [])
 
       resources =
-        for port <- assigned,
-            kind = Assignments.kind(port.name),
-            kind in kinds do
+        for port <- assigned, port.assignable, port.kind in kinds do
           %NervesGateSDK.Hardware.Port{
-            id: port.name,
-            kind: kind,
+            id: port.id,
+            kind: port.kind,
+            label: port.label,
             present?: port.present,
             path: Map.get(port, :path),
-            interface: if(kind in [:can, :ethernet], do: port.name)
+            interface: Map.get(port, :interface),
+            gpios: port.gpios
           }
         end
 
@@ -704,14 +708,19 @@ defmodule NervesGate.Plugins do
     end
   end
 
-  defp assignment_network(port) when port in ["eth0", "eth1"] do
-    case NervesGate.Network.status() do
-      nil -> :unavailable
-      status -> Map.take(status, [:config, :trial, :recovering, :ready])
+  # Ethernet assignment shares Network's admission; other kinds do not.
+  defp assignment_network(port) do
+    case NervesGate.Hardware.fetch(port) do
+      %{kind: :ethernet} ->
+        case NervesGate.Network.status() do
+          nil -> :unavailable
+          status -> Map.take(status, [:config, :trial, :recovering, :ready])
+        end
+
+      _ ->
+        nil
     end
   end
-
-  defp assignment_network(_), do: nil
 
   defp assignment_review(port, enabled, plugin, start?, network, state) do
     old = state.assignments[port] || %{enabled: false, plugin: nil}
@@ -764,7 +773,7 @@ defmodule NervesGate.Plugins do
   defp reserve_review(%{changed?: false}), do: :ok
 
   defp reserve_review(%{port: port, setting: setting, network: expected})
-       when port in ["eth0", "eth1"],
+       when expected != nil,
        do:
          NervesGate.Network.reserve_hardware(
            port,
@@ -1191,8 +1200,16 @@ defmodule NervesGate.Plugins do
   defp activate(artifact, package, state, context) do
     app = to_string(artifact.app)
 
-    case context.({:bind, artifact}) do
-      {:ok, activation} -> activate_bound(app, activation, package, state, context)
+    with :ok <-
+           Assignments.validate_plugin(
+             app,
+             state.assignments,
+             NervesGate.Hardware.inventory(),
+             package.main.env[:nerves_gate_hardware] || []
+           ),
+         {:ok, activation} <- context.({:bind, artifact}) do
+      activate_bound(app, activation, package, state, context)
+    else
       {:error, reason} -> {:error, reason, state}
     end
   end

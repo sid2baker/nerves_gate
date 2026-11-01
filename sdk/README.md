@@ -143,15 +143,18 @@ Plugins on a device are trusted same-BEAM OTP applications, not sandboxed.
 
 ## Exclusive hardware assignments
 
-Plugins declare the kinds they use (`:ethernet`, `:serial`, `:can`) in `nerves_gate_hardware` in their main OTP
-environment. `Hardware.resources/0` returns enabled allowlisted assignments for the
-actual managed caller, as `%Hardware.Port{id: ..., kind: ..., present?: ..., path: ...}`.
+Plugins declare the kinds they support (`:ethernet`, `:can`, `:rs485`,
+`:iotrouter_expansion`; see `Hardware.kinds/0`) in `nerves_gate_hardware` in their main
+OTP environment. Boards declare which resources exist; IDs such as `ttyS3` are board
+data, so plugins choose from `Hardware.candidates/0` instead of fixed lists.
+`Hardware.resources/0` returns enabled assignments for the actual managed caller, as
+`%Hardware.Port{id: ..., kind: ..., label: ..., present?: ..., path: ..., gpios: ...}`.
 It opens nothing and accepts no plugin name or arbitrary operator-supplied path. One
 port belongs to one plugin; a plugin may own several ports with supervised workers.
 
 SDK 0.2.0-dev.5 adds `Hardware.candidates/0`, returning typed
-`%Hardware.Candidate{id: ..., kind: ..., present?: ..., enabled?: ..., assigned_plugin: ...}`
-for read-only setup. Candidates grant no access. Save persistent drafts before
+`%Hardware.Candidate{id: ..., kind: ..., label: ..., present?: ..., enabled?: ..., assigned_plugin: ...}`
+for read-only setup. Link assignment review as `/hardware/<id>?plugin=<app>`. Candidates grant no access. Save persistent drafts before
 navigating to gateway-owned assignment review; plugin UI is closed during checked
 unload. There is no administrative assignment SDK API.
 

@@ -29,13 +29,14 @@ defmodule NervesGate.BuildConfigTest do
                        vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
                      }
                    },
-                   ports: %{
-                     can: ["can0", "can1"],
-                     serial: [
-                       {"ttyS3", "rs485", "RS485 · automatic direction · 9600 8N1"},
-                       {"ttyS4", "rs485", "RS485 · automatic direction · 9600 8N1"}
-                     ]
-                   },
+                   ports: [
+                     %{id: "eth0", kind: :ethernet, label: "LAN 1", assignable: true},
+                     %{id: "eth1", kind: :ethernet, label: "LAN 2", assignable: true},
+                     %{id: "ttyS3", kind: :rs485, label: "RS485 1", assignable: true},
+                     %{id: "ttyS4", kind: :rs485, label: "RS485 2", assignable: true},
+                     %{id: "can0", kind: :can, label: "CAN 1", assignable: true},
+                     %{id: "can1", kind: :can, label: "CAN 2", assignable: true}
+                   ],
                    indicators: %{
                      leds: %{run: "ec100:run", user1: "ec100:user1", user2: "ec100:user2"},
                      button: "gpio-keys"
@@ -47,16 +48,26 @@ defmodule NervesGate.BuildConfigTest do
           assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
 
         :em300 ->
-          # Unqualified EM300 peripherals stay disabled; ttyS5 belongs to the I/O domain.
+          # Unqualified EM300 peripherals stay disabled; the expansion bus is a plugin resource.
           assert %{
                    cellular: nil,
                    indicators: nil,
                    data: {:ubifs, "/dev/ubi0_2"},
                    plugins_device: "/dev/mmcblk0p1",
-                   ports: %{can: ["can0", "can1"], serial: serial}
+                   ports: ports
                  } = board
 
-          assert Enum.map(serial, &elem(&1, 0)) == ["ttyS1", "ttyS2", "ttyS3", "ttyS4"]
+          assert Enum.map(ports, &{&1.id, &1.kind}) == [
+                   {"eth0", :ethernet},
+                   {"eth1", :ethernet},
+                   {"ttyS1", :rs485},
+                   {"ttyS2", :rs485},
+                   {"ttyS3", :rs485},
+                   {"ttyS4", :rs485},
+                   {"ttyS5", :iotrouter_expansion}
+                 ]
+
+          assert List.last(ports).gpios == %{reset: "EXT_RESET", link: "EXT_LINK"}
           assert config[:vintage_net][:config] == [{"usb0", %{type: VintageNetDirect}}]
 
           # Slot writes and data reset run outside fwup's env-partition destination.
@@ -67,7 +78,10 @@ defmodule NervesGate.BuildConfigTest do
         :x86_64 ->
           assert board == %{
                    cellular: nil,
-                   ports: nil,
+                   ports: [
+                     %{id: "eth0", kind: :ethernet, label: "LAN 1", assignable: true},
+                     %{id: "eth1", kind: :ethernet, label: "LAN 2", assignable: true}
+                   ],
                    indicators: nil,
                    data: {:ext4, "/sys/class/block/vda4/dev"},
                    plugins_device: "/dev/vdb"
@@ -76,6 +90,23 @@ defmodule NervesGate.BuildConfigTest do
           # runtime.exs supplies USB and the real eth2 IP from the virtual disk serial.
           # There is no shared static management address in the compiled configuration.
           assert config[:vintage_net][:config] == []
+      end
+    end
+  end
+
+  test "boards declare assignable hardware with SDK kinds and unique IDs" do
+    for target <- [:ec100, :em300, :x86_64] do
+      config = Config.Reader.read!("config/config.exs", env: :dev, target: target)
+      ports = config[:nerves_gate][:board][:ports]
+
+      assert Enum.uniq_by(ports, & &1.id) == ports
+
+      for port <- ports do
+        assert port.kind in NervesGateSDK.Hardware.kinds(), inspect(port)
+        assert NervesGate.Plugins.Assignments.valid_id?(port.id)
+        assert is_binary(port.label) and port.label != ""
+        assert is_boolean(port.assignable)
+        assert Map.keys(port) -- [:id, :kind, :label, :assignable, :gpios] == []
       end
     end
   end
