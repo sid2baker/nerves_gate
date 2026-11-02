@@ -54,6 +54,8 @@
 
 ### Added
 
+- Firmware releases include Erlang's `runtime_tools` (scheduler utilization, `msacc`, `dbg`) for read-only diagnosis of live gateways.
+
 - Network status shows received and sent bytes per Internet port and for cellular, from kernel counters since the interface came up (not stored; reset on reboot or modem re-enumeration). The 4G panel also shows the APN the modem's data context actually uses, including with Automatic carrier settings.
 
 - Experimental IOTRouter expansion-card plugin for the EM300's assigned bus. Explicit reset/start discovers captured D1600/D0016N layouts and exposes digital inputs and repeatable outputs with card echo evidence through the existing I/O page. No automatic activation or transport startup; unknown/analog cards are rejected. Requires SDK 0.2.0-dev.8 firmware with shared GPIO support; electrical qualification remains outstanding.

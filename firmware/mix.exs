@@ -60,7 +60,10 @@ defmodule NervesGate.MixProject do
   end
 
   def application,
-    do: [extra_applications: [:logger, :crypto, :ssh], mod: {NervesGate.Application, []}]
+    do: [
+      extra_applications: [:logger, :crypto, :ssh, :runtime_tools],
+      mod: {NervesGate.Application, []}
+    ]
 
   def cli do
     [
