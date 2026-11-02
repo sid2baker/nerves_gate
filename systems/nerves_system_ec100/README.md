@@ -237,8 +237,9 @@ terminals. UART0 remains the boot console.
 
 The SPI SD slot has passed card detection, read-only FAT mounting, directory
 listing, and unmounting, with eMMC numbering preserved. SD file contents and
-writes remain untested. Reboot with an inserted SD card works with the included
-[MMC regulator fix](https://github.com/armbian/linux-rockchip/issues/563).
+writes remain untested. Reboot with an inserted SD card needs the
+[MMC regulator fix](https://github.com/armbian/linux-rockchip/issues/563), which
+the pinned kernel includes.
 Both CAN interfaces register, but physical CAN traffic has not been tested.
 
 ## User controls
@@ -407,7 +408,7 @@ qualification.
 
 ## Configuration
 
-- `dts/rk3506-ec100.dts` — board hardware
+- `dts/rockchip/rk3506-ec100.dts` — board hardware
 - `linux/ec100.fragment` — board kernel features, bridging, routing and firewall support
 - `bootstrap/uboot.env` — boot selection and rollback
 - `fwup.conf` — storage layout and firmware updates

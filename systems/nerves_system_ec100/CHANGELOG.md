@@ -7,6 +7,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-02
+
+### Changed
+
+- Move to the Armbian Rockchip 6.12 kernel (`rk-6.12-rkr1`). The board device
+  tree now lives in `dts/rockchip/`, beside the SoC files it includes. The MMC
+  regulator fix is upstream there, so its local patch is gone.
+
+### Fixed
+
+- Ethernet statistics no longer stall the gateway. The 6.1 kernel's stmmac
+  driver lost 64-bit counter updates on this 32-bit SoC, so after hours of
+  uptime every read of `eth0` counters spun in the kernel for seconds. The
+  6.12 driver protects these updates.
+
 ## 0.3.0 - 2026-10-22
 
 ### Added
