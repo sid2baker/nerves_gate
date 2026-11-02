@@ -21,7 +21,8 @@ defmodule NervesGate.Hardware.Ports do
   defp observe(:ethernet, id, network) do
     case Enum.find(network, &(&1.name == id)) do
       nil -> %{present: false, interface: id}
-      port -> port |> Map.delete(:name) |> Map.put(:interface, id)
+      # Traffic counters change constantly; the inventory publishes only on real changes.
+      port -> port |> Map.drop([:name, :traffic]) |> Map.put(:interface, id)
     end
   end
 

@@ -99,6 +99,8 @@
 
 ### Fixed
 
+- The hardware inventory no longer carries Ethernet traffic counters, which changed its observation every two seconds and pushed needless updates to every subscriber.
+
 - Factory review resolves boot artifacts with the same Mix environment as the firmware build, so it finds the selected build's system instead of requiring an unpublished local one.
 
 - Workbench gateway pages show a firmware-update notice for unsupported remote port observations instead of crashing.

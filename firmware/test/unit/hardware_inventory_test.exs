@@ -22,10 +22,16 @@ defmodule NervesGate.HardwareInventoryTest do
 
   test "Ethernet count and identity come only from board declarations, not detected interfaces" do
     declared = [%{id: "eth2", kind: :ethernet, label: "Equipment", assignable: true}]
-    network = [%{name: "eth2", present: true, link: true}, %{name: "eth9", present: true}]
 
-    assert [%{id: "eth2", kind: :ethernet, interface: "eth2", present: true, link: true}] =
+    network = [
+      %{name: "eth2", present: true, link: true, traffic: %{received: 1, sent: 2}},
+      %{name: "eth9", present: true}
+    ]
+
+    assert [%{id: "eth2", kind: :ethernet, interface: "eth2", present: true, link: true} = port] =
              Ports.snapshot(declared, network)
+
+    refute Map.has_key?(port, :traffic)
 
     assert [%{id: "eth2", present: false}] = Ports.snapshot(declared, [])
     assert [] = Ports.snapshot([], network)
