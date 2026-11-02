@@ -2,7 +2,7 @@
 
 | Component | Source | Revision |
 | --- | --- | --- |
-| Linux | [armbian/linux-rockchip](https://github.com/armbian/linux-rockchip) | `428ab2713a61e9bc438eb1e065469797f97953b4` |
+| Linux 6.12 | [armbian/linux-rockchip](https://github.com/armbian/linux-rockchip) `rk-6.12-rkr1` | `112eaf45d8a2319be444f9e23602f5b400a6e3cc` |
 | U-Boot | [rockchip-linux/u-boot](https://github.com/rockchip-linux/u-boot) | `1c535d65b8509f388d09e49fb6961f49fda35a1d` |
 | DDR, SPL, TEE, USB loader and packaging tools | [rockchip-linux/rkbin](https://github.com/rockchip-linux/rkbin) | `3e288fe814e059dd06833495f845cab04ac20a5c` |
 

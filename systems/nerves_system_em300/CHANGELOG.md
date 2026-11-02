@@ -7,6 +7,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## Unreleased
 
+### Changed
+
+- Move to the Armbian Rockchip 6.12 kernel (`rk-6.12-rkr1`), matching EC100.
+  The board device tree now lives in `dts/rockchip/`, beside the SoC files it
+  includes. The MMC regulator fix is upstream there, so its local patch is
+  gone; the remaining kernel patches are renumbered 0001–0004. This also
+  brings the 6.12 stmmac driver, which protects Ethernet statistics updates
+  that 6.1 lost on this 32-bit SoC. Not yet booted on EM300 hardware.
+
 ### Breaking changes
 
 - Kernel FITs live in UBI volumes `kernel_a`/`kernel_b` (IDs 3/4), read by
