@@ -12,10 +12,9 @@ defmodule NervesGate.Settings do
   @path "/data/nerves_gate/settings"
 
   def child_spec(opts) do
-    PropertyTable.child_spec(
-      name: __MODULE__,
-      persist_data_path: Keyword.get(opts, :path, @path)
-    )
+    path = Keyword.get(opts, :path, @path)
+    :persistent_term.put({__MODULE__, :path}, path)
+    PropertyTable.child_spec(name: __MODULE__, persist_data_path: path)
   end
 
   @doc "PropertyTable's committed data file, for fault-injection tests and scenarios."
@@ -30,10 +29,12 @@ defmodule NervesGate.Settings do
     previous = PropertyTable.fetch_with_timestamp(__MODULE__, key)
     change.()
 
-    case PropertyTable.flush_to_disk(__MODULE__) do
-      :ok ->
-        :ok
-
+    # PropertyTable renames the new file into place but does not sync the
+    # directory, so without this a power cut can bring back the old file.
+    with :ok <- PropertyTable.flush_to_disk(__MODULE__),
+         :ok <- sync_directory() do
+      :ok
+    else
       _ ->
         case previous do
           {:ok, value, _} -> PropertyTable.put(__MODULE__, key, value)
@@ -42,5 +43,10 @@ defmodule NervesGate.Settings do
 
         {:error, :commit_unknown}
     end
+  end
+
+  defp sync_directory do
+    path = :persistent_term.get({__MODULE__, :path})
+    NervesGate.Plugins.Metadata.sync_directory(Path.dirname(file(path)))
   end
 end
