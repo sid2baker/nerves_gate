@@ -19,6 +19,8 @@
 
 ### Added
 
+- SDK `0.2.0-dev.9` adds optional `nerves_gate_required_hardware`, a subset of the plugin's supported hardware kinds. Firmware excludes plugins whose required kinds the board lacks; gateway activation rejects missing required hardware before loading plugin code. Supported kinds alone remain optional, so Modbus TCP still works without RS485.
+
 - SDK 0.2.0-dev.5 adds read-only `Hardware.candidates/0` for plugin setup, including presence, owner and permission. Candidates do not grant access; `resources/0` still requires actual managed ownership.
 - `Storage.save_config/1`, `restore_config/0` and `delete_config/0`: one opaque, atomically replaced configuration term per running plugin version, with plugin and version derived from the actual managed caller. Other versions' terms are preserved and never loaded automatically; restores refuse unknown atoms/functions and malformed or oversized (over 1 MiB) files. No fallback without commissioned storage.
 - `IO` input registration, `publish/3`, Reading, subscription and exclusive output Authority APIs with actual calling-process ownership. Shared `IO.InputDefinition`, `IO.OutputDefinition`, `IO.Evidence` and `IO.Reading` types describe observable inputs and repeatable desired-state outputs with declared evidence and descriptive release behaviour.

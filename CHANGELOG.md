@@ -101,6 +101,8 @@
 
 ### Fixed
 
+- Firmware bundles plugins only when their declared mandatory hardware exists on the target board. The expansion-card plugin is now EM300-only; Modbus TCP remains available without RS485. Gateway activation also rejects plugins with absent required hardware (SDK `0.2.0-dev.9`).
+
 - The hardware inventory no longer carries Ethernet traffic counters, which changed its observation every two seconds and pushed needless updates to every subscriber.
 
 - Factory review resolves boot artifacts with the same Mix environment as the firmware build, so it finds the selected build's system instead of requiring an unpublished local one.

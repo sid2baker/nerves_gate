@@ -154,12 +154,27 @@ defmodule NervesGateSDK.Package do
          true <- module in main.modules,
          true <- valid_ui?(main),
          true <- valid_hardware?(main.env[:nerves_gate_hardware] || []),
+         true <- valid_hardware?(main.env[:nerves_gate_required_hardware] || []),
+         true <-
+           Enum.all?(main.env[:nerves_gate_required_hardware] || [], fn kind ->
+             kind in (main.env[:nerves_gate_hardware] || [])
+           end),
          :ok <- check_files(files, apps),
          :ok <- unique_modules(apps) do
       {:ok, %{app: main.app, version: main.version, main: main, apps: apps, files: files}}
     else
       {:error, reason} -> {:error, reason}
       _ -> {:error, :invalid_package}
+    end
+  end
+
+  @doc "Check mandatory hardware kinds against board declarations or present inventory kinds."
+  def check_hardware(package, kinds) do
+    missing = (package.main.env[:nerves_gate_required_hardware] || []) -- kinds
+
+    case missing do
+      [] -> :ok
+      _ -> {:error, {:required_hardware_missing, missing}}
     end
   end
 

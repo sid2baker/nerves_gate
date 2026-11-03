@@ -8,8 +8,10 @@ card protocol and channel reconciliation. No broker or vendor agent is required.
 ## Use
 
 1. Build firmware selecting this plugin in `plugins/selection.exs`. It needs SDK
-   `0.2.0-dev.8` firmware, including shared native `circuits_uart` 1.7.0 and
+   `0.2.0-dev.9` firmware, including shared native `circuits_uart` 1.7.0 and
    `circuits_gpio` 2.3.1. Native libraries are not bundled in the plugin archive.
+   The plugin requires `:iotrouter_expansion` hardware, so it is bundled only
+   for EM300, not EC100 or QEMU. Gateway activation checks presence too.
 2. Explicitly start the plugin and review the Expansion Bus assignment on Hardware.
    Exactly one present, enabled `:iotrouter_expansion` resource must belong to it.
    The path and named reset/link GPIOs come from that assignment, not constants.

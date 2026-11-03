@@ -147,6 +147,15 @@ Plugins declare the kinds they support (`:ethernet`, `:can`, `:rs485`,
 `:iotrouter_expansion`; see `Hardware.kinds/0`) in `nerves_gate_hardware` in their main
 OTP environment. Boards declare which resources exist; IDs such as `ttyS3` are board
 data, so plugins choose from `Hardware.candidates/0` instead of fixed lists.
+`nerves_gate_hardware` describes supported assignment kinds, not mandatory
+hardware: Modbus can use RS485 but also works over TCP without it. Plugins that
+cannot work without a kind additionally declare
+`nerves_gate_required_hardware: [:iotrouter_expansion]` (SDK `0.2.0-dev.9`).
+Required kinds must be unique, known and also declared in `nerves_gate_hardware`.
+Firmware builds omit that plugin unless the target board declares every required
+kind. Gateway activation checks every required kind is present before starting
+any plugin code; this does not grant or automatically assign resources.
+
 `Hardware.resources/0` returns enabled assignments for the actual managed caller, as
 `%Hardware.Port{id: ..., kind: ..., label: ..., present?: ..., path: ..., gpios: ...}`.
 It opens nothing and accepts no plugin name or arbitrary operator-supplied path. One

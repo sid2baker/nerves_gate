@@ -131,6 +131,57 @@ defmodule NervesGateSDK.PackageTest do
     end
   end
 
+  test "required hardware is optional, validated and checked independently of supported kinds",
+       context do
+    for required <- [[], [:rs485], [:rs485, :can]] do
+      file =
+        archive(context,
+          env: [
+            nerves_gate_sdk_requirement: "~> 0.1.0",
+            nerves_gate_hardware: [:rs485, :can],
+            nerves_gate_required_hardware: required
+          ]
+        )
+
+      assert {:ok, package} = Package.read(file)
+      assert :ok = Package.check_hardware(package, [:rs485, :can])
+
+      if required == [:rs485, :can] do
+        assert {:error, {:required_hardware_missing, [:can]}} =
+                 Package.check_hardware(package, [:rs485])
+      end
+
+      if required == [] do
+        assert :ok = Package.check_hardware(package, [])
+      else
+        assert {:error, {:required_hardware_missing, ^required}} =
+                 Package.check_hardware(package, [])
+      end
+    end
+
+    for required <- [[:rs485, :rs485], [:usb], [:can], :rs485, "rs485"] do
+      file =
+        archive(context,
+          env: [
+            nerves_gate_sdk_requirement: "~> 0.1.0",
+            nerves_gate_hardware: [:rs485],
+            nerves_gate_required_hardware: required
+          ]
+        )
+
+      assert {:error, :invalid_package} = Package.read(file)
+    end
+
+    assert {:ok, optional} =
+             context
+             |> archive(
+               env: [nerves_gate_sdk_requirement: "~> 0.1.0", nerves_gate_hardware: [:rs485]]
+             )
+             |> Package.read()
+
+    assert :ok = Package.check_hardware(optional, [])
+  end
+
   test "optional UI declarations must name a module in the main application", context do
     for module <- [String, "Elixir.SomeUI", nil] do
       file =

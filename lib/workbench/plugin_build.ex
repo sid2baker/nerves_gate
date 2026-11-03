@@ -7,9 +7,10 @@ defmodule Workbench.PluginBuild do
   def projects,
     do: Code.eval_file(Path.join(Workbench.root(), "plugins/selection.exs")) |> elem(0)
 
-  def build!(report \\ fn _ -> :ok end) do
+  def build!(target, report \\ fn _ -> :ok end, env \\ :dev) do
     root = Workbench.root()
     projects = projects()
+    kinds = hardware_kinds(target, env)
     destination = Path.join(root, "firmware/priv/plugins")
     stage = destination <> ".#{Base.encode16(:crypto.strong_rand_bytes(8))}"
     File.mkdir_p!(stage)
@@ -20,7 +21,7 @@ defmodule Workbench.PluginBuild do
           output = Workbench.Plugins.package!(Path.expand(project, root), report, :temporary)
 
           try do
-            add!(output, stage, entries)
+            add!(output, stage, entries, kinds, report)
           after
             File.rm(output)
           end
@@ -37,8 +38,31 @@ defmodule Workbench.PluginBuild do
     end
   end
 
-  def add!(archive, root, entries) do
+  @doc "Hardware kinds declared by the selected firmware board, without changing host config."
+  def hardware_kinds(target, env) do
+    config =
+      Config.Reader.read!(Path.join(Workbench.root(), "firmware/config/config.exs"),
+        target: String.to_existing_atom(target),
+        env: env
+      )
+
+    config[:nerves_gate][:board].ports |> Enum.map(& &1.kind) |> Enum.uniq()
+  end
+
+  def add!(archive, root, entries, kinds, report) do
     {:ok, package, bytes, sha} = Artifact.read(archive)
+
+    case Package.check_hardware(package, kinds) do
+      :ok ->
+        add_package!(package, bytes, sha, root, entries)
+
+      {:error, {:required_hardware_missing, missing}} ->
+        report.("Skipping #{package.app}: board lacks required hardware #{inspect(missing)}")
+        entries
+    end
+  end
+
+  defp add_package!(package, bytes, sha, root, entries) do
     app = to_string(package.app)
     if Map.has_key?(entries, app), do: raise("Duplicate plugin selection: #{app}")
 

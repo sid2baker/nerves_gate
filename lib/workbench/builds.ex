@@ -84,7 +84,7 @@ defmodule Workbench.Builds do
 
     Workbench.BuildLock.run!(fn ->
       assets!(report)
-      Workbench.PluginBuild.build!(report)
+      Workbench.PluginBuild.build!(target, report, env)
 
       status =
         Simulator.BuildOutput.run(

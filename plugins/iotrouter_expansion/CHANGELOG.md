@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Require an expansion-bus resource using SDK `0.2.0-dev.9`. Artifact `0.1.1-dev.2` is omitted from boards without that hardware, including EC100 and QEMU; gateway activation also checks its presence.
+
 - Match the stock agent's 25 ms discovery/configuration command spacing.
   Reply deadlines and fail-closed startup remain unchanged. Experimental artifact
   0.1.1-dev.1 still fails warm bus restart with a card-2 discovery timeout; this is

@@ -1200,11 +1200,15 @@ defmodule NervesGate.Plugins do
   defp activate(artifact, package, state, context) do
     app = to_string(artifact.app)
 
-    with :ok <-
+    inventory = NervesGate.Hardware.inventory()
+    kinds = for port <- inventory, port.present, do: port.kind
+
+    with :ok <- Package.check_hardware(package, kinds),
+         :ok <-
            Assignments.validate_plugin(
              app,
              state.assignments,
-             NervesGate.Hardware.inventory(),
+             inventory,
              package.main.env[:nerves_gate_hardware] || []
            ),
          {:ok, activation} <- context.({:bind, artifact}) do

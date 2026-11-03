@@ -8,7 +8,10 @@ namespace. There is one lifecycle manager: `NervesGate.Plugins`.
 
 `plugins/selection.exs` explicitly selects independent plugin projects. Root
 `mix firmware x86_64`, `mix firmware ec100` or `mix firmware em300` builds them in isolated host Mix
-processes, validates the complete selection and includes immutable artifacts under
+processes, validates packages and omits plugins whose `nerves_gate_required_hardware`
+is absent from the target's board declarations. Supported assignment kinds in
+`nerves_gate_hardware` alone do not restrict bundling (Modbus TCP needs no RS485).
+Matching plugins are included as immutable artifacts under
 the firmware application's `priv/plugins`. A build-generated `inventory.term`
 identifies entry points, versions, dependency/module reservations and digests.
 The manager reads that inventory, not arbitrary directories or loaded OTP apps.
@@ -28,7 +31,7 @@ The initial selection contains:
   platform inputs and repeatable outputs. Definitions use plugin configuration storage.
   RTU requires enabled exclusive RS485 assignment and explicit operator approval; no
   automatic discovery. Saving and starting are explicit, separate actions.
-- `iotrouter_expansion`: experimental EM300 card discovery and digital I/O through
+- `iotrouter_expansion` (bundled only on EM300): experimental EM300 card discovery and digital I/O through
   an explicitly assigned expansion bus. Reset/start is separate from plugin start
   and changes card outputs to their power-on state. Only captured D1600/D0016N
   layouts are accepted; electrical qualification remains outstanding. See its
