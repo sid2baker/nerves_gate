@@ -264,10 +264,17 @@ defmodule Scenarios.Cases.SdPlugins do
     assert "preserved" = Scenarios.Device.rpc(vm, File, :read!, [marker], 30_000)
 
     # Refuse the mounted firmware disk, without a platform/target switch: point
-    # the slot at the system disk's hardware path (whole disk).
+    # the slot at the system disk's controller (whole disk), as boards declare
+    # their card slot by the hardware path above the block device.
     board = Scenarios.Device.rpc(vm, Application, :fetch_env!, [:nerves_gate, :board], 30_000)
     {:ok, link} = Scenarios.Device.rpc(vm, File, :read_link, ["/sys/class/block/vda"], 30_000)
-    system_disk = link |> Path.expand("/sys/class/block") |> Path.relative_to("/sys")
+    # .../virtio0/block/vda -> .../virtio0
+    system_disk =
+      link
+      |> Path.expand("/sys/class/block")
+      |> Path.relative_to("/sys")
+      |> Path.dirname()
+      |> Path.dirname()
 
     Scenarios.Device.rpc(
       vm,

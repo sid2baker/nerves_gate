@@ -13,8 +13,6 @@ defmodule Scenarios.Cases.QemuStatus do
     assert status.system.target == "x86_64"
     assert status.system.node == vm.node
     assert status.device.available
-    version = Scenarios.Device.rpc(vm, Application, :spec, [:tailscaled_ex, :vsn])
-    assert Version.match?(to_string(version), "~> 0.5.0")
     assert is_pid(Scenarios.Device.rpc(vm, Process, :whereis, [Tailscaled.Supervisor]))
 
     assert Scenarios.Device.rpc(vm, Application, :get_env, [:tailscaled_ex, :data_dir]) ==

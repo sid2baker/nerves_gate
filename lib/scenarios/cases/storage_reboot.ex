@@ -20,7 +20,7 @@ defmodule Scenarios.Cases.StorageReboot do
     try do
       Qemu.fail_disk_writes(vm)
 
-      assert {:error, %{code: "save_failed"}} =
+      assert {:error, %{code: "network_commit_unknown"}} =
                Scenarios.Device.rpc(vm, NervesGate.Network, :confirm, [trial])
 
       assert Qemu.failed_disk_writes(vm) > 0

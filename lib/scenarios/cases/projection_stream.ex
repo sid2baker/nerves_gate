@@ -196,8 +196,9 @@ defmodule Scenarios.Cases.ProjectionStream do
 
       if path == "/hardware" do
         page = Floki.parse_document!(response.body)
-        assert [] = Floki.find(page, "#hardware-lan-1")
-        assert [_] = Floki.find(page, "#hardware-lan-2")
+        # The uplink (eth0) belongs under Internet; the free LAN is assignable.
+        assert [] = Floki.find(page, "#hardware-eth0")
+        assert [_] = Floki.find(page, "#hardware-eth1")
         assert [] = Floki.find(page, "details#ethernet-arrangement, #lan-ports-form")
       end
 

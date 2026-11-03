@@ -31,6 +31,11 @@ defmodule Scenarios.Cases.Sdk do
     assert {:error, "plugin_not_running"} = Device.rpc(device, Network, :local_status)
 
     assert {:error, :invalid_local_network} =
+             Device.rpc(device, Network, :claim_local, ["eth1", "192.168.50.2", 31])
+
+    # Interface names are board-defined, so the firmware rejects them for
+    # unmanaged callers before inspecting the name.
+    assert {:error, "plugin_not_running"} =
              Device.rpc(device, Network, :claim_local, ["usb0", "192.168.50.2", 24])
 
     assert {:error, "plugin_not_running"} =
