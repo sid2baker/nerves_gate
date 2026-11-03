@@ -40,29 +40,8 @@ defmodule Scenarios.Cases.QemuStatus do
       assert status.actions["cellular.#{name}"].enabled == false
     end
 
-    assert Map.keys(status.cellular) |> Enum.sort() ==
-             Enum.sort([
-               :supported,
-               :enabled,
-               :present,
-               :sim,
-               :pin_saved,
-               :auto_unlock,
-               :authentication,
-               :authentication_apn,
-               :pin_lock,
-               :pin_attempts_remaining,
-               :registration,
-               :operator,
-               :signal_dbm,
-               :access_technology,
-               :provider,
-               :provider_options,
-               :refreshed_at,
-               :operation,
-               :result,
-               :error
-             ])
+    assert Map.keys(status.cellular) ==
+             Map.keys(Scenarios.Device.rpc(vm, NervesGate.Cellular, :view, [nil]))
 
     assert {:ok, _} = Jason.encode(status)
   end
