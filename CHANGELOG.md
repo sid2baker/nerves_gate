@@ -105,6 +105,8 @@
 
 ### Fixed
 
+- EC100 firmware uses system 0.4.0 on the Armbian Rockchip 6.12 kernel, so reading Ethernet statistics no longer stalls the gateway after hours of uptime.
+
 - Firmware bundles plugins only when their declared mandatory hardware exists on the target board. The expansion-card plugin is now EM300-only; Modbus TCP remains available without RS485. Gateway activation also rejects plugins with absent required hardware (SDK `0.2.0-dev.9`).
 
 - The hardware inventory no longer carries Ethernet traffic counters, which changed its observation every two seconds and pushed needless updates to every subscriber.
