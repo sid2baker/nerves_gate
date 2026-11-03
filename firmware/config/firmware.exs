@@ -3,29 +3,7 @@ import Config
 # Shared device settings, imported by ec100.exs, em300.exs and x86_64.exs only.
 # Nothing in this file configures the workstation UI. The platform files add
 # only real hardware differences; the device application is otherwise identical.
-config :nerves_gate,
-  services: [
-    NervesGate.Network.Vintage,
-    {PropertyTable, name: NervesGate.Properties},
-    # Small device-local values with no better owner, such as the SIM PIN.
-    {PropertyTable, name: NervesGate.Settings, persist_data_path: "/data/nerves_gate/settings"},
-    NervesGate.SSH,
-    NervesGate.Network,
-    NervesGate.Remote,
-    NervesGate.Indicators,
-    NervesGate.Hardware,
-    {Task.Supervisor, name: NervesGate.PluginTasks},
-    NervesGate.Storage,
-    NervesGate.IO,
-    # Owns manual output claims; restarts with I/O, which clears them anyway.
-    NervesGate.IO.Manual,
-    # Plugins start after everything they call while starting. Views come later,
-    # so a UI or projection restart (rest_for_one) never restarts plugins.
-    NervesGate.SDKBackend,
-    NervesGate.Plugins,
-    NervesGate.ProjectionServer,
-    NervesGateWeb.Endpoint
-  ]
+# Device services are supervised by NervesGate.Application.
 
 # Public LAN advertisement only. Discovery does not grant access or advertise
 # distribution cookies, login URLs, credentials or application data.

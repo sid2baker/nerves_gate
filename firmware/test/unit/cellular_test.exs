@@ -319,7 +319,10 @@ defmodule NervesGate.CellularTest do
         do: refute(inspect(filtered) =~ secret)
   end
 
-  test "installed primary filter redacts commands before logger handlers capture them" do
+  test "primary filter redacts commands before logger handlers capture them" do
+    # NervesGate.Application installs this filter on devices; the host never starts it.
+    :ok = :logger.add_primary_filter(:cellular_test, {&NervesGate.Cellular.filter_log/2, nil})
+    on_exit(fn -> :logger.remove_primary_filter(:cellular_test) end)
     output = ExUnit.CaptureLog.capture_log(fn -> Logger.error(~s(AT+CPWD="SC","4812","2580")) end)
     assert output =~ "REDACTED SIM COMMAND"
     refute output =~ "4812"

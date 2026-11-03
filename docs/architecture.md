@@ -276,8 +276,8 @@ PubSub → Plugins.UI → Network.Vintage → workflow PropertyTable
        → ProjectionServer → gateway Endpoint
 ```
 
-See [`firmware/config/firmware.exs`](../firmware/config/firmware.exs) and
-[`NervesGate.Application`](../firmware/lib/nerves_gate/application.ex). An earlier
+See [`NervesGate.Application`](../firmware/lib/nerves_gate/application.ex); only
+device targets start it, host builds just compile it. An earlier
 child's failure restarts later children. Supervision order is the startup barrier:
 Plugins follows every service plugins call while starting, so it restores plugins
 as soon as its `init/1` returns, without readiness polling. Restoration runs as a

@@ -59,11 +59,12 @@ defmodule NervesGate.MixProject do
     ]
   end
 
-  def application,
-    do: [
-      extra_applications: [:logger, :crypto, :ssh, :runtime_tools],
-      mod: {NervesGate.Application, []}
-    ]
+  # Host builds compile the application for checks and the workbench; only
+  # device targets start its supervision tree.
+  def application do
+    [extra_applications: [:logger, :crypto, :ssh, :runtime_tools]] ++
+      if Mix.target() in @targets, do: [mod: {NervesGate.Application, []}], else: []
+  end
 
   def cli do
     [

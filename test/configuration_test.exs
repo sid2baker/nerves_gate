@@ -73,7 +73,6 @@ defmodule Workbench.ConfigurationTest do
     assert settings[:server] == false
     assert byte_size(settings[:secret_key_base]) >= 64
     assert is_binary(settings[:live_view][:signing_salt])
-    assert Application.fetch_env!(:nerves_gate, :services) == []
     refute Keyword.has_key?(config[:nerves_gate], NervesGateWeb.Endpoint)
     refute Process.whereis(NervesGateWeb.Endpoint)
   end

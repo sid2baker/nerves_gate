@@ -12,22 +12,6 @@ defmodule NervesGate.BuildConfigTest do
       end
 
       assert shared.(ec100) == shared.(em300)
-      services = ec100[:nerves_gate][:services]
-
-      for service <- [
-            NervesGate.Network,
-            NervesGate.Remote,
-            NervesGate.SSH,
-            NervesGate.Hardware,
-            NervesGate.Storage,
-            NervesGate.IO,
-            NervesGate.SDKBackend,
-            NervesGate.Plugins,
-            NervesGate.ProjectionServer,
-            NervesGateWeb.Endpoint
-          ] do
-        assert service in services
-      end
 
       for app <- [:tailscaled_ex, :nerves_ssh] do
         assert ec100[app] == em300[app], "#{app} differs between physical targets in #{env}"
@@ -230,10 +214,27 @@ defmodule NervesGate.BuildConfigTest do
     end
   end
 
-  test "host builds start no device services and declare no board hardware" do
+  test "only device targets start the application; host declares no board hardware" do
     config = Config.Reader.read!("config/config.exs", env: :test, target: :host)
-    assert config[:nerves_gate][:services] == []
     refute Keyword.has_key?(config[:nerves_gate], :board)
+
+    project = Mix.Project.get()
+    previous_target = Mix.target()
+
+    try do
+      for target <- [:host, :x86_64, :ec100, :em300] do
+        Mix.target(target)
+        mod = project.application()[:mod]
+
+        if target == :host,
+          do: assert(mod == nil),
+          else: assert(mod == {NervesGate.Application, []})
+      end
+    after
+      Mix.target(previous_target)
+    end
+
+    refute Process.whereis(NervesGate.Supervisor)
   end
 
   test "code reload listeners are restricted to host development" do

@@ -4,8 +4,7 @@ import Config
 # gateway HTTP endpoint run on the workstation.
 config :nerves_gate,
   target: :host,
-  distribution_cookie: :mycookie,
-  services: []
+  distribution_cookie: :mycookie
 
 config :phoenix, :json_library, Jason
 

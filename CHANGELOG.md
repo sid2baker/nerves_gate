@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- `NervesGate.Application` lists the device supervision tree directly and starts only on device targets; the `:nerves_gate, :services` setting is removed. Host builds compile the firmware without starting it.
+
 - Network settings are VintageNet's own saved interface configs, with no `br0` metadata bridge, extra metadata or separate store; roles and cellular policy are read back from them. Earlier saved layouts are rejected and preserved; reflash or reprovision those gateways. A failed or interrupted save blocks further changes because interface writes are not a whole-device transaction.
 
 - Ethernet configuration, commissioning and SDK local claims use board-declared interface IDs rather than a fixed two-port list. Gateway and Workbench views use board labels; EM300 shows WAN/LAN. SDK 0.2.0-dev.7 accepts board-defined interface names, with ownership and capability checked by firmware.
