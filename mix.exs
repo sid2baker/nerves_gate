@@ -211,7 +211,6 @@ defmodule Workbench.MixProject do
       # which intentionally do not include the workstation's optional tools.
       Application.delete_env(:nerves_gate, NervesGateWeb.Endpoint)
       Code.compiler_options(ignore_module_conflict: true)
-      System.put_env("NERVES_GATE_LOCAL_DEPS", "1")
       System.delete_env("NERVES_GATE_DEVICE_NODE")
       Mix.env(if task in ["test", "ci", "check"], do: :test, else: previous_env)
       Mix.target(target)

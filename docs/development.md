@@ -286,8 +286,10 @@ runs on the device. No separate asset command or environment flag is required.
 For an asset-only diagnostic build, firmware provides `mix assets.build`
 (`volt.build --tailwind`); repository tooling enters that host project natively.
 Include the resulting `firmware/priv/static/assets/` files with their sources.
-`NERVES_GATE_LOCAL_DEPS` selects local system/BSP sources for internal device
-builds; the build pipeline sets it automatically. It is not an asset setting.
+Device builds and `mix setup` use the published system releases pinned in
+`firmware/mix.exs`. Set `NERVES_GATE_LOCAL_DEPS=1` to use the local
+`systems/*` sources instead (required for unpublished EM300). Simulator QEMU
+builds always use local sources. It is not an asset setting.
 
 ## Diagnostics and limits
 
