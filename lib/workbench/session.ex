@@ -94,7 +94,9 @@ defmodule Workbench.Session do
          do: :ok
   end
 
-  def dir, do: Path.join(Workbench.root(), @dir)
+  # Inside a session (including a disposable CI bench) the launcher supplies its
+  # own directory; outside, CLIs find the checkout's interactive session.
+  def dir, do: System.get_env("WORKBENCH_DIR") || Path.join(Workbench.root(), @dir)
 
   # --- inside the session ---
 
