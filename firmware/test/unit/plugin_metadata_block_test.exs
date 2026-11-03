@@ -1,44 +1,31 @@
 defmodule NervesGate.PluginMetadataBlockTest do
   use ExUnit.Case, async: false
-  alias NervesGate.Plugins
+  alias NervesGate.{Plugins, Settings}
+  alias NervesGate.Plugins.Metadata
   @moduletag :tmp_dir
+  @key ["plugins", "entries"]
+  @saved %{"old_entry" => %{enabled: true}}
 
   setup %{tmp_dir: dir} do
-    path = Path.join(dir, "apps.term")
-    bytes = :erlang.term_to_binary(%{"old_entry" => %{enabled: true}})
-    File.write!(path, bytes)
-    previous = Application.get_env(:nerves_gate, :plugins_metadata)
-    Application.put_env(:nerves_gate, :plugins_metadata, path)
-
-    on_exit(fn ->
-      if previous,
-        do: Application.put_env(:nerves_gate, :plugins_metadata, previous),
-        else: Application.delete_env(:nerves_gate, :plugins_metadata)
-    end)
-
     # Plugins relies on the services before it in the supervision order.
+    start_supervised!({Settings, path: dir})
+    :ok = Settings.put(@key, @saved)
     start_supervised!({PropertyTable, name: NervesGate.Properties})
     start_supervised!({Task.Supervisor, name: NervesGate.PluginTasks})
-    pid = start_supervised!(Plugins)
-    %{pid: pid, path: path, bytes: bytes}
+    %{pid: start_supervised!(Plugins)}
   end
 
   test "unsupported metadata blocks app management without taking its controller down", %{
-    pid: pid,
-    path: path,
-    bytes: bytes
+    pid: pid
   } do
     assert {:error, :invalid_app_metadata} = Plugins.list()
     assert {:error, :plugins_blocked} = Plugins.start(:old_entry)
     assert {:error, :plugins_blocked} = Plugins.install("/missing.ez")
     assert Process.alive?(pid)
-    assert File.read!(path) == bytes
+    assert Settings.get(@key) == @saved
   end
 
-  test "oversized catalogs are rejected without replacing existing metadata", %{
-    path: path,
-    bytes: bytes
-  } do
+  test "oversized catalogs are rejected without replacing existing metadata" do
     modules = for n <- 1..10_000, do: "Elixir.CatalogFixture.Module#{n}"
 
     descriptor = %{
@@ -60,16 +47,16 @@ defmodule NervesGate.PluginMetadataBlockTest do
       }
     }
 
-    assert NervesGate.Plugins.Metadata.valid?(entries)
-    assert byte_size(:erlang.term_to_binary(%{schema: 1, entries: entries})) > 4 * 1024 * 1024
-    assert {:error, :invalid_app_metadata} = NervesGate.Plugins.Metadata.persist(path, entries)
-    assert File.read!(path) == bytes
+    assert Metadata.valid?(entries)
+    assert :erlang.external_size(entries) > 4 * 1024 * 1024
+    assert {:error, :invalid_app_metadata} = Metadata.save(entries)
+    assert Settings.get(@key) == @saved
   end
 
-  test "unreadable ownership cannot make formatting safe", %{path: path, bytes: bytes} do
+  test "unreadable ownership cannot make formatting safe" do
     assert {:error, %{code: "plugins_installed"}} =
              GenServer.call(Plugins, {:storage_setup, :format, "card", :erase_all_data})
 
-    assert File.read!(path) == bytes
+    assert Settings.get(@key) == @saved
   end
 end

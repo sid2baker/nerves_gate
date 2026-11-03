@@ -1,6 +1,8 @@
 defmodule NervesGate.IODefinitionTest do
-  use ExUnit.Case, async: true
+  # Catalog persistence uses the globally named NervesGate.Settings table.
+  use ExUnit.Case, async: false
   alias NervesGate.IO.{Catalog, Definition}
+  alias NervesGate.Settings
   alias NervesGateSDK.IO.{Evidence, InputDefinition, OutputDefinition, Reading}
 
   @moduletag :tmp_dir
@@ -109,9 +111,8 @@ defmodule NervesGate.IODefinitionTest do
     refute Definition.stale?(input, nil, 1_000_000)
   end
 
-  test "persisted definitions start on a cold VM without plugin/schema modules already loaded",
-       %{tmp_dir: dir} do
-    path = Path.join(dir, "cold-io.term")
+  test "persisted definitions survive a restart of the settings table", %{tmp_dir: dir} do
+    start_supervised!({Settings, path: dir})
 
     definitions = %{
       "test.temperature" => %InputDefinition{
@@ -136,81 +137,31 @@ defmodule NervesGate.IODefinitionTest do
       }
     }
 
-    assert :ok = Catalog.save(path, definitions)
-    bytes = File.read!(path)
-    {:ok, peer, _} = :peer.start_link(%{connection: :standard_io, args: [~c"+S", ~c"2:2"]})
-
-    try do
-      :ok = :peer.call(peer, :code, :add_paths, [:code.get_path()])
-      :peer.call(peer, Code, :ensure_loaded!, [NervesGate.IO])
-      assert false == :peer.call(peer, :code, :is_loaded, [Definition])
-
-      assert {:ok, _} =
-               :peer.call(peer, GenServer, :start, [
-                 NervesGate.IO,
-                 [path: path],
-                 [name: NervesGate.IO]
-               ])
-
-      assert ^definitions = :peer.call(peer, NervesGate.IO, :definitions, [])
-      assert File.read!(path) == bytes
-
-      # Loading the supported schema must not permit new atoms from saved bytes.
-      unknown = "unknown_io_catalog_atom_#{System.unique_integer([:positive])}"
-
-      assert_raise ArgumentError, fn ->
-        :peer.call(peer, :erlang, :binary_to_existing_atom, [unknown, :utf8])
-      end
-
-      hostile = <<131, 119, byte_size(unknown), unknown::binary>>
-      File.write!(path, hostile)
-      assert {:error, :invalid_io_catalog} = :peer.call(peer, Catalog, :load, [path])
-
-      assert_raise ArgumentError, fn ->
-        :peer.call(peer, :erlang, :binary_to_existing_atom, [unknown, :utf8])
-      end
-
-      assert File.read!(path) == hostile
-    after
-      :peer.stop(peer)
-    end
+    assert {:ok, %{}} = Catalog.load()
+    assert :ok = Catalog.save(definitions)
+    stop_supervised!(Settings)
+    start_supervised!({Settings, path: dir})
+    assert {:ok, ^definitions} = Catalog.load()
   end
 
-  test "catalog rejects corrupt, trailing, compressed, unsupported and malformed data without rewriting",
+  test "catalog rejects unsupported and malformed definitions without rewriting them",
        %{tmp_dir: dir} do
-    path = Path.join(dir, "io.term")
-    assert {:ok, %{}} = Catalog.load(path)
+    start_supervised!({Settings, path: dir})
     input = %InputDefinition{id: "temperature", type: :float}
-    definitions = %{"test.temperature" => input}
-    assert :ok = Catalog.save(path, definitions)
-    assert {:ok, ^definitions} = Catalog.load(path)
-    valid = File.read!(path)
     malformed = input |> Map.delete(:id) |> Map.put(:wrong_field, "temperature")
+    too_many = Map.new(1..1025, &{"test.value#{&1}", %{input | id: "value#{&1}"}})
+    assert {:error, :io_catalog_full} = Catalog.save(too_many)
 
-    documents = [
-      "broken",
-      valid <> "trailing",
-      :erlang.term_to_binary(%{schema: 1, definitions: definitions}),
-      :erlang.term_to_binary(%{schema: 3, definitions: definitions}),
-      :erlang.term_to_binary(%{schema: 2, definitions: definitions, desire: true}),
-      :erlang.term_to_binary(%{schema: 2, definitions: %{"wrong.id" => input}}),
-      :erlang.term_to_binary(%{schema: 2, definitions: %{"test.temperature" => malformed}}),
-      :erlang.term_to_binary(%{schema: 2, definitions: definitions}, compressed: 9),
-      :erlang.term_to_binary(%{
-        schema: 2,
-        definitions: Map.new(1..1025, &{"test.value#{&1}", %{input | id: "value#{&1}"}})
-      }),
-      :binary.copy(<<0>>, 1024 * 1024 + 1)
-    ]
-
-    for bytes <- documents do
-      File.write!(path, bytes)
-      assert {:error, :invalid_io_catalog} = Catalog.load(path)
-      assert File.read!(path) == bytes
+    for saved <- [
+          "broken",
+          %{schema: 2, definitions: %{"test.temperature" => input}},
+          %{"wrong.id" => input},
+          %{"test.temperature" => malformed},
+          too_many
+        ] do
+      :ok = Settings.put(["io", "definitions"], saved)
+      assert {:error, :invalid_io_catalog} = Catalog.load()
+      assert Settings.get(["io", "definitions"]) == saved
     end
-
-    File.rm!(path)
-    File.mkdir_p!(path)
-    assert {:error, :invalid_io_catalog} = Catalog.load(path)
   end
 end

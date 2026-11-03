@@ -1,6 +1,7 @@
 defmodule NervesGate.SDKOwnershipTest do
   use ExUnit.Case, async: false
   alias NervesGate.Plugins.{Assignments, Owner}
+  alias NervesGate.Settings
   @moduletag :tmp_dir
 
   defmodule ResourceFixture do
@@ -145,48 +146,41 @@ defmodule NervesGate.SDKOwnershipTest do
       "eth1" => %{enabled: true, plugin: "tailnet_subrouter"}
     }
 
-    file = Path.join(dir, "hardware.term")
-    assert :ok = Assignments.persist(file, ports)
-    assert {:ok, ^ports} = Assignments.read(file)
+    start_supervised!({Settings, path: dir})
+    assert {:ok, %{}} = Assignments.load()
+    assert :ok = Assignments.save(ports)
+    stop_supervised!(Settings)
+    start_supervised!({Settings, path: dir})
+    assert {:ok, ^ports} = Assignments.load()
 
     # Persistence is structural: any well-formed ID is kept, including intent for
     # hardware a board does not declare (for example ttyS1 on EM300 or a removed port).
     other_board = Map.put(ports, "ttyS1", %{enabled: true, plugin: "modbus_plugin"})
-    assert :ok = Assignments.persist(file, other_board)
-    assert {:ok, ^other_board} = Assignments.read(file)
-    bytes = File.read!(file)
+    assert :ok = Assignments.save(other_board)
+    assert {:ok, ^other_board} = Assignments.load()
 
     for bad <- ["", ".", "..", "../tty", String.duplicate("x", 33), :ttyS3] do
       assert {:error, :invalid_hardware_assignments} =
-               Assignments.persist(file, Map.put(ports, bad, %{enabled: true, plugin: nil}))
+               Assignments.save(Map.put(ports, bad, %{enabled: true, plugin: nil}))
     end
 
     many = Map.new(1..65, &{"port#{&1}", %{enabled: false, plugin: nil}})
-    assert {:error, :invalid_hardware_assignments} = Assignments.persist(file, many)
-    assert File.read!(file) == bytes
+    assert {:error, :invalid_hardware_assignments} = Assignments.save(many)
+    assert {:ok, ^other_board} = Assignments.load()
   end
 
-  test "current-only metadata rejects trailing bytes, compression and malformed intent", %{
-    tmp_dir: dir
-  } do
-    file = Path.join(dir, "hardware.term")
+  test "malformed saved intent is rejected and kept untouched", %{tmp_dir: dir} do
+    start_supervised!({Settings, path: dir})
 
-    for bytes <- [
+    for saved <- [
           "invalid",
-          :erlang.term_to_binary(%{}),
-          :erlang.term_to_binary(
-            %{
-              schema: 1,
-              ports: %{"ttyS3" => %{enabled: true, plugin: String.duplicate("p", 200)}}
-            },
-            [:compressed]
-          ),
-          :erlang.term_to_binary(%{schema: 1, ports: %{}}) <> "extra",
-          :erlang.term_to_binary(%{schema: 1, ports: %{"ttyS3" => %{enabled: true, plugin: 1}}})
+          %{schema: 1, ports: %{}},
+          %{"ttyS3" => %{enabled: true, plugin: String.duplicate("p", 300)}},
+          %{"ttyS3" => %{enabled: true, plugin: 1}}
         ] do
-      File.write!(file, bytes)
-      assert {:error, :invalid_hardware_assignments} = Assignments.read(file)
-      assert File.read!(file) == bytes
+      :ok = Settings.put(["plugins", "assignments"], saved)
+      assert {:error, :invalid_hardware_assignments} = Assignments.load()
+      assert Settings.get(["plugins", "assignments"]) == saved
     end
   end
 
@@ -256,16 +250,8 @@ defmodule NervesGate.SDKOwnershipTest do
   end
 
   test "fixed SDK bridge forwards assignment queries from the actual caller", %{tmp_dir: dir} do
-    previous = Application.get_env(:nerves_gate, :plugins_metadata)
-    Application.put_env(:nerves_gate, :plugins_metadata, Path.join(dir, "plugins.term"))
-
-    on_exit(fn ->
-      if previous,
-        do: Application.put_env(:nerves_gate, :plugins_metadata, previous),
-        else: Application.delete_env(:nerves_gate, :plugins_metadata)
-    end)
-
     # Plugins relies on the services before it in the supervision order.
+    start_supervised!({Settings, path: dir})
     start_supervised!({PropertyTable, name: NervesGate.Properties})
     start_supervised!({Task.Supervisor, name: NervesGate.PluginTasks})
     manager = start_supervised!(NervesGate.Plugins)

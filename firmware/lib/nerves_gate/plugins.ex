@@ -94,24 +94,17 @@ defmodule NervesGate.Plugins do
   def init(_) do
     Process.flag(:trap_exit, true)
     Owner.init()
-    file = Application.get_env(:nerves_gate, :plugins_metadata, "/data/nerves_gate/plugins.term")
-
-    {entries, blocked} = initial_entries(file)
-
-    hardware_file =
-      Application.get_env(:nerves_gate, :hardware_assignments, "/data/nerves_gate/hardware.term")
+    {entries, blocked} = initial_entries()
 
     {assignments, assignment_error} =
-      case Assignments.read(hardware_file) do
+      case Assignments.load() do
         {:ok, ports} -> {ports, nil}
         {:error, reason} -> {%{}, reason}
       end
 
     state = %{
-      hardware_file: hardware_file,
       assignments: assignments,
       assignment_error: assignment_error,
-      file: file,
       entries: entries,
       running: %{},
       errors: %{},
@@ -139,20 +132,13 @@ defmodule NervesGate.Plugins do
 
   def handle_continue(:restore, state), do: {:noreply, state}
 
-  defp initial_entries(file) do
-    obsolete =
-      file == "/data/nerves_gate/plugins.term" and File.exists?("/data/nerves_gate/apps.term")
-
-    if obsolete do
-      {%{}, :obsolete_application_metadata}
+  defp initial_entries do
+    with {:ok, entries} <- Metadata.load(),
+         {:ok, bundled} <- Bundled.entries(),
+         {:ok, merged} <- Bundled.merge(entries, bundled) do
+      {merged, nil}
     else
-      with {:ok, entries} <- Metadata.read(file),
-           {:ok, bundled} <- Bundled.entries(),
-           {:ok, merged} <- Bundled.merge(entries, bundled) do
-        {merged, nil}
-      else
-        {:error, reason} -> {%{}, reason}
-      end
+      {:error, reason} -> {%{}, reason}
     end
   end
 
@@ -160,7 +146,6 @@ defmodule NervesGate.Plugins do
   def handle_call(:list, _, %{blocked: blocked} = state)
       when blocked in [
              :invalid_app_metadata,
-             :obsolete_application_metadata,
              :firmware_artifact_conflict
            ],
       do: {:reply, {:error, blocked}, state}
@@ -366,7 +351,7 @@ defmodule NervesGate.Plugins do
   defp recovery?(_, _), do: false
 
   defp worker_call({:assignments, ports}, %{blocked: nil, assignment_error: nil} = state) do
-    case Assignments.persist(state.hardware_file, ports) do
+    case Assignments.save(ports) do
       :ok ->
         NervesGate.Observations.put(
           ["hardware", "assignments"],
@@ -432,7 +417,7 @@ defmodule NervesGate.Plugins do
   end
 
   defp worker_call({:persist, entries}, %{blocked: nil} = state) do
-    result = with :ok <- storage_check(state.job), do: Metadata.persist(state.file, entries)
+    result = with :ok <- storage_check(state.job), do: Metadata.save(entries)
 
     case result do
       :ok ->
@@ -447,7 +432,7 @@ defmodule NervesGate.Plugins do
   end
 
   defp worker_call({:persist, entries}, %{job: %{request: {:stop, _}}} = state) do
-    case Metadata.persist(state.file, entries) do
+    case Metadata.save(entries) do
       :ok -> {:reply, :ok, %{state | entries: entries}}
       error -> {:reply, error, state}
     end

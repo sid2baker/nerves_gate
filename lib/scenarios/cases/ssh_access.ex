@@ -37,8 +37,6 @@ defmodule Scenarios.Cases.SshAccess do
     assert_key_works(vm, key)
     assert :ok = Scenarios.Device.rpc(vm, NervesGate.SSH, :remove_key, [fingerprint])
     assert {:error, _} = ssh_public_key(vm, key)
-    path = Scenarios.Device.rpc(vm, NervesGate.SSH.Keys, :path, [])
-    assert {:ok, %{size: 0}} = Scenarios.Device.rpc(vm, File, :stat, [path])
     Qemu.reboot(vm)
     await_ssh(vm)
     refute Enum.any?(Scenarios.Device.status(vm).ssh.keys, &(&1.fingerprint == fingerprint))
@@ -168,7 +166,8 @@ defmodule Scenarios.Cases.SshAccess do
   end
 
   defp reject_failed_save(vm, line, key) do
-    path = Scenarios.Device.rpc(vm, NervesGate.SSH.Keys, :path, []) <> ".new"
+    # PropertyTable writes this temporary file first; a directory makes it fail.
+    path = Scenarios.Device.rpc(vm, NervesGate.Settings, :file, []) <> ".tmp"
     :ok = Scenarios.Device.rpc(vm, File, :mkdir, [path])
     before = Scenarios.Device.status(vm).ssh.keys
 

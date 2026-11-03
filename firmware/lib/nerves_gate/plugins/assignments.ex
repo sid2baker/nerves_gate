@@ -5,31 +5,21 @@ defmodule NervesGate.Plugins.Assignments do
   may own it comes from the current hardware inventory. Saved intent for a
   resource the board no longer declares is kept untouched and cannot be enabled.
   """
+  alias NervesGate.Settings
   @max_resources 64
+  @key ["plugins", "assignments"]
 
-  def read(file) do
-    with {:ok, %{type: :regular, size: size}} when size <= 32_768 <- File.lstat(file),
-         {:ok, <<131, tag, _::binary>> = bytes} when tag != 80 <- File.read(file),
-         {%{schema: 1, ports: ports} = value, used} <-
-           :erlang.binary_to_term(bytes, [:safe, :used]),
-         true <- used == byte_size(bytes) and map_size(value) == 2 and valid?(ports) do
-      {:ok, ports}
-    else
-      {:error, :enoent} -> {:ok, %{}}
-      _ -> {:error, :invalid_hardware_assignments}
-    end
-  rescue
-    ArgumentError -> {:error, :invalid_hardware_assignments}
+  def load do
+    ports = Settings.get(@key, %{})
+    if valid?(ports), do: {:ok, ports}, else: {:error, :invalid_hardware_assignments}
   end
 
-  def persist(file, ports) do
-    if valid?(ports),
-      do:
-        NervesGate.Plugins.Metadata.write(
-          file,
-          :erlang.term_to_binary(%{schema: 1, ports: ports})
-        ),
-      else: {:error, :invalid_hardware_assignments}
+  def save(ports) do
+    cond do
+      not valid?(ports) -> {:error, :invalid_hardware_assignments}
+      Settings.put(@key, ports) == :ok -> :ok
+      true -> {:error, :metadata_commit_unknown}
+    end
   end
 
   def valid?(ports) when is_map(ports) and map_size(ports) <= @max_resources do

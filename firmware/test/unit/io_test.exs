@@ -2,20 +2,21 @@ defmodule NervesGate.IOTest do
   use ExUnit.Case, async: false
   alias NervesGate.IO, as: GateIO
   alias NervesGate.Plugins.Owner
+  alias NervesGate.Settings
   alias NervesGateSDK.IO.{InputDefinition, OutputDefinition}
   import NervesGate.IOFixture
 
   @moduletag :tmp_dir
+  @definitions ["io", "definitions"]
+
   setup %{tmp_dir: dir} do
+    start_supervised!({Settings, path: dir})
     fixture = NervesGate.IOFixture.start()
-    path = Path.join(dir, "io.term")
-    controller = start_supervised!({GateIO, path: path})
-    Map.merge(fixture, %{path: path, controller: controller})
+    controller = start_supervised!(GateIO)
+    Map.merge(fixture, %{dir: dir, controller: controller})
   end
 
-  test "definitions persist but registration, readings, claims and desire do not", %{
-    path: path
-  } do
+  test "definitions persist but registration, readings, claims and desire do not" do
     register_pair()
     assert {:ok, reading} = publish(21.0)
     assert reading.received_at_utc == nil
@@ -26,12 +27,9 @@ defmodule NervesGate.IOTest do
     assert {:ok, %{desired: 22.0, status: %{state: :pending}}} =
              GateIO.output("io_fixture.setpoint")
 
-    assert %{schema: 2, definitions: definitions} =
-             path |> File.read!() |> :erlang.binary_to_term()
-
-    assert definitions == GateIO.definitions()
+    assert Settings.get(@definitions) == GateIO.definitions()
     stop_supervised!(GateIO)
-    start_supervised!({GateIO, path: path})
+    start_supervised!(GateIO)
     assert {:ok, %{available?: false, reading: nil}} = GateIO.input("io_fixture.temperature")
 
     assert {:ok, %{available?: false, desired: nil, claimed?: false}} =
@@ -331,7 +329,6 @@ defmodule NervesGate.IOTest do
   end
 
   test "subscriber death removes subscription and controller loss requires fresh subscription", %{
-    path: path,
     controller: controller
   } do
     register_pair()
@@ -344,7 +341,7 @@ defmodule NervesGate.IOTest do
     ref = Process.monitor(controller)
     stop_supervised!(GateIO)
     assert_receive {:DOWN, ^ref, :process, ^controller, _}
-    next = start_supervised!({GateIO, path: path})
+    next = start_supervised!(GateIO)
     register_pair()
     publish(21.0)
     refute_receive {:nerves_gate_input_changed, _}
@@ -355,20 +352,23 @@ defmodule NervesGate.IOTest do
   end
 
   test "a definition persistence failure never registers and blocks further catalog writes", %{
-    path: path
+    dir: dir
   } do
-    File.mkdir_p!(path)
+    # PropertyTable writes this temporary file first; a directory makes it fail.
+    blocker = Settings.file(dir) <> ".tmp"
+    File.mkdir_p!(blocker)
 
     assert {:error, :io_catalog_write_failed} =
              plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
 
     assert GateIO.definitions() == %{}
-    File.rmdir!(path)
+    assert Settings.get(@definitions) == nil
+    File.rmdir!(blocker)
 
     assert {:error, :io_catalog_write_failed} =
              plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
 
-    refute File.exists?(path)
+    assert Settings.get(@definitions) == nil
   end
 
   test "quiescing alone eventually notifies input subscribers without another publication", %{
@@ -415,24 +415,19 @@ defmodule NervesGate.IOTest do
              desired("setpoint")
   end
 
-  test "unsupported saved definitions disable I/O without stopping it or rewriting them", %{
-    path: path
-  } do
+  test "unsupported saved definitions disable I/O without stopping it or rewriting them" do
     stop_supervised!(GateIO)
 
-    for bytes <- [
-          "not an I/O catalog",
-          :erlang.term_to_binary(%{schema: 1, definitions: %{}})
-        ] do
-      File.write!(path, bytes)
-      controller = start_supervised!({GateIO, path: path})
+    for saved <- ["not an I/O catalog", %{"io_fixture.temperature" => %{id: "temperature"}}] do
+      :ok = Settings.put(@definitions, saved)
+      controller = start_supervised!(GateIO)
       assert {:error, :io_catalog_unavailable} = GateIO.snapshot()
       assert {:error, :io_catalog_unavailable} = GateIO.claim_output("io_fixture.setpoint")
 
       assert {:error, :io_catalog_unavailable} =
                plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
 
-      assert File.read!(path) == bytes
+      assert Settings.get(@definitions) == saved
       assert Process.alive?(controller)
       stop_supervised!(GateIO)
     end

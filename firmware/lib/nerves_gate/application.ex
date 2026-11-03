@@ -20,8 +20,8 @@ defmodule NervesGate.Application do
       # One-time routing setup before Network.
       NervesGate.Network.Vintage,
       {PropertyTable, name: NervesGate.Properties},
-      # Small device-local values with no better owner, such as the SIM PIN.
-      {PropertyTable, name: NervesGate.Settings, persist_data_path: "/data/nerves_gate/settings"},
+      # Persistent device configuration for every domain that follows.
+      NervesGate.Settings,
       NervesGate.SSH,
       NervesGate.Network,
       NervesGate.Remote,

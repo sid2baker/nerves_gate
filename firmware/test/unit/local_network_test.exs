@@ -1,29 +1,15 @@
 defmodule NervesGate.Network.LocalTest do
   use ExUnit.Case, async: false
-  alias NervesGate.Config
+  alias NervesGate.{Config, Settings}
   alias NervesGate.Network.{Local, Policy, Vintage}
   alias NervesGate.Remote.Sharing
 
-  setup do
-    previous = Application.get_env(:nerves_gate, :local_network_journal)
+  @moduletag :tmp_dir
+  @journal ["network", "local"]
 
-    path =
-      Path.join(
-        System.tmp_dir!(),
-        "local-network-#{System.unique_integer([:positive])}/lease.json"
-      )
-
-    Application.put_env(:nerves_gate, :local_network_journal, path)
-
-    on_exit(fn ->
-      File.rm_rf!(Path.dirname(path))
-
-      if previous,
-        do: Application.put_env(:nerves_gate, :local_network_journal, previous),
-        else: Application.delete_env(:nerves_gate, :local_network_journal)
-    end)
-
-    %{path: path}
+  setup %{tmp_dir: dir} do
+    start_supervised!({NervesGate.Settings, path: dir})
+    :ok
   end
 
   test "revoked generations retain blocked cleanup instead of replaying uncertain writes" do
@@ -217,32 +203,36 @@ defmodule NervesGate.Network.LocalTest do
     assert {:error, _} = Policy.available(Map.put(status(), :local, Local.public(local)))
   end
 
-  test "journal startup blocks reuse and cannot silently adopt an existing route", %{path: path} do
+  test "journal startup blocks reuse and cannot silently adopt an existing route" do
     assert Local.load() == nil
-    File.mkdir_p!(Path.dirname(path))
 
-    File.write!(
-      path,
-      Jason.encode!(%{interface: "eth1", address: "192.168.50.2", prefix: 24, route_owned: false})
-    )
+    :ok =
+      Settings.put(@journal, %{
+        interface: "eth1",
+        address: "192.168.50.2",
+        prefix: 24,
+        route_owned: false
+      })
 
     assert %{owner: nil, phase: :cleanup_pending, scope: scope} = Local.load()
     assert Local.mark_advertising(scope) == :ok
     assert {:ok, %{route_owned: true}} = Local.read()
     assert {:error, _} = Local.mark_advertising(scope)
-    File.write!(path, "invalid")
+    :ok = Settings.put(@journal, "invalid")
     assert %{phase: :blocked, error: %{code: "local_journal_invalid"}} = Local.load()
   end
 
-  test "unavailable route owner blocks cleanup and retains its ownership journal", %{path: path} do
+  test "unavailable route owner blocks cleanup and retains its ownership journal" do
     assert Process.whereis(NervesGate.Remote) == nil
     {:ok, scope} = Local.candidate(status(), "eth1", "192.168.50.2", 24)
-    File.mkdir_p!(Path.dirname(path))
 
-    File.write!(
-      path,
-      Jason.encode!(%{interface: "eth1", address: "192.168.50.2", prefix: 24, route_owned: true})
-    )
+    :ok =
+      Settings.put(@journal, %{
+        interface: "eth1",
+        address: "192.168.50.2",
+        prefix: 24,
+        route_owned: true
+      })
 
     assert {:error, %{code: "local_cleanup_required"}} = Local.cleanup(scope)
     assert {:ok, %{route_owned: true, scope: ^scope}} = Local.read()

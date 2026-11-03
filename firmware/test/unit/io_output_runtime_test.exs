@@ -23,9 +23,9 @@ defmodule NervesGate.IOOutputRuntimeTest do
 
   @moduletag :tmp_dir
   setup %{tmp_dir: dir} do
+    start_supervised!({NervesGate.Settings, path: dir})
     fixture = NervesGate.IOFixture.start()
-    path = Path.join(dir, "io.term")
-    start_supervised!({GateIO, path: path})
+    start_supervised!(GateIO)
     parent = self()
     definition = %OutputDefinition{id: "relay", type: :boolean, on_release: :hold}
 
@@ -36,7 +36,7 @@ defmodule NervesGate.IOOutputRuntimeTest do
         start: {Output, :start_link, [Recorder, [definition], parent]}
       })
 
-    Map.merge(fixture, %{path: path, runtime: runtime, id: "io_fixture.relay"})
+    Map.merge(fixture, %{runtime: runtime, id: "io_fixture.relay"})
   end
 
   test "registration applies nothing; a Desire is applied once and its outcome recorded", %{
@@ -157,12 +157,11 @@ defmodule NervesGate.IOOutputRuntimeTest do
   end
 
   test "the runtime stops when the controller no longer accepts its handler", %{
-    path: path,
     runtime: runtime
   } do
     ref = Process.monitor(runtime)
     stop_supervised!(GateIO)
-    start_supervised!({GateIO, path: path})
+    start_supervised!(GateIO)
     Output.reapply(runtime, "relay")
 
     assert_receive {:DOWN, ^ref, :process, ^runtime,

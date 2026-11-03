@@ -5,8 +5,10 @@ defmodule NervesGate.Storage do
   formatting. Plugin lifecycle remains owned by `NervesGate.Plugins`.
   """
   use GenServer
-  alias NervesGate.{Error, Observations}
+  alias NervesGate.{Error, Observations, Settings}
   alias NervesGate.Storage.Config
+
+  @choice ["storage", "choice"]
   alias NervesGateSDK.Package
   alias NervesGateSDK.Storage.Status
   require Logger
@@ -68,17 +70,9 @@ defmodule NervesGate.Storage do
   @impl true
   def init(_) do
     Process.flag(:trap_exit, true)
-    file = Application.get_env(:nerves_gate, :storage_metadata, "/data/nerves_gate/storage")
-
-    choice =
-      case File.read(file) do
-        {:ok, "use"} -> :use
-        {:ok, "skip"} -> :skip
-        _ -> :pending
-      end
-
+    choice = if Settings.get(@choice) in [:use, :skip], do: Settings.get(@choice), else: :pending
     send(self(), :poll)
-    {:ok, %{file: file, choice: choice, card: card(), worker: nil, error: nil}}
+    {:ok, %{choice: choice, card: card(), worker: nil, error: nil}}
   end
 
   @impl true
@@ -112,7 +106,7 @@ defmodule NervesGate.Storage do
 
   def handle_call({:setup, :skip, _, _}, _, state) do
     # A regular unmount refuses open files; never silently detach busy apps.
-    with :ok <- unmount(), :ok <- save(state.file, :skip) do
+    with :ok <- unmount(), :ok <- Settings.put(@choice, :skip) do
       {:reply, :ok, publish(%{state | choice: :skip, error: nil})}
     else
       error -> {:reply, error, state}
@@ -167,7 +161,7 @@ defmodule NervesGate.Storage do
     next =
       case result do
         :ok ->
-          case save(state.file, :use) do
+          case Settings.put(@choice, :use) do
             :ok ->
               %{state | choice: :use, error: nil}
 
@@ -228,7 +222,7 @@ defmodule NervesGate.Storage do
       # Repeated non-destructive setup must not unmount a card used by apps.
       {:reply, :ok, state}
     else
-      case save(state.file, :pending) do
+      case Settings.put(@choice, :pending) do
         :ok ->
           {:reply, :ok, start(%{state | choice: :pending, card: current}, action)}
 
@@ -450,12 +444,6 @@ defmodule NervesGate.Storage do
   defp publish(state) do
     Observations.put(["storage"], view(state))
     state
-  end
-
-  defp save(file, choice) do
-    with :ok <- File.mkdir_p(Path.dirname(file)),
-         :ok <- File.write(file <> ".tmp", Atom.to_string(choice), [:sync]),
-         do: File.rename(file <> ".tmp", file)
   end
 
   # The board names the card slot by its sysfs hardware path, never by a kernel

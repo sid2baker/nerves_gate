@@ -2,9 +2,7 @@ defmodule NervesGate.SSH.Keys do
   @moduledoc false
   @limit 32
   @max_bytes 8192
-  @path "/data/nerves_gate/ssh_authorized_keys"
-
-  def path, do: @path
+  @key ["ssh", "authorized_keys"]
 
   # Accept exactly one plain OpenSSH public key. In particular, do not silently
   # discard authorized_keys restrictions (from=, command=, etc.) or private keys.
@@ -78,88 +76,42 @@ defmodule NervesGate.SSH.Keys do
   end
 
   def load do
-    case read(@path) do
-      {:error, :enoent} -> seed()
-      result -> result
+    case NervesGate.Settings.get(@key) do
+      nil -> seed()
+      lines when is_list(lines) and length(lines) <= @limit -> parse_lines(lines)
+      _ -> unavailable()
     end
   end
 
+  # A persisted empty list stays empty, so a removed key is never restored.
   def save(keys) do
-    data = Enum.map_join(keys, &(&1.line <> "\n"))
-    directory = Path.dirname(@path)
-
-    # Flush even an empty key file, then the rename and initial directory entry.
-    # O_SYNC on writes alone does not make revocation durable across a hard reset.
-    with :ok <- File.mkdir_p(directory),
-         :ok <- File.write(@path <> ".new", data),
-         :ok <- File.chmod(@path <> ".new", 0o600),
-         {:ok, :ok} <- File.open(@path <> ".new", [:read, :raw], &:file.sync/1),
-         :ok <- File.rename(@path <> ".new", @path),
-         :ok <- sync_directory(directory),
-         :ok <- sync_directory(Path.dirname(directory)) do
-      :ok
-    else
-      _ ->
-        {:error,
-         %{
-           code: "ssh_keys_unavailable",
-           message: "SSH keys could not be read or saved. Existing keys have not been replaced."
-         }}
+    case NervesGate.Settings.put(@key, Enum.map(keys, & &1.line)) do
+      :ok -> :ok
+      _ -> unavailable()
     end
   end
 
-  defp sync_directory(directory) do
-    # Directory descriptors are supported by OTP's primitive file driver, but
-    # are not part of the File.open/:file.open contract.
-    with {:ok, file} <- :prim_file.open(String.to_charlist(directory), [:read, :directory]) do
-      try do
-        :prim_file.sync(file)
-      after
-        :prim_file.close(file)
-      end
-    end
-  end
+  defp unavailable,
+    do:
+      {:error,
+       %{
+         code: "ssh_keys_unavailable",
+         message: "SSH keys could not be read or saved. Existing keys have not been replaced."
+       }}
 
+  # Seed only from the current firmware configuration, once.
   defp seed do
-    # Seed only from the current firmware configuration. A persisted empty store
-    # remains empty, so deleted keys never reappear after reboot or an update.
     with {:ok, keys} <- parse_lines(Application.get_env(:nerves_gate, :ssh_keys, [])),
          :ok <- save(keys) do
       {:ok, keys}
     end
   end
 
-  defp read(path) do
-    with {:ok, %{size: size}} when size <= @limit * (@max_bytes + 1) <- File.stat(path),
-         {:ok, text} <- File.read(path) do
-      parse_lines(String.split(text, "\n", trim: true))
-    else
-      {:error, :enoent} ->
-        {:error, :enoent}
-
-      _ ->
-        {:error,
-         %{
-           code: "ssh_keys_unavailable",
-           message: "SSH keys could not be read or saved. Existing keys have not been replaced."
-         }}
-    end
-  end
-
   defp parse_lines(lines) do
     Enum.reduce_while(lines, {:ok, []}, fn line, {:ok, keys} ->
       case add(keys, line) do
-        {:ok, keys} ->
-          {:cont, {:ok, keys}}
-
-        _ ->
-          {:halt,
-           {:error,
-            %{
-              code: "ssh_keys_unavailable",
-              message:
-                "SSH keys could not be read or saved. Existing keys have not been replaced."
-            }}}
+        {:ok, keys} -> {:cont, {:ok, keys}}
+        _ -> {:halt, unavailable()}
       end
     end)
   end

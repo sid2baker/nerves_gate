@@ -4,6 +4,8 @@
 
 ### Breaking changes
 
+- Device configuration is persisted in one `NervesGate.Settings` PropertyTable: plugin selections, hardware assignments, I/O definitions, the storage choice, SSH authorized keys and the local-network cleanup journal, next to the existing cellular settings. The old `/data/nerves_gate/*.term`, `storage`, `ssh_authorized_keys` and `local_network.json` files are ignored and left untouched; reconfigure plugins, assignments and I/O after updating. SSH keys reseed from build-time `NERVES_GATE_SSH_KEYS`. Plugin configuration on the SD card is unchanged.
+
 - `NervesGate.Application` lists the device supervision tree directly and starts only on device targets; the `:nerves_gate, :services` setting is removed. Host builds compile the firmware without starting it.
 
 - Network settings are VintageNet's own saved interface configs, with no `br0` metadata bridge, extra metadata or separate store; roles and cellular policy are read back from them. Earlier saved layouts are rejected and preserved; reflash or reprovision those gateways. A failed or interrupted save blocks further changes because interface writes are not a whole-device transaction.

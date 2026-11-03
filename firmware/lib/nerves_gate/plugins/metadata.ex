@@ -1,7 +1,29 @@
 defmodule NervesGate.Plugins.Metadata do
-  @moduledoc "Current-only artifact catalog and atomic selection persistence."
+  @moduledoc """
+  Schema 2 plugin catalog: artifact SHA/source/name/module, selection, enabled
+  intent and committed sequence. The device's selections live in
+  `NervesGate.Settings`; the build-generated firmware inventory is a read-only
+  file in the same format.
+  """
+  alias NervesGate.Settings
   alias NervesGateSDK.Package
   @limit 4 * 1024 * 1024
+  @key ["plugins", "entries"]
+
+  @doc "Saved device selections; unsupported values are kept untouched."
+  def load do
+    entries = Settings.get(@key, %{})
+    if valid?(entries), do: {:ok, entries}, else: {:error, :invalid_app_metadata}
+  end
+
+  def save(entries) do
+    cond do
+      not valid?(entries) -> {:error, :invalid_app_metadata}
+      :erlang.external_size(entries) > @limit -> {:error, :invalid_app_metadata}
+      Settings.put(@key, entries) == :ok -> :ok
+      true -> {:error, :metadata_commit_unknown}
+    end
+  end
 
   def read(file) do
     with {:ok, %{type: :regular, size: size}} when size <= @limit <- File.lstat(file),

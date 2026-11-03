@@ -240,7 +240,8 @@ defmodule NervesGate.PluginArtifactTest do
       }
     }
 
-    path = Path.join(dir, "apps.term")
+    # The firmware inventory is a strict read-only file in the same format.
+    path = Path.join(dir, "inventory.term")
     assert :ok = Metadata.persist(path, entries)
     assert {:ok, ^entries} = Metadata.read(path)
     original = File.read!(path)

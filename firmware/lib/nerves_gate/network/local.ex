@@ -1,8 +1,11 @@
 defmodule NervesGate.Network.Local do
   @moduledoc "Application-owned, isolated IPv4 links and durable subnet-advertisement cleanup."
   import Bitwise
-  alias NervesGate.{Config, Error, Remote}
+  alias NervesGate.{Config, Error, Remote, Settings}
   alias NervesGate.Network.{Policy, Subnet, Vintage}
+
+  # Ownership journal for cleanup after a crash or reboot; never enable intent.
+  @journal ["network", "local"]
 
   def candidate(status, interface, address, prefix) do
     with :ok <- Policy.available(status),
@@ -120,7 +123,7 @@ defmodule NervesGate.Network.Local do
     with {:ok, %{scope: ^scope, route_owned: owned}} <- read(),
          :ok <- withdraw(scope, owned),
          :ok <- Vintage.apply_local(scope.interface, nil),
-         :ok <- File.rm(path()) do
+         :ok <- Settings.delete(@journal) do
       :ok
     else
       _ ->
@@ -277,22 +280,16 @@ defmodule NervesGate.Network.Local do
       )
 
   def read do
-    case File.read(path()) do
-      {:error, :enoent} -> {:ok, nil}
-      {:ok, bytes} when byte_size(bytes) < 4096 -> decode(bytes)
-      _ -> {:error, :invalid_journal}
+    case Settings.get(@journal) do
+      nil -> {:ok, nil}
+      record -> decode(record)
     end
   end
 
-  defp decode(bytes) do
-    with {:ok,
-          %{
-            "interface" => interface,
-            "address" => address,
-            "prefix" => prefix,
-            "route_owned" => owned
-          } = record} <- Jason.decode(bytes),
-         true <-
+  defp decode(
+         %{interface: interface, address: address, prefix: prefix, route_owned: owned} = record
+       ) do
+    with true <-
            map_size(record) == 4 and interface in NervesGate.Board.ethernet() and
              is_boolean(owned) and
              is_integer(prefix) and prefix in 1..30,
@@ -310,32 +307,16 @@ defmodule NervesGate.Network.Local do
     end
   end
 
+  defp decode(_), do: {:error, :invalid_journal}
+
   defp write(scope, owned) do
-    bytes =
-      Jason.encode!(%{
-        interface: scope.interface,
-        address: scope.address,
-        prefix: scope.prefix,
-        route_owned: owned
-      })
-
-    with :ok <- File.mkdir_p(Path.dirname(path())),
-         {:ok, file} <- File.open(path(), [:write, :binary, :sync]) do
-      try do
-        with :ok <- IO.binwrite(file, bytes), do: :file.sync(file)
-      after
-        File.close(file)
-      end
-    end
+    Settings.put(@journal, %{
+      interface: scope.interface,
+      address: scope.address,
+      prefix: scope.prefix,
+      route_owned: owned
+    })
   end
-
-  defp path,
-    do:
-      Application.get_env(
-        :nerves_gate,
-        :local_network_journal,
-        "/data/nerves_gate/local_network.json"
-      )
 
   defp failure(code, message), do: {:error, Error.new(code, message)}
 end

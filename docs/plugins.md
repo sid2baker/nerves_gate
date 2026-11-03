@@ -109,10 +109,8 @@ closes surviving sessions. Stopped plugins show a host-owned unavailable page.
 ## Storage and state
 
 Firmware-bundled code runs without an SD card. Enabled intent and immutable artifact
-identity are stored in schema-2 `/data/nerves_gate/plugins.term`. Unsupported metadata
-is rejected intact, never migrated/reset automatically. Existing application-era
-`/data/nerves_gate/apps.term` blocks the cutover until a separately authorized
-operator decision; it is not silently adopted or deleted.
+identity are stored under `plugins.entries` in `NervesGate.Settings`. Unsupported
+metadata is rejected intact, never migrated/reset automatically.
 
 Plugin storage remains a separately commissioned ext4 SD mount at `/mnt/plugins`.
 `Storage.data_dir/1` requires available storage and a real managed calling process;

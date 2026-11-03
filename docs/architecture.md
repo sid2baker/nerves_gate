@@ -424,14 +424,23 @@ See [optional plugin UI](plugins.md#optional-ui).
 | --- | --- |
 | VintageNet | Confirmed interface settings; Network reads its settings back from them |
 | Tailscale | Device identity and preferences |
-| Settings PropertyTable | Small private settings, including SIM-bound PIN and APN-bound PAP |
-| SSH | Authorized public keys |
-| Network.Local: `/data/nerves_gate/local_network.json` | Temporary link/route ownership and incomplete cleanup; never enable intent |
-| Plugins: `/data/nerves_gate/plugins.term` | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
+| `NervesGate.Settings` (`/data/nerves_gate/settings`) | All other device configuration, one key per owning domain (below) |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
-| Plugins: `/data/nerves_gate/hardware.term` | Bounded exclusive port assignment and enablement intent |
-| IO: `/data/nerves_gate/io.term` | Schema 2 input/output definitions only (outputs with evidence and release declarations); no Desires, Readings or Authority |
 | Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data; the board's `plugins_slot` names the card slot by sysfs hardware path |
+
+`NervesGate.Settings` is a persistent PropertyTable. Each owner validates its
+own key; a write returns `:ok` only after it is flushed to disk. Invalid saved
+values are rejected and kept untouched.
+
+| Key | Owner | Value |
+| --- | --- | --- |
+| `cellular.*` | Cellular | SIM-bound PIN and APN-bound PAP |
+| `ssh.authorized_keys` | SSH | Authorized public keys |
+| `storage.choice` | Storage | SD card setup choice |
+| `network.local` | Network.Local | Temporary link/route ownership and incomplete cleanup; never enable intent |
+| `plugins.entries` | Plugins | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
+| `plugins.assignments` | Plugins | Bounded exclusive port assignment and enablement intent |
+| `io.definitions` | IO | Input/output definitions only (outputs with evidence and release declarations); no Desires, Readings or Authority |
 
 Targets require their declared data filesystem mounted read-write before data
 users start. Unreadable or unsupported saved network settings fail closed. Trials

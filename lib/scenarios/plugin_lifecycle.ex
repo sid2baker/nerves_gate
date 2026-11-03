@@ -7,14 +7,13 @@ defmodule Scenarios.PluginLifecycle do
   def run(vm) do
     ManagedPlugin.prepare_storage(vm)
     token = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-    metadata = "/tmp/lifecycle-metadata-#{token}/plugins.term"
-    previous = Device.rpc(vm, Application, :get_env, [:nerves_gate, :plugins_metadata])
+    # Runs on an owned disposable QEMU disk; saved selections are restored after.
+    key = ["plugins", "entries"]
+    previous = Device.rpc(vm, NervesGate.Settings, :get, [key])
     directory = Path.join(System.tmp_dir!(), "gate-lifecycle-#{token}")
     paths = Device.rpc(vm, :code, :get_path)
 
     try do
-      Device.rpc(vm, Application, :put_env, [:nerves_gate, :plugins_metadata, metadata])
-      restart_manager(vm)
       qualify(vm, directory)
     after
       {:ok, entries} = ManagedPlugin.plugins(vm, :list, [])
@@ -28,12 +27,13 @@ defmodule Scenarios.PluginLifecycle do
       assert Device.rpc(vm, :code, :get_path) == paths
       assert_unloaded(vm)
 
-      if previous,
-        do: Device.rpc(vm, Application, :put_env, [:nerves_gate, :plugins_metadata, previous]),
-        else: Device.rpc(vm, Application, :delete_env, [:nerves_gate, :plugins_metadata])
+      assert :ok =
+               if(previous,
+                 do: Device.rpc(vm, NervesGate.Settings, :put, [key, previous]),
+                 else: Device.rpc(vm, NervesGate.Settings, :delete, [key])
+               )
 
       restart_manager(vm)
-      Device.rpc(vm, File, :rm_rf!, [Path.dirname(metadata)])
       File.rm_rf!(directory)
     end
   end

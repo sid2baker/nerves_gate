@@ -8,8 +8,9 @@ defmodule NervesGateWeb.IOPageTest do
 
   @moduletag :tmp_dir
   setup %{tmp_dir: dir} do
+    start_supervised!({NervesGate.Settings, path: dir})
     NervesGate.IOFixture.start()
-    start_supervised!({GateIO, path: Path.join(dir, "io.term")})
+    start_supervised!(GateIO)
     start_supervised!(NervesGate.IO.Manual)
     start_supervised!(NervesGate.ProjectionServer)
     NervesGate.WebFixture.start_endpoint("io-page-test")

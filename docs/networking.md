@@ -514,8 +514,8 @@ return route, and fails closed on overlaps, gateways, VPN route overrides or
 uncertainty. Ethernet, Tailscale, IPv6 and QEMU management need keys.
 
 Manage SSH public keys under **Settings**. Keys grant full access, including IEx,
-SFTP and firmware uploads. Changes are saved to
-`/data/nerves_gate/ssh_authorized_keys` before taking effect. Build-time
+SFTP and firmware uploads. Changes are saved under `ssh.authorized_keys` in
+`NervesGate.Settings` before taking effect. Build-time
 `NERVES_GATE_SSH_KEYS` populates `:nerves_gate, :ssh_keys`, which seeds the store
 only on first use or after factory reset. No older key store is imported. A
 persisted empty store stays empty. Use `NervesGate.SSH.add_key/1` and

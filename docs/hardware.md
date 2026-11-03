@@ -89,7 +89,8 @@ NervesGate.Plugins.hardware()
 ```
 
 The manager serializes assignments with plugin lifecycle, keeps bounded current-only
-state at `/data/nerves_gate/hardware.term`, and rejects malformed state intact.
+state under `plugins.assignments` in `NervesGate.Settings`, and rejects malformed
+state intact.
 Firmware artifact selection remains separate. No automatic migration/reset of saved
 intent is performed.
 

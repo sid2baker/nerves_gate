@@ -97,11 +97,9 @@ defmodule NervesGate.IO do
   def release_output(full_id), do: GenServer.call(__MODULE__, {:release_output, full_id})
 
   @impl true
-  def init(opts) do
-    path = Keyword.get(opts, :path, "/data/nerves_gate/io.term")
-
+  def init(_) do
     {definitions, error} =
-      case Catalog.load(path) do
+      case Catalog.load() do
         {:ok, definitions} -> {definitions, nil}
         {:error, _} -> {%{}, :io_catalog_unavailable}
       end
@@ -110,7 +108,6 @@ defmodule NervesGate.IO do
 
     {:ok,
      %{
-       path: path,
        catalog_error: error,
        definitions: definitions,
        bindings: %{},
@@ -355,7 +352,7 @@ defmodule NervesGate.IO do
   defp persist_definition(state, id, definition) do
     if Map.has_key?(state.definitions, id),
       do: :ok,
-      else: Catalog.save(state.path, Map.put(state.definitions, id, definition))
+      else: Catalog.save(Map.put(state.definitions, id, definition))
   end
 
   defp caller_binding(state, pid, local_id) do
