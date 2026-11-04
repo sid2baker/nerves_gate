@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-03
+
 ### Breaking changes
 
 - Device configuration is persisted in one `NervesGate.Settings` PropertyTable: plugin selections, hardware assignments, I/O definitions, the storage choice, SSH authorized keys and the local-network cleanup journal, next to the existing cellular settings. The old `/data/nerves_gate/*.term`, `storage`, `ssh_authorized_keys` and `local_network.json` files are ignored and left untouched; reconfigure plugins, assignments and I/O after updating. SSH keys reseed from build-time `NERVES_GATE_SSH_KEYS`. Plugin configuration on the SD card is unchanged.
