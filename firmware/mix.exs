@@ -45,6 +45,7 @@ defmodule NervesGate.MixProject do
       ],
       aliases: [
         "assets.build": ["volt.build --tailwind"],
+        compile: [&drop_stale_app/1, "compile"],
         check: [
           "compile --warnings-as-errors",
           "format --check-formatted",
@@ -71,6 +72,15 @@ defmodule NervesGate.MixProject do
       preferred_targets: [ci: :host, check: :host, "assets.build": :host],
       preferred_envs: [ci: :test, check: :test, "assets.build": :dev]
     ]
+  end
+
+  # Mix regenerates the .app file when mix.exs or config changes, not VERSION.
+  defp drop_stale_app(_args) do
+    app = Path.join(Mix.Project.compile_path(), "nerves_gate.app")
+
+    with {:ok, [{:application, _, properties}]} <- :file.consult(app),
+         false <- to_string(properties[:vsn]) == @version,
+         do: File.rm!(app)
   end
 
   # Nerves 2 exposes extra firmware metadata through the build plan, not the

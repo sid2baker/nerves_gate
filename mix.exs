@@ -38,6 +38,7 @@ defmodule Workbench.MixProject do
         "deps.get": &deps_get/1,
         format: &format/1,
         firmware: &firmware/1,
+        compile: [&drop_stale_app/1, "compile"],
         ci: &ci/1,
         check: &check/1,
         "test.sdk": &run("sdk", ["test" | &1])
@@ -50,6 +51,15 @@ defmodule Workbench.MixProject do
     do: [extra_applications: [:logger, :crypto, :ssh, :eex], mod: {Workbench.Application, []}]
 
   def cli, do: [preferred_envs: [ci: :test, check: :test, "scenario.ci": :test]]
+
+  # Mix regenerates the .app file when mix.exs or config changes, not VERSION.
+  defp drop_stale_app(_args) do
+    app = Path.join(Mix.Project.compile_path(), "nerves_gate_workbench.app")
+
+    with {:ok, [{:application, _, properties}]} <- :file.consult(app),
+         false <- to_string(properties[:vsn]) == @version,
+         do: File.rm!(app)
+  end
 
   defp deps_get(args) do
     for project <- @projects, do: run(project, ["deps.get" | args])

@@ -17,7 +17,8 @@ defmodule NervesGateSDK.MixProject do
       ],
       aliases: [
         check: ["compile --warnings-as-errors", "format --check-formatted", "test"],
-        ci: ["check"]
+        ci: ["check"],
+        compile: [&drop_stale_app/1, "compile"]
       ],
       docs: [main: "readme", extras: ["README.md", "CHANGELOG.md"]],
       deps: [{:ex_doc, "~> 0.40", only: :docs, runtime: false}]
@@ -27,4 +28,13 @@ defmodule NervesGateSDK.MixProject do
   def cli, do: [preferred_envs: [ci: :test, check: :test]]
 
   def application, do: []
+
+  # Mix regenerates the .app file when mix.exs or config changes, not VERSION.
+  defp drop_stale_app(_args) do
+    app = Path.join(Mix.Project.compile_path(), "nerves_gate_sdk.app")
+
+    with {:ok, [{:application, _, properties}]} <- :file.consult(app),
+         false <- to_string(properties[:vsn]) == @version,
+         do: File.rm!(app)
+  end
 end

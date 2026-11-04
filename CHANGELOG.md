@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Firmware images and the Workbench report the current `VERSION` after a version change; incremental builds no longer keep the previous version in the compiled application.
+
 ## 0.4.0 - 2026-11-03
 
 ### Breaking changes
