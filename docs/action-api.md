@@ -92,6 +92,7 @@ with a domain-owned atom; controller loss exits the call and requires reconnecti
 | Function | Success |
 | --- | --- |
 | `IO.definitions()` | Map of full IDs to persisted SDK input/output definitions |
+| `IO.forget(id)` | `:ok`; explicitly forget an inactive input or output with no binding, claim, target or evidence references |
 | `IO.input(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., reading: ..., stale?: ...}}` |
 | `IO.output(id)` | `{:ok, %{id: ..., definition: ..., available?: ..., claimed?: ..., owned?: ..., desired: ..., status: ...}}` |
 | `IO.snapshot()` | `%{inputs: [...], outputs: [...]}` of every persisted endpoint, sorted by ID; consumes no hints |
@@ -122,6 +123,20 @@ clears its dirty flag. The read drains obsolete queued hints in the caller first
 A racing update can leave a redundant hint, never a lost final state. Another PID's
 read does not consume your notification. Recheck freshness with monotonic timers;
 resubscribe and reread after controller loss.
+
+The I/O page offers the same confirmed **Forget inactive endpoint** action for inputs
+and outputs. `IO.forget/1` refuses unknown IDs (`:unknown_endpoint`), any remaining
+binding—even during quiescence—claim or target (`:endpoint_active`), and references
+from saved output evidence (`:endpoint_referenced`). To remove an obsolete input used
+by an obsolete output, forget the inactive output first.
+
+Removal persists the updated catalog before changing live state. It notifies input
+subscribers and ends their subscriptions to that ID. Subsequent reads return
+`:unknown_input` or `:unknown_output`; a later explicit plugin registration can
+recreate the endpoint. Forget never releases control or sends equipment commands to
+make an endpoint removable. A failed or uncertain save leaves the live definition
+in place and blocks further catalog writes until I/O restarts; inspect persisted
+state after recovery rather than blindly retrying.
 
 Definitions persist, but restart or loss of an output binding clears its claim and
 desire. Writer death or release does the same without reverting or stopping equipment.

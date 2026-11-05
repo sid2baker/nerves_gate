@@ -60,6 +60,9 @@ defmodule NervesGate.IO do
   @doc "Read persisted definitions, independent of live availability."
   def definitions, do: GenServer.call(__MODULE__, :definitions)
 
+  @doc "Forget an unbound endpoint with no claim, target or evidence references. Persists before removal; sends no equipment commands."
+  def forget(full_id), do: GenServer.call(__MODULE__, {:forget, full_id})
+
   @doc "Read the latest Reading, quality and monotonic freshness. Consumes this caller's input hint."
   def input(full_id) do
     consume_hint(:nerves_gate_input_changed, full_id)
@@ -133,6 +136,37 @@ defmodule NervesGate.IO do
     do: register(definition, pid, handler, sweep(state))
 
   def handle_call(:definitions, _, state), do: {:reply, state.definitions, sweep(state)}
+
+  def handle_call({:forget, id}, _, state) do
+    state = sweep(state)
+    definitions = Map.delete(state.definitions, id)
+
+    with :ok <- forgettable_endpoint(state, id),
+         :ok <- state.storage_error || Catalog.save(definitions) do
+      state = notify_input(state, id)
+
+      subscribers =
+        Map.new(state.subscribers, fn {pid, inputs} -> {pid, Map.delete(inputs, id)} end)
+
+      state = %{
+        state
+        | definitions: definitions,
+          latest: Map.delete(state.latest, id),
+          claims: Map.delete(state.claims, id),
+          desires: Map.delete(state.desires, id),
+          applied: Map.delete(state.applied, id),
+          subscribers: subscribers
+      }
+
+      {:reply, :ok, sweep(state)}
+    else
+      {:error, :io_catalog_write_failed} = error ->
+        {:reply, error, %{state | storage_error: error}}
+
+      error ->
+        {:reply, error, state}
+    end
+  end
 
   def handle_call({:publish, local_id, value, quality}, {pid, _}, state) do
     state = sweep(state)
@@ -306,6 +340,26 @@ defmodule NervesGate.IO do
     else
       {:error, _} = error -> {:reply, error, state}
       _ -> {:reply, {:error, :invalid_registration}, state}
+    end
+  end
+
+  defp forgettable_endpoint(state, id) do
+    cond do
+      not Map.has_key?(state.definitions, id) ->
+        {:error, :unknown_endpoint}
+
+      Map.has_key?(state.bindings, id) or Map.has_key?(state.claims, id) or
+          state.desires[id] != nil ->
+        {:error, :endpoint_active}
+
+      Enum.any?(state.definitions, fn
+        {_, %OutputDefinition{evidence: evidence}} -> Enum.any?(evidence, &(&1.input == id))
+        _ -> false
+      end) ->
+        {:error, :endpoint_referenced}
+
+      true ->
+        :ok
     end
   end
 

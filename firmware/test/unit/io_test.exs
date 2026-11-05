@@ -43,6 +43,137 @@ defmodule NervesGate.IOTest do
     refute_receive {:plugin_hint, _, {:nerves_gate_output, _, _}}
   end
 
+  test "forget refuses bound endpoints and never clears control to make them removable", %{
+    owner: owner
+  } do
+    register_pair()
+    before = GateIO.definitions()
+    assert {:error, :endpoint_active} = GateIO.forget("io_fixture.temperature")
+    assert {:error, :endpoint_active} = GateIO.forget("io_fixture.setpoint")
+    :ok = GateIO.claim_output("io_fixture.setpoint")
+    :ok = GateIO.set_output("io_fixture.setpoint", 22.0)
+    assert {:error, :endpoint_active} = GateIO.forget("io_fixture.setpoint")
+    assert {:ok, %{owned?: true, desired: 22.0}} = GateIO.output("io_fixture.setpoint")
+    Owner.quiesce(owner)
+    assert {:ok, %{available?: false}} = GateIO.input("io_fixture.temperature")
+    assert {:error, :endpoint_active} = GateIO.forget("io_fixture.temperature")
+    assert {:error, :endpoint_active} = GateIO.forget("io_fixture.setpoint")
+    assert GateIO.definitions() == before
+    assert Settings.get(@definitions) == before
+  end
+
+  test "forget removes only an unbound input, notifies subscribers, and survives restart", %{
+    controller: controller
+  } do
+    assert {:ok, id} = plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
+    spare = %{input_definition() | id: "spare"}
+    assert {:ok, spare_id} = plugin(Publisher, fn -> GateIO.register_input(spare) end)
+    publish(21.0)
+    GateIO.subscribe(id)
+    GateIO.subscribe(spare_id)
+    GateIO.input(id)
+    Supervisor.terminate_child(FixtureSupervisor, Publisher)
+    GateIO.input(id)
+    GateIO.input(id)
+    GateIO.input(spare_id)
+
+    assert :ok = NervesGate.IO.forget(id)
+    assert_receive {:nerves_gate_input_changed, ^id}
+    assert {:error, :unknown_input} = GateIO.input(id)
+    assert GateIO.definitions() == %{spare_id => spare}
+    assert Settings.get(@definitions) == %{spare_id => spare}
+    assert :sys.get_state(controller).subscribers[self()] == %{spare_id => false}
+    refute Map.has_key?(:sys.get_state(controller).latest, id)
+    stop_supervised!(GateIO)
+    start_supervised!(GateIO)
+    assert GateIO.definitions() == %{spare_id => spare}
+    assert {:error, :unknown_input} = GateIO.input(id)
+    # Forgetting is not a ban: an explicit later registration can recreate it.
+    {:ok, _} = Supervisor.restart_child(FixtureSupervisor, Publisher)
+    assert {:ok, ^id} = plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
+  end
+
+  test "forget refuses inputs referenced by persisted outputs and unknown IDs" do
+    register_pair()
+    stop_supervised!(GateIO)
+    start_supervised!(GateIO)
+    before = GateIO.definitions()
+    assert {:error, :endpoint_referenced} = GateIO.forget("io_fixture.temperature")
+    assert {:error, :unknown_endpoint} = GateIO.forget("io_fixture.missing")
+    assert GateIO.definitions() == before
+    assert Settings.get(@definitions) == before
+  end
+
+  test "forgetting an inactive output leaves its input intact and permits later input cleanup" do
+    register_pair()
+    publish(21.0)
+    :ok = GateIO.claim_output("io_fixture.setpoint")
+    :ok = GateIO.set_output("io_fixture.setpoint", 22.0)
+    Supervisor.terminate_child(FixtureSupervisor, Handler)
+
+    assert {:ok, %{available?: false, claimed?: false, desired: nil}} =
+             GateIO.output("io_fixture.setpoint")
+
+    assert :ok = GateIO.forget("io_fixture.setpoint")
+    assert {:error, :unknown_output} = GateIO.output("io_fixture.setpoint")
+
+    assert {:ok, %{available?: true, reading: %{value: 21.0}}} =
+             GateIO.input("io_fixture.temperature")
+
+    assert GateIO.definitions() == %{"io_fixture.temperature" => input_definition()}
+    assert Settings.get(@definitions) == GateIO.definitions()
+
+    for key <- [:bindings, :claims, :desires, :applied] do
+      refute Map.has_key?(Map.fetch!(:sys.get_state(GateIO), key), "io_fixture.setpoint")
+    end
+
+    stop_supervised!(GateIO)
+    start_supervised!(GateIO)
+    assert {:error, :unknown_output} = GateIO.output("io_fixture.setpoint")
+    assert :ok = GateIO.forget("io_fixture.temperature")
+    assert Settings.get(@definitions) == %{}
+  end
+
+  test "a failed output removal preserves its saved and live definition", %{dir: dir} do
+    register_pair()
+    stop_supervised!(GateIO)
+    start_supervised!(GateIO)
+    before = GateIO.definitions()
+    blocker = Settings.file(dir) <> ".tmp"
+    File.mkdir_p!(blocker)
+    assert {:error, :io_catalog_write_failed} = GateIO.forget("io_fixture.setpoint")
+    assert GateIO.definitions() == before
+    assert Settings.get(@definitions) == before
+    assert {:ok, %{available?: false}} = GateIO.output("io_fixture.setpoint")
+    File.rmdir!(blocker)
+    assert {:error, :io_catalog_write_failed} = GateIO.forget("io_fixture.setpoint")
+  end
+
+  test "failed forget preserves the catalog and subscriptions and fences further writes", %{
+    dir: dir
+  } do
+    assert {:ok, id} = plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
+    stop_supervised!(GateIO)
+    start_supervised!(GateIO)
+    GateIO.subscribe(id)
+    GateIO.input(id)
+    before = GateIO.definitions()
+    blocker = Settings.file(dir) <> ".tmp"
+    File.mkdir_p!(blocker)
+    assert {:error, :io_catalog_write_failed} = NervesGate.IO.forget(id)
+    assert GateIO.definitions() == before
+    assert Settings.get(@definitions) == before
+    assert :sys.get_state(GateIO).subscribers[self()] == %{id => false}
+    refute_receive {:nerves_gate_input_changed, ^id}
+    File.rmdir!(blocker)
+    assert {:error, :io_catalog_write_failed} = NervesGate.IO.forget(id)
+    assert GateIO.definitions() == before
+    stop_supervised!(GateIO)
+    start_supervised!(GateIO)
+    assert :ok = NervesGate.IO.forget(id)
+    assert Settings.get(@definitions) == %{}
+  end
+
   test "SDK bridge preserves actual registration, subscription, handler and writer PIDs" do
     sdk = NervesGateSDK.IO
     assert {:error, :plugin_not_running} = sdk.subscribe("io_fixture.temperature")
@@ -422,6 +553,7 @@ defmodule NervesGate.IOTest do
       :ok = Settings.put(@definitions, saved)
       controller = start_supervised!(GateIO)
       assert {:error, :io_catalog_unavailable} = GateIO.snapshot()
+      assert {:error, :io_catalog_unavailable} = NervesGate.IO.forget("io_fixture.temperature")
       assert {:error, :io_catalog_unavailable} = GateIO.claim_output("io_fixture.setpoint")
 
       assert {:error, :io_catalog_unavailable} =

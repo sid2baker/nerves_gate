@@ -88,6 +88,89 @@ defmodule NervesGateWeb.IOPageTest do
     assert {:ok, %{desired: nil}} = plugin(Handler, fn -> GateIO.read_desired("setpoint") end)
   end
 
+  test "confirmed forgetting removes an inactive input from the page and saved catalog" do
+    assert {:ok, id} = plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
+    Supervisor.terminate_child(FixtureSupervisor, Publisher)
+    {:ok, view, _} = live(build_conn(), "/io")
+    button = "#io-forget-io_fixture-temperature"
+    assert has_element?(view, button <> "[data-confirm]", "Forget inactive endpoint")
+    view |> element(button) |> render_click()
+    assert render(view) =~ "Endpoint definition forgotten. No equipment commands were sent."
+    refute has_element?(view, "#io-input-io_fixture-temperature")
+    assert render(view) =~ "No plugin has registered an input."
+    refute Map.has_key?(NervesGate.Settings.get(["io", "definitions"]), id)
+    assert {:error, :unknown_input} = GateIO.input(id)
+  end
+
+  test "active inputs have no forget button and forged requests are refused" do
+    register_pair()
+    publish(21.5)
+    {:ok, view, _} = live(build_conn(), "/io")
+    refute has_element?(view, "#io-forget-io_fixture-temperature")
+    render_click(view, "forget", %{"id" => "io_fixture.temperature"})
+    assert render(view) =~ "Stop the endpoint&#39;s owning plugin"
+
+    assert {:ok, %{available?: true, reading: %{value: 21.5}}} =
+             GateIO.input("io_fixture.temperature")
+
+    assert {:ok, %{claimed?: false, desired: nil}} = GateIO.output("io_fixture.setpoint")
+  end
+
+  test "a failed save retains the input and displays the recovery warning", %{tmp_dir: dir} do
+    assert {:ok, id} = plugin(Publisher, fn -> GateIO.register_input(input_definition()) end)
+    Supervisor.terminate_child(FixtureSupervisor, Publisher)
+    {:ok, view, _} = live(build_conn(), "/io")
+    blocker = NervesGate.Settings.file(dir) <> ".tmp"
+    File.mkdir_p!(blocker)
+    view |> element("#io-forget-io_fixture-temperature") |> render_click()
+    assert render(view) =~ "The live endpoint was retained"
+    assert has_element?(view, "#io-input-io_fixture-temperature")
+    assert Map.has_key?(NervesGate.Settings.get(["io", "definitions"]), id)
+    File.rmdir!(blocker)
+  end
+
+  test "inactive evidence cannot be forgotten and backend errors are shown" do
+    register_pair()
+    stop_supervised!(GateIO)
+    start_supervised!(GateIO)
+    {:ok, view, _} = live(build_conn(), "/io")
+    view |> element("#io-forget-io_fixture-temperature") |> render_click()
+    assert render(view) =~ "still used as output evidence"
+    assert has_element?(view, "#io-input-io_fixture-temperature")
+    assert has_element?(view, @output)
+  end
+
+  test "outputs use the same confirmed action, refuse active control, and disappear after inactive removal" do
+    register_pair()
+    :ok = GateIO.claim_output("io_fixture.setpoint")
+    :ok = GateIO.set_output("io_fixture.setpoint", 22.0)
+    {:ok, view, _} = live(build_conn(), "/io")
+    refute has_element?(view, "#io-forget-io_fixture-setpoint")
+    render_click(view, "forget", %{"id" => "io_fixture.setpoint"})
+    assert render(view) =~ "Stop the endpoint&#39;s owning plugin"
+    assert {:ok, %{owned?: true, desired: 22.0}} = GateIO.output("io_fixture.setpoint")
+    Supervisor.terminate_child(FixtureSupervisor, Handler)
+    send(view.pid, :poll)
+
+    assert has_element?(
+             view,
+             "#io-forget-io_fixture-setpoint[data-confirm]",
+             "Forget inactive endpoint"
+           )
+
+    view |> element("#io-forget-io_fixture-setpoint") |> render_click()
+    assert render(view) =~ "Endpoint definition forgotten. No equipment commands were sent."
+    refute has_element?(view, @output)
+    assert has_element?(view, "#io-input-io_fixture-temperature")
+    assert {:error, :unknown_output} = GateIO.output("io_fixture.setpoint")
+    refute Map.has_key?(NervesGate.Settings.get(["io", "definitions"]), "io_fixture.setpoint")
+    Supervisor.terminate_child(FixtureSupervisor, Publisher)
+    send(view.pid, :poll)
+    view |> element("#io-forget-io_fixture-temperature") |> render_click()
+    refute has_element?(view, "#io-input-io_fixture-temperature")
+    assert NervesGate.Settings.get(["io", "definitions"]) == %{}
+  end
+
   test "form text converts only to the output's declared type" do
     alias NervesGateWeb.IOLive
     assert {:ok, true} = IOLive.parse(:boolean, "true")

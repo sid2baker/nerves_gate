@@ -23,6 +23,14 @@ defmodule NervesGateWeb.IOLive do
     {:noreply, read(socket)}
   end
 
+  def handle_event("forget", %{"id" => id}, socket),
+    do:
+      command(
+        socket,
+        NervesGate.Error.protect(fn -> NervesGate.IO.forget(id) end),
+        "Endpoint definition forgotten. No equipment commands were sent."
+      )
+
   def handle_event("claim", %{"id" => id}, socket),
     do:
       command(
@@ -63,9 +71,28 @@ defmodule NervesGateWeb.IOLive do
 
     case result do
       :ok -> {:noreply, socket |> put_flash(:info, success) |> read()}
-      {:error, error} -> {:noreply, socket |> put_flash(:error, error.message) |> read()}
+      {:error, %{message: message}} -> {:noreply, socket |> put_flash(:error, message) |> read()}
+      {:error, reason} -> {:noreply, socket |> put_flash(:error, forget_error(reason)) |> read()}
     end
   end
+
+  defp forget_error(:unknown_endpoint), do: "This endpoint is no longer defined."
+
+  defp forget_error(:endpoint_active),
+    do: "Stop the endpoint's owning plugin and clear its control before forgetting it."
+
+  defp forget_error(:endpoint_referenced),
+    do: "This endpoint is still used as output evidence and cannot be forgotten."
+
+  defp forget_error(:io_catalog_write_failed),
+    do:
+      "Could not confirm saving I/O definitions. The live endpoint was retained; further catalog changes are blocked until I/O restarts. Inspect saved state after recovery."
+
+  defp forget_error(:io_catalog_unavailable),
+    do: "Saved I/O definitions are unsupported or unreadable. Nothing was removed."
+
+  defp forget_error(_),
+    do: "Could not forget this endpoint. Refresh and inspect before trying again."
 
   defp read(socket),
     do: assign(socket, io: Manual.status(), now: System.monotonic_time(:millisecond))
@@ -112,6 +139,7 @@ defmodule NervesGateWeb.IOLive do
               <strong>{observed(input)}</strong>
               <.status tone={tone(input)}>{state(input)}</.status>
               <span :if={input.reading} class="ui-muted">{age(input.reading, @now)}</span>
+              <.forget_button :if={!input.available?} id={input.id} />
             </div>
           </li>
         </ul>
@@ -148,6 +176,10 @@ defmodule NervesGateWeb.IOLive do
               </dl>
             </details>
             <div class="ui-io-controls">
+              <.forget_button
+                :if={!output.available? and !output.claimed? and output.desired == nil}
+                id={output.id}
+              />
               <.button
                 :if={!output.claimed?}
                 id={dom_id("io-claim", output.id)}
@@ -202,6 +234,20 @@ defmodule NervesGateWeb.IOLive do
         </ul>
       </.panel>
     </div>
+    """
+  end
+
+  attr(:id, :string, required: true)
+
+  defp forget_button(assigns) do
+    ~H"""
+    <.button
+      id={dom_id("io-forget", @id)}
+      variant="quiet"
+      phx-click="forget"
+      phx-value-id={@id}
+      data-confirm="Forget this saved endpoint definition? This does not send commands to equipment. Its plugin may register it again in the future."
+    >Forget inactive endpoint</.button>
     """
   end
 

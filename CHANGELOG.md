@@ -8,6 +8,7 @@
 
 ### Added
 
+- The I/O page can explicitly forget inactive input and output definitions after confirmation. Endpoints with bindings, claims, targets or output-evidence references are protected; removal persists before changing the live catalog and sends no equipment commands.
 - Modbus clients and servers support raw grouped reads and explicit whole-range writes across all four tables. A simple range editor replaces mapping JSON; bounded read-only discovery stays separate and creates no ranges or endpoints.
 
 ### Fixed
