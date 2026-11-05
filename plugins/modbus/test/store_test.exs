@@ -8,7 +8,7 @@ defmodule ModbusPlugin.StoreTest do
     assert configs == %{"pump" => config}
     assert Store.valid?(configs)
 
-    assert {:error, :invalid_configuration} =
+    assert {:error, {:invalid_field, "unit", 0}} =
              Store.put(configs, "pump", %{params() | "unit" => 0})
 
     full = Enum.reduce(1..16, %{}, fn n, acc -> elem(Store.put(acc, "d#{n}", params()), 1) end)
@@ -48,7 +48,7 @@ defmodule ModbusPlugin.StoreTest do
       "interval" => 500,
       "timeout" => 1000,
       "mappings" => [
-        %{"id" => "level", "table" => "holding", "address" => 0, "direction" => "input"}
+        %{"id" => "level", "table" => "holding", "address" => 0, "access" => "read"}
       ]
     }
   end

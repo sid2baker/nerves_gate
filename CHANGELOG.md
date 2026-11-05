@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- Modbus 0.5.0-dev.2 replaces mapping `direction` with `access: read|write` and typed values. Old version-scoped configuration remains untouched; configure the new plugin version explicitly.
+
+### Added
+
+- Modbus clients and servers support all four tables, typed multi-register values, units and batching. Separate bounded read-only discovery retains raw evidence for operator promotion into mapping drafts; Solis templates and SunSpec model discovery remain explicitly selected.
+
 ### Fixed
 
 - Firmware images and the Workbench report the current `VERSION` after a version change; incremental builds no longer keep the previous version in the compiled application.

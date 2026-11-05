@@ -1,7 +1,9 @@
 defmodule ModbusPlugin do
   @moduledoc """
   Explicitly started Modbus TCP/RTU clients and servers using yamodbus, with
-  mapped registers/coils exposed as platform inputs and outputs.
+  typed points of all four tables exposed as platform inputs and outputs.
+  `discover/2` runs a separate read-only survey through a stopped client instead
+  of normal polling; it registers no endpoints and retains evidence only in memory.
 
   Definitions are this plugin version's `NervesGateSDK.Storage` configuration
   term, restored at startup; startup never opens a transport. Save and Start are separate: a running
@@ -11,12 +13,15 @@ defmodule ModbusPlugin do
   worker is no proof its native handle drained.
   """
   use GenServer
-  alias ModbusPlugin.{Connection, Server, Store}
+  alias ModbusPlugin.{Connection, Discovery, Server, Store}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
   def save(id, params), do: GenServer.call(__MODULE__, {:save, id, params})
   def delete(id), do: GenServer.call(__MODULE__, {:delete, id})
   def start(id), do: GenServer.call(__MODULE__, {:start, id})
+
+  @doc "Start a bounded read-only survey instead of polling a stopped client."
+  def discover(id, params), do: GenServer.call(__MODULE__, {:discover, id, params})
   def stop(id), do: GenServer.call(__MODULE__, {:stop, id})
   def status, do: GenServer.call(__MODULE__, :status)
   def ports, do: GenServer.call(__MODULE__, :ports)
@@ -63,11 +68,41 @@ defmodule ModbusPlugin do
         {_, nil, monitor} when monitor != nil ->
           {:error, :connection_cleanup_required}
 
+        {%{role: :client, mappings: []}, nil, nil} ->
+          {:error, :no_mappings}
+
         {config, nil, nil} ->
           with :ok <- serial_exclusive(config, state),
                {:ok, config} <- assigned_transport(config) do
             start_runtime(config)
           end
+      end
+
+    case result do
+      {:ok, pid} ->
+        monitors =
+          if state.configs[id].transport == "rtu",
+            do: Map.put(state.monitors, id, Process.monitor(pid)),
+            else: state.monitors
+
+        {:reply, :ok, %{state | monitors: monitors}}
+
+      error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:discover, id, params}, _, state) do
+    result =
+      with :ok <- idle(state, id),
+           %{role: :client} = config <- state.configs[id] || {:error, :save_first},
+           {:ok, plan} <- Discovery.validate(params),
+           :ok <- serial_exclusive(config, state),
+           {:ok, config} <- assigned_transport(config) do
+        start_child(Discovery, {config, plan})
+      else
+        %{role: :server} -> {:error, :client_required}
+        error -> error
       end
 
     case result do
@@ -150,10 +185,11 @@ defmodule ModbusPlugin do
     end
   end
 
-  defp start_runtime(config) do
-    module = if config.role == :server, do: Server, else: Connection
+  defp start_runtime(config),
+    do: start_child(if(config.role == :server, do: Server, else: Connection), config)
 
-    case DynamicSupervisor.start_child(ModbusPlugin.Connections, {module, config}) do
+  defp start_child(module, arg) do
+    case DynamicSupervisor.start_child(ModbusPlugin.Connections, {module, arg}) do
       {:ok, pid} -> {:ok, pid}
       {:error, reason} -> {:error, {:start_failed, reason}}
     end

@@ -48,9 +48,9 @@ defmodule ModbusPluginTest do
           %{"host" => "http://example.com"},
           %{"timeout" => "999999"},
           %{"role" => "master"},
-          %{"mappings" => []},
+          %{"mappings" => nil},
           %{"mappings" => [%{"id" => "Bad", "table" => "holding", "address" => 0}]},
-          %{"mappings" => [%{"id" => "x", "table" => "input", "address" => 0}]},
+          %{"mappings" => [%{"id" => "x", "table" => "unknown", "address" => 0}]},
           %{"mappings" => [%{"id" => "x", "table" => "holding", "address" => 65536}]},
           %{
             "mappings" => [
@@ -60,24 +60,23 @@ defmodule ModbusPluginTest do
           },
           %{
             "mappings" => [
-              %{"id" => "x", "table" => "coil", "address" => 0, "direction" => "input"},
+              %{"id" => "x", "table" => "coil", "address" => 0, "access" => "read"},
               %{
                 "id" => "y",
                 "table" => "holding",
                 "address" => 0,
-                "direction" => "output",
+                "access" => "write",
                 "feedback" => "x"
               }
             ]
           }
         ] do
-      assert {:error, :invalid_configuration} =
-               Config.validate("one", Map.merge(client(502), change))
+      assert {:error, _reason} = Config.validate("one", Map.merge(client(502), change))
     end
 
-    assert {:error, :invalid_configuration} = Config.validate("Bad-Id", client(502))
+    assert {:error, {:invalid_field, "id", "Bad-Id"}} = Config.validate("Bad-Id", client(502))
 
-    assert {:error, :invalid_configuration} =
+    assert {:error, {:invalid_mapping, "c", {:invalid_initial, 2}}} =
              Config.validate(
                "s",
                Map.put(server(502), "mappings", [
@@ -132,16 +131,16 @@ defmodule ModbusPluginTest do
       "interval" => 100,
       "timeout" => 100,
       "mappings" => [
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "direction" => "input"},
+        %{"id" => "holding0", "table" => "holding", "address" => 0, "access" => "read"},
         %{
           "id" => "holding0_set",
           "table" => "holding",
           "address" => 0,
-          "direction" => "output",
+          "access" => "write",
           "feedback" => "holding0"
         },
-        %{"id" => "coil0", "table" => "coil", "address" => 0, "direction" => "input"},
-        %{"id" => "coil0_set", "table" => "coil", "address" => 0, "direction" => "output"}
+        %{"id" => "coil0", "table" => "coil", "address" => 0, "access" => "read"},
+        %{"id" => "coil0_set", "table" => "coil", "address" => 0, "access" => "write"}
       ]
     }
 

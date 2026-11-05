@@ -76,6 +76,86 @@ defmodule ModbusPlugin.UITest do
     assert ModbusPlugin.Connection.pid("server1") == nil
   end
 
+  test "discovery controls render and promotion and templates only change a draft" do
+    {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
+
+    defaults =
+      socket.assigns.form.params
+      |> Map.merge(%{
+        "role" => "client",
+        "transport" => "tcp",
+        "host" => "localhost",
+        "mappings" => [%{"id" => "point", "table" => "input", "address" => 0}]
+      })
+
+    {:ok, config} = ModbusPlugin.Config.validate("client1", defaults)
+
+    evidence = %{
+      unit: 2,
+      table: :input,
+      address: 33139,
+      raw: 80,
+      hex: "0050",
+      observed_at: "2026-11-04T00:00:00Z"
+    }
+
+    model = %{id: 1, address: 40002, length: 66}
+
+    survey = %{
+      requests: 8,
+      budget: 100,
+      remaining: 0,
+      units: [],
+      sunspec: [%{unit: 2, base: 40000, models: [model]}],
+      evidence: [evidence]
+    }
+
+    connection =
+      Map.merge(config, %{
+        state: :discovered,
+        values: nil,
+        error: nil,
+        read_at: nil,
+        discovery: survey
+      })
+
+    status = %{storage: nil, connections: [connection]}
+    socket = Phoenix.Component.assign(socket, :status, status)
+    html = render_component(ModbusPlugin.UI, id: "modbus", status: status)
+    assert html =~ "Raw discovery evidence"
+    assert html =~ "0050"
+    assert html =~ "Promote to draft"
+    assert html =~ "Common-model strings"
+
+    {:noreply, promoted} =
+      ModbusPlugin.UI.handle_event(
+        "promote",
+        %{"id" => "client1", "unit" => "2", "table" => "input", "address" => "33139"},
+        socket
+      )
+
+    assert promoted.assigns.form.params["unit"] == "2"
+
+    assert JSON.decode!(promoted.assigns.form.params["mappings"]) == [
+             ModbusPlugin.Discovery.mapping(evidence)
+           ]
+
+    assert promoted.assigns.status == status
+    assert promoted.assigns.message =~ "draft only"
+
+    {:noreply, sun} =
+      ModbusPlugin.UI.handle_event(
+        "sunspec",
+        %{"id" => "client1", "unit" => "2", "address" => "40002"},
+        socket
+      )
+
+    assert length(JSON.decode!(sun.assigns.form.params["mappings"])) == 3
+    {:noreply, solis} = ModbusPlugin.UI.handle_event("solis", %{}, promoted)
+    assert JSON.decode!(solis.assigns.form.params["mappings"]) == ModbusPlugin.Profiles.solis()
+    assert ModbusPlugin.Connection.pid("client1") == nil
+  end
+
   test "Edit loads a saved definition into a separate draft; role switches keep user edits" do
     {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
     defaults = socket.assigns.form.params

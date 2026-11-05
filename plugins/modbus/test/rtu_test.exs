@@ -22,7 +22,7 @@ defmodule ModbusPlugin.RTUTest do
           %{"stop_bits" => 3},
           %{"unit" => 0}
         ] do
-      assert {:error, :invalid_configuration} =
+      assert {:error, {:invalid_field, _, _}} =
                Config.validate("one", Map.merge(params(), change))
     end
 
@@ -94,7 +94,7 @@ defmodule ModbusPlugin.RTUTest do
       "interval" => 500,
       "timeout" => 200,
       "mappings" => [
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "direction" => "input"}
+        %{"id" => "holding0", "table" => "holding", "address" => 0, "access" => "read"}
       ]
     }
 end

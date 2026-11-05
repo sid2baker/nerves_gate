@@ -147,6 +147,19 @@ defmodule Scenarios.Cases.Plugins do
       await_value(vm, "server publishes its initial map", @server_holding, 7)
       await_value(vm, "client polls the server map", @client_holding, 7)
       await_value(vm, "client polls the server coil", "modbus_plugin.client1.coil0", true)
+      await_value(vm, "FC02 discrete input", "modbus_plugin.client1.ready", true)
+      await_value(vm, "FC04 scaled input", "modbus_plugin.client1.voltage", 230.1)
+      await_value(vm, "signed multi-register input", "modbus_plugin.client1.power", -123_456)
+      await_value(vm, "IEEE float input", "modbus_plugin.client1.temperature", 12.3)
+      await_value(vm, "ASCII input", "modbus_plugin.client1.label", "Solis")
+      await_value(vm, "bit view", "modbus_plugin.client1.alarm", true)
+
+      wide = "modbus_plugin.client1.wide_set"
+      assert :ok = command(vm, :claim, [wide])
+      assert :ok = command(vm, :set, [wide, -123_456])
+      await_value(vm, "FC16 signed write reaches server", "modbus_plugin.server1.wide", -123_456)
+      await_value(vm, "FC16 signed readback", "modbus_plugin.client1.wide", -123_456)
+      assert :ok = command(vm, :release, [wide])
 
       # A claim alone sets no desire and causes no write.
       assert :ok = command(vm, :claim, [@holding_setter])
@@ -195,6 +208,35 @@ defmodule Scenarios.Cases.Plugins do
       Process.sleep(1_000)
       assert {:ok, %{reading: %{value: 99}}} = io(vm, :input, [@server_holding])
       manual(vm)
+
+      # Discovery replaces a stopped client, never registers its discovered points.
+      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
+
+      survey = %{
+        "units" => [1],
+        "ranges" => [%{"table" => "input", "address" => 0, "count" => 7}],
+        "budget" => 100,
+        "delay" => 0
+      }
+
+      assert :ok = Device.rpc(vm, ModbusPlugin, :discover, ["client1", survey])
+
+      Device.await(vm, "read-only survey finishes", fn _ ->
+        %{connections: connections} = Device.rpc(vm, ModbusPlugin, :status)
+        match?(%{state: :discovered}, Enum.find(connections, &(&1.id == "client1")))
+      end)
+
+      %{connections: connections} = Device.rpc(vm, ModbusPlugin, :status)
+      found = Enum.find(connections, &(&1.id == "client1"))
+      assert found.error == nil
+      assert length(found.discovery.evidence) == 7
+      assert [%{identification: %{objects: objects}}] = found.discovery.units
+      assert {0, "Nerves Gate"} in objects
+      assert {:error, :unknown_input} = io(vm, :input, ["modbus_plugin.client1.input_0"])
+      assert {:ok, %{available?: false}} = io(vm, :input, [@client_holding])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["client1"])
+      await_value(vm, "polling resumes only on explicit start", @client_holding, 11)
 
       # Losing the server is reported as unknown/invalid, never a stale success.
       assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["server1"])
@@ -294,7 +336,40 @@ defmodule Scenarios.Cases.Plugins do
       "timeout" => 1000,
       "mappings" => [
         %{"id" => "holding0", "table" => "holding", "address" => 0, "initial" => 7},
-        %{"id" => "coil0", "table" => "coil", "address" => 0, "initial" => true}
+        %{"id" => "coil0", "table" => "coil", "address" => 0, "initial" => true},
+        %{"id" => "ready", "table" => "discrete", "address" => 0, "initial" => true},
+        %{
+          "id" => "voltage",
+          "table" => "input",
+          "address" => 0,
+          "type" => "u16",
+          "scale" => 0.1,
+          "unit" => "V",
+          "initial" => 230.1
+        },
+        %{
+          "id" => "power",
+          "table" => "input",
+          "address" => 1,
+          "type" => "s32",
+          "initial" => -123_456
+        },
+        %{
+          "id" => "temperature",
+          "table" => "input",
+          "address" => 3,
+          "type" => "float32",
+          "initial" => 12.3
+        },
+        %{
+          "id" => "label",
+          "table" => "input",
+          "address" => 5,
+          "type" => "ascii",
+          "length" => 3,
+          "initial" => "Solis"
+        },
+        %{"id" => "wide", "table" => "holding", "address" => 1, "type" => "s32", "initial" => 0}
       ]
     }
   end
@@ -309,20 +384,42 @@ defmodule Scenarios.Cases.Plugins do
       "interval" => 200,
       "timeout" => 500,
       "mappings" => [
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "direction" => "input"},
+        %{"id" => "ready", "table" => "discrete", "address" => 0},
+        %{
+          "id" => "voltage",
+          "table" => "input",
+          "address" => 0,
+          "type" => "u16",
+          "scale" => 0.1,
+          "unit" => "V"
+        },
+        %{"id" => "power", "table" => "input", "address" => 1, "type" => "s32"},
+        %{"id" => "temperature", "table" => "input", "address" => 3, "type" => "float32"},
+        %{"id" => "label", "table" => "input", "address" => 5, "type" => "ascii", "length" => 3},
+        %{"id" => "alarm", "table" => "input", "address" => 1, "type" => "bool", "bit" => 15},
+        %{"id" => "wide", "table" => "holding", "address" => 1, "type" => "s32"},
+        %{
+          "id" => "wide_set",
+          "table" => "holding",
+          "address" => 1,
+          "type" => "s32",
+          "access" => "write",
+          "feedback" => "wide"
+        },
+        %{"id" => "holding0", "table" => "holding", "address" => 0, "access" => "read"},
         %{
           "id" => "holding0_set",
           "table" => "holding",
           "address" => 0,
-          "direction" => "output",
+          "access" => "write",
           "feedback" => "holding0"
         },
-        %{"id" => "coil0", "table" => "coil", "address" => 0, "direction" => "input"},
+        %{"id" => "coil0", "table" => "coil", "address" => 0, "access" => "read"},
         %{
           "id" => "coil0_set",
           "table" => "coil",
           "address" => 0,
-          "direction" => "output",
+          "access" => "write",
           "feedback" => "coil0"
         }
       ]

@@ -1,14 +1,14 @@
 defmodule ModbusPlugin.UI do
   @moduledoc "Plugin-owned drafts and controls; every command runs in a supervised plugin process."
   use Phoenix.LiveComponent
-  alias ModbusPlugin.{Command, Config, Server}
+  alias ModbusPlugin.{Codec, Command, Config, Discovery, Profiles, Server}
 
   @server_mappings ~s([{"id": "holding0", "table": "holding", "address": 0, "initial": 0},
  {"id": "coil0", "table": "coil", "address": 0, "initial": false}])
-  @client_mappings ~s([{"id": "holding0", "table": "holding", "address": 0, "direction": "input"},
- {"id": "holding0_set", "table": "holding", "address": 0, "direction": "output", "feedback": "holding0"},
- {"id": "coil0", "table": "coil", "address": 0, "direction": "input"},
- {"id": "coil0_set", "table": "coil", "address": 0, "direction": "output", "feedback": "coil0"}])
+  @client_mappings ~s([{"id": "holding0", "table": "holding", "address": 0, "access": "read"},
+ {"id": "holding0_set", "table": "holding", "address": 0, "access": "write", "feedback": "holding0"},
+ {"id": "coil0", "table": "coil", "address": 0, "access": "read"},
+ {"id": "coil0_set", "table": "coil", "address": 0, "access": "write", "feedback": "coil0"}])
 
   def update(assigns, socket) do
     {:ok,
@@ -36,6 +36,7 @@ defmodule ModbusPlugin.UI do
       "port" => "502",
       "unit" => "1",
       "interval" => "500",
+      "max_gap" => "0",
       "timeout" => "1000",
       "mappings" => if(role == "server", do: @server_mappings, else: @client_mappings)
     }
@@ -47,7 +48,7 @@ defmodule ModbusPlugin.UI do
       <div class="ui-panel-body">
         <h2>Modbus TCP / RTU</h2>
         <p class="ui-help">
-          Saved client and server definitions on the plugin's SD storage. Save never communicates; Start explicitly opens the transport and registers the mapped points as platform inputs and outputs. Stop before saving a change. Addresses are zero-based; holding registers are 0..65535, coils true/false.
+          Saved client and server definitions on the plugin's SD storage. Save never communicates; Start explicitly opens the transport and registers the mapped points as platform inputs and outputs. Stop before saving a change. Addresses are zero-based protocol addresses, not register numbers like 30001/40001. All four tables are readable; only coils and holding registers are writable.
         </p>
         <p :if={@message} role="alert">{@message}</p>
         <p :if={@status == :unavailable} role="alert">
@@ -169,6 +170,13 @@ defmodule ModbusPlugin.UI do
             max="60000"
             required
           /></label>
+          <label :if={@form[:role].value == "client"}>Maximum unmapped gap per batch<input
+            name="connection[max_gap]"
+            value={@form[:max_gap].value}
+            type="number"
+            min="0"
+            max="100"
+          /></label>
           <label>Request timeout (ms)<input
             name="connection[timeout]"
             value={@form[:timeout].value}
@@ -179,9 +187,9 @@ defmodule ModbusPlugin.UI do
           /></label>
           <label>
             Mappings (JSON, zero-based addresses){if @form[:role].value == "server",
-              do: " · id, table holding|coil, address, initial",
+              do: " · id, table, address, type, initial",
               else:
-                " · id, table holding|coil, address, direction input|output, optional feedback input id"}
+                " · id, table, address, access read|write, type; optional scale, unit, word_order, bit, length, feedback"}
             <textarea name="connection[mappings]" rows="6" required>{@form[:mappings].value}</textarea>
           </label>
           <button
@@ -189,6 +197,15 @@ defmodule ModbusPlugin.UI do
             disabled={@uncertain? or @status == :unavailable}
           >Save definition · no connection</button>
         </.form>
+        <button
+          :if={@form[:role].value == "client"}
+          class="ui-button ui-button--secondary"
+          phx-click="solis"
+          phx-target={@myself}
+        >Load Solis hybrid template into draft</button>
+        <p class="ui-help">
+          Types: bool, u16, s16, u32, s32, float32, ascii. 32-bit word_order: high_first or low_first. ASCII length is in registers. A bool register may select a read-only bit (0..15). Verify templates against your device manual before saving.
+        </p>
         <button class="ui-button ui-button--secondary" phx-click="refresh" phx-target={@myself}>Refresh status</button>
         <article :for={connection <- connections(@status)} id={"modbus-#{connection.id}"}>
           <h3>
@@ -216,18 +233,18 @@ defmodule ModbusPlugin.UI do
           <ul>
             <li :for={mapping <- connection.mappings}>
               <code>modbus_plugin.{connection.id}.{mapping.id}</code>
-              · {mapping.table} {mapping.address} · {mapping.direction}
+              · {mapping.table} {mapping.address} · {access(mapping)} · {mapping.type} {mapping.unit}
               <span :if={connection.values != nil and Map.has_key?(connection.values, mapping.id)}>
                 · value {inspect(connection.values[mapping.id])}
               </span>
               <span :if={
-                mapping.direction == :output and
+                access(mapping) == :write and
                   @values["modbus_plugin.#{connection.id}.#{mapping.id}"]
               }>
                 · {inspect(@values["modbus_plugin.#{connection.id}.#{mapping.id}"])}
               </span>
               <form
-                :if={connection.state == :serving and mapping.direction == :observed}
+                :if={connection.state == :serving}
                 phx-submit="put"
                 phx-target={@myself}
               >
@@ -235,13 +252,13 @@ defmodule ModbusPlugin.UI do
                 <input type="hidden" name="mapping" value={mapping.id} />
                 <input
                   name="value"
-                  placeholder={if mapping.table == :coil, do: "true | false", else: "0..65535"}
+                  placeholder={Atom.to_string(Codec.endpoint_type(mapping))}
                   required
                 />
                 <button class="ui-button ui-button--secondary" disabled={@uncertain?}>Set local value</button>
               </form>
               <form
-                :if={connection.state == :polling and mapping.direction == :output}
+                :if={connection.state == :polling and access(mapping) == :write}
                 phx-submit="desire"
                 phx-target={@myself}
               >
@@ -252,7 +269,7 @@ defmodule ModbusPlugin.UI do
                 />
                 <input
                   name="value"
-                  placeholder={if mapping.table == :coil, do: "true | false", else: "0..65535"}
+                  placeholder={Atom.to_string(Codec.endpoint_type(mapping))}
                   required
                 />
                 <button class="ui-button ui-button--secondary" disabled={@uncertain?}>Set desired</button>
@@ -267,6 +284,104 @@ defmodule ModbusPlugin.UI do
               </form>
             </li>
           </ul>
+          <form
+            :if={connection.role == :client and connection.state == :stopped}
+            phx-submit="discover"
+            phx-target={@myself}
+            id={"discover-#{connection.id}"}
+          >
+            <h4>Read-only discovery · separate from saved mappings</h4>
+            <p>
+              Uses this stopped connection, with no endpoint registration or writes. Reads can still affect counters on some devices; verify the device manual and avoid other bus masters. Results stay in memory until Stop.
+            </p>
+            <input type="hidden" name="connection_id" value={connection.id} />
+            <label>Unit IDs (JSON list, at most 16)<input
+              name="units"
+              value={"[#{connection.unit}]"}
+              required
+            /></label>
+            <label>Ranges (JSON; table, address, count; at most 4096 addresses)<textarea
+              name="ranges"
+              rows="3"
+            >{~s([{"table":"input","address":0,"count":16}])}</textarea></label>
+            <label>Request budget<input
+              name="budget"
+              type="number"
+              value="200"
+              min="1"
+              max="1000"
+              required
+            /></label>
+            <label>Delay between requests (ms)<input
+              name="delay"
+              type="number"
+              value="50"
+              min="0"
+              max="5000"
+              required
+            /></label>
+            <label><input name="sunspec" type="checkbox" value="true" />Look for SunSpec model blocks (holding 0, 40000, 50000)</label>
+            <button class="ui-button ui-button--secondary" disabled={@uncertain?}>Identify, probe FC01–04 and scan · reads only</button>
+          </form>
+          <div :if={Map.has_key?(connection, :discovery)} id={"evidence-#{connection.id}"}>
+            <h4>Raw discovery evidence</h4>
+            <p>
+              {connection.discovery.requests}/{connection.discovery.budget} requests; {connection.discovery.remaining} operations remaining. Refresh to update. Stop closes the survey and discards evidence.
+            </p>
+            <pre>{inspect(connection.discovery.units, pretty: true)}</pre>
+            <details :if={Map.get(connection.discovery, :failures, []) != []}>
+              <summary>Failed scan ranges ({length(connection.discovery.failures)})</summary>
+              <pre>{inspect(connection.discovery.failures, pretty: true, limit: 100)}</pre>
+            </details>
+            <article :for={found <- connection.discovery.sunspec}>
+              <p>SunSpec unit {found.unit} · base {found.base}</p>
+              <p :if={Map.get(found, :error)}>{inspect(found.error)}</p>
+              <div :for={model <- found.models}>
+                <code>Model {model.id} · header {model.address} · length {model.length}</code>
+                <button
+                  :if={Profiles.sunspec(model) != []}
+                  class="ui-button ui-button--secondary"
+                  phx-click="sunspec"
+                  phx-value-id={connection.id}
+                  phx-value-address={model.address}
+                  phx-value-unit={found.unit}
+                  phx-target={@myself}
+                >Common-model strings → draft</button>
+              </div>
+            </article>
+            <p>
+              Showing {min(length(connection.discovery.evidence), 256)} of {length(
+                connection.discovery.evidence
+              )} observations. Values are not device semantics. Promotion changes only the editor draft; choose the right unit, ID and type, stop discovery, then save.
+            </p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Unit</th><th>Table</th><th>Address</th><th>Raw</th><th>Hex</th><th>
+                    Observed UTC
+                  </th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={evidence <- Enum.take(connection.discovery.evidence, 256)}>
+                  <td>{evidence.unit}</td><td>{evidence.table}</td><td>{evidence.address}</td><td>
+                    {inspect(evidence.raw)}
+                  </td><td>{Map.get(evidence, :hex)}</td><td>{evidence.observed_at}</td>
+                  <td>
+                    <button
+                      class="ui-button ui-button--secondary"
+                      phx-click="promote"
+                      phx-value-id={connection.id}
+                      phx-value-unit={evidence.unit}
+                      phx-value-table={evidence.table}
+                      phx-value-address={evidence.address}
+                      phx-target={@myself}
+                    >Promote to draft</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <button
             :if={connection.state == :stopped}
             class="ui-button ui-button--primary"
@@ -358,6 +473,7 @@ defmodule ModbusPlugin.UI do
             :stop_bits,
             :unit,
             :interval,
+            :max_gap,
             :timeout
           ])
           |> Map.new(fn {key, value} -> {Atom.to_string(key), text(value)} end)
@@ -372,6 +488,81 @@ defmodule ModbusPlugin.UI do
     end
   end
 
+  def handle_event("solis", _, socket) do
+    params = Map.put(socket.assigns.form.params, "mappings", JSON.encode!(Profiles.solis()))
+
+    {:noreply,
+     assign(socket,
+       form: to_form(params, as: :connection),
+       message:
+         "Solis template loaded into draft only. Verify your exact inverter register map before saving."
+     )}
+  end
+
+  def handle_event("discover", params, socket) do
+    with {:ok, units} <- JSON.decode(params["units"] || ""),
+         {:ok, ranges} <- JSON.decode(params["ranges"] || ""),
+         {budget, ""} <- Integer.parse(params["budget"] || ""),
+         {delay, ""} <- Integer.parse(params["delay"] || "") do
+      command(socket, fn ->
+        ModbusPlugin.discover(params["connection_id"], %{
+          "units" => units,
+          "ranges" => ranges,
+          "budget" => budget,
+          "delay" => delay,
+          "sunspec" => params["sunspec"] == "true"
+        })
+      end)
+    else
+      _ ->
+        {:noreply,
+         assign(
+           socket,
+           :message,
+           "Discovery requires JSON unit/range lists and integer budget/delay."
+         )}
+    end
+  end
+
+  def handle_event("promote", params, socket) do
+    connection = Enum.find(connections(socket.assigns.status), &(&1.id == params["id"]))
+    evidence = connection && Map.get(connection, :discovery)
+
+    evidence =
+      evidence &&
+        Enum.find(
+          evidence.evidence,
+          &(to_string(&1.unit) == params["unit"] and to_string(&1.table) == params["table"] and
+              to_string(&1.address) == params["address"])
+        )
+
+    if evidence,
+      do: draft(socket, connection, evidence.unit, [Discovery.mapping(evidence)], :append),
+      else: {:noreply, socket}
+  end
+
+  def handle_event("sunspec", params, socket) do
+    connection = Enum.find(connections(socket.assigns.status), &(&1.id == params["id"]))
+    found = connection && Map.get(connection, :discovery)
+
+    models =
+      if found,
+        do:
+          for(
+            block <- found.sunspec,
+            to_string(block.unit) == params["unit"],
+            model <- block.models,
+            to_string(model.address) == params["address"],
+            do: {block.unit, model}
+          ),
+        else: []
+
+    case models do
+      [{unit, model}] -> draft(socket, connection, unit, Profiles.sunspec(model), :replace)
+      _ -> {:noreply, socket}
+    end
+  end
+
   def handle_event("start", %{"id" => id}, socket),
     do: command(socket, fn -> ModbusPlugin.start(id) end)
 
@@ -382,11 +573,14 @@ defmodule ModbusPlugin.UI do
     do: command(socket, fn -> ModbusPlugin.delete(id) end)
 
   def handle_event("put", %{"connection" => id, "mapping" => mapping, "value" => value}, socket),
-    do: command(socket, fn -> Server.put(id, mapping, parse(value)) end)
+    do:
+      command(socket, fn ->
+        Server.put(id, mapping, parse(socket, "modbus_plugin.#{id}.#{mapping}", value))
+      end)
 
   def handle_event("desire", %{"output" => id, "value" => value}, socket) do
     command(socket, fn ->
-      with :ok <- Command.claim(id), do: Command.set(id, parse(value))
+      with :ok <- Command.claim(id), do: Command.set(id, parse(socket, id, value))
     end)
   end
 
@@ -428,11 +622,46 @@ defmodule ModbusPlugin.UI do
        )}
   end
 
-  defp parse(value) when value in ["true", "false"], do: value == "true"
+  defp draft(socket, connection, unit, mappings, mode) do
+    params =
+      Config.params(connection)
+      |> Map.drop(["mappings", "state", "values", "error", "read_at", "discovery"])
 
-  defp parse(value) do
-    case Integer.parse(String.trim(value)) do
-      {number, ""} -> number
+    params = Map.new(params, fn {key, value} -> {key, text(value)} end)
+    previous = socket.assigns.form.params
+
+    existing =
+      case JSON.decode(previous["mappings"] || "") do
+        {:ok, list} when is_list(list) -> list
+        _ -> []
+      end
+
+    append? =
+      mode == :append and previous["id"] == connection.id and previous["unit"] == to_string(unit)
+
+    mappings = if append?, do: Enum.uniq(existing ++ mappings), else: mappings
+
+    params =
+      params |> Map.put("unit", to_string(unit)) |> Map.put("mappings", JSON.encode!(mappings))
+
+    {:noreply,
+     assign(socket,
+       form: to_form(params, as: :connection),
+       message: "Evidence promoted to draft only. Verify its meaning, stop discovery, then save."
+     )}
+  end
+
+  defp access(mapping), do: Map.get(mapping, :access, :local)
+
+  defp parse(socket, id, value) do
+    mapping =
+      for connection <- connections(socket.assigns.status),
+          mapping <- connection.mappings,
+          "modbus_plugin.#{connection.id}.#{mapping.id}" == id,
+          do: mapping
+
+    case mapping do
+      [mapping] -> Codec.parse(mapping, value)
       _ -> value
     end
   end
@@ -447,7 +676,7 @@ defmodule ModbusPlugin.UI do
     for connection <- connections(status),
         connection.state == :polling,
         mapping <- connection.mappings,
-        mapping.direction == :output,
+        access(mapping) == :write,
         id = "modbus_plugin.#{connection.id}.#{mapping.id}",
         {:ok, output} <- [Command.output(id)],
         into: %{},

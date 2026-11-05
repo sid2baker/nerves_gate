@@ -124,7 +124,10 @@ a pending network trial prevents assignment. No assignment starts traffic or sha
 Its page owns roles, unit IDs and register/coil mappings, not Hardware. Definitions
 are saved through plugin configuration storage on SD. Startup and saving open no connection;
 Start and Stop are explicit, and a running connection must be stopped before saving.
-Mapped holding registers and coils become platform inputs and repeatable outputs.
+Typed mappings of all four Modbus tables become platform inputs; coils and holding
+registers can also be repeatable outputs. Read-only discovery uses a stopped client
+connection and keeps raw evidence separate from saved mappings; it never registers
+endpoints or writes. Discovery and polling are mutually exclusive on that connection.
 See the [plugin README](../plugins/modbus/README.md).
 
 RTU requires an enabled RS485 assignment, detected device, and confirmation that the
@@ -144,7 +147,8 @@ to access.
 
 ## Validation limits
 
-Modbus host tests cover validation, storage and admission without opening ports.
+Modbus host tests cover validation, codecs, read plans, storage and admission;
+discovery tests additionally use real loopback TCP servers without an SDK substitute.
 The QEMU `plugins` scenario runs the real platform and plugin over loopback TCP.
 QEMU guests have no RS485 ports: RTU between the EC100 ports, electrical, direction
 control, PLC and CAN qualification are separate, authorized physical activities. No

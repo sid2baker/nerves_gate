@@ -4,7 +4,7 @@ defmodule ModbusPlugin.MixProject do
   def project do
     [
       app: :modbus_plugin,
-      version: "0.4.3",
+      version: "0.5.0-dev.2",
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       deps: [

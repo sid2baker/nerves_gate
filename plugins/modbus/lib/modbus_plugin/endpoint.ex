@@ -4,8 +4,9 @@ defmodule ModbusPlugin.Endpoint do
   published by the runtime process that owns the transport, so the platform binds
   that actual PID and clears all runtime state when it stops. Outputs are handled
   by the connection's `NervesGateSDK.Output` runtime (`ModbusPlugin.Outputs`).
-  Holding registers are integers 0..65535; coils are booleans.
+  Types, units and output bounds follow `ModbusPlugin.Codec`.
   """
+  alias ModbusPlugin.Codec
   alias NervesGateSDK.IO, as: SDKIO
   alias NervesGateSDK.IO.{Evidence, InputDefinition, OutputDefinition}
 
@@ -15,11 +16,12 @@ defmodule ModbusPlugin.Endpoint do
   @doc "Register every input mapping, in order; the first failure stops before any transport opens."
   def register(config) do
     config.mappings
-    |> Enum.reject(&(&1.direction == :output))
+    |> Enum.reject(&(Map.get(&1, :access) == :write))
     |> Enum.reduce_while(:ok, fn mapping, :ok ->
       case SDKIO.register_input(%InputDefinition{
              id: id(config, mapping),
-             type: type(mapping.table),
+             type: Codec.endpoint_type(mapping),
+             unit: mapping.unit,
              expected_interval_ms: if(config.role == :client, do: config.interval)
            }) do
         {:ok, _} -> {:cont, :ok}
@@ -34,12 +36,15 @@ defmodule ModbusPlugin.Endpoint do
   its last written value.
   """
   def outputs(config) do
-    for %{direction: :output} = mapping <- config.mappings do
+    for %{access: :write} = mapping <- config.mappings do
+      {min, max} = Codec.bounds(mapping)
+
       %OutputDefinition{
         id: id(config, mapping),
-        type: type(mapping.table),
-        min: if(mapping.table == :holding, do: 0),
-        max: if(mapping.table == :holding, do: 65535),
+        type: Codec.endpoint_type(mapping),
+        unit: mapping.unit,
+        min: min,
+        max: max,
         on_release: :hold,
         evidence:
           if(mapping.feedback,
@@ -52,7 +57,4 @@ defmodule ModbusPlugin.Endpoint do
 
   def publish(config, mapping, value, quality \\ :good),
     do: SDKIO.publish(id(config, mapping), value, quality)
-
-  def type(:coil), do: :boolean
-  def type(:holding), do: :integer
 end

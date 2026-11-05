@@ -3,14 +3,15 @@ defmodule ModbusPlugin.Connection do
   One explicitly started Modbus client. The runtime process registers its mapped
   inputs with the platform and opens the transport, then starts a linked
   `NervesGateSDK.Output` runtime for its outputs. It serializes one request at a
-  time: setters requested by that runtime go first, then inputs are read. The
-  runtime always applies the newest Desire, so stale queued writes never happen;
-  a released Desire causes no physical write. When readback disagrees with the
-  last written value, the output is applied again. Any read failure publishes the
-  input as invalid (exception) or unknown.
+  time: setters requested by that runtime go first, then the poll's batched
+  reads (`ModbusPlugin.Plan`). The runtime always applies the newest Desire, so
+  stale queued writes never happen; a released Desire causes no physical write.
+  When readback disagrees with the last written value, the output is applied
+  again. A failed batch publishes each of its inputs as invalid (exception) or
+  unknown; a value that does not decode is invalid.
   """
   use GenServer, restart: :temporary
-  alias ModbusPlugin.{Endpoint, Outputs}
+  alias ModbusPlugin.{Codec, Endpoint, Outputs, Plan}
 
   def start_link(config),
     do:
@@ -56,6 +57,7 @@ defmodule ModbusPlugin.Connection do
       {:ok,
        %{
          config: config,
+         plan: Plan.build(config),
          client: client,
          outputs: outputs,
          pending: nil,
@@ -83,7 +85,8 @@ defmodule ModbusPlugin.Connection do
     end
   end
 
-  defp start_client(config) do
+  @doc false
+  def start_client(config) do
     case Modbus.Client.start_link(client_options(config)) do
       {:ok, client} -> {:ok, client}
       {:error, reason} -> {:error, {:client_start_failed, reason}}
@@ -115,23 +118,22 @@ defmodule ModbusPlugin.Connection do
   def handle_call(:status, _, state), do: {:reply, state.status, state}
 
   def handle_call({:write, mapping_id, value}, from, state) do
-    case Enum.find(state.config.mappings, &(&1.id == mapping_id and &1.direction == :output)) do
-      nil ->
-        {:reply, {:error, :unknown_output}, state}
-
-      mapping ->
-        state = %{state | queue: [{:write, from, mapping, value} | state.queue]}
-        if state.pending == nil, do: {:noreply, cancel_and_next(state)}, else: {:noreply, state}
+    with %{} = mapping <-
+           Enum.find(state.config.mappings, &(&1.id == mapping_id and &1.access == :write)),
+         {:ok, words} <- Codec.encode(mapping, value) do
+      state = %{state | queue: [{:write, from, mapping, value, words} | state.queue]}
+      if state.pending == nil, do: {:noreply, cancel_and_next(state)}, else: {:noreply, state}
+    else
+      nil -> {:reply, {:error, :unknown_output}, state}
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
   def handle_cast({:forget, mapping_id}, state),
     do: {:noreply, %{state | written: Map.delete(state.written, mapping_id)}}
 
-  def handle_info(:poll, %{pending: nil, queue: []} = state) do
-    inputs = Enum.reject(state.config.mappings, &(&1.direction == :output))
-    {:noreply, next(%{state | queue: Enum.map(inputs, &{:read, &1}), timer: nil})}
-  end
+  def handle_info(:poll, %{pending: nil, queue: []} = state),
+    do: {:noreply, next(%{state | queue: Enum.map(state.plan, &{:read, &1}), timer: nil})}
 
   def handle_info(:poll, state), do: {:noreply, state}
 
@@ -163,25 +165,21 @@ defmodule ModbusPlugin.Connection do
     %{state | timer: timer}
   end
 
-  defp next(%{queue: [{:read, mapping} | queue]} = state) do
-    function = if mapping.table == :coil, do: :read_coils, else: :read_holding_registers
-    request(%{state | queue: queue}, {:read, mapping}, {function, mapping.address, 1})
-  end
+  defp next(%{queue: [{:read, batch} | queue]} = state),
+    do: request(%{state | queue: queue}, {:read, batch}, Plan.request(batch))
 
-  defp next(%{queue: [{:write, from, mapping, value} | queue]} = state) do
-    function = if mapping.table == :coil, do: :write_single_coil, else: :write_single_register
+  defp next(%{queue: [{:write, from, mapping, value, words} | queue]} = state),
+    do: request(%{state | queue: queue}, {:write, from, mapping, value}, write(mapping, words))
 
-    request(
-      %{state | queue: queue},
-      {:write, from, mapping, value},
-      {function, mapping.address, value}
-    )
-  end
+  defp write(%{table: :coil, address: address}, [bit]), do: {:write_single_coil, address, bit}
+
+  defp write(%{address: address}, [word]), do: {:write_single_register, address, word}
+  defp write(%{address: address}, words), do: {:write_multiple_registers, address, words}
 
   # Repeatable setter reconciliation: rewrite when readback disagrees with the
   # last written value. The Output runtime re-reads the current Desire first.
   defp reconcile_feedback(state, input, value) do
-    for %{direction: :output, feedback: feedback, id: id} = mapping <- state.config.mappings,
+    for %{access: :write, feedback: feedback, id: id} = mapping <- state.config.mappings,
         feedback == input.id,
         Map.has_key?(state.written, id),
         state.written[id] != value do
@@ -200,24 +198,35 @@ defmodule ModbusPlugin.Connection do
     %{state | pending: {ref, operation}}
   end
 
-  defp complete(state, {:read, mapping}, {:ok, [value]}) do
-    Endpoint.publish(state.config, mapping, value)
+  defp complete(state, {:read, batch}, {:ok, values}) when length(values) == batch.count do
+    {state, errors} =
+      Enum.reduce(Plan.decode(batch, values), {state, []}, fn
+        {mapping, {:ok, value}}, {state, errors} ->
+          Endpoint.publish(state.config, mapping, value)
+          state = put_in(state.status.values[mapping.id], value)
+          {reconcile_feedback(state, mapping, value), errors}
 
-    state
-    |> put_in([:status], %{
-      state: :polling,
-      values: Map.put(state.status.values, mapping.id, value),
-      error: nil,
-      read_at: DateTime.to_iso8601(DateTime.utc_now())
-    })
-    |> reconcile_feedback(mapping, value)
+        {mapping, {:error, reason}}, {state, errors} ->
+          Endpoint.publish(state.config, mapping, nil, :invalid)
+
+          {update_in(state.status.values, &Map.delete(&1, mapping.id)),
+           [{mapping.id, reason} | errors]}
+      end)
+
+    state = put_in(state.status.read_at, DateTime.to_iso8601(DateTime.utc_now()))
+
+    case errors do
+      [] -> put_in(state.status, %{state.status | state: :polling, error: nil})
+      errors -> failed(state, state.status.values, {:decode_failed, Enum.reverse(errors)})
+    end
   end
 
-  defp complete(state, {:read, mapping}, result) do
+  defp complete(state, {:read, batch}, result) do
     reason = failure(result)
     quality = if match?({:exception, _}, reason), do: :invalid, else: :unknown
-    Endpoint.publish(state.config, mapping, nil, quality)
-    failed(state, Map.delete(state.status.values, mapping.id), reason)
+    Enum.each(batch.mappings, &Endpoint.publish(state.config, &1, nil, quality))
+    values = Map.drop(state.status.values, Enum.map(batch.mappings, & &1.id))
+    failed(state, values, {:read_failed, batch.table, batch.address, batch.count, reason})
   end
 
   defp complete(state, {:write, from, mapping, value}, :ok) do
