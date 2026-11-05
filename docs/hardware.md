@@ -121,13 +121,13 @@ a pending network trial prevents assignment. No assignment starts traffic or sha
 ## Modbus TCP and RTU
 
 `modbus_plugin` uses yamodbus for saved Modbus clients and servers over TCP or RTU.
-Its page owns roles, unit IDs and register/coil mappings, not Hardware. Definitions
+Its page owns roles, unit IDs and raw address ranges, not Hardware. Definitions
 are saved through plugin configuration storage on SD. Startup and saving open no connection;
 Start and Stop are explicit, and a running connection must be stopped before saving.
-Typed mappings of all four Modbus tables become platform inputs; coils and holding
-registers can also be repeatable outputs. Read-only discovery uses a stopped client
-connection and keeps raw evidence separate from saved mappings; it never registers
-endpoints or writes. Discovery and polling are mutually exclusive on that connection.
+Each range returns raw booleans or unsigned 16-bit words as one grouped observation.
+The consuming integration owns interpretation, scaling and SDK endpoints. Read-only
+discovery uses a stopped client and never creates ranges, endpoints or writes.
+Discovery and polling are mutually exclusive on that connection.
 See the [plugin README](../plugins/modbus/README.md).
 
 RTU requires an enabled RS485 assignment, detected device, and confirmation that the
@@ -140,14 +140,15 @@ The plugin declares `circuits_uart` as a dependency, but the native 1.7.0 driver
 provided by target-built firmware and excluded from plugin archives. Packages remain
 pure BEAM and pin the exact platform library version. No device library downloads.
 
-Clients write only repeatable setters for a held desire and never write when no desire
-exists. The library may reconnect an explicitly started transport; Stop or plugin stop
-terminates it. Check wiring/termination and use only networks/buses you are authorized
+Clients write only on explicit requests to ranges marked writable, once without
+automatic retries or desired-state control. Unknown outcomes must not be blindly
+replayed. The library may reconnect an explicitly started transport; Stop or plugin
+stop terminates it. Check wiring/termination and use only networks/buses you are authorized
 to access.
 
 ## Validation limits
 
-Modbus host tests cover validation, codecs, read plans, storage and admission;
+Modbus host tests cover raw validation, grouped I/O, write uncertainty, storage and admission;
 discovery tests additionally use real loopback TCP servers without an SDK substitute.
 The QEMU `plugins` scenario runs the real platform and plugin over loopback TCP.
 QEMU guests have no RS485 ports: RTU between the EC100 ports, electrical, direction

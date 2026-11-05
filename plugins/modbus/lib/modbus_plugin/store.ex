@@ -45,9 +45,9 @@ defmodule ModbusPlugin.Store do
 
   def valid?(_), do: false
 
-  defp valid_config?({id, %{mappings: mappings} = config}) when is_list(mappings),
+  defp valid_config?({id, %{ranges: ranges} = config}) when is_list(ranges),
     do:
-      Enum.all?(mappings, &is_map/1) and
+      Enum.all?(ranges, &is_map/1) and
         Config.validate(id, Config.params(config)) == {:ok, config}
 
   defp valid_config?(_), do: false

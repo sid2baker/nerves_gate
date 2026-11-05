@@ -5,7 +5,7 @@ defmodule Scenarios.Cases.Plugins do
 
   def spec do
     %{
-      name: "Bundled plugins: no-SD activation, UI cleanup and real Modbus TCP state I/O",
+      name: "Bundled plugins: no-SD activation, UI cleanup and raw Modbus TCP",
       fresh_disk: true,
       requires: %{device: [], fixture: [:qemu]}
     }
@@ -117,169 +117,92 @@ defmodule Scenarios.Cases.Plugins do
   end
 
   @modbus_port 15_020
-  @server_holding "modbus_plugin.server1.holding0"
-  @server_coil "modbus_plugin.server1.coil0"
-  @client_holding "modbus_plugin.client1.holding0"
-  @holding_setter "modbus_plugin.client1.holding0_set"
-  @coil_setter "modbus_plugin.client1.coil0_set"
-
-  # Saved server + client in one plugin over real loopback TCP and the real I/O domain:
-  # desired -> client write -> server map -> client poll -> linked feedback.
   defp modbus(vm) do
+    before = Device.rpc(vm, NervesGate.IO, :definitions)
     assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
 
     try do
       assert %{storage: nil, connections: []} = Device.rpc(vm, ModbusPlugin, :status)
       assert :ok = Device.rpc(vm, ModbusPlugin, :save, ["server1", modbus_server()])
       assert :ok = Device.rpc(vm, ModbusPlugin, :save, ["client1", modbus_client()])
-
-      # Platform configuration storage keys the term by the running plugin version.
       version = Device.rpc(vm, Application, :spec, [:modbus_plugin, :vsn]) |> to_string()
       config = "/mnt/plugins/data/modbus_plugin/.nerves_gate/config/#{version}.term"
 
       assert %{"client1" => _, "server1" => _} =
                config |> then(&Device.rpc(vm, File, :read!, [&1])) |> :erlang.binary_to_term()
 
-      # Save registers nothing: endpoints appear only once a runtime starts.
-      assert {:error, :unknown_input} = io(vm, :input, [@server_holding])
       assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["server1"])
       assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["client1"])
-      await_value(vm, "server publishes its initial map", @server_holding, 7)
-      await_value(vm, "client polls the server map", @client_holding, 7)
-      await_value(vm, "client polls the server coil", "modbus_plugin.client1.coil0", true)
-      await_value(vm, "FC02 discrete input", "modbus_plugin.client1.ready", true)
-      await_value(vm, "FC04 scaled input", "modbus_plugin.client1.voltage", 230.1)
-      await_value(vm, "signed multi-register input", "modbus_plugin.client1.power", -123_456)
-      await_value(vm, "IEEE float input", "modbus_plugin.client1.temperature", 12.3)
-      await_value(vm, "ASCII input", "modbus_plugin.client1.label", "Solis")
-      await_value(vm, "bit view", "modbus_plugin.client1.alarm", true)
+      await_raw(vm, "FC03 raw words remain grouped", "holding", [65535, 65436])
+      await_raw(vm, "FC04 raw input words", "input", [32768, 0])
+      await_raw(vm, "FC01 raw coils", "coil", [true, false])
+      await_raw(vm, "FC02 raw discrete inputs", "discrete", [false, true])
+      assert Device.rpc(vm, NervesGate.IO, :definitions) == before
+      assert :ok = Device.rpc(vm, ModbusPlugin, :write, ["client1", "holding", [0, 42]])
+      await_raw(vm, "FC16 writes both words together", "holding", [0, 42])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :write, ["client1", "coil", [false, true]])
+      await_raw(vm, "FC15 writes raw bits", "coil", [false, true])
 
-      wide = "modbus_plugin.client1.wide_set"
-      assert :ok = command(vm, :claim, [wide])
-      assert :ok = command(vm, :set, [wide, -123_456])
-      await_value(vm, "FC16 signed write reaches server", "modbus_plugin.server1.wide", -123_456)
-      await_value(vm, "FC16 signed readback", "modbus_plugin.client1.wide", -123_456)
-      assert :ok = command(vm, :release, [wide])
+      assert {:error, :read_only} =
+               Device.rpc(vm, ModbusPlugin, :write, ["client1", "input", [0, 1]])
 
-      # A claim alone sets no desire and causes no write.
-      assert :ok = command(vm, :claim, [@holding_setter])
-      assert {:ok, %{claimed?: true, desired: nil}} = io(vm, :output, [@holding_setter])
-      assert :ok = command(vm, :set, [@holding_setter, 42])
-      await_value(vm, "desired register reaches the server map", @server_holding, 42)
-
-      Device.await(vm, "readback evidence confirms the applied register", fn _ ->
-        match?(
-          {:ok,
-           %{
-             desired: 42,
-             status: %{
-               state: :confirmed,
-               applied: :applied,
-               evidence: [%{input: @client_holding, role: :readback, state: :confirmed}]
-             }
-           }},
-          io(vm, :output, [@holding_setter])
-        )
-      end)
-
-      assert :ok = command(vm, :claim, [@coil_setter])
-      assert :ok = command(vm, :set, [@coil_setter, false])
-      await_value(vm, "desired coil reaches the server map", @server_coil, false)
-
-      for value <- 1..5, do: assert(:ok = command(vm, :set, [@holding_setter, value]))
-      await_value(vm, "rapid desires converge on the latest", @server_holding, 5)
-
-      # A local server change contradicting a held desire is reconciled back.
-      assert :ok = Device.rpc(vm, ModbusPlugin.Server, :put, ["server1", "holding0", 99])
-      await_value(vm, "client restores held desire after feedback mismatch", @server_holding, 5)
-
-      Device.await(vm, "restored register is confirmed again", fn _ ->
-        match?(
-          {:ok, %{desired: 5, status: %{state: :confirmed}}},
-          io(vm, :output, [@holding_setter])
-        )
-      end)
-
-      # Release drops the desire without writing; later local changes stand.
-      assert :ok = command(vm, :release, [@holding_setter])
-      assert {:ok, %{claimed?: false, desired: nil}} = io(vm, :output, [@holding_setter])
-      assert :ok = Device.rpc(vm, ModbusPlugin.Server, :put, ["server1", "holding0", 99])
-      await_value(vm, "client observes the local server change", @client_holding, 99)
-      Process.sleep(1_000)
-      assert {:ok, %{reading: %{value: 99}}} = io(vm, :input, [@server_holding])
-      manual(vm)
-
-      # Discovery replaces a stopped client, never registers its discovered points.
-      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
-
-      survey = %{
-        "units" => [1],
-        "ranges" => [%{"table" => "input", "address" => 0, "count" => 7}],
-        "budget" => 100,
-        "delay" => 0
-      }
-
-      assert :ok = Device.rpc(vm, ModbusPlugin, :discover, ["client1", survey])
-
-      Device.await(vm, "read-only survey finishes", fn _ ->
-        %{connections: connections} = Device.rpc(vm, ModbusPlugin, :status)
-        match?(%{state: :discovered}, Enum.find(connections, &(&1.id == "client1")))
-      end)
-
-      %{connections: connections} = Device.rpc(vm, ModbusPlugin, :status)
-      found = Enum.find(connections, &(&1.id == "client1"))
-      assert found.error == nil
-      assert length(found.discovery.evidence) == 7
-      assert [%{identification: %{objects: objects}}] = found.discovery.units
-      assert {0, "Nerves Gate"} in objects
-      assert {:error, :unknown_input} = io(vm, :input, ["modbus_plugin.client1.input_0"])
-      assert {:ok, %{available?: false}} = io(vm, :input, [@client_holding])
-      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
-      assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["client1"])
-      await_value(vm, "polling resumes only on explicit start", @client_holding, 11)
-
-      # Losing the server is reported as unknown/invalid, never a stale success.
-      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["server1"])
-      assert {:ok, %{available?: false}} = io(vm, :input, [@server_holding])
-
-      Device.await(vm, "client reports lost server without fabricated values", fn _ ->
-        match?(
-          {:ok, %{reading: %{value: nil, quality: quality}}} when quality != :good,
-          io(vm, :input, [@client_holding])
-        )
-      end)
-
-      # Stopping the client clears its binding, claims and desire, not definitions.
-      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
-
-      assert {:ok, %{available?: false, claimed?: false, desired: nil}} =
-               io(vm, :output, [@coil_setter])
-
-      assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["client1"])
+      assert {:error, :invalid_raw_values} =
+               Device.rpc(vm, ModbusPlugin, :write, ["client1", "holding", [-1, 0]])
 
       assert {:error, :stop_first} =
                Device.rpc(vm, ModbusPlugin, :save, ["client1", modbus_client()])
 
       assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
+
+      survey = %{
+        "units" => [1],
+        "ranges" => [%{"table" => "input", "address" => 0, "count" => 2}],
+        "delay" => 0
+      }
+
+      assert :ok = Device.rpc(vm, ModbusPlugin, :discover, ["client1", survey])
+
+      Device.await(vm, "read-only discovery completes", fn _ ->
+        connection(vm, "client1").state == :discovered
+      end)
+
+      found = connection(vm, "client1")
+      assert found.error == nil
+      assert Enum.map(found.discovery.evidence, & &1.raw) == [32768, 0]
+
+      assert {:error, :discovering} =
+               Device.rpc(vm, ModbusPlugin, :write, ["client1", "holding", [0, 0]])
+
+      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["client1"])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :start, ["client1"])
+      await_raw(vm, "polling resumes explicitly", "holding", [0, 42])
+      assert :ok = Device.rpc(vm, ModbusPlugin, :stop, ["server1"])
+
+      Device.await(vm, "transport loss removes raw values", fn _ ->
+        match?(
+          %{values: nil, quality: :unknown},
+          connection(vm, "client1").observations["holding"]
+        )
+      end)
+
+      page = guest_page(vm, "/plugins/modbus_plugin")
+      assert page.status == 200
+      assert page.body =~ "Raw ranges"
+      refute page.body =~ "Load Solis"
     after
       assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
     end
 
     assert Device.rpc(vm, :code, :is_loaded, [Modbus.Client]) == false
-    definitions = Device.rpc(vm, NervesGate.IO, :definitions)
-    assert Map.has_key?(definitions, @holding_setter)
-
-    # Saved definitions return after restart; nothing starts or communicates.
+    assert Device.rpc(vm, NervesGate.IO, :definitions) == before
     assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
 
     try do
       assert %{
                storage: nil,
                connections: [%{id: "client1", state: :stopped}, %{id: "server1", state: :stopped}]
-             } =
-               Device.rpc(vm, ModbusPlugin, :status)
+             } = Device.rpc(vm, ModbusPlugin, :status)
 
-      assert {:ok, %{available?: false, reading: nil}} = io(vm, :input, [@server_holding])
       assert :ok = Device.rpc(vm, ModbusPlugin, :delete, ["client1"])
       assert :ok = Device.rpc(vm, ModbusPlugin, :delete, ["server1"])
     after
@@ -287,43 +210,12 @@ defmodule Scenarios.Cases.Plugins do
     end
   end
 
-  # The gateway I/O page and its manual writer against the plugin's own writer.
-  defp manual(vm) do
-    page = io_page(vm)
-    assert page =~ ~s(id="io-input-modbus_plugin-server1-holding0")
-    assert page =~ ~s(id="io-claim-modbus_plugin-client1-holding0_set")
+  defp connection(vm, id),
+    do: Device.rpc(vm, ModbusPlugin, :status).connections |> Enum.find(&(&1.id == id))
 
-    assert :ok = manual(vm, :claim, [@holding_setter])
-    assert {:error, _} = command(vm, :claim, [@holding_setter])
-    assert :ok = manual(vm, :set, [@holding_setter, 11])
-    await_value(vm, "manual desire reaches the server map", @server_holding, 11)
-    page = io_page(vm)
-    assert page =~ "Manual control"
-    assert page =~ "Target: 11"
-    assert page =~ ~s(id="io-status-modbus_plugin-client1-holding0_set")
-    assert :ok = manual(vm, :release, [@holding_setter])
-    assert {:ok, %{claimed?: false, desired: nil}} = io(vm, :output, [@holding_setter])
-    await_value(vm, "release writes nothing back", @server_holding, 11)
-  end
-
-  # Disposable guests are replaced without closing host sockets; a pooled
-  # keep-alive connection would fail the next scenario's first request.
-  defp guest_page(vm, path),
-    do: Req.get!(Scenarios.Qemu.ui_url(vm) <> path, headers: [connection: "close"], retry: false)
-
-  defp io_page(vm) do
-    response = guest_page(vm, "/io")
-    assert response.status == 200
-    response.body
-  end
-
-  defp manual(vm, function, args), do: Device.rpc(vm, NervesGate.IO.Manual, function, args)
-  defp io(vm, function, args), do: Device.rpc(vm, NervesGate.IO, function, args)
-  defp command(vm, function, args), do: Device.rpc(vm, ModbusPlugin.Command, function, args)
-
-  defp await_value(vm, phase, id, value) do
+  defp await_raw(vm, phase, id, values) do
     Device.await(vm, phase, fn _ ->
-      match?({:ok, %{reading: %{value: ^value, quality: :good}}}, io(vm, :input, [id]))
+      match?(%{values: ^values, quality: :good}, connection(vm, "client1").observations[id])
     end)
   end
 
@@ -334,95 +226,59 @@ defmodule Scenarios.Cases.Plugins do
       "port" => @modbus_port,
       "unit" => 1,
       "timeout" => 1000,
-      "mappings" => [
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "initial" => 7},
-        %{"id" => "coil0", "table" => "coil", "address" => 0, "initial" => true},
-        %{"id" => "ready", "table" => "discrete", "address" => 0, "initial" => true},
+      "ranges" => [
         %{
-          "id" => "voltage",
+          "id" => "holding",
+          "table" => "holding",
+          "address" => 0,
+          "count" => 2,
+          "initial" => [65535, 65436]
+        },
+        %{
+          "id" => "input",
           "table" => "input",
           "address" => 0,
-          "type" => "u16",
-          "scale" => 0.1,
-          "unit" => "V",
-          "initial" => 230.1
+          "count" => 2,
+          "initial" => [32768, 0]
         },
         %{
-          "id" => "power",
-          "table" => "input",
-          "address" => 1,
-          "type" => "s32",
-          "initial" => -123_456
+          "id" => "coil",
+          "table" => "coil",
+          "address" => 0,
+          "count" => 2,
+          "initial" => [true, false]
         },
         %{
-          "id" => "temperature",
-          "table" => "input",
-          "address" => 3,
-          "type" => "float32",
-          "initial" => 12.3
-        },
-        %{
-          "id" => "label",
-          "table" => "input",
-          "address" => 5,
-          "type" => "ascii",
-          "length" => 3,
-          "initial" => "Solis"
-        },
-        %{"id" => "wide", "table" => "holding", "address" => 1, "type" => "s32", "initial" => 0}
+          "id" => "discrete",
+          "table" => "discrete",
+          "address" => 0,
+          "count" => 2,
+          "initial" => [false, true]
+        }
       ]
     }
   end
 
   defp modbus_client do
-    %{
+    server = modbus_server()
+
+    ranges =
+      Enum.map(server["ranges"], fn range ->
+        range
+        |> Map.delete("initial")
+        |> Map.put("writable", range["table"] in ["holding", "coil"])
+      end)
+
+    Map.merge(server, %{
       "role" => "client",
-      "transport" => "tcp",
       "host" => "127.0.0.1",
-      "port" => @modbus_port,
-      "unit" => 1,
       "interval" => 200,
       "timeout" => 500,
-      "mappings" => [
-        %{"id" => "ready", "table" => "discrete", "address" => 0},
-        %{
-          "id" => "voltage",
-          "table" => "input",
-          "address" => 0,
-          "type" => "u16",
-          "scale" => 0.1,
-          "unit" => "V"
-        },
-        %{"id" => "power", "table" => "input", "address" => 1, "type" => "s32"},
-        %{"id" => "temperature", "table" => "input", "address" => 3, "type" => "float32"},
-        %{"id" => "label", "table" => "input", "address" => 5, "type" => "ascii", "length" => 3},
-        %{"id" => "alarm", "table" => "input", "address" => 1, "type" => "bool", "bit" => 15},
-        %{"id" => "wide", "table" => "holding", "address" => 1, "type" => "s32"},
-        %{
-          "id" => "wide_set",
-          "table" => "holding",
-          "address" => 1,
-          "type" => "s32",
-          "access" => "write",
-          "feedback" => "wide"
-        },
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "access" => "read"},
-        %{
-          "id" => "holding0_set",
-          "table" => "holding",
-          "address" => 0,
-          "access" => "write",
-          "feedback" => "holding0"
-        },
-        %{"id" => "coil0", "table" => "coil", "address" => 0, "access" => "read"},
-        %{
-          "id" => "coil0_set",
-          "table" => "coil",
-          "address" => 0,
-          "access" => "write",
-          "feedback" => "coil0"
-        }
-      ]
-    }
+      "ranges" => ranges
+    })
   end
+
+  # Disposable guests are replaced without closing host sockets: do not pool HTTP connections.
+  defp guest_page(vm, path),
+    do: Req.get!(Scenarios.Qemu.ui_url(vm) <> path, headers: [connection: "close"], retry: false)
 end

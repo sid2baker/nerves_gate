@@ -7,7 +7,6 @@ defmodule ModbusPlugin.Application do
       [
         {Registry, keys: :unique, name: ModbusPlugin.Registry},
         {DynamicSupervisor, name: ModbusPlugin.Connections, strategy: :one_for_one},
-        ModbusPlugin.Command,
         ModbusPlugin
       ],
       strategy: :one_for_all,

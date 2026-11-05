@@ -93,8 +93,8 @@ defmodule ModbusPlugin.RTUTest do
       "unit" => 1,
       "interval" => 500,
       "timeout" => 200,
-      "mappings" => [
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "access" => "read"}
+      "ranges" => [
+        %{"id" => "holding0", "table" => "holding", "address" => 0, "count" => 1}
       ]
     }
 end

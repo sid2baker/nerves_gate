@@ -66,9 +66,9 @@ defmodule ModbusPlugin.DiscoveryTest do
     assert tables.input == :ok
     assert tables.holding == {:exception, :illegal_data_address}
 
-    assert Enum.map(status.discovery.evidence, &{&1.address, &1.raw, &1.hex}) == [
-             {0, 80, "0050"},
-             {2, 42, "002A"}
+    assert Enum.map(status.discovery.evidence, &{&1.address, &1.raw}) == [
+             {0, 80},
+             {2, 42}
            ]
 
     assert [%{address: 1, result: {:exception, :illegal_data_address}}] =
@@ -76,12 +76,6 @@ defmodule ModbusPlugin.DiscoveryTest do
 
     assert %{client: nil} = :sys.get_state(worker)
     assert GenServer.call(worker, {:write, "x", 99}) == {:error, :discovering}
-
-    assert Discovery.mapping(hd(status.discovery.evidence)) == %{
-             "id" => "input_0",
-             "table" => "input",
-             "address" => 0
-           }
 
     requests = wire([])
     assert length(requests) == status.discovery.requests
@@ -131,11 +125,8 @@ defmodule ModbusPlugin.DiscoveryTest do
     assert %{client: nil} = :sys.get_state(worker)
   end
 
-  test "SunSpec walks actual model headers and identification pagination stays budgeted" do
+  test "identification pagination stays budgeted" do
     parent = self()
-    memory = start_supervised!({Modbus.Memory, holding_registers: 128})
-    :ok = Modbus.Memory.put(memory, :holding_register, 0, [0x5375, 0x6E53, 1, 66])
-    :ok = Modbus.Memory.put(memory, :holding_register, 70, [0xFFFF, 0])
 
     server =
       start_supervised!(
@@ -149,24 +140,26 @@ defmodule ModbusPlugin.DiscoveryTest do
               %{
                 conformity_level: 1,
                 more_follows: from == 0,
-                next_object_id: if(from == 0, do: 1, else: 0),
+                next_object_id:
+                  if from == 0 do
+                    1
+                  else
+                    0
+                  end,
                 objects: [{from, "value"}]
               }}
 
-           unit, request ->
-             Modbus.Memory.handle_request(unit, request, memory)
+           _, _ ->
+             {:error, {:exception, :illegal_data_address}}
          end}
       )
 
-    {:ok, plan} = Discovery.validate(%{"units" => [1], "sunspec" => true, "delay" => 0})
+    {:ok, plan} = Discovery.validate(%{"units" => [1], "delay" => 0})
 
     worker =
       start_supervised!({Discovery, {%{config() | port: Modbus.Server.port(server)}, plan}})
 
     status = await(worker)
-
-    assert [%{unit: 1, base: 0, models: [%{id: 1, address: 2, length: 66}]}] =
-             status.discovery.sunspec
 
     assert [%{identification: %{objects: [{0, "value"}, {1, "value"}], more: false}}] =
              status.discovery.units
@@ -202,7 +195,7 @@ defmodule ModbusPlugin.DiscoveryTest do
         "unit" => 1,
         "interval" => 100,
         "timeout" => 100,
-        "mappings" => [%{"id" => "p", "table" => "input", "address" => 0}]
+        "ranges" => [%{"id" => "p", "table" => "input", "address" => 0, "count" => 1}]
       })
 
     config

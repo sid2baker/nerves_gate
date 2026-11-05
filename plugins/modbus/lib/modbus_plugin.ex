@@ -1,7 +1,8 @@
 defmodule ModbusPlugin do
   @moduledoc """
   Explicitly started Modbus TCP/RTU clients and servers using yamodbus, with
-  typed points of all four tables exposed as platform inputs and outputs.
+  raw boolean and register ranges. Device interpretation and platform endpoints
+  belong to the consuming integration, not this transport.
   `discover/2` runs a separate read-only survey through a stopped client instead
   of normal polling; it registers no endpoints and retains evidence only in memory.
 
@@ -23,6 +24,9 @@ defmodule ModbusPlugin do
   @doc "Start a bounded read-only survey instead of polling a stopped client."
   def discover(id, params), do: GenServer.call(__MODULE__, {:discover, id, params})
   def stop(id), do: GenServer.call(__MODULE__, {:stop, id})
+
+  @doc "Write a whole writable client range once, without retry or desired-state control."
+  def write(id, range_id, values), do: Connection.write(id, range_id, values)
   def status, do: GenServer.call(__MODULE__, :status)
   def ports, do: GenServer.call(__MODULE__, :ports)
   def health_check, do: if(Process.whereis(__MODULE__), do: :ok, else: {:error, :not_running})
@@ -68,8 +72,8 @@ defmodule ModbusPlugin do
         {_, nil, monitor} when monitor != nil ->
           {:error, :connection_cleanup_required}
 
-        {%{role: :client, mappings: []}, nil, nil} ->
-          {:error, :no_mappings}
+        {%{role: :client, ranges: []}, nil, nil} ->
+          {:error, :no_ranges}
 
         {config, nil, nil} ->
           with :ok <- serial_exclusive(config, state),
@@ -147,9 +151,8 @@ defmodule ModbusPlugin do
           if state.monitors[id] && Connection.pid(id) == nil,
             do: %{
               state: :cleanup_required,
-              values: nil,
-              error: :restart_plugin_to_verify_cleanup,
-              read_at: nil
+              observations: %{},
+              error: :restart_plugin_to_verify_cleanup
             },
             else: Connection.status(id)
 
@@ -207,16 +210,19 @@ defmodule ModbusPlugin do
 
   defp serial_exclusive(_, _), do: :ok
 
-  defp assigned_transport(%{transport: "tcp"} = config), do: {:ok, config}
-
   defp assigned_transport(config) do
-    with {:ok, resources} <- NervesGateSDK.Hardware.resources(),
-         %{present?: true, path: path} when is_binary(path) <-
-           Enum.find(resources, &(&1.id == config.serial_port and &1.kind == :rs485)) do
-      {:ok, Map.put(config, :serial_path, path)}
-    else
-      {:error, _} = error -> error
-      _ -> {:error, :serial_port_unavailable}
+    with {:ok, resources} <- NervesGateSDK.Hardware.resources() do
+      if config.transport == "tcp" do
+        {:ok, config}
+      else
+        case Enum.find(resources, &(&1.id == config.serial_port and &1.kind == :rs485)) do
+          %{present?: true, path: path} when is_binary(path) ->
+            {:ok, Map.put(config, :serial_path, path)}
+
+          _ ->
+            {:error, :serial_port_unavailable}
+        end
+      end
     end
   end
 end

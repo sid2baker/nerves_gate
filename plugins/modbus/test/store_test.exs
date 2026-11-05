@@ -26,7 +26,7 @@ defmodule ModbusPlugin.StoreTest do
           %{"pump" => Map.put(config, :serial_path, "/dev/ttyS0")},
           %{"pump" => Map.put(config, :serial_monitor, make_ref())},
           %{"pump" => %{config | unit: 0}},
-          %{"pump" => %{config | mappings: [:not_a_map]}},
+          %{"pump" => %{config | ranges: [:not_a_map]}},
           Map.new(1..17, &{"d#{&1}", %{config | id: "d#{&1}"}})
         ] do
       refute Store.valid?(configs)
@@ -47,8 +47,8 @@ defmodule ModbusPlugin.StoreTest do
       "unit" => 1,
       "interval" => 500,
       "timeout" => 1000,
-      "mappings" => [
-        %{"id" => "level", "table" => "holding", "address" => 0, "access" => "read"}
+      "ranges" => [
+        %{"id" => "level", "table" => "holding", "address" => 0, "count" => 1}
       ]
     }
   end

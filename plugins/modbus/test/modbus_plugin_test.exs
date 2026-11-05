@@ -1,9 +1,8 @@
 defmodule ModbusPluginTest do
   use ExUnit.Case, async: false
-  alias ModbusPlugin.{Config, Connection}
+  alias ModbusPlugin.{Config, Connection, Store}
 
   setup do
-    # Restart only this test project's application, never gateway/bench services.
     :ok = Application.stop(:modbus_plugin)
     {:ok, _} = Application.ensure_all_started(:modbus_plugin)
     :ok
@@ -23,10 +22,9 @@ defmodule ModbusPluginTest do
     assert ModbusPlugin.health_check() == :ok
   end
 
-  test "a failed save keeps the previous definitions; an uncertain commit blocks saving" do
-    {:ok, configs} = ModbusPlugin.Store.put(%{}, "one", client(502))
+  test "a failed save preserves definitions and an uncertain commit blocks further changes" do
+    {:ok, configs} = Store.put(%{}, "one", client(502))
 
-    # The host SDK has no runtime, so the real persist call fails before any write.
     assert {:reply, {:error, :runtime_unavailable}, %{configs: ^configs, error: nil}} =
              ModbusPlugin.handle_call({:save, "two", client(503)}, from(), state(configs))
 
@@ -41,84 +39,74 @@ defmodule ModbusPluginTest do
              ModbusPlugin.handle_call({:delete, "nope"}, from(), state(configs))
   end
 
-  test "definitions are bounded and validated" do
+  test "legacy schemas are refused instead of silently discarding interpretation" do
+    for key <- ~w(mappings max_gap) do
+      assert {:error, {:unknown_field, ^key}} =
+               Config.validate("one", Map.put(client(502), key, []))
+    end
+
+    assert {:error, {:invalid_field, "id", "Bad-Id"}} = Config.validate("Bad-Id", client(502))
+  end
+
+  test "connection fields and raw range coordinates reject malformed values" do
     for change <- [
           %{"unit" => "0"},
           %{"interval" => "0"},
           %{"host" => "http://example.com"},
           %{"timeout" => "999999"},
           %{"role" => "master"},
-          %{"mappings" => nil},
-          %{"mappings" => [%{"id" => "Bad", "table" => "holding", "address" => 0}]},
-          %{"mappings" => [%{"id" => "x", "table" => "unknown", "address" => 0}]},
-          %{"mappings" => [%{"id" => "x", "table" => "holding", "address" => 65536}]},
-          %{
-            "mappings" => [
-              %{"id" => "x", "table" => "holding", "address" => 0},
-              %{"id" => "x", "table" => "holding", "address" => 1}
-            ]
-          },
-          %{
-            "mappings" => [
-              %{"id" => "x", "table" => "coil", "address" => 0, "access" => "read"},
-              %{
-                "id" => "y",
-                "table" => "holding",
-                "address" => 0,
-                "access" => "write",
-                "feedback" => "x"
-              }
-            ]
-          }
+          %{"transport" => "udp"},
+          %{"ranges" => nil},
+          %{"ranges" => [%{"id" => "Bad", "table" => "holding", "address" => 0, "count" => 1}]},
+          %{"ranges" => [%{"id" => "x", "table" => "unknown", "address" => 0, "count" => 1}]},
+          %{"ranges" => [%{"id" => "x", "table" => "holding", "address" => 65536, "count" => 1}]}
         ] do
-      assert {:error, _reason} = Config.validate("one", Map.merge(client(502), change))
+      assert {:error, _} = Config.validate("one", Map.merge(client(502), change))
     end
 
-    assert {:error, {:invalid_field, "id", "Bad-Id"}} = Config.validate("Bad-Id", client(502))
-
-    assert {:error, {:invalid_mapping, "c", {:invalid_initial, 2}}} =
-             Config.validate(
-               "s",
-               Map.put(server(502), "mappings", [
-                 %{"id" => "c", "table" => "coil", "address" => 0, "initial" => 2}
-               ])
-             )
+    assert {:error, _} =
+             Config.validate("one", %{
+               "role" => "server",
+               "port" => 502,
+               "unit" => 1,
+               "timeout" => 100,
+               "ranges" => []
+             })
   end
 
-  test "without the platform runtime, Start fails closed and opens no transport" do
+  test "without activation membership Start and discovery open no TCP transport" do
     {:ok, listener} =
       :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}, reuseaddr: true])
 
+    on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, {_, port}} = :inet.sockname(listener)
-    {:ok, configs} = ModbusPlugin.Store.put(%{}, "client", client(port))
-    {:ok, configs} = ModbusPlugin.Store.put(configs, "server", server(port + 1))
+    {:ok, configs} = Store.put(%{}, "client", client(port))
+    {:ok, configs} = Store.put(configs, "server", Map.put(client(port), "role", "server"))
 
-    assert {:reply,
-            {:error, {:start_failed, {:registration_failed, "holding0", :runtime_unavailable}}},
-            _} =
-             ModbusPlugin.handle_call({:start, "client"}, from(), state(configs))
+    for operation <- [
+          {:start, "client"},
+          {:start, "server"},
+          {:discover, "client", %{"units" => [1]}}
+        ] do
+      assert {:reply, {:error, :runtime_unavailable}, _} =
+               ModbusPlugin.handle_call(operation, from(), state(configs))
+    end
 
-    assert {:error, :timeout} = :gen_tcp.accept(listener, 200)
+    assert {:error, :timeout} = :gen_tcp.accept(listener, 100)
     assert Connection.pid("client") == nil
-    :gen_tcp.close(listener)
-
-    assert {:reply, {:error, {:start_failed, {:registration_failed, _, :runtime_unavailable}}}, _} =
-             ModbusPlugin.handle_call({:start, "server"}, from(), state(configs))
-
-    assert {:ok, free} = :gen_tcp.listen(port + 1, [:binary, ip: {127, 0, 0, 1}, reuseaddr: true])
-    :gen_tcp.close(free)
+    assert Connection.pid("server") == nil
     assert DynamicSupervisor.which_children(ModbusPlugin.Connections) == []
   end
 
-  test "a stopped plugin leaves no runtime and the manual writer holds no claims" do
-    assert ModbusPlugin.Command.claims() == []
-    assert {:error, :not_claimed} = ModbusPlugin.Command.set("modbus_plugin.x.y", 1)
-    assert {:error, :runtime_unavailable} = ModbusPlugin.Command.claim("modbus_plugin.x.y")
-    assert {:error, :not_running} = ModbusPlugin.Server.put("x", "y", 1)
-    :ok = Application.stop(:modbus_plugin)
-    refute Process.whereis(ModbusPlugin)
-    refute Process.whereis(ModbusPlugin.Command)
-    {:ok, _} = Application.ensure_all_started(:modbus_plugin)
+  test "empty client ranges are discovery-only and never start polling" do
+    {:ok, config} = Config.validate("one", Map.put(client(502), "ranges", []))
+    s = state(%{"one" => config})
+
+    assert {:reply, {:error, :no_ranges}, ^s} =
+             ModbusPlugin.handle_call({:start, "one"}, from(), s)
+
+    assert {:error, :not_running} = ModbusPlugin.write("one", "block", [1])
+    assert {:error, :not_running} = ModbusPlugin.Server.put("one", "block", [1])
   end
 
   def client(port),
@@ -130,30 +118,6 @@ defmodule ModbusPluginTest do
       "unit" => 1,
       "interval" => 100,
       "timeout" => 100,
-      "mappings" => [
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "access" => "read"},
-        %{
-          "id" => "holding0_set",
-          "table" => "holding",
-          "address" => 0,
-          "access" => "write",
-          "feedback" => "holding0"
-        },
-        %{"id" => "coil0", "table" => "coil", "address" => 0, "access" => "read"},
-        %{"id" => "coil0_set", "table" => "coil", "address" => 0, "access" => "write"}
-      ]
-    }
-
-  def server(port),
-    do: %{
-      "role" => "server",
-      "transport" => "tcp",
-      "port" => port,
-      "unit" => 1,
-      "timeout" => 1000,
-      "mappings" => [
-        %{"id" => "holding0", "table" => "holding", "address" => 0, "initial" => 7},
-        %{"id" => "coil0", "table" => "coil", "address" => 0, "initial" => true}
-      ]
+      "ranges" => [%{"id" => "block", "table" => "holding", "address" => 0, "count" => 2}]
     }
 end

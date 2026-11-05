@@ -4,11 +4,11 @@
 
 ### Breaking changes
 
-- Modbus 0.5.0-dev.2 replaces mapping `direction` with `access: read|write` and typed values. Old version-scoped configuration remains untouched; configure the new plugin version explicitly.
+- Modbus 0.6.0-dev.1 exposes raw address ranges instead of typed mappings or platform endpoints. Consuming integrations own decoding, scaling, units and desired-state control. Existing version-scoped configuration and endpoint history remain untouched; configure the new version explicitly.
 
 ### Added
 
-- Modbus clients and servers support all four tables, typed multi-register values, units and batching. Separate bounded read-only discovery retains raw evidence for operator promotion into mapping drafts; Solis templates and SunSpec model discovery remain explicitly selected.
+- Modbus clients and servers support raw grouped reads and explicit whole-range writes across all four tables. A simple range editor replaces mapping JSON; bounded read-only discovery stays separate and creates no ranges or endpoints.
 
 ### Fixed
 

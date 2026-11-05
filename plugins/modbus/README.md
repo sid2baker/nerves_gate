@@ -1,198 +1,139 @@
-# Modbus TCP / RTU plugin
+# Raw Modbus TCP / RTU
 
-Firmware-selected Modbus clients and servers using
-[yamodbus 0.1.0](https://github.com/tallakt/yamodbus), Apache-2.0 licensed.
-Private pure-Elixir yamodbus code is bundled with it. Native `circuits_uart`
-1.7.0, the SDK and LiveView are supplied by firmware, not bundled.
+This plugin owns Modbus connections and raw data—not equipment meaning.
+Coils/discrete inputs are booleans; holding/input registers are unsigned 16-bit
+words (0–65535). A consuming integration combines words, decodes numbers/text,
+applies scaling/units and registers its own meaningful platform inputs/outputs.
+There are no datatype mappings, templates, automatic endpoint registration or
+desired-state control in this transport plugin.
 
-## Data model
+Uses [yamodbus 0.1.0](https://github.com/tallakt/yamodbus), Apache-2.0 licensed,
+bundled as private pure-Elixir code. Firmware supplies native `circuits_uart`
+1.7.0, the SDK and LiveView; no device downloads or dependency resolution.
 
-Each saved connection has an ID, role, transport, unit (1–247), timeout
-(100–5000 ms) and up to 64 mappings. Servers need at least one; a client
-may save an empty list for discovery only (normal Start refuses `:no_mappings`).
-There may be 16 definitions. IDs are lowercase,
-letter-led `[a-z0-9_]`, at most 32 characters. Mapping IDs name stable equipment
-meaning and become `modbus_plugin.<connection>.<mapping>` platform endpoints.
-The platform retains definitions after deletion; changed meaning needs a new ID.
+## Setup
 
-**Addresses are zero-based protocol addresses, 0–65535**, the number sent on the
-wire. Do not enter a vendor's `30001`/`40001` register notation without converting
-it according to the device manual. Some vendors, including the Solis template,
-already document protocol addresses; do not subtract a base automatically.
+1. Choose **Client**, **TCP**, the device IP/port (usually 502) and unit ID.
+2. Add raw ranges with an ID, table, start address and count.
+3. Save to SD, then explicitly Start. Refresh shows grouped raw observations.
 
-| Table | Read | Client writes |
-|---|---|---|
-| `coil` | FC01 | FC05 |
-| `discrete` | FC02 | Never |
-| `holding` | FC03 | FC06 (one register), FC16 (multiple) |
-| `input` | FC04 | Never |
+TCP clients use normal gateway routing, with no LAN selector or exclusive
+Ethernet assignment. TCP servers listen on all interfaces. Use trusted networks:
+Modbus TCP has no authentication or encryption.
 
-Client mappings have `access: "read"` (default) or `"write"`. Server mappings
-have no access field: every point is a local platform input, remotely writable
-only in coil/holding tables. Server mappings may not overlap; client read views
-may overlap but two writers may not own the same address. A server refuses
-unmapped addresses, another unit and undecodable writes without changing its map.
-TCP servers listen on the configured port on all addresses. Servers also answer
-FC43/14 and FC17 with the plugin identity, not physical equipment identity.
+For RTU, choose the RS485 resource, baud/parity/stop bits (8 data bits), confirm
+bus authorization, and save. **Assign port / enable access** opens gateway-owned
+hardware review; assignment may stop the entire plugin and starts nothing
+implicitly. Start checks the enabled assignment and device presence. One runtime
+per serial port; unexpected death retains its reservation until whole-plugin
+cleanup verifies closure. EC100 uses automatic direction control, not guessed
+GPIOs. Physical bus/equipment qualification requires separate authorization.
 
-```json
-[
-  {"id":"battery_soc","table":"input","address":33139,"access":"read","type":"u16","unit":"%"},
-  {"id":"battery_power","table":"input","address":33149,"access":"read","type":"s32","scale":1,"unit":"W","word_order":"high_first"}
-]
-```
-
-| Type | Width | Platform value |
-|---|---|---|
-| `bool` | 1 bit-table point or 1 register | boolean |
-| `u16`, `s16` | 1 register | integer, or float with a float scale |
-| `u32`, `s32` | 2 registers | integer, or float with a float scale |
-| `float32` | 2 registers | IEEE-754 float |
-| `ascii` | `length` registers (1–123) | string |
-
-Coils/discrete inputs accept only `bool` (their default); other tables default
-to `u16`. A register `bool` means non-zero, or selects `bit: 0..15` on a client
-read. Bit views are read-only, not unsafe whole-word writers.
-
-Numeric mappings accept `scale` (default 1, non-zero, absolute value 0.000001 to
-1000000). Published value is raw × scale. Integer types with an integer scale
-remain integers; a floating scale publishes a float rounded to the scale's
-decimal precision. IEEE floats publish their shortest float32-round-trip decimal
-before scaling. NaN/infinity and invalid text publish invalid quality, never a
-fabricated value. `unit` is optional, up to 32 UTF-8 bytes.
-
-32-bit types accept `word_order: "high_first"` (default) or `"low_first"`.
-Bytes within a register are high-byte first. ASCII ends at the first NUL and
-trims trailing spaces. Writes are zero-padded and must fit and read back exactly.
-Numeric writes must likewise be representable and read back exactly; e.g. 1.23
-cannot be written with scale 0.1. Invalid values are refused before sending.
-
-Servers accept `initial` in published units (default zero/false/empty string).
-`ModbusPlugin.Server.put(connection, mapping, value)` sets a local typed value,
-including input registers and discrete inputs, and publishes it.
-
-## Polling and desired state
-
-Clients poll every `interval` (100–60000 ms). A plan merges adjacent or
-overlapping reads of one table into FC01/02 batches of up to 2000 bits or FC03/04
-batches of up to 125 registers. `max_gap` (0–100, default 0) explicitly permits
-reading gaps; **many devices refuse any batch touching an unmapped address**.
-One failed batch invalidates all its mappings. No automatic speculative polling
-fallback conceals a bad mapping.
-
-A write mapping can link `feedback` to a read mapping of the same platform value
-type. This is readback evidence, not proof of a physical equipment condition.
-Output types, units and bounds derive from the mapping. The actual managed
-connection owns its inputs, transport and linked `NervesGateSDK.Output` worker;
-the supervised `ModbusPlugin.Command` owns manual output claims, never a UI PID.
-
-Outputs are repeatable setters only, not pulses, toggles or command registers.
-Setters and batched reads share one serialized transport. The output worker
-re-reads the newest Desire before applying; a successful write reports applied,
-a timeout unknown and another error failed. Failed/uncertain repeatable setters
-are reapplied after the interval, and disagreeing readback requests reapplication.
-Releasing a Desire holds the last value: it performs no write. Status confirms a
-Desire only from fresh readback after the Desire changed, not a write response.
-Read exceptions publish invalid quality; transport loss/timeouts publish unknown,
-without retaining a fabricated successful value.
-
-## Save, Start, Stop and storage
-
-Save never communicates. Startup/restart only restore definitions and start
-nothing. Start registers the mapped endpoints and opens the transport; a failed
-registration opens nothing. Stop before saving changes. Stop clears runtime
-bindings, claims, desires and observations, not endpoint history.
-
-Definitions are this plugin version's SDK storage configuration term. A new
-version starts with no definitions; old versions' terms stay on the SD card and
-are not imported. There are no legacy schema aliases: `direction` is rejected;
-use `access` in new drafts. Missing SD storage refuses saving, with no `/data`
-fallback. Unsupported saved terms or uncertain commits fail closed without
-rewriting state. Validation errors identify fields or individual mappings:
+## Definitions and bounds
 
 ```elixir
-{:error, {:invalid_mapping, "battery_power", {:invalid_type, "s64"}}}
-{:error, {:invalid_mapping, "soc", {:address_out_of_range, 70000}}}
-{:error, {:invalid_field, "unit", 0}}
-```
-
-For RTU, save a stopped definition with `serial_port` (resource ID, never a
-path), `authorized: true`, speed 1200–115200, parity none/even/odd, stop bits 1/2
-and 8 data bits. Use **Assign port / enable access** to review its exclusive
-hardware assignment. This may stop the whole plugin; nothing restarts
-automatically. Start resolves the currently enabled, assigned RS485 resource.
-One runtime per serial port; an unexpected RTU death retains its reservation
-until the whole plugin is stopped and cleanup verified. EC100 uses automatic
-direction control, not guessed DE/RTS pins. TCP needs no Ethernet assignment.
-
-## Read-only discovery
-
-Discovery is **separate from normal mappings** and explicitly runs instead of a
-stopped client on its transport. It never registers endpoints or sends a write
-function code. It identifies devices using FC43/14 basic objects (including
-budgeted continuation) and FC17, probes FC01/02/03/04 at address 0, and scans
-operator-selected ranges. A probe exception is raw evidence, not proof that a
-table is absent: address 0 may simply be unmapped.
-
-```elixir
-ModbusPlugin.discover("inverter", %{
-  "units" => [1],
-  "ranges" => [%{"table" => "input", "address" => 33133, "count" => 18}],
-  "budget" => 200, "delay" => 50, "sunspec" => false
+ModbusPlugin.save("inverter", %{
+  "role" => "client", "transport" => "tcp",
+  "host" => "192.0.2.10", "port" => 502, "unit" => 1,
+  "interval" => 1000, "timeout" => 1000,
+  "ranges" => [
+    %{"id" => "words", "table" => "input", "address" => 33149, "count" => 2}
+  ]
 })
+ModbusPlugin.start("inverter")
 ModbusPlugin.status()
-ModbusPlugin.stop("inverter")
 ```
 
-Limits: 16 distinct units in 1–247; 8 ranges totalling at most 4096 addresses;
-1–1000 requests (default 200); 0–5000 ms between requests (default 50). Every
-probe, identification page and retry-free scan request counts. Ranges use
-protocol-sized chunks; illegal-address chunks split down to single addresses,
-within the same budget. The survey stores at most 4096 successful observations.
-Budget/evidence exhaustion stops it visibly with remaining work; failures retain
-their unit, table, range, error and UTC observation time. Successful evidence is:
+**Addresses are zero-based protocol addresses**, exactly the numbers on the wire.
+Do not automatically subtract 30001/40001 from a vendor's documented addresses.
+
+| Table | Read | Writable client range |
+|---|---|---|
+| `coil` | FC01, up to 2000 bits | FC05/15, up to 1968 bits |
+| `discrete` | FC02, up to 2000 bits | Never |
+| `holding` | FC03, up to 125 words | FC06/16, up to 123 words |
+| `input` | FC04, up to 125 words | Never |
+
+Each range is **one request**, not separately sampled words. Choose ranges that
+are fully implemented by the device; normal polling does not speculate across
+gaps or silently split a failed batch. A failed range returns no values and
+invalid quality for exceptions, unknown quality for transport failures/timeouts.
+Other ranges retain their own observations and timestamps.
+
+`status/0` returns saved connections with their current `observations`, keyed by
+range ID, e.g.:
 
 ```elixir
-%{unit: 1, table: :input, address: 33139, raw: 80, hex: "0050", observed_at: "..."}
+%{values: [65535, 65436], quality: :good, error: nil, observed_at: "..."}
 ```
 
-Read-only does **not** mean harmless: some equipment resets counters on reads,
-and a scanner consumes shared bus time. Check the manual, authorize the selected
-units/ranges and avoid other masters. No broadcast unit 0 or automatic background
-scans. Stop cancels the survey; completion closes the transport, keeping only
-in-memory results until Stop/plugin shutdown. The UI displays up to 256 results;
-the status API exposes the entire bounded result.
+The next layer consumes the whole observation and checks its quality and freshness
+before interpretation. It is responsible for word order, signedness, floats,
+strings, scaling, units, device models (including SunSpec/Solis) and SDK endpoints.
+No generic transformation framework is introduced here.
 
-**Promote to draft** copies one observed address and its unit into the editor.
-The operator still supplies ID, datatype, scale and meaning, stops discovery and
-saves explicitly. A value resembling a percentage never becomes SOC automatically.
-Promotion never changes saved mappings or starts normal polling.
+At most 16 connections, 64 non-overlapping ranges per connection and 4096 total
+addresses per definition. IDs match `[a-z][a-z0-9_]{0,31}`. Units are 1–247;
+addresses 0–65535; timeout 100–5000 ms; client interval 100–60000 ms. Empty client
+ranges permit discovery-only definitions; normal Start refuses `:no_ranges`.
 
-## Optional profiles and SunSpec
+Servers use the same range coordinates, with optional `initial` raw lists;
+defaults are zero/false. Remote writes affect only mapped coil/holding spans,
+atomically. `ModbusPlugin.Server.put(connection, range, values)` explicitly changes
+a whole local range, including input/discrete tables. Server identification
+reports this plugin, not attached equipment.
 
-**Load Solis hybrid template** replaces only the mapping draft. It covers PV1/2
-voltage/current, total PV power, temperature, battery SOC and battery power.
-Register facts are cross-checked against the [Solis integration](https://github.com/Pho3niX90/solis_modbus/blob/master/custom_components/solis_modbus/sensor_data/hybrid_sensors.py)
-and [evcc Solis hybrid definition](https://github.com/evcc-io/evcc/blob/master/templates/definition/meter/solis-hybrid.yaml).
-These are a starting point, **not qualification of every S6/RHI model or firmware**;
-verify the manufacturer's register map and battery-power sign convention. The
-template preserves raw signed battery power (no inferred charge/discharge sign).
+## Explicit raw writes
 
-With `sunspec: true`, discovery looks for the `SunS` marker in holding registers
-at protocol addresses 0, 40000 and 50000. It walks actual model headers until
-0xFFFF, address bounds or 64 models, under the same request budget. Unknown
-models remain IDs, lengths and addresses. For discovered common model 1, the UI
-can load manufacturer/model/firmware strings into a draft. It does not guess
-vendor data or decode arbitrary inverter models/scale-factor dependencies.
-Profiles are plain mapping data, not a second transport or automatic activation
-framework. No unsupported Victron map is invented.
+A client range must explicitly have `"writable" => true`. Then:
+
+```elixir
+ModbusPlugin.write("controller", "setpoints", [0, 42])
+```
+
+The list must cover the entire range, with raw integers or booleans. One call
+sends one FC05/06/15/16 operation, serialized with reads. At most one write is
+accepted at a time; another is refused as busy. **No retry, desire, reapplication
+or inferred readback confirmation.** Timeout/caller exit may leave an unknown
+outcome; never blindly replay it. A write response is not physical equipment
+confirmation. Cached observations of that range are invalidated until reread.
+The next layer owns application-specific write admission and control semantics.
+
+## Save and lifecycle
+
+Save and plugin startup never communicate. Stop before changing a definition.
+Stop closes transports and clears in-memory observations, not saved definitions.
+Managed activation membership is checked before controller Start/discovery;
+RTU additionally requires the assigned hardware resource.
+
+Configuration is version-scoped SDK storage on SD, with no internal-storage
+fallback or automatic migration. A new version starts empty, leaving older terms
+and endpoint history untouched. Unsupported saved schemas, unavailable storage
+and uncertain commits fail closed without rewriting state. Validation names the
+invalid connection field or range. Typed mapping fields are rejected, not ignored.
+
+## Optional read-only discovery
+
+Hidden under **Advanced** for a stopped client. Choose unit IDs, table, address
+and count. Protocol identification and FC01–04 probes precede the scan. It keeps
+raw evidence in memory until Stop; it never registers endpoints, saves ranges,
+sends writes or guesses device semantics. Reads themselves may affect counters;
+check the manual and avoid other masters.
+
+The API accepts `units` (1–16 IDs), `ranges` (up to 8, totalling 4096 addresses),
+`budget` (1–1000 requests, default 200), `delay` (0–5000 ms, default 50) and
+`identify` (default true). Illegal-address scans bisect down to individual points,
+within the same budget. Identification continuation is budgeted too. At most 4096
+successful observations are retained; exhaustion is explicit. Finish closes the
+transport, keeping results until Stop. The UI shows up to 256 observations;
+`status/0` exposes the bounded complete result. Polling resumes only after Stop
+and explicit Start.
 
 ## Validation
 
-From the repository root: `mix plugin.test plugins/modbus` or `mix check`.
-Tests cover codecs, validation, plans, storage/admission, UI drafts and real TCP
-discovery with budgets, gaps, pacing, pagination and SunSpec. No fake SDK backend.
-The QEMU `plugins` scenario exercises real platform ownership, all four tables,
-multi-register writes, typed feedback, discovery and explicit polling resumption.
-Physical RTU/equipment qualification requires separate authorization.
-See [hardware](../../docs/hardware.md) and [plugin development](../../docs/plugin-development.md).
+From the repository root: `mix plugin.test plugins/modbus` and `mix check`.
+Tests exercise raw validation, persistence, admission, rendered forms, real TCP
+polling/writes, write uncertainty, discovery budgets, pacing and gaps. The QEMU
+`plugins` scenario covers real managed activation and storage, all four tables,
+grouped raw I/O and discovery without platform endpoint creation. Runtime QEMU
+and physical validation are separate from host checks and firmware builds.

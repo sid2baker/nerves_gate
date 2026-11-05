@@ -2,203 +2,162 @@ defmodule ModbusPlugin.UITest do
   use ExUnit.Case, async: false
   import Phoenix.LiveViewTest
 
-  setup do
-    :ok = Application.stop(:modbus_plugin)
-    {:ok, _} = Application.ensure_all_started(:modbus_plugin)
-    :ok
-  end
-
-  test "UI drafts definitions and reports blocked storage without starting anything" do
+  test "default TCP client shows simple raw range fields, not register interpretation or RS485" do
     html = render_component(ModbusPlugin.UI, id: "modbus")
-    assert html =~ "Modbus TCP"
-    assert html =~ "Save definition · no connection"
-    assert html =~ "Saved configuration blocked"
-    refute html =~ ">Start<"
-    {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
-    assert socket.assigns.form.params["role"] == "server"
-
-    assert {:noreply, malformed} =
-             ModbusPlugin.UI.handle_event(
-               "save",
-               %{"connection" => %{"id" => "bad", "mappings" => "{"}},
-               socket
-             )
-
-    assert malformed.assigns.message =~ "JSON list"
-
-    # Validation and persistence belong to the controller, not the component.
-    params = %{socket.assigns.form.params | "transport" => "tcp", "port" => "1502"}
-
-    assert {:noreply, refused} =
-             ModbusPlugin.UI.handle_event("save", %{"connection" => params}, socket)
-
-    assert refused.assigns.message =~ "storage_unavailable"
-    assert ModbusPlugin.Connection.pid("server1") == nil
+    assert html =~ "Device IP / hostname"
+    assert html =~ "Start address"
+    assert html =~ "Count"
+    refute html =~ "Mappings (JSON"
+    refute html =~ "Solis"
+    refute html =~ "word_order"
+    refute html =~ "RS485 port"
+    refute html =~ "Parity"
+    assert html =~ "block1"
   end
 
-  test "unassigned saved RTU drafts offer review but cannot start" do
+  test "range editing, role and transport changes only affect the draft" do
     {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
-    defaults = socket.assigns.form.params
-    {:ok, mappings} = JSON.decode(defaults["mappings"])
 
-    {:ok, %{"server1" => config}} =
-      ModbusPlugin.Store.put(
-        %{},
-        "server1",
-        Map.merge(defaults, %{
-          "mappings" => mappings,
-          "authorized" => "true",
-          "serial_port" => "ttyS1"
-        })
+    params = %{
+      "role" => "client",
+      "transport" => "tcp",
+      "host" => "192.0.2.10",
+      "ranges" => %{
+        "0" => %{"id" => "raw", "table" => "input", "address" => "33149", "count" => "2"}
+      }
+    }
+
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("edit", %{"connection" => params}, socket)
+    assert socket.assigns.draft["host"] == "192.0.2.10"
+    assert [%{"count" => "2"}] = socket.assigns.draft["ranges"]
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("add_range", %{}, socket)
+    assert length(socket.assigns.draft["ranges"]) == 2
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("remove_range", %{"index" => "1"}, socket)
+    assert length(socket.assigns.draft["ranges"]) == 1
+    assert ModbusPlugin.Connection.pid("client1") == nil
+
+    html =
+      render_component(ModbusPlugin.UI,
+        id: "modbus",
+        draft: Map.merge(socket.assigns.draft, %{"transport" => "rtu"})
       )
 
-    connection = Map.merge(config, %{state: :stopped, values: nil, error: nil, read_at: nil})
+    assert html =~ "RS485 port"
+    refute html =~ "Device IP / hostname"
+  end
 
-    port = %NervesGateSDK.Hardware.Candidate{
-      id: "ttyS1",
-      label: "RS485 1",
-      kind: :rs485,
-      present?: true,
-      enabled?: false
+  test "LiveView unused-field metadata never becomes configuration" do
+    {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
+
+    params = %{
+      "host" => "192.0.2.10",
+      "_unused_host" => "",
+      "_unused_port" => "",
+      "_unused_ranges" => "",
+      "ranges" => %{
+        "0" => %{
+          "id" => "raw",
+          "table" => "input",
+          "address" => "0",
+          "count" => "2",
+          "_unused_address" => ""
+        }
+      }
+    }
+
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("edit", %{"connection" => params}, socket)
+    refute Map.has_key?(socket.assigns.draft, "_unused_host")
+    refute Map.has_key?(socket.assigns.draft, "_unused_port")
+    refute Map.has_key?(socket.assigns.draft, "_unused_ranges")
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("save", %{"connection" => params}, socket)
+    assert socket.assigns.message =~ "storage_unavailable"
+    refute socket.assigns.message =~ "unknown_field"
+    assert ModbusPlugin.Connection.pid("client1") == nil
+  end
+
+  test "each range has its own right-side remove control and deleting the middle preserves the others" do
+    {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("add_range", %{}, socket)
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("add_range", %{}, socket)
+    html = render_component(ModbusPlugin.UI, id: "modbus", draft: socket.assigns.draft)
+
+    for index <- 0..2 do
+      assert html =~ ~s(id="modbus-range-#{index}")
+      assert html =~ ~s(phx-value-index="#{index}")
+      assert html =~ ~s(aria-label="Remove range block#{index + 1}")
+    end
+
+    assert html =~ "margin-left: auto"
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("remove_range", %{"index" => "1"}, socket)
+    assert Enum.map(socket.assigns.draft["ranges"], & &1["id"]) == ["block1", "block3"]
+    html = render_component(ModbusPlugin.UI, id: "modbus", draft: socket.assigns.draft)
+    assert html =~ ~s(aria-label="Remove range block1")
+    assert html =~ ~s(aria-label="Remove range block3")
+    refute html =~ ~s(aria-label="Remove range block2")
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("add_range", %{}, socket)
+    assert Enum.map(socket.assigns.draft["ranges"], & &1["id"]) == ["block1", "block3", "block2"]
+  end
+
+  test "saved raw observations and advanced discovery are separate from the draft" do
+    {:ok, config} =
+      ModbusPlugin.Config.validate("one", %{
+        "role" => "client",
+        "host" => "localhost",
+        "port" => 502,
+        "unit" => 1,
+        "timeout" => 1000,
+        "interval" => 1000,
+        "ranges" => [%{"id" => "words", "table" => "input", "address" => 33149, "count" => 2}]
+      })
+
+    connection =
+      Map.merge(config, %{
+        state: :polling,
+        error: nil,
+        observations: %{
+          "words" => %{
+            values: [65535, 65436],
+            quality: :good,
+            error: nil,
+            observed_at: "2026-11-04T00:00:00Z"
+          }
+        }
+      })
+
+    status = %{storage: nil, connections: [connection]}
+    html = render_component(ModbusPlugin.UI, id: "modbus", status: status)
+    assert html =~ "65535"
+    assert html =~ "65436"
+    # input ranges cannot be writable
+    refute html =~ "Allow explicit raw writes</label>"
+
+    {:ok, socket} =
+      ModbusPlugin.UI.update(%{id: "modbus", status: status}, %Phoenix.LiveView.Socket{})
+
+    {:noreply, socket} = ModbusPlugin.UI.handle_event("load", %{"id" => "one"}, socket)
+    assert socket.assigns.draft["id"] == "one"
+    assert [%{"address" => "33149", "count" => "2"}] = socket.assigns.draft["ranges"]
+    assert socket.assigns.status == status
+
+    survey = %{
+      requests: 4,
+      budget: 200,
+      remaining: 0,
+      units: [],
+      failures: [],
+      evidence: [%{unit: 1, table: :input, address: 33149, raw: 65535}]
     }
 
     html =
       render_component(ModbusPlugin.UI,
         id: "modbus",
-        ports: [port],
-        status: %{storage: nil, connections: [connection]}
+        status: %{
+          status
+          | connections: [Map.merge(connection, %{state: :discovered, discovery: survey})]
+        }
       )
 
-    assert html =~ "RS485 1 (ttyS1)"
-    assert html =~ "Available for assignment"
-    assert html =~ "/hardware/ttyS1?plugin=modbus_plugin"
-    assert html =~ ~r/<button[^>]*phx-click="start"[^>]*disabled/
-    assert ModbusPlugin.Connection.pid("server1") == nil
-  end
-
-  test "discovery controls render and promotion and templates only change a draft" do
-    {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
-
-    defaults =
-      socket.assigns.form.params
-      |> Map.merge(%{
-        "role" => "client",
-        "transport" => "tcp",
-        "host" => "localhost",
-        "mappings" => [%{"id" => "point", "table" => "input", "address" => 0}]
-      })
-
-    {:ok, config} = ModbusPlugin.Config.validate("client1", defaults)
-
-    evidence = %{
-      unit: 2,
-      table: :input,
-      address: 33139,
-      raw: 80,
-      hex: "0050",
-      observed_at: "2026-11-04T00:00:00Z"
-    }
-
-    model = %{id: 1, address: 40002, length: 66}
-
-    survey = %{
-      requests: 8,
-      budget: 100,
-      remaining: 0,
-      units: [],
-      sunspec: [%{unit: 2, base: 40000, models: [model]}],
-      evidence: [evidence]
-    }
-
-    connection =
-      Map.merge(config, %{
-        state: :discovered,
-        values: nil,
-        error: nil,
-        read_at: nil,
-        discovery: survey
-      })
-
-    status = %{storage: nil, connections: [connection]}
-    socket = Phoenix.Component.assign(socket, :status, status)
-    html = render_component(ModbusPlugin.UI, id: "modbus", status: status)
-    assert html =~ "Raw discovery evidence"
-    assert html =~ "0050"
-    assert html =~ "Promote to draft"
-    assert html =~ "Common-model strings"
-
-    {:noreply, promoted} =
-      ModbusPlugin.UI.handle_event(
-        "promote",
-        %{"id" => "client1", "unit" => "2", "table" => "input", "address" => "33139"},
-        socket
-      )
-
-    assert promoted.assigns.form.params["unit"] == "2"
-
-    assert JSON.decode!(promoted.assigns.form.params["mappings"]) == [
-             ModbusPlugin.Discovery.mapping(evidence)
-           ]
-
-    assert promoted.assigns.status == status
-    assert promoted.assigns.message =~ "draft only"
-
-    {:noreply, sun} =
-      ModbusPlugin.UI.handle_event(
-        "sunspec",
-        %{"id" => "client1", "unit" => "2", "address" => "40002"},
-        socket
-      )
-
-    assert length(JSON.decode!(sun.assigns.form.params["mappings"])) == 3
-    {:noreply, solis} = ModbusPlugin.UI.handle_event("solis", %{}, promoted)
-    assert JSON.decode!(solis.assigns.form.params["mappings"]) == ModbusPlugin.Profiles.solis()
-    assert ModbusPlugin.Connection.pid("client1") == nil
-  end
-
-  test "Edit loads a saved definition into a separate draft; role switches keep user edits" do
-    {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
-    defaults = socket.assigns.form.params
-
-    {:ok, mappings} = JSON.decode(defaults["mappings"])
-
-    {:ok, %{"server1" => config}} =
-      ModbusPlugin.Store.put(%{}, "server1", %{
-        defaults
-        | "transport" => "tcp",
-          "port" => "1502",
-          "mappings" => mappings
-      })
-
-    connection = Map.merge(config, %{state: :stopped, values: nil, error: nil, read_at: nil})
-
-    saved = %{
-      socket
-      | assigns: %{socket.assigns | status: %{storage: nil, connections: [connection]}}
-    }
-
-    assert {:noreply, loaded} = ModbusPlugin.UI.handle_event("load", %{"id" => "server1"}, saved)
-    assert loaded.assigns.form.params["port"] == "1502"
-    assert loaded.assigns.form.params["mappings"] =~ "holding0"
-
-    assert {:noreply, client} =
-             ModbusPlugin.UI.handle_event(
-               "edit",
-               %{"connection" => %{defaults | "role" => "client"}},
-               socket
-             )
-
-    assert client.assigns.form.params["mappings"] =~ "holding0_set"
-    edited = %{defaults | "mappings" => "[{}]"}
-    {:noreply, drafted} = ModbusPlugin.UI.handle_event("edit", %{"connection" => edited}, socket)
-
-    assert {:noreply, kept} =
-             ModbusPlugin.UI.handle_event(
-               "edit",
-               %{"connection" => %{edited | "role" => "client"}},
-               drafted
-             )
-
-    assert kept.assigns.form.params["mappings"] == "[{}]"
+    assert html =~ "Raw discovery results"
+    refute html =~ "Promote"
   end
 end

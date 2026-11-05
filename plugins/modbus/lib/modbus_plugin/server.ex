@@ -1,19 +1,9 @@
 defmodule ModbusPlugin.Server do
-  @moduledoc """
-  One explicitly started Modbus server exposing exactly the saved mappings of
-  all four tables. The runtime process owns the visible raw map: remote masters
-  write coils and holding registers, explicit local changes set any mapping, and
-  every mapping is published as an ordinary platform input with its decoded
-  value. Requests outside the mapped points, and remote writes that leave a
-  mapping undecodable, are refused. The library runs each request handler in a
-  short-lived process, so handlers only forward to this owner and never touch
-  the platform themselves.
-  """
+  @moduledoc "A raw four-table map. Remote writes change coils/holding; local puts may change any range."
   use GenServer, restart: :temporary
   @behaviour Modbus.Server
-  alias ModbusPlugin.{Codec, Connection, Endpoint, Plan}
-
-  @tables Map.new(Plan.tables(), &{Plan.function(&1), &1})
+  alias ModbusPlugin.{Connection, Protocol}
+  @tables Map.new(Protocol.tables(), &{Protocol.function(&1), &1})
 
   def start_link(config),
     do:
@@ -21,11 +11,10 @@ defmodule ModbusPlugin.Server do
         name: {:via, Registry, {ModbusPlugin.Registry, config.id}}
       )
 
-  @doc "Explicitly change one mapped local value; callers never hold the map."
-  def put(id, mapping_id, value) do
+  def put(id, range_id, values) do
     case Connection.pid(id) do
       nil -> {:error, :not_running}
-      pid -> GenServer.call(pid, {:put, mapping_id, value})
+      pid -> GenServer.call(pid, {:put, range_id, values})
     end
   end
 
@@ -36,56 +25,56 @@ defmodule ModbusPlugin.Server do
   def init(config) do
     Process.flag(:trap_exit, true)
 
-    with :ok <- Endpoint.register(config),
-         {:ok, server} <- start_server(config) do
-      state = %{config: config, server: server, map: %{}, values: %{}}
+    case Modbus.Server.start_link([handler: {__MODULE__, self()}] ++ transport_options(config)) do
+      {:ok, server} ->
+        map =
+          for range <- config.ranges,
+              {value, offset} <- Enum.with_index(range.initial),
+              into: %{},
+              do: {{range.table, range.address + offset}, value}
 
-      state =
-        Enum.reduce(config.mappings, state, fn mapping, state ->
-          {:ok, raw} = Codec.encode(mapping, mapping.initial)
-          store(state, mapping, mapping.initial, raw)
-        end)
+        {:ok, %{config: config, server: server, map: map}}
 
-      {:ok, publish_all(state, config.mappings)}
-    else
-      {:error, reason} -> {:stop, reason}
-    end
-  end
-
-  defp start_server(config) do
-    options = [handler: {__MODULE__, self()}] ++ transport_options(config)
-
-    case Modbus.Server.start_link(options) do
-      {:ok, server} -> {:ok, server}
-      {:error, reason} -> {:error, {:server_start_failed, reason}}
+      {:error, reason} ->
+        {:stop, {:server_start_failed, reason}}
     end
   end
 
   @doc false
-  def transport_options(%{transport: "rtu"} = config) do
-    [
-      rtu: config.serial_path,
-      units: [config.unit],
-      speed: config.speed,
+  def transport_options(%{transport: "rtu"} = c),
+    do: [
+      rtu: c.serial_path,
+      units: [c.unit],
+      speed: c.speed,
       data_bits: 8,
-      stop_bits: config.stop_bits,
-      parity: config.parity
+      stop_bits: c.stop_bits,
+      parity: c.parity
     ]
-  end
 
-  def transport_options(config), do: [port: config.port, handler_timeout: config.timeout]
+  def transport_options(c), do: [port: c.port, handler_timeout: c.timeout]
 
   @impl GenServer
-  def handle_call(:status, _, state),
-    do: {:reply, %{state: :serving, values: state.values, error: nil, read_at: nil}, state}
+  def handle_call(:status, _, state) do
+    values =
+      Map.new(state.config.ranges, fn range ->
+        {range.id,
+         for(offset <- 0..(range.count - 1), do: state.map[{range.table, range.address + offset}])}
+      end)
 
-  def handle_call({:put, mapping_id, value}, _, state) do
-    with %{} = mapping <- Enum.find(state.config.mappings, &(&1.id == mapping_id)),
-         {:ok, raw} <- Codec.encode(mapping, value) do
-      {:reply, :ok, publish_all(store(state, mapping, value, raw), [mapping])}
-    else
-      nil -> {:reply, {:error, :unknown_mapping}, state}
-      error -> {:reply, error, state}
+    {:reply, %{state: :serving, values: values, error: nil}, state}
+  end
+
+  def handle_call({:write, _, _}, _, state), do: {:reply, {:error, :client_required}, state}
+
+  def handle_call({:put, id, values}, _, state) do
+    case Enum.find(state.config.ranges, &(&1.id == id)) do
+      nil ->
+        {:reply, {:error, :unknown_range}, state}
+
+      range ->
+        if Protocol.valid_values?(range, values),
+          do: {:reply, :ok, store(state, range.table, range.address, values)},
+          else: {:reply, {:error, :invalid_raw_values}, state}
     end
   end
 
@@ -94,11 +83,17 @@ defmodule ModbusPlugin.Server do
 
   def handle_call({:request, _, {function, address, count}}, _, state)
       when is_map_key(@tables, function) do
-    keys = for offset <- 0..(count - 1), do: {@tables[function], address + offset}
+    table = @tables[function]
 
-    if Enum.all?(keys, &Map.has_key?(state.map, &1)),
-      do: {:reply, {:ok, Enum.map(keys, &state.map[&1])}, state},
-      else: {:reply, {:error, {:exception, :illegal_data_address}}, state}
+    if is_integer(count) and count in 1..Protocol.limit(table) do
+      keys = for offset <- 0..(count - 1), do: {table, address + offset}
+
+      if Enum.all?(keys, &Map.has_key?(state.map, &1)),
+        do: {:reply, {:ok, Enum.map(keys, &state.map[&1])}, state},
+        else: exception(state, :illegal_data_address)
+    else
+      exception(state, :illegal_data_value)
+    end
   end
 
   def handle_call({:request, _, {:write_single_coil, address, value}}, _, state),
@@ -120,85 +115,61 @@ defmodule ModbusPlugin.Server do
       {2, Application.spec(:modbus_plugin, :vsn) |> to_string()}
     ]
 
-    answer = %{
-      conformity_level: 1,
-      more_follows: false,
-      next_object_id: 0,
-      objects: Enum.filter(objects, fn {id, _} -> id >= from end)
-    }
-
     if category in [:basic, :regular, :extended],
-      do: {:reply, {:ok, answer}, state},
-      else: {:reply, {:error, {:exception, :illegal_data_value}}, state}
+      do:
+        {:reply,
+         {:ok,
+          %{
+            conformity_level: 1,
+            more_follows: false,
+            next_object_id: 0,
+            objects: Enum.filter(objects, fn {id, _} -> id >= from end)
+          }}, state},
+      else: exception(state, :illegal_data_value)
   end
 
   def handle_call({:request, _, :report_server_id}, _, state),
     do: {:reply, {:ok, <<1, 255, "Nerves Gate Modbus">>}, state}
 
-  def handle_call({:request, _, _}, _, state),
-    do: {:reply, {:error, {:exception, :illegal_function}}, state}
+  def handle_call({:request, _, _}, _, state), do: exception(state, :illegal_function)
 
   @impl GenServer
   def handle_info({:EXIT, server, reason}, %{server: server} = state),
     do: {:stop, {:server_exit, reason}, state}
 
   def handle_info(_, state), do: {:noreply, state}
-
   @impl GenServer
   def terminate(_, state) do
     if Process.alive?(state.server), do: Modbus.Server.stop(state.server)
     :ok
   end
 
-  # A remote write lands only when every touched address is mapped and every
-  # touched mapping still decodes; otherwise nothing changes.
-  defp write(state, table, address, values) do
-    keys = for {_, offset} <- Enum.with_index(values), do: {table, address + offset}
-    map = Map.merge(state.map, Map.new(Enum.zip(keys, values)))
-    changed = Enum.filter(state.config.mappings, &(&1.table == table and touches?(&1, keys)))
-    decoded = for mapping <- changed, do: {mapping, Codec.decode(mapping, raw(map, mapping))}
+  defp write(state, table, address, values) when is_list(values) do
+    range = %{table: table, count: length(values)}
 
     cond do
-      not Enum.all?(keys, &Map.has_key?(state.map, &1)) ->
-        {:reply, {:error, {:exception, :illegal_data_address}}, state}
+      range.count not in 1..Protocol.write_limit(table) or
+          not Protocol.valid_values?(range, values) ->
+        exception(state, :illegal_data_value)
 
-      not Enum.all?(decoded, &match?({_, {:ok, _}}, &1)) ->
-        {:reply, {:error, {:exception, :illegal_data_value}}, state}
+      not Enum.all?(0..(range.count - 1), &Map.has_key?(state.map, {table, address + &1})) ->
+        exception(state, :illegal_data_address)
 
       true ->
-        values =
-          for {mapping, {:ok, value}} <- decoded, into: state.values, do: {mapping.id, value}
-
-        {:reply, :ok, publish_all(%{state | map: map, values: values}, changed)}
+        {:reply, :ok, store(state, table, address, values)}
     end
   end
 
-  defp touches?(mapping, keys),
-    do:
-      Enum.any?(keys, fn {_, a} ->
-        a in mapping.address..(mapping.address + Codec.size(mapping) - 1)//1
-      end)
+  defp write(state, _, _, _), do: exception(state, :illegal_data_value)
 
-  defp raw(map, mapping),
-    do:
-      for(
-        offset <- 0..(Codec.size(mapping) - 1),
-        do: map[{mapping.table, mapping.address + offset}]
-      )
+  defp store(state, table, address, values) do
+    entries =
+      for {value, offset} <- Enum.with_index(values),
+          into: %{},
+          do: {{table, address + offset}, value}
 
-  defp store(state, mapping, value, raw) do
-    keys =
-      for offset <- 0..(Codec.size(mapping) - 1), do: {mapping.table, mapping.address + offset}
-
-    %{
-      state
-      | map: Map.merge(state.map, Map.new(Enum.zip(keys, raw))),
-        values: Map.put(state.values, mapping.id, value)
-    }
+    %{state | map: Map.merge(state.map, entries)}
   end
 
-  defp publish_all(state, mappings) do
-    Enum.each(mappings, &Endpoint.publish(state.config, &1, state.values[&1.id]))
-    state
-  end
+  defp exception(state, reason), do: {:reply, {:error, {:exception, reason}}, state}
 end
