@@ -27,6 +27,11 @@ defmodule Workbench.ScenariosTest do
     def run(_), do: raise(ExUnit.AssertionError, message: "contract violation")
   end
 
+  defmodule KnownFailure do
+    def spec, do: %{name: "Stopped before submission", requires: %{device: [], fixture: []}}
+    def run(_), do: {:error, :known, "No SMS submitted"}
+  end
+
   defmodule Uncertain do
     def spec, do: %{name: "Uncertain control", requires: %{device: [], fixture: []}}
     def run(_), do: exit(:control_outcome_unknown)
@@ -88,6 +93,13 @@ defmodule Workbench.ScenariosTest do
              Scenarios.run(Passing, %{device: %{}}, fn -> raise "preparation failed" end)
 
     refute_received :body
+  end
+
+  test "explicit known failures and missing prerequisites retain their certainty" do
+    assert %{status: :failed, certainty: :known, detail: "No SMS submitted"} =
+             Scenarios.run(KnownFailure, %{device: %{}})
+
+    assert %{status: :skipped, certainty: :known} = Scenarios.run(Unsupported, %{device: %{}})
   end
 
   test "unknown control exits propagate to the reservation owner without retries" do
@@ -210,7 +222,7 @@ defmodule Workbench.ScenariosTest do
 
     # Physical checks are separate: only physical gateways run them, one at a time.
     assert Enum.map(Scenarios.physical(), & &1.id) ==
-             ~w(hardware_readiness physical_remote_access hardware_backup button_reboot)
+             ~w(hardware_readiness physical_remote_access cellular_modem_support cellular_sms_submit hardware_backup button_reboot)
 
     for check <- Scenarios.physical(),
         do: assert(check.requires.fixture == [:physical] and check.opt_in)
@@ -224,6 +236,169 @@ defmodule Workbench.ScenariosTest do
 
     assert [%{module: Scenarios.Cases.Plugins, fresh_disk: true, requires: %{fixture: [:qemu]}}] =
              Scenarios.select("plugins")
+  end
+
+  test "modem qualification is opt-in, physical-only and requires cellular hardware" do
+    check = Enum.find(Scenarios.physical(), &(&1.id == "cellular_modem_support"))
+    assert check.requires == %{device: [:cellular], fixture: [:physical]}
+    assert check.opt_in
+    assert Scenarios.select("cellular_modem_support") == []
+    refute check.fresh_disk
+  end
+
+  test "USSD capability classification requires an explicit supported request mode" do
+    alias Scenarios.Cases.CellularModemSupport, as: Probe
+
+    for modes <- ["0-2", "0,1,2", "0, 1, 2", "0-1", "1", "1-2"] do
+      assert Probe.classify({:ok, ["+CUSD: (#{modes})"]}) == :supported
+    end
+
+    for lines <- [
+          [],
+          ["OK"],
+          ["+CUSD: (0)"],
+          ["+CUSD: (2)"],
+          ["+CUSD: (1,3)"],
+          ["+CUSD: (2-1)"],
+          ["+CUSD: (0-2)", "+CUSD: (0)"],
+          ["+CUSD: 0,\"Guthaben 12,34 EUR\",15"],
+          ["+CUSD: (1) private trailing data"],
+          [String.duplicate("x", 256)],
+          ["+CUSD: (1)" <> <<255>>],
+          [nil, :unknown]
+        ] do
+      assert Probe.classify({:ok, lines}) == :inconclusive
+    end
+
+    assert Probe.classify({:error, :error}) == :rejected
+    assert Probe.classify({:error, {:cme, "operation not supported"}}) == :rejected
+    assert Probe.classify({:error, :timeout}) == :timeout
+    assert Probe.classify({:error, :not_running}) == :inconclusive
+    assert Probe.classify(nil) == :inconclusive
+  end
+
+  test "USSD diagnostics expose only known error causes and safe mode fields" do
+    alias Scenarios.Cases.CellularModemSupport, as: Probe
+
+    assert Probe.describe("AT", {:ok, ["private unsolicited message"]}) == "OK"
+
+    for {mode, description} <- [
+          {0, "extended errors disabled"},
+          {1, "numeric extended errors"},
+          {2, "verbose extended errors"}
+        ] do
+      assert Probe.describe("AT+CMEE?", {:ok, ["+CMEE: #{mode}"]}) ==
+               "CMEE=#{mode} (#{description})"
+
+      assert Probe.describe("AT+CUSD?", {:ok, ["+CUSD: #{mode}"]}) == "CUSD=#{mode}"
+    end
+
+    assert Probe.describe("AT+CUSD=?", {:ok, ["+CUSD: (0-2)"]}) ==
+             "OK; request mode 1 advertised"
+
+    assert Probe.describe("AT+CUSD=?", {:ok, []}) ==
+             "OK; no recognized request-mode advertisement"
+
+    assert Probe.describe("AT+CUSD?", {:error, :error}) ==
+             "ERROR (no extended cause supplied)"
+
+    for detail <- ["4", "operation not supported", " Operation Not Supported "] do
+      assert Probe.describe("AT+CUSD=?", {:error, {:cme, detail}}) ==
+               "CME: operation not supported"
+    end
+
+    assert Probe.describe("AT+CUSD=?", {:error, {:cme, "3"}}) ==
+             "CME: operation not allowed"
+
+    assert Probe.describe("AT+CUSD=?", {:error, {:cme, "30"}}) == "CME: no network service"
+    assert Probe.describe("AT+CUSD=?", {:error, {:cme, "515"}}) == "CME code 515"
+    assert Probe.describe("AT+CUSD=?", {:error, :timeout}) == "timeout"
+
+    assert Probe.describe("AT", {:error, :not_running}) ==
+             "controller unavailable or call outcome unknown"
+
+    for detail <- ["private subscriber data", "1234", <<255>>, nil, String.duplicate("x", 65)] do
+      assert Probe.describe("AT+CUSD=?", {:error, {:cme, detail}}) ==
+               "CME error (unrecognized detail withheld)"
+    end
+
+    for lines <- [
+          ["+CUSD: 0,\"private payload\",15"],
+          ["+CUSD: 1", "+CUSD: 0"],
+          ["+CUSD: 9"],
+          ["+CUSD: " <> <<255>>],
+          [nil],
+          :unexpected
+        ] do
+      assert Probe.describe("AT+CUSD?", {:ok, lines}) == "OK; USSD mode not recognized"
+    end
+
+    assert Probe.describe("AT+CMEE?", {:ok, ["+CMEE: 2 private data"]}) ==
+             "OK; error mode not recognized"
+
+    assert Probe.describe("AT", {:error, {:unexpected, "private data"}}) ==
+             "inconclusive (details withheld)"
+  end
+
+  test "SMS qualification requires PDU format and every command test, independently of USSD" do
+    alias Scenarios.Cases.CellularModemSupport, as: Probe
+
+    tests = ~w(AT+CMGS=? AT+CMGR=? AT+CMGL=? AT+CMGD=? AT+CPMS=?)
+    responses = Map.new(tests, &{&1, {:ok, []}})
+    responses = Map.put(responses, "AT+CMGF=?", {:ok, ["+CMGF: (0,1)"]})
+    assert Probe.sms_supported?(responses)
+    assert Probe.sms_supported?(Map.put(responses, "AT+CUSD=?", {:error, :error}))
+
+    for command <- tests do
+      refute Probe.sms_supported?(Map.delete(responses, command))
+      refute Probe.sms_supported?(Map.put(responses, command, {:error, :error}))
+      refute Probe.sms_supported?(Map.put(responses, command, {:error, :timeout}))
+      refute Probe.sms_supported?(Map.put(responses, command, {:ok, :malformed}))
+    end
+
+    for lines <- [["+CMGF: (1)"], [], ["+CMGF: (0)", "+CMGF: (1)"], ["+CMGF: private"]] do
+      refute Probe.sms_supported?(Map.put(responses, "AT+CMGF=?", {:ok, lines}))
+    end
+
+    assert Probe.sms_supported?(Map.put(responses, "AT+CMGF=?", {:ok, ["+CMGF: (0-1)"]}))
+    refute Probe.sms_supported?(nil)
+  end
+
+  test "SMS qualification reports only recognized model, revision, format and storage metadata" do
+    alias Scenarios.Cases.CellularModemSupport, as: Probe
+
+    assert Probe.describe("AT+CGMM", {:ok, ["EG800AK", "private unsolicited data"]}) == "EG800AK"
+    assert Probe.describe("AT+CGMR", {:ok, ["EG800AKGLR01A01M01"]}) == "EG800AKGLR01A01M01"
+
+    assert Probe.describe("AT+CGMM", {:ok, ["private subscriber data"]}) ==
+             "OK; model/revision not recognized (details withheld)"
+
+    assert Probe.describe("AT+CGMR", {:ok, ["EG800AK", "EG800AK"]}) ==
+             "OK; model/revision not recognized (details withheld)"
+
+    assert Probe.describe("AT+CMGF=?", {:ok, ["+CMGF: (0-1)"]}) == "OK; PDU format advertised"
+    assert Probe.describe("AT+CMGF=?", {:ok, ["+CMGF: (1)"]}) == "OK; PDU format not established"
+    assert Probe.describe("AT+CMGF?", {:ok, ["+CMGF: 0"]}) == "PDU format selected"
+    assert Probe.describe("AT+CMGF?", {:ok, ["+CMGF: 1"]}) == "text format selected"
+    assert Probe.describe("AT+CMGF?", {:ok, ["+CMGF: 2"]}) == "OK; SMS format not recognized"
+    assert Probe.describe("AT+CMGS=?", {:ok, []}) == "OK; command test accepted"
+
+    assert Probe.describe("AT+CMGR=?", {:error, {:cms, "private data"}}) ==
+             "CMS error (details withheld)"
+
+    assert Probe.describe("AT+CPMS?", {:ok, [~s(+CPMS: "SM",2,20,"ME",0,100,"ME",0,100)]}) ==
+             "read=SM:2/20, write=ME:0/100, receive=ME:0/100"
+
+    for lines <- [
+          [~s(+CPMS: "SM",21,20,"ME",0,100,"ME",0,100)],
+          [~s(+CPMS: "private",2,20,"ME",0,100,"ME",0,100)],
+          ["+CPMS: private data"],
+          ["+CPMS: " <> <<255>>],
+          [],
+          :malformed
+        ] do
+      assert Probe.describe("AT+CPMS?", {:ok, lines}) == "OK; storage counts not recognized"
+    end
   end
 
   test "an uncertain RPC stops the worker before further commands or cleanup" do

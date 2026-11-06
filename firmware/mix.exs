@@ -196,7 +196,10 @@ defmodule NervesGate.MixProject do
        runtime: Mix.target() != :host},
       {:vintage_net_wifi, "~> 0.12.12", targets: [:em300]},
       {:vintage_net_ethernet, "~> 0.11", runtime: Mix.target() != :host},
-      {:vintage_net_ecm, "~> 0.2.1", runtime: Mix.target() != :host},
+      {:vintage_net_ecm,
+       github: "jannikbecher/vintage_net_ecm",
+       ref: "bf5e9ee47b6639649ccb72cb0d151c0ccf6b9ca9",
+       runtime: Mix.target() != :host},
       {:vintage_net_direct, "~> 0.10", runtime: Mix.target() != :host},
       {:nerves_gate_sdk, path: "../sdk"}
     ] ++ system_dependencies()

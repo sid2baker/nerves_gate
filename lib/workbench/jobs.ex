@@ -170,9 +170,13 @@ defmodule Workbench.Jobs do
         Process.put(:scenario_report, report)
         result = Scenarios.run(scenario, %{device: %{node: gateway.node, physical: true}})
 
-        if result.status == :passed,
-          do: {:ok, "#{scenario.name}: passed"},
-          else: {:error, "#{scenario.name}: #{result.status}. #{result.detail}"}
+        message = "#{scenario.name}: #{result.status}. #{result.detail}"
+
+        case result do
+          %{status: :passed} -> {:ok, message}
+          %{certainty: :known} -> {:error, :known, message}
+          _ -> {:error, message}
+        end
       end)
     else
       _ -> {:reply, {:error, "Choose a connected physical gateway and a physical check"}, state}
@@ -258,6 +262,9 @@ defmodule Workbench.Jobs do
                   result: to_string(message)
               }
           }
+
+        {:error, :known, message} ->
+          %{state | view: %{state.view | status: :failed, certainty: :known, result: message}}
 
         {:error, message} ->
           # A maintenance exception/reply alone cannot prove no remote effects.

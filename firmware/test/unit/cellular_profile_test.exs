@@ -35,6 +35,7 @@ defmodule NervesGate.Cellular.ProfileTest do
     assert normalized.vintage_net_ecm == %{
              at_tty: "ttyUSB2",
              context_id: 1,
+             intermediate_responses: [],
              modem: VintageNetECM.Modem.Quectel,
              service_providers: [%{apn: "internet.example"}]
            }

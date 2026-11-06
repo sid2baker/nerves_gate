@@ -36,6 +36,33 @@ defmodule Workbench.JobOutcomesTest do
     refute state.blocked
   end
 
+  test "a scenario's explicit pre-submission failure is known without fencing" do
+    state = running("check")
+    ref = state.task.ref
+    {:noreply, state} = Jobs.handle_info({ref, {:error, :known, "No SMS submitted"}}, state)
+    assert state.view.status == :failed
+    assert state.view.certainty == :known
+    assert state.view.result == "No SMS submitted"
+    refute state.blocked
+    assert state.task == nil
+  end
+
+  test "an unclassified scenario failure still fences uncertain effects" do
+    state = running("check")
+    ref = state.task.ref
+    {:noreply, state} = Jobs.handle_info({ref, {:error, "Reply lost"}}, state)
+    assert state.view.status == :uncertain
+    assert state.view.certainty == :unknown
+    assert state.blocked
+  end
+
+  test "a known result cannot clear an existing uncertainty fence" do
+    state = %{running("check") | blocked: true}
+    ref = state.task.ref
+    {:noreply, state} = Jobs.handle_info({ref, {:error, :known, "No SMS submitted"}}, state)
+    assert state.blocked
+  end
+
   test "worker crash never fabricates a known failure" do
     state = running("install")
     ref = state.task.ref

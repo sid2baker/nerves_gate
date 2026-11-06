@@ -236,6 +236,58 @@ observations. `physical_remote_access` checks enrollment/granted tags, SSH with 
 operator's existing key and host-key pinning, and rejection of an ephemeral
 unregistered key. It changes no keys, enrollment or settings and opens no SSH shell.
 A transport failure is not counted as proof of authentication rejection.
+
+`cellular_modem_support` is an opt-in, read-only SMS qualification diagnostic:
+
+```sh
+mix scenario.run cellular_modem_support --device GATEWAY
+```
+
+It requires present cellular hardware, a ready SIM, and the qualified VintageNetECM
+controller. Through that controller's existing UART it queries channel sanity,
+model/revision, error-reporting mode, USSD support, SMS formats, and storage counts.
+It also tests the send/read/list/delete/storage command interfaces with test syntax
+(`AT+CMGS=?`, `AT+CMGR=?`, `AT+CMGL=?`, `AT+CMGD=?`, `AT+CPMS=?`). Test syntax
+reads command capabilities; it does not send, read, list or delete actual messages.
+It opens no second UART, starts no USSD session, queries no balance, changes no
+error/radio/network settings, and sends no PIN. A failed sanity check, timeout,
+controller loss or unexpected failure stops the sequence without retry. Passing
+requires advertised PDU format and acceptance of every SMS command test. USSD
+rejection is reported but does not prevent SMS qualification.
+Reports contain only recognized model/revision strings, format/storage metadata,
+bare `ERROR`, recognized CME causes and bounded numeric CME codes. Unrecognized
+error text and raw modem replies are withheld. A pass establishes command-interface
+support only, not SMS delivery, Vodafone/network support or a working balance feature.
+Do not retry automatically after failure. New physical catalogue entries require
+a coordinated user-owned Workbench restart before execution; no firmware update
+is required for this diagnostic on firmware exposing the existing modem driver.
+
+`cellular_sms_submit` sends exactly one “EC100 SMS session test” message. It
+requires EC100 firmware with the current session driver, its configured `"> "`
+prompt and PDU mode already selected. It changes no SMS mode, SIM, inbox or
+network settings and opens no second UART. Rebuild firmware and obtain explicit
+update approval first; restart the user-owned Workbench after adding this case.
+
+In the running Workbench, `Scenarios.Cases.CellularSmsSubmit.recipient_path/0`
+returns a session-specific path outside the checkout. Create that file exclusively
+with mode `0600` and put only the international recipient (`+` and country code)
+in it. For a privately supplied runtime variable `recipient`:
+
+```elixir
+path = Scenarios.Cases.CellularSmsSubmit.recipient_path()
+File.open!(path, [:write, :exclusive], fn io ->
+  File.chmod!(path, 0o600)
+  IO.binwrite(io, recipient)
+end)
+```
+
+Then run `mix scenario.run cellular_sms_submit --device GATEWAY`. The file is
+consumed once before SMS submission; neither the recipient nor its PDU is reported.
+A rejected prerequisite reports a known failure without fencing maintenance;
+an uncertain submission still blocks it. A modem acknowledgement proves
+submission, not delivery; confirm receipt separately. Do not rearm the input or
+retry after a failure without inspecting the outcome and obtaining authorization.
+
 Ethernet/4G failover and button-reboot checks are operator-attended procedures.
 Keep management independent from the link being tested. The human restores cables
 and controls the button; the Workbench sends no physical switch or reboot command.

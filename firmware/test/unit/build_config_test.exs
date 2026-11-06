@@ -48,7 +48,11 @@ defmodule NervesGate.BuildConfigTest do
                      sim_detect_level: 1,
                      config: %{
                        type: VintageNetECM,
-                       vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
+                       vintage_net_ecm: %{
+                         at_tty: "ttyUSB2",
+                         modem: NervesGate.Cellular.Modem,
+                         intermediate_responses: ["> "]
+                       }
                      }
                    },
                    ports: [

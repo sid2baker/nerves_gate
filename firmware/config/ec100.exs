@@ -13,7 +13,11 @@ config :nerves_gate, :board, %{
     sim_detect_level: 1,
     config: %{
       type: VintageNetECM,
-      vintage_net_ecm: %{at_tty: "ttyUSB2", modem: NervesGate.Cellular.Modem}
+      vintage_net_ecm: %{
+        at_tty: "ttyUSB2",
+        modem: NervesGate.Cellular.Modem,
+        intermediate_responses: ["> "]
+      }
     }
   },
   # Plugin-assignable hardware; `kind` says which class of plugin may own it.

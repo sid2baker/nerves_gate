@@ -108,9 +108,16 @@ The EC100 board's `:cellular` profile is:
 
 `Cellular.Profile` owns board/config generation; `Cellular.SIM` owns SIM/PIN
 lifecycle and `Cellular.Authentication` owns private APN-bound PAP.
-`Cellular.Modem` implements the VintageNetECM modem contract and bounded UART
-commands. Public `Cellular` operations share Network's single worker: there is no
-separate Cellular GenServer or second UART owner.
+`Cellular.Modem` implements the VintageNetECM modem contract using exclusive AT
+session handles, never a raw UART. VintageNet supervises the driver's generic
+`AT.Channel` UART owner alongside its radio-management controller. Controller
+polling, SIM setup and SMS share that channel; SIM detection and any hot-plug
+reconfiguration hold one session. Managed commands require controller readiness
+and reject competing sessions as busy. An uncertain call-status query does not
+trigger a data-call restart. A fenced channel needs explicit modem recovery before
+channel recovery; neither uncertain writes nor SMS submissions are retried.
+Public `Cellular` operations share Network's single worker: there is no separate
+Cellular GenServer or second UART owner.
 
 Saved Network settings contain intent, never a modem callback module. The current
 board supplies the driver when Network applies that intent. VintageNet persistence

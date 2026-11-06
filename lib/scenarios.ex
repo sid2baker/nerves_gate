@@ -71,6 +71,8 @@ defmodule Scenarios do
       [
         Scenarios.Cases.HardwareReadiness,
         Scenarios.Cases.PhysicalRemoteAccess,
+        Scenarios.Cases.CellularModemSupport,
+        Scenarios.Cases.CellularSmsSubmit,
         Scenarios.Cases.HardwareBackup,
         Scenarios.Cases.ButtonReboot
       ],
@@ -124,10 +126,13 @@ defmodule Scenarios do
            ]),
          :ok <- device_requirements(scenario.requires, device) do
       :ok = prepare.()
-      scenario.module.run(context)
-      %{status: :passed, detail: "OK"}
+
+      case scenario.module.run(context) do
+        {:error, :known, detail} -> %{status: :failed, certainty: :known, detail: detail}
+        _ -> %{status: :passed, detail: "OK"}
+      end
     else
-      {:skip, reason} -> %{status: :skipped, detail: reason}
+      {:skip, reason} -> %{status: :skipped, certainty: :known, detail: reason}
     end
   rescue
     error in ExUnit.AssertionError ->
