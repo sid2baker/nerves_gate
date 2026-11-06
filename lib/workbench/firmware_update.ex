@@ -9,7 +9,7 @@ defmodule Workbench.FirmwareUpdate do
   """
   @ttl 600_000
   @ssh_hint "The presented host key must match the one the gateway reports, and one of your SSH agent's or ~/.ssh keys must be authorized under gateway Settings → SSH keys"
-  @keys ["target", "product", "version", "source_revision", "serial", "boot_id"]
+  @keys ["target", "product", "firmware_uuid", "serial", "boot_id"]
 
   def review!(node, firmware, report \\ fn _ -> :ok end) do
     {:ok, gateway} = gateway!(node)
@@ -60,6 +60,7 @@ defmodule Workbench.FirmwareUpdate do
           current_version: before["version"],
           version: image["meta-version"],
           source_revision: image["meta-vcs-identifier"],
+          firmware_uuid: image["meta-uuid"],
           serial: before["serial"],
           sha256: hash!(snapshot)
         },
@@ -74,6 +75,73 @@ defmodule Workbench.FirmwareUpdate do
       kind, reason ->
         File.rm_rf!(dir)
         :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  @doc "Explicitly preserve confirmed network intent before an authorized settings-format change."
+  def preserve_network_settings!(node) do
+    {:ok, gateway} = gateway!(node)
+    before = observe!(gateway.node)
+    healthy!(before)
+
+    call = fn module, function, args ->
+      :erpc.call(gateway.node, module, function, args, 5_000)
+    end
+
+    confirmed =
+      case call.(NervesGate.Network.Vintage, :load, []) do
+        {:ok, config} -> config
+        _ -> raise "Cannot read confirmed network settings; nothing was written"
+      end
+
+    status = call.(NervesGate.Network, :status, [])
+    ports = call.(NervesGate.Board, :ethernet, [])
+    {key, network} = network_settings!(status, confirmed, ports)
+
+    case call.(NervesGate.Settings, :get, [key]) do
+      nil ->
+        case call.(NervesGate.Settings, :put, [key, network]) do
+          :ok -> :ok
+          _ -> raise "Network settings write outcome is unknown; do not retry"
+        end
+
+      ^network ->
+        :ok
+
+      _ ->
+        raise "A different network settings record exists; nothing was overwritten"
+    end
+
+    current = call.(NervesGate.Network, :status, [])
+
+    unless same_boot?(before, observe!(gateway.node)) and
+             network_settings!(current, confirmed, ports) == {key, network} and
+             call.(NervesGate.Network.Vintage, :load, []) == {:ok, confirmed} and
+             call.(NervesGate.Settings, :get, [key]) == network do
+      raise "Network settings preservation could not be verified; inspect before any update"
+    end
+
+    {:ok, "Confirmed network values preserved and verified; no network configuration was applied"}
+  catch
+    :error, {:erpc, _} ->
+      raise "Gateway reply was lost while preserving settings; inspect the device, do not retry"
+  end
+
+  @doc false
+  def network_settings!(status, confirmed, ports) do
+    with %{
+           config: ^confirmed,
+           trial: nil,
+           phase: :idle,
+           recovering: false,
+           commit_unknown: false,
+           error: nil
+         } <- status,
+         %{"setup_completed" => true, "network" => network} <- confirmed,
+         {:ok, ^network} <- NervesGate.Config.validate_network(network, ports) do
+      {["network", "settings"], network}
+    else
+      _ -> raise ArgumentError, "Confirmed, valid and idle network settings are required"
     end
   end
 
@@ -204,8 +272,8 @@ defmodule Workbench.FirmwareUpdate do
   @doc false
   def verified?(plan, observed) do
     observed["serial"] == plan.before["serial"] and observed["boot_id"] != plan.before["boot_id"] and
-      observed["version"] == plan.public.version and
-      observed["source_revision"] == plan.public.source_revision and healthy?(observed)
+      is_binary(plan.public.firmware_uuid) and
+      observed["firmware_uuid"] == plan.public.firmware_uuid and healthy?(observed)
   end
 
   @doc false
@@ -307,7 +375,7 @@ defmodule Workbench.FirmwareUpdate do
   def metadata(text) do
     for line <- String.split(text, "\n"),
         [key, value] <- [String.split(line, "=", parts: 2)],
-        key in ~w(meta-product meta-platform meta-architecture meta-version meta-vcs-identifier),
+        key in ~w(meta-product meta-platform meta-architecture meta-version meta-vcs-identifier meta-uuid),
         into: %{},
         do: {key, value |> String.trim() |> String.trim("\"")}
   end
@@ -322,6 +390,10 @@ defmodule Workbench.FirmwareUpdate do
              image["meta-architecture"] == device["architecture"] and
              image["meta-product"] == "nerves_gate" and device["product"] == "nerves_gate" and
              is_binary(image["meta-version"]) and
+             Regex.match?(
+               ~r/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/,
+               image["meta-uuid"] || ""
+             ) and
              Regex.match?(~r/\A[0-9a-f]{40}(?:-dirty)?\z/, image["meta-vcs-identifier"] || ""),
            do:
              raise(

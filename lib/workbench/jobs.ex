@@ -27,6 +27,9 @@ defmodule Workbench.Jobs do
   def install_plugin(path, device, expected \\ Workbench.Session.identity()),
     do: admit({:install, path, device}, expected)
 
+  def preserve_network_settings(node, expected \\ Workbench.Session.identity()),
+    do: admit({:preserve_network_settings, node}, expected)
+
   def review_firmware(node, firmware, expected \\ Workbench.Session.identity()),
     do: admit({:review_firmware, node, firmware}, expected)
 
@@ -151,6 +154,18 @@ defmodule Workbench.Jobs do
 
       _ ->
         {:reply, {:error, "Choose an explicit connected gateway from mix gateway.list"}, state}
+    end
+  end
+
+  def handle_call({:preserve_network_settings, node}, _, state) do
+    case Workbench.Gateways.fetch(node) do
+      {:ok, %{source: :network} = gateway} ->
+        start(state, "network_settings", gateway.node, fn _report ->
+          Workbench.FirmwareUpdate.preserve_network_settings!(gateway.node)
+        end)
+
+      _ ->
+        {:reply, {:error, "Choose a connected physical gateway"}, state}
     end
   end
 
@@ -418,7 +433,8 @@ defmodule Workbench.Jobs do
     end
   end
 
-  defp effectful?(kind), do: kind in ["install", "firmware_update", "factory_provision", "check"]
+  defp effectful?(kind),
+    do: kind in ["install", "firmware_update", "factory_provision", "network_settings", "check"]
 
   defp publish(state) do
     Phoenix.PubSub.broadcast(NervesGate.PubSub, @topic, {:jobs, state.view})

@@ -57,9 +57,20 @@ from Pi only after the user approved that SHA-256. After a verified update it
 prints the state again so changes, such as plugins that need a new selection, are
 visible. The `firmware-update` skill and gateway page use the same jobs. Review checks the exact image, saved plugin artifacts, identity, health and SSH
 trust. Confirmation consumes the review once, uploads over SSH and verifies a new
-healthy boot over distribution. It never selects or starts plugins.
+healthy boot of the reviewed firmware UUID over distribution. Matching version
+or source-revision strings alone cannot verify an update or hide a rollback.
+It never selects or starts plugins.
 Errors or timeouts require inspection, not automatic replay. It does not build,
 bump versions, erase metadata or bypass SSH host-key verification.
+
+For an explicitly authorized bench settings-format transition, run
+`Workbench.Jobs.preserve_network_settings(node)` in the attached Workbench before
+reviewing the new image. This is a separate, one-use maintenance job, never an
+automatic update migration. It reads confirmed idle network values, writes the
+new settings record only if absent, and verifies the values without applying a
+network configuration. A conflicting record or uncertain write stops maintenance;
+never retry blindly. Settings and credentials are not included in the job output.
+Source changes to the Jobs API require restarting the user-owned `mix dev` first.
 
 ## Prerequisites
 

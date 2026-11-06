@@ -20,6 +20,7 @@ defmodule NervesGate.System do
       target: info.target,
       version: info.firmware,
       source_revision: info.source_revision,
+      firmware_uuid: Nerves.Runtime.KV.get_active("nerves_fw_uuid"),
       platform: Nerves.Runtime.KV.get_active("nerves_fw_platform"),
       architecture: Nerves.Runtime.KV.get_active("nerves_fw_architecture"),
       product: Nerves.Runtime.KV.get_active("nerves_fw_product"),

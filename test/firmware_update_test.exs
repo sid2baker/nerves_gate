@@ -5,7 +5,7 @@ defmodule Workbench.FirmwareUpdateTest do
   test "image and authenticated device must have matching product and platform" do
     image =
       FirmwareUpdate.metadata(
-        "meta-product=nerves_gate\nmeta-platform=ec100\nmeta-architecture=arm\nmeta-version=\"0.2.0-dev\"\nmeta-vcs-identifier=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nignored=private\n"
+        "meta-product=nerves_gate\nmeta-platform=ec100\nmeta-architecture=arm\nmeta-version=\"0.2.0-dev\"\nmeta-vcs-identifier=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nmeta-uuid=12345678-1234-5678-1234-123456789abc\nignored=private\n"
       )
 
     device = %{
@@ -21,6 +21,12 @@ defmodule Workbench.FirmwareUpdateTest do
 
     assert_raise ArgumentError, fn ->
       FirmwareUpdate.compatible!(Map.delete(image, "meta-vcs-identifier"), device)
+    end
+
+    for uuid <- [nil, "", "invalid"] do
+      assert_raise ArgumentError, fn ->
+        FirmwareUpdate.compatible!(Map.put(image, "meta-uuid", uuid), device)
+      end
     end
 
     for incompatible <- [
@@ -102,15 +108,23 @@ defmodule Workbench.FirmwareUpdateTest do
     assert {:error, _} = Workbench.SSHHostKeys.add_host_key(~c"h", 22, elem(other, 0), [])
   end
 
-  test "a new healthy boot of the same serial with the reviewed build verifies the update" do
-    before = %{"serial" => "s", "boot_id" => "1", "version" => "0.1", "source_revision" => "old"}
-    plan = %{before: before, public: %{version: "0.2", source_revision: "new"}}
+  test "only the exact reviewed image verifies, even when rollback has the same version and revision" do
+    before = %{
+      "serial" => "s",
+      "boot_id" => "1",
+      "version" => "0.4.0",
+      "source_revision" => "same-dirty",
+      "firmware_uuid" => "old-image"
+    }
+
+    plan = %{before: before, public: %{firmware_uuid: "reviewed-image"}}
 
     healthy = %{
       "serial" => "s",
       "boot_id" => "2",
-      "version" => "0.2",
-      "source_revision" => "new",
+      "version" => "0.4.0",
+      "source_revision" => "same-dirty",
+      "firmware_uuid" => "reviewed-image",
       "available" => true,
       "firmware_validated" => true,
       "pending" => false,
@@ -120,10 +134,74 @@ defmodule Workbench.FirmwareUpdateTest do
     assert FirmwareUpdate.verified?(plan, healthy)
     refute FirmwareUpdate.verified?(plan, %{healthy | "boot_id" => "1"})
     refute FirmwareUpdate.verified?(plan, %{healthy | "serial" => "other"})
-    refute FirmwareUpdate.verified?(plan, %{healthy | "version" => "0.1"})
+    refute FirmwareUpdate.verified?(plan, %{healthy | "firmware_uuid" => "old-image"})
+    refute FirmwareUpdate.verified?(plan, Map.delete(healthy, "firmware_uuid"))
+    refute FirmwareUpdate.verified?(%{plan | public: %{firmware_uuid: nil}}, healthy)
     refute FirmwareUpdate.verified?(plan, %{healthy | "firmware_validated" => false})
     assert FirmwareUpdate.same_boot?(before, Map.put(before, "available", false))
     refute FirmwareUpdate.same_boot?(before, %{before | "boot_id" => "2"})
+    refute FirmwareUpdate.same_boot?(before, %{before | "firmware_uuid" => "other-image"})
+  end
+
+  @tag :tmp_dir
+  test "explicit network preservation matches the firmware's settings boundary", %{tmp_dir: dir} do
+    previous = Application.fetch_env(:nerves_gate, :board)
+
+    Application.put_env(:nerves_gate, :board, %{
+      ports: [%{id: "eth0", kind: :ethernet}, %{id: "eth1", kind: :ethernet}]
+    })
+
+    on_exit(fn ->
+      case previous do
+        {:ok, board} -> Application.put_env(:nerves_gate, :board, board)
+        :error -> Application.delete_env(:nerves_gate, :board)
+      end
+    end)
+
+    network = %{
+      "mode" => "ports",
+      "eth0" => %{"role" => "internet", "address" => NervesGate.Config.address_defaults()},
+      "eth1" => nil
+    }
+
+    confirmed = NervesGate.Config.from_network(network)
+
+    status = %{
+      config: confirmed,
+      trial: nil,
+      phase: :idle,
+      recovering: false,
+      commit_unknown: false,
+      error: nil
+    }
+
+    {key, values} = FirmwareUpdate.network_settings!(status, confirmed, ["eth0", "eth1"])
+    assert values == network
+    start_supervised!({NervesGate.Settings, path: dir})
+    assert :ok = NervesGate.Settings.put(key, values)
+    assert NervesGate.Network.Vintage.load() == {:ok, confirmed}
+
+    for unsafe <- [
+          nil,
+          %{status | config: nil},
+          %{status | trial: "pending"},
+          %{status | phase: :apply},
+          %{status | recovering: true},
+          %{status | commit_unknown: true},
+          %{status | error: %{code: "unavailable"}}
+        ] do
+      assert_raise ArgumentError, fn ->
+        FirmwareUpdate.network_settings!(unsafe, confirmed, ["eth0", "eth1"])
+      end
+    end
+
+    for invalid <- [Map.delete(network, "eth1"), Map.put(network, "driver", :private)] do
+      config = NervesGate.Config.from_network(invalid)
+
+      assert_raise ArgumentError, fn ->
+        FirmwareUpdate.network_settings!(%{status | config: config}, config, ["eth0", "eth1"])
+      end
+    end
   end
 
   test "changed plugin artifacts under an existing version are conflicts" do

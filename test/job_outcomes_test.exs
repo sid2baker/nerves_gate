@@ -24,6 +24,15 @@ defmodule Workbench.JobOutcomesTest do
     assert job == state.view
   end
 
+  test "an incomplete settings preservation fences further maintenance" do
+    state = running("network_settings")
+    ref = state.task.ref
+    {:noreply, state} = Jobs.handle_info({ref, {:error, "Write reply lost"}}, state)
+    assert state.view.status == :uncertain
+    assert state.view.certainty == :unknown
+    assert state.blocked
+  end
+
   test "a failed read-only review is not an uncertain upload" do
     state = running("firmware_review")
     ref = state.task.ref
