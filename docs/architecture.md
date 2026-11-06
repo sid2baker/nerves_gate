@@ -422,9 +422,8 @@ See [optional plugin UI](plugins.md#optional-ui).
 
 | Owner/store | Durable state |
 | --- | --- |
-| VintageNet | Confirmed interface settings; Network reads its settings back from them |
 | Tailscale | Device identity and preferences |
-| `NervesGate.Settings` (`/data/nerves_gate/settings`) | All other device configuration, one key per owning domain (below) |
+| `NervesGate.Settings` (`/data/nerves_gate/settings`) | Device configuration, one key per owning domain (below) |
 | Firmware `priv/plugins` | Build-generated inventory and read-only plugin artifacts |
 | Plugin SD: `/mnt/plugins` | Development plugin archives and plugin data; the board's `plugins_slot` names the card slot by sysfs hardware path |
 
@@ -437,6 +436,7 @@ values are rejected and kept untouched.
 | `cellular.*` | Cellular | SIM-bound PIN and APN-bound PAP |
 | `ssh.authorized_keys` | SSH | Authorized public keys |
 | `storage.choice` | Storage | SD card setup choice |
+| `network.settings` | Network | Confirmed Ethernet roles/addresses and cellular APN/provider policy; no driver configuration |
 | `network.local` | Network.Local | Temporary link/route ownership and incomplete cleanup; never enable intent |
 | `plugins.entries` | Plugins | Schema 2 artifact SHA/source/name/module catalog, selection, enabled intent and committed sequence |
 | `plugins.assignments` | Plugins | Bounded exclusive port assignment and enablement intent |
@@ -445,8 +445,9 @@ values are rejected and kept untouched.
 Targets require their declared data filesystem mounted read-write before data
 users start. Unreadable or unsupported saved network settings fail closed. Trials
 and monotonic deadlines live in RAM; confirmation commits one Network-owned
-record. Old VintageNet settings are preserved and rejected, never migrated;
-see [rollback](networking.md#saving-and-rollback). Startup installs
+record. VintageNet persistence is disabled: interface configs are generated from
+validated user intent and current board configuration, never restored from disk.
+See [rollback](networking.md#saving-and-rollback). Startup installs
 default-deny IPv4 forwarding before enabling forwarding.
 
 Card insertion never formats media. Storage commissioning is explicit and Plugins

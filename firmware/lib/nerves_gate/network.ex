@@ -16,7 +16,7 @@ defmodule NervesGate.Network do
   current trial, settings and interfaces. Subscribe with `observe/0` before
   reading; notifications are hints to read again, not complete status maps.
 
-  Network.Vintage owns interface persistence through VintageNet's built-in store.
+  Network.Vintage stores user settings in Settings; driver configurations are transient.
   Failed restoration sets `:network_restore_failed`; successful restoration clears it.
   """
   use GenServer
@@ -875,8 +875,8 @@ defmodule NervesGate.Network do
   defp load(timeout, local) do
     case bounded(fn -> NervesGate.Network.Vintage.load() end, timeout) do
       # Do not flush a surviving claimed address on a Network restart before
-      # its advertised route has been withdrawn. Boot-time VintageNet restore
-      # is independent; the journal still blocks all new access until cleanup.
+      # its advertised route has been withdrawn. The journal blocks all new
+      # access until cleanup; saved intent is applied after that cleanup.
       {:ok, config} -> {config, if(local == nil, do: restore_loaded(config, timeout))}
       {:error, reason} -> {nil, {:load, reason}}
     end

@@ -1,10 +1,11 @@
 defmodule NervesGate.Network.Vintage do
   @moduledoc "Firmware adapter. USB is never part of a port-role change. No Ethernet DHCP server or NAT."
 
-  import Bitwise
-  alias NervesGate.Config
+  alias NervesGate.{Config, Settings}
   alias NervesGate.Network.LAN
   require Logger
+
+  @settings ["network", "settings"]
 
   # Listed first in the firmware services: one-time routing setup before Network
   # starts. Tailscale owns its forwarding/NAT rules. Failure must not prevent
@@ -23,25 +24,6 @@ defmodule NervesGate.Network.Vintage do
     _exception in [MatchError, ErlangError] ->
       Logger.warning("IPv4 subnet forwarding setup failed; local web access remains available.")
       :ignore
-  end
-
-  # Check the saved modem before VintageNet can open its UART. Never restore a
-  # driver or wiring that differs from this board's qualified configuration.
-  @doc false
-  def check_saved_cellular do
-    # Only the modem config: an Ethernet problem must not stop recovery access.
-    with %{interface: name} <- NervesGate.Cellular.Profile.get(),
-         {:ok, saved} <- VintageNet.Persistence.call(:load, [name]),
-         internet = NervesGate.Cellular.Profile.saved_internet(saved),
-         {:ok, [{^name, expected}]} <-
-           NervesGate.Cellular.Profile.configurations(%{"internet" => internet}),
-         true <- saved == expected.type.normalize(expected) do
-      :ok
-    else
-      nil -> :ok
-      {:error, :enoent} -> :ok
-      _ -> unsupported()
-    end
   end
 
   # DataInit installs protection before VintageNet or Network can open a cellular link.
@@ -92,111 +74,38 @@ defmodule NervesGate.Network.Vintage do
     [{VintageNet, ["interface"]}]
   end
 
-  @doc """
-  Confirmed settings are VintageNet's own saved interface configs; none means
-  factory settings. Settings are read back from those configs and accepted only
-  if this firmware would save exactly the same configs for them.
-  """
+  @doc "Confirmed user settings only; interface configs are rebuilt from the current firmware."
   def load do
-    case saved_configurations() do
-      {:ok, saved} when map_size(saved) == 0 -> {:ok, Config.defaults()}
-      {:ok, saved} -> from_saved(saved)
-      error -> error
+    case Settings.get(@settings) do
+      nil ->
+        {:ok, Config.defaults()}
+
+      saved ->
+        with {:ok, network} <- Config.validate_network(saved),
+             {:ok, _configs} <- all_configurations(network) do
+          {:ok, Config.from_network(network)}
+        else
+          _ -> unsupported()
+        end
     end
   end
 
-  # The factory state is the absence of saved configs, never a saved value.
+  # The factory state is the absence of saved settings, never a saved value.
   def save(%{"mode" => "unconfigured"}), do: {:error, :factory_state_not_saved}
 
   def save(network) do
     with {:ok, network} <- Config.validate_network(network),
-         {:ok, configs} <- all_configurations(network) do
-      Enum.reduce_while(configs, :ok, &save_interface/2)
-    end
-  end
-
-  defp save_interface({name, config}, :ok) do
-    case VintageNet.Persistence.call(:save, [name, config.type.normalize(config)]) do
-      :ok -> {:cont, :ok}
-      # A previous interface may already have been saved. Do not admit another
-      # change after a partial or failed write, even if runtime restore succeeds.
-      _ -> {:halt, {:error, :network_commit_unknown}}
-    end
-  end
-
-  defp saved_configurations do
-    modem = NervesGate.Cellular.Profile.get()
-    names = NervesGate.Board.ethernet() ++ if(modem, do: [modem.interface], else: [])
-
-    Enum.reduce_while(names, {:ok, %{}}, fn name, {:ok, saved} ->
-      case VintageNet.Persistence.call(:load, [name]) do
-        {:ok, config} -> {:cont, {:ok, Map.put(saved, name, config)}}
-        {:error, :enoent} -> {:cont, {:ok, saved}}
-        _ -> {:halt, unsupported()}
+         {:ok, _configs} <- all_configurations(network) do
+      case Settings.put(@settings, network) do
+        :ok -> :ok
+        {:error, :commit_unknown} -> {:error, :network_commit_unknown}
       end
-    end)
-  end
-
-  defp from_saved(saved) do
-    modem = NervesGate.Cellular.Profile.get()
-    cellular = modem && NervesGate.Cellular.Profile.saved_internet(saved[modem.interface])
-
-    network =
-      NervesGate.Board.ethernet()
-      |> Map.new(&{&1, saved_port(saved[&1])})
-      |> Map.put("mode", "ports")
-      |> put_internet(cellular)
-
-    with {:ok, network} <- Config.validate_network(network),
-         {:ok, configs} <- all_configurations(network),
-         true <- Map.new(configs, fn {name, c} -> {name, c.type.normalize(c)} end) == saved do
-      {:ok, Config.from_network(network)}
-    else
-      _ -> unsupported()
     end
   end
-
-  defp saved_port(%{ipv4: %{method: :disabled}, nerves_gate_disabled: true}), do: nil
-
-  defp saved_port(%{ipv4: %{method: :disabled}}),
-    do: %{"role" => "plugin", "address" => nil}
-
-  defp saved_port(%{ipv4: ipv4}),
-    do: %{"role" => "internet", "address" => saved_address(ipv4)}
-
-  defp saved_port(_), do: nil
-
-  # The modem holds the APN; an Ethernet Internet port makes cellular the backup.
-  defp put_internet(network, nil), do: network
-
-  defp put_internet(network, internet) do
-    mode = if Config.role_port(network, "internet"), do: "backup", else: "cellular"
-    Map.put(network, "internet", %{internet | "mode" => mode})
-  end
-
-  defp saved_address(%{method: :dhcp}), do: Config.address_defaults()
-
-  defp saved_address(%{method: :static, prefix_length: prefix} = ipv4) when prefix in 1..30 do
-    <<a, b, c, d>> = <<0xFFFFFFFF <<< (32 - prefix)::32>>
-
-    %{
-      "ip_method" => "static",
-      "static_ip" => ip_string(ipv4.address),
-      "subnet_mask" => ip_string({a, b, c, d}),
-      "gateway" => ip_string(ipv4[:gateway])
-    }
-    |> then(fn address ->
-      if ipv4[:name_servers] in [nil, []],
-        do: address,
-        else: Map.put(address, "nameservers", Enum.map(ipv4.name_servers, &ip_string/1))
-    end)
-  end
-
-  defp saved_address(_), do: nil
 
   defp unsupported do
     {:error,
-     "Saved network settings are unsupported by this firmware or board. Settings were not changed. Use recovery access and an explicitly authorized external reprovisioning procedure."}
+     "Saved network settings are unsupported by this firmware or board. Settings were not changed. Use recovery access to explicitly update the saved settings."}
   end
 
   # Unconfigured is the unsaved factory state; it is never written.

@@ -96,11 +96,11 @@ config :tailscaled_ex,
   manage_daemon: true,
   tun: :kernel
 
-# VintageNet persists confirmed interface configurations. Trials remain ephemeral.
+# Network stores user intent in Settings and builds ephemeral interface configs.
 # Each platform adds its independent recovery/management connection.
 config :vintage_net,
   route_metric_fun: {NervesGate.Network.RouteMetric, :compute_metric, 2},
-  persistence: VintageNet.Persistence.FlatFile,
+  persistence: VintageNet.Persistence.Null,
   config: []
 
 # Build keys seed the device-owned store once. Settings owns later additions

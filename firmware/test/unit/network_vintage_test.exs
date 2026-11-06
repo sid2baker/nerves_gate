@@ -1,8 +1,9 @@
 defmodule NervesGate.NetworkVintageTest do
   use ExUnit.Case, async: false
-  alias NervesGate.Config
+  alias NervesGate.{Config, Settings}
   alias NervesGate.Network.Vintage
 
+  @settings ["network", "settings"]
   @modem %{
     interface: "wwan0",
     config: %{
@@ -13,25 +14,10 @@ defmodule NervesGate.NetworkVintageTest do
 
   setup do
     root = Path.join(System.tmp_dir!(), "network-vintage-#{System.unique_integer([:positive])}")
-
-    settings = [
-      {:vintage_net, :persistence_dir, root},
-      {:vintage_net, :persistence, VintageNet.Persistence.FlatFile},
-      {:vintage_net, :persistence_secret, <<0::128>>}
-    ]
-
-    previous =
-      Enum.map(settings, fn {app, key, _} -> {app, key, Application.fetch_env(app, key)} end)
-
-    Enum.each(settings, fn {app, key, value} -> Application.put_env(app, key, value) end)
+    start_supervised!({Settings, path: root})
     board = Application.fetch_env!(:nerves_gate, :board)
 
     on_exit(fn ->
-      Enum.each(previous, fn
-        {app, key, {:ok, value}} -> Application.put_env(app, key, value)
-        {app, key, :error} -> Application.delete_env(app, key)
-      end)
-
       Application.put_env(:nerves_gate, :board, board)
       File.rm_rf!(root)
     end)
@@ -44,22 +30,22 @@ defmodule NervesGate.NetworkVintageTest do
              NervesGate.Network.Policy.available(%{config: %{}, commit_unknown: true, error: nil})
   end
 
-  test "no saved configs is the factory state; reading writes nothing", %{root: root} do
+  test "missing settings is the factory state; reading writes nothing", %{root: root} do
     assert Vintage.load() == {:ok, Config.defaults()}
-    refute File.exists?(root)
-    assert {:error, _} = Vintage.save(%{"mode" => "unconfigured"})
-    refute File.exists?(root)
+    refute File.exists?(Settings.file(root))
+    assert {:error, :factory_state_not_saved} = Vintage.save(%{"mode" => "unconfigured"})
+    refute File.exists?(Settings.file(root))
   end
 
-  test "settings are plain VintageNet interface configs, with no extra metadata", %{root: root} do
+  test "one durable settings value contains user intent, not driver configuration", %{root: root} do
+    assert :ok = Settings.put(["network", "local"], %{owner: :fixture})
     assert :ok = Vintage.save(ports())
-    assert Enum.sort(File.ls!(root)) == Enum.sort(NervesGate.Board.ethernet())
-
-    for {name, config} <- Vintage.configurations(ports()) do
-      assert {:ok, saved} = VintageNet.Persistence.call(:load, [name])
-      assert saved == config.type.normalize(config)
-      assert saved |> Map.keys() |> Enum.all?(&(&1 in [:type, :ipv4, :nerves_gate_disabled]))
-    end
+    assert Settings.get(@settings) == ports()
+    assert Settings.get(["network", "local"]) == %{owner: :fixture}
+    stop_supervised!(Settings)
+    start_supervised!({Settings, path: root})
+    assert Vintage.load() == {:ok, Config.from_network(ports())}
+    assert Settings.get(["network", "local"]) == %{owner: :fixture}
   end
 
   test "roles and addresses round-trip" do
@@ -82,7 +68,7 @@ defmodule NervesGate.NetworkVintageTest do
     end
   end
 
-  test "cellular policy comes from the modem's own config", %{board: board} do
+  test "cellular intent round-trips without modem internals", %{board: board} do
     Application.put_env(:nerves_gate, :board, Map.put(board, :cellular, @modem))
     cellular = %{"mode" => "cellular", "apn" => "internet.example"}
 
@@ -92,64 +78,78 @@ defmodule NervesGate.NetworkVintageTest do
           ports() |> Map.put("eth0", nil) |> Map.put("internet", cellular)
         ] do
       assert :ok = Vintage.save(network)
+      assert Settings.get(@settings) == network
       assert Vintage.load() == {:ok, Config.from_network(network)}
-      assert Vintage.check_saved_cellular() == :ok
     end
   end
 
-  test "a modem config this board would not write blocks startup and is kept", %{
+  test "a firmware framing change uses the new profile without rewriting settings", %{
     root: root,
     board: board
   } do
     Application.put_env(:nerves_gate, :board, Map.put(board, :cellular, @modem))
-    assert :ok = Vintage.save(ports())
-    {:ok, saved} = VintageNet.Persistence.call(:load, ["wwan0"])
-    unsafe = put_in(saved, [:vintage_net_ecm, :modem], VintageNetECM.Modem.Quectel)
-    assert :ok = VintageNet.Persistence.call(:save, ["wwan0", unsafe])
-    before = files(root)
-    assert {:error, _} = Vintage.check_saved_cellular()
-    assert {:error, _} = Vintage.load()
-    assert files(root) == before
+    network = Map.put(ports(), "internet", %{"mode" => "backup", "apn" => "internet.example"})
+    assert :ok = Vintage.save(network)
+    before = File.read!(Settings.file(root))
+    modem = put_in(@modem, [:config, :vintage_net_ecm, :intermediate_responses], ["> "])
+    Application.put_env(:nerves_gate, :board, Map.put(board, :cellular, modem))
+
+    assert {:ok, loaded} = Vintage.load()
+    assert loaded == Config.from_network(network)
+
+    assert {:ok, [{"wwan0", config}]} =
+             NervesGate.Cellular.Profile.configurations(loaded["network"])
+
+    raw = VintageNetECM.to_raw_config("wwan0", config, [])
+
+    assert {VintageNetECM.AT.Channel, options} =
+             Enum.find(raw.child_specs, &match?({VintageNetECM.AT.Channel, _}, &1))
+
+    assert options[:intermediate_responses] == ["> "]
+    assert File.read!(Settings.file(root)) == before
+    assert Settings.get(@settings) == network
   end
 
-  test "invalid writes preserve saved configs", %{root: root} do
+  test "invalid writes preserve saved settings", %{root: root} do
     assert :ok = Vintage.save(ports())
-    before = files(root)
+    before = File.read!(Settings.file(root))
     assert {:error, _} = Vintage.save(%{"mode" => "shared"})
-    assert files(root) == before
+    assert File.read!(Settings.file(root)) == before
+    assert Settings.get(@settings) == ports()
   end
 
-  test "corrupt, partial and foreign configs are rejected and preserved", %{root: root} do
-    for damage <- [
-          &File.write!(Path.join(&1, "eth0"), "corrupt"),
-          &File.rm!(Path.join(&1, "eth1")),
-          fn _ ->
-            VintageNet.Persistence.call(:save, [
-              "eth1",
-              %{type: NervesGate.Network.LAN, ipv4: %{method: :dhcp}}
-            ])
-          end,
-          fn _ ->
-            VintageNet.Persistence.call(:save, [
-              "eth0",
-              %{type: VintageNetEthernet, ipv4: %{method: :dhcp}}
-            ])
-          end
+  test "unsupported settings are rejected and preserved", %{root: root, board: board} do
+    Application.put_env(:nerves_gate, :board, Map.put(board, :cellular, nil))
+
+    for invalid <- [
+          "corrupt",
+          Map.delete(ports(), "eth1"),
+          Map.put(ports(), "driver", VintageNetECM),
+          put_in(ports(), ["eth0", "role"], "unknown"),
+          Map.put(ports(), "internet", %{"mode" => "backup", "apn" => "internet.example"})
         ] do
-      assert :ok = Vintage.save(ports())
-      damage.(root)
-      before = files(root)
+      assert :ok = Settings.put(@settings, invalid)
+      before = File.read!(Settings.file(root))
       assert {:error, message} = Vintage.load()
       assert message =~ "Settings were not changed"
-      assert files(root) == before
+      assert Settings.get(@settings) == invalid
+      assert File.read!(Settings.file(root)) == before
     end
   end
 
-  test "write failures are uncertain, including a partially saved set", %{root: root} do
+  test "write failures are uncertain and do not leak into a later settings flush", %{root: root} do
     assert :ok = Vintage.save(ports())
-    File.rm!(Path.join(root, "eth1"))
-    File.mkdir!(Path.join(root, "eth1"))
+    before = File.read!(Settings.file(root))
+    blocker = Settings.file(root) <> ".tmp"
+    File.mkdir!(blocker)
     assert {:error, :network_commit_unknown} = Vintage.save(Map.put(ports(), "eth1", nil))
+    assert File.read!(Settings.file(root)) == before
+    assert Settings.get(@settings) == ports()
+    File.rmdir!(blocker)
+    assert :ok = Settings.put(["unrelated"], true)
+    stop_supervised!(Settings)
+    start_supervised!({Settings, path: root})
+    assert Vintage.load() == {:ok, Config.from_network(ports())}
   end
 
   defp ports do
@@ -159,6 +159,4 @@ defmodule NervesGate.NetworkVintageTest do
       "eth1" => %{"role" => "plugin", "address" => nil}
     }
   end
-
-  defp files(root), do: Map.new(File.ls!(root), &{&1, File.read!(Path.join(root, &1))})
 end

@@ -119,12 +119,14 @@ channel recovery; neither uncertain writes nor SMS submissions are retried.
 Public `Cellular` operations share Network's single worker: there is no separate
 Cellular GenServer or second UART owner.
 
-Saved Network settings contain intent, never a modem callback module. The current
-board supplies the driver when Network applies that intent. VintageNet persistence
-is disabled, so it cannot restore an old driver before Network validation. Old
-per-interface files are preserved and rejected, not imported. Deployments with
-incompatible saved settings need separately authorized external reprovisioning.
-A build alone is not permission to erase network settings, plugin data or credentials.
+Network stores confirmed user intent under `network.settings` in
+`NervesGate.Settings`: port roles, addresses and cellular APN/provider policy.
+The current board supplies driver wiring and response framing when Network applies
+that intent. VintageNet persistence is disabled; generated driver configs never
+become saved user settings. Invalid saved intent is rejected without rewriting it.
+Changing a bench's saved-settings format requires explicit authorization and must
+preserve the user's values. A build alone is not permission to change network
+settings, plugin data or credentials.
 
 The qualified EC100 driver keeps its existing AT controller available for SIM
 setup even while the Internet source is LAN. This control-only configuration has

@@ -63,19 +63,6 @@ defmodule NervesGate.Cellular.Profile do
     end
   end
 
-  @doc "Cellular data settings in a saved modem config; nil when data is off."
-  def saved_internet(%{vintage_net_ecm: %{setup_only: true}}), do: nil
-
-  def saved_internet(%{vintage_net_ecm: %{service_providers: [%{apn: apn}]} = ecm}) do
-    internet = %{"mode" => "cellular", "apn" => apn}
-
-    if ecm[:carrier_profile],
-      do: Map.put(internet, "provider", ecm.carrier_profile),
-      else: internet
-  end
-
-  def saved_internet(_), do: nil
-
   defp technology_key(%{vintage_net_ecm: options}) when is_map(options), do: :vintage_net_ecm
 
   defp technology_key(%{vintage_net_qmi: options}) when is_map(options), do: :vintage_net_qmi
