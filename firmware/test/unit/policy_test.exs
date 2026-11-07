@@ -1,6 +1,6 @@
 defmodule NervesGate.PolicyTest do
   use ExUnit.Case, async: true
-  alias NervesGate.Config
+  alias NervesGate.{Config, Network}
   alias NervesGate.Indicators.Policy
 
   test "unknown connectivity is never indicated as healthy" do
@@ -64,6 +64,67 @@ defmodule NervesGate.PolicyTest do
         ] do
       assert {:error, reason} = Config.validate_network(unsupported)
       assert reason =~ "never rewritten"
+    end
+  end
+
+  describe "network topology readiness" do
+    setup do
+      port = %{
+        name: "eth0",
+        present: true,
+        state: :configured,
+        master: nil,
+        method: "dhcp",
+        addresses: []
+      }
+
+      network = %{
+        "mode" => "ports",
+        "eth0" => %{"role" => "internet", "address" => Config.address_defaults()}
+      }
+
+      {:ok, port: port, network: network}
+    end
+
+    test "DHCP needs configured independent topology, not a lease", %{
+      port: port,
+      network: network
+    } do
+      assert Network.ready?(%{ports: [port]}, network)
+
+      for unavailable <- [
+            %{port | present: false},
+            %{port | state: :configuring},
+            %{port | master: "br0"},
+            %{port | method: "static"}
+          ] do
+        refute Network.ready?(%{ports: [unavailable]}, network)
+      end
+    end
+
+    test "static addressing needs the matching address and prefix", %{
+      port: port,
+      network: network
+    } do
+      address = %{
+        "ip_method" => "static",
+        "static_ip" => "192.0.2.10",
+        "subnet_mask" => "255.255.255.0"
+      }
+
+      network = put_in(network, ["eth0", "address"], address)
+      port = %{port | method: "static"}
+      matching = %{address: "192.0.2.10", prefix_length: 24}
+
+      assert Network.ready?(%{ports: [%{port | addresses: [matching]}]}, network)
+
+      for addresses <- [
+            [],
+            [%{matching | address: "192.0.2.11"}],
+            [%{matching | prefix_length: 25}]
+          ] do
+        refute Network.ready?(%{ports: [%{port | addresses: addresses}]}, network)
+      end
     end
   end
 

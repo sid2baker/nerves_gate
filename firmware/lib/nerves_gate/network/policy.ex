@@ -189,21 +189,15 @@ defmodule NervesGate.Network.Policy do
 
   defp port_ready?(port, %{"address" => address}) do
     configured_port?(port) and port.method == address["ip_method"] and
-      (port.method == "dhcp" or address_matches?(port.addresses, address))
+      (port.method == "dhcp" or static_address_matches?(port.addresses, address))
   end
 
   defp configured_port?(port), do: port.state == :configured and is_nil(port.master)
 
-  defp address_matches?(addresses, network) do
+  defp static_address_matches?(addresses, network) do
     Enum.any?(addresses, fn %{address: address, prefix_length: prefix} ->
-      case network["ip_method"] do
-        "dhcp" ->
-          match?({:ok, {a, _, _, _}} when a > 0 and a < 224 and a != 127, Config.ipv4(address))
-
-        "static" ->
-          address == network["static_ip"] and
-            Config.prefix_length(network["subnet_mask"]) == {:ok, prefix}
-      end
+      address == network["static_ip"] and
+        Config.prefix_length(network["subnet_mask"]) == {:ok, prefix}
     end)
   end
 end
