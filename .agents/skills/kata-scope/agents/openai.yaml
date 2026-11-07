@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scope"
+  short_description: "Turn a rough request into bounded delivery work"
+  default_prompt: "Use $kata-scope to define the outcome, boundaries, completion evidence, dependencies, and open decisions for this work."

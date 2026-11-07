@@ -1,0 +1,4 @@
+interface:
+  display_name: "Idea"
+  short_description: "Explore, grill, or challenge an idea before planning"
+  default_prompt: "Use $kata-idea to turn this idea into a decision-ready brief without implementing it."

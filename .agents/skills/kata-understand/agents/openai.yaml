@@ -1,0 +1,4 @@
+interface:
+  display_name: "Understand"
+  short_description: "Establish conditions and explain systems with evidence"
+  default_prompt: "Use $kata-understand to establish what is true, explain relevant system behavior, bound the problem, and state what is ready next."

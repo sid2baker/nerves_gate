@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kata Plan"
+  short_description: "Create a deep software implementation plan"
+  default_prompt: "Use $kata-plan to ground this software change and write its implementation plan. Markdown is canonical. Use HTML or Beadwork only when I request that adapter."

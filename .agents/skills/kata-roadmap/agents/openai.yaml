@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kata Roadmap"
+  short_description: "Resolve long-horizon decisions in a durable roadmap"
+  default_prompt: "Use $kata-roadmap to create or advance this decision roadmap. Use local Beadwork or CSV and do not start implementation."

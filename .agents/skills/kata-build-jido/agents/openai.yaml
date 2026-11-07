@@ -1,0 +1,3 @@
+interface:
+  display_name: "Build Jido"
+  short_description: "Build and test current Jido systems"

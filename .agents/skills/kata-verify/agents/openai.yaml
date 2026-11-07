@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify"
+  short_description: "Route a result to context-specific verification"
+  default_prompt: "Use $kata-verify to select the relevant verification methods, check this exact result, and return pass, fail, unknown, or blocked."

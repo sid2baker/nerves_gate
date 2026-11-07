@@ -1,0 +1,4 @@
+interface:
+  display_name: "Work"
+  short_description: "Produce one candidate result from a ready request"
+  default_prompt: "Use $kata-work to produce the smallest candidate result and hand it to independent verification."

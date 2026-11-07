@@ -1,0 +1,143 @@
+{
+  "version": 1,
+  "skills": {
+    "jido": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/jido/SKILL.md",
+      "computedHash": "700640aa6a537195c1db8c9584b79955071b45bbed1c272df449f74d8b963036"
+    },
+    "kata-build-jido": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-build-jido/SKILL.md",
+      "computedHash": "4fa44c51f2ac00ad8f4470e6627ef43c92a322b8d57efe3170cc881412fa3b8c"
+    },
+    "kata-debug": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-debug/SKILL.md",
+      "computedHash": "3ab2ba9bae0cbbff766342c5c3b56b7f1711a428a8a71b428f456d570e12b542"
+    },
+    "kata-delegate": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-delegate/SKILL.md",
+      "computedHash": "cbb880eb29eb7a73f86b9ed03b161f4da685a04cd69cd2d37b23b1c44c10dbee"
+    },
+    "kata-docs": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-docs/SKILL.md",
+      "computedHash": "8411f5c69c812d8a484a5e5ca3a1b1ca0b08d1048ac0dba0a9c4db143b7eb0c3"
+    },
+    "kata-dojo": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-dojo/SKILL.md",
+      "computedHash": "0ec803178ee229dfc67d4da2edfe8d3f783d7ed093eeac54bb05f25b3b1cf737"
+    },
+    "kata-ex-design-review": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-ex-design-review/SKILL.md",
+      "computedHash": "2d8c30caca470e13f8f7d9726fbcc11cc903fe5455d87d3ad5b318b396f0df85"
+    },
+    "kata-ex-quality": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-ex-quality/SKILL.md",
+      "computedHash": "531e6f810bd9d48de4d84ced66aab0032fc0a0d495856592d17f8a9287cc43e2"
+    },
+    "kata-idea": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-idea/SKILL.md",
+      "computedHash": "f827bef7147b55553bceaeedbef2338a10932f5d696313b8383eac536ac2b8ef"
+    },
+    "kata-maintain-skill": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-maintain-skill/SKILL.md",
+      "computedHash": "92c0d6de91b1c3affcf753813ebf1ba97d15230d5508c048a0149fc2e33ef620"
+    },
+    "kata-plan": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-plan/SKILL.md",
+      "computedHash": "81323e58a90fd1be3768c03f8e869855604957eb32d50f71d1f7b13d0743e49d"
+    },
+    "kata-roadmap": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-roadmap/SKILL.md",
+      "computedHash": "1e64b07806b8d8fc26284485a01397c1aaaa36bf34038c507775296b21199e49"
+    },
+    "kata-scope": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-scope/SKILL.md",
+      "computedHash": "1d3da0c92b9432fb5a079c36d9079147341b7842a283112c2c4f6f9979bfff1a"
+    },
+    "kata-security": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-security/SKILL.md",
+      "computedHash": "eec7e6b1b3a68bb1c1089e59202ac3e06e318a1350c3ef0d1ee9cbf547c0c9e2"
+    },
+    "kata-shipit": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-shipit/SKILL.md",
+      "computedHash": "064250a08d05cd71cfdf4455711758ac02dd9de4c9d097c2b887442faf08e37b"
+    },
+    "kata-showme": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-showme/SKILL.md",
+      "computedHash": "0662fc639bbb4300755b8e7e931863a03d17d2021c9794970db8e450b6f8dad1"
+    },
+    "kata-sitrep": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-sitrep/SKILL.md",
+      "computedHash": "82fe0f5941640fbc1e24179d3b5e12e820e62c61ad715d15dc8cc57d94350a1d"
+    },
+    "kata-technical-writing": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-technical-writing/SKILL.md",
+      "computedHash": "ef0da57a7a6f4b2e0030a9cd6f887b0b829e961c1cc594387153e6b313d0b53e"
+    },
+    "kata-tutor": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-tutor/SKILL.md",
+      "computedHash": "b663bd1591965707430eb6fc4b246fe7596deee8b70a053496bb60e3a7550ce8"
+    },
+    "kata-understand": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-understand/SKILL.md",
+      "computedHash": "3bb302b60ad2fc987ff7e913e516561b1cc6293dbdcecc09af1f49a4fc914642"
+    },
+    "kata-verify": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-verify/SKILL.md",
+      "computedHash": "2a9e1cf3d45ae89484383573a21062e2a1897b2ac92b12d627f2b277673fdffd"
+    },
+    "kata-work": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-work/SKILL.md",
+      "computedHash": "be2c56629ab9a9330bdd3865d9bcbb4eca64a9fcc985b1b957c812b29c2c8883"
+    },
+    "kata-write-skill": {
+      "source": "agentjido/kata",
+      "sourceType": "github",
+      "skillPath": "skills/kata-write-skill/SKILL.md",
+      "computedHash": "83fd13f36d911d8ae9f71ab6c7e8d1635281b64af284a4cfa4120f4d0137d087"
+    }
+  }
+}

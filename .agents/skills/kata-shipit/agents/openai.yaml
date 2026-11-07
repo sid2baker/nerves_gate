@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ship It"
+  short_description: "Commit, publish, watch, or land a verified change"
+  default_prompt: "Use $kata-shipit to commit this verified change, push it, and create or update its pull request. Honor any explicit delivery limit or target in my request."

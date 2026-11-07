@@ -1,0 +1,4 @@
+interface:
+  display_name: "Delegate"
+  short_description: "Assign defined work and manage its return"
+  default_prompt: "Use $kata-delegate to prepare clear assignments, use available workers within my authority, and return checked results to the integration owner."

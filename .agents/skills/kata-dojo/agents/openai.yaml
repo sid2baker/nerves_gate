@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dojo"
+  short_description: "Evaluate one exact skill candidate with controlled cases"
+  default_prompt: "Use $kata-dojo to evaluate this exact skill candidate and return evidence for an adoption decision."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tutor"
+  short_description: "Learn to lead agent work through real tasks"
+  default_prompt: "Use $kata-tutor to coach me on this real task, teach one relevant leadership action, and adjust support from my attempts."
