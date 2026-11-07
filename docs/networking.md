@@ -106,8 +106,10 @@ The EC100 board's `:cellular` profile is:
 }
 ```
 
-`Cellular.Profile` owns board/config generation; `Cellular.SIM` owns SIM/PIN
-lifecycle and `Cellular.Authentication` owns private APN-bound PAP.
+`Cellular.Profile` owns board/config generation. A profile requires
+`type: VintageNetECM` and a `vintage_net_ecm` options map; other technologies
+and option schemas are unsupported. `Cellular.SIM` owns SIM/PIN lifecycle
+and `Cellular.Authentication` owns private APN-bound PAP.
 `Cellular.Modem` implements the VintageNetECM modem contract using exclusive AT
 session handles, never a raw UART. VintageNet supervises the driver's generic
 `AT.Channel` UART owner alongside its radio-management controller. Controller

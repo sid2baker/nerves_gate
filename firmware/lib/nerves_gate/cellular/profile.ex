@@ -1,15 +1,12 @@
 defmodule NervesGate.Cellular.Profile do
-  @moduledoc "Board-selected modem wiring and VintageNet configurations."
+  @moduledoc "Board-selected ECM modem wiring and VintageNet configurations."
   alias NervesGate.Config
 
   def get do
     case NervesGate.Board.get(:cellular) do
-      %{interface: name, config: %{type: type} = config} = profile
-      when is_binary(name) and is_atom(type) ->
-        if Regex.match?(~r"\A(?:wwan|ppp|cell)[0-9]+\z", name) and technology_key(config) != nil and
-             Code.ensure_loaded?(type) do
-          profile
-        end
+      %{interface: name, config: %{type: VintageNetECM, vintage_net_ecm: options}} = profile
+      when is_binary(name) and is_map(options) ->
+        if Regex.match?(~r"\A(?:wwan|ppp|cell)[0-9]+\z", name), do: profile
 
       _ ->
         nil
@@ -47,10 +44,8 @@ defmodule NervesGate.Cellular.Profile do
         {:ok, [{name, %{type: VintageNet.Technology.Null}}]}
 
       {%{interface: name, config: config}, true} ->
-        key = technology_key(config)
-
         options =
-          Map.put(config[key], :service_providers, [
+          Map.put(config.vintage_net_ecm, :service_providers, [
             %{apn: Config.internet(network)["apn"]}
           ])
 
@@ -59,16 +54,7 @@ defmodule NervesGate.Cellular.Profile do
             do: Map.put(options, :carrier_profile, Config.internet(network)["provider"]),
             else: options
 
-        {:ok, [{name, Map.put(config, key, options)}]}
+        {:ok, [{name, Map.put(config, :vintage_net_ecm, options)}]}
     end
   end
-
-  defp technology_key(%{vintage_net_ecm: options}) when is_map(options), do: :vintage_net_ecm
-
-  defp technology_key(%{vintage_net_qmi: options}) when is_map(options), do: :vintage_net_qmi
-
-  defp technology_key(%{vintage_net_mobile: options}) when is_map(options),
-    do: :vintage_net_mobile
-
-  defp technology_key(_), do: nil
 end

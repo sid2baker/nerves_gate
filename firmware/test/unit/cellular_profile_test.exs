@@ -45,6 +45,41 @@ defmodule NervesGate.Cellular.ProfileTest do
     assert raw.source_config.type == VintageNetECM
   end
 
+  test "the selected carrier profile is passed to the ECM driver" do
+    network = put_in(@network, ["internet", "provider"], "selected-carrier")
+    assert {:ok, [{"wwan0", config}]} = NervesGate.Cellular.Profile.configurations(network)
+    assert config.vintage_net_ecm.carrier_profile == "selected-carrier"
+    assert config.vintage_net_ecm.service_providers == [%{apn: "internet.example"}]
+    assert config.vintage_net_ecm.at_tty == "ttyUSB2"
+  end
+
+  test "non-ECM technologies and option schemas are rejected before configuration" do
+    for config <- [
+          %{type: VintageNetEthernet, vintage_net_ecm: %{at_tty: "ttyUSB2"}},
+          %{type: VintageNetECM, vintage_net_qmi: %{at_tty: "ttyUSB2"}},
+          %{type: VintageNetECM, vintage_net_mobile: %{at_tty: "ttyUSB2"}}
+        ] do
+      put_profile(%{@profile | config: config})
+      assert NervesGate.Cellular.Profile.get() == nil
+
+      assert {:error, %{code: "cellular_unsupported"}} =
+               NervesGate.Cellular.Profile.configurations(@network)
+
+      ethernet = Map.put(@network, "internet", %{"mode" => "ethernet"})
+      assert NervesGate.Cellular.Profile.configurations(ethernet) == {:ok, []}
+    end
+  end
+
+  test "ECM profiles require an options map" do
+    for options <- [nil, [], "invalid"] do
+      put_profile(put_in(@profile, [:config, :vintage_net_ecm], options))
+      assert NervesGate.Cellular.Profile.get() == nil
+
+      assert {:error, %{code: "cellular_unsupported"}} =
+               NervesGate.Cellular.Profile.configurations(@network)
+    end
+  end
+
   test "EC100's authentication hook runs in the standard ECM controller, not interface config" do
     put_profile(put_in(@profile, [:config, :vintage_net_ecm, :modem], NervesGate.Cellular.Modem))
     assert {:ok, [{"wwan0", config}]} = NervesGate.Cellular.Profile.configurations(@network)
