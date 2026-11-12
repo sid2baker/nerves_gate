@@ -96,8 +96,8 @@ system/toolchain, and checks these prerequisites. It neither builds firmware nor
 boots devices. QEMU's amd64 daemon is installed by `Tailscaled.Installer` before
 target compilation, with an explicit Tailscale 1.104.1 archive checksum and cache
 under `firmware/_build/setup/`. Physical targets use their system's ARM daemon;
-they also require the selected board's system artifact. EC100 uses its published
-artifact; EM300 currently requires a locally built, unpublished artifact. See
+they also require the selected board's published system artifact. EM300's
+artifact is a hardware-unqualified development prerelease. See
 [firmware builds](firmware-updates.md#build).
 
 ## Commands
@@ -350,14 +350,9 @@ For an asset-only diagnostic build, firmware provides `mix assets.build`
 (`volt.build --tailwind`); repository tooling enters that host project natively.
 Include the resulting `firmware/priv/static/assets/` files with their sources.
 Device builds select the system dependencies pinned in `firmware/mix.exs`.
-EC100 retains its published 0.4.0 artifact until the standalone 0.5.0 release is
-available. EM300's standalone bring-up commit is pinned but unpublished; build
-its artifact explicitly before firmware:
-
-```sh
-cd firmware
-MIX_TARGET=em300 mix nerves.artifact.build nerves_system_em300
-```
+All three download published artifacts from their standalone repositories:
+EC100 0.5.0, EM300 0.2.0-dev and simulator 0.3.0. The EM300 prerelease remains
+hardware-unqualified; availability of an artifact is not hardware acceptance.
 
 System development uses explicit checkout paths:
 `NERVES_GATE_EC100_SYSTEM_PATH=/absolute/path/to/nerves_system_ec100`,
@@ -368,16 +363,9 @@ then run the firmware build. Workbench passes these paths to isolated builds and
 resolves factory engines from the same selected dependency.
 
 Simulator builds use the pinned standalone `nerves_system_nerves_gate_simulator`
-dependency and retain the `x86_64` target. Before its first release, build the system
-artifact explicitly from `firmware/`:
-
-```sh
-MIX_TARGET=x86_64 mix nerves.artifact.build nerves_system_nerves_gate_simulator
-```
-
-Clean `mix setup` downloads require a published artifact and a source pin containing
-the checksum manifest.
-None of the checkout overrides controls assets.
+dependency and retain the `x86_64` target. `mix setup` fetches its published
+artifact and checks it against the manifest in the tagged source. None of the
+checkout overrides controls assets.
 
 ## Diagnostics and limits
 

@@ -135,30 +135,11 @@ defmodule NervesGate.MixProject do
 
     options =
       case System.get_env("NERVES_GATE_#{name}_SYSTEM_PATH") do
-        nil -> system_source(app, version)
+        nil -> [github: "sid2baker/#{app}", tag: "v#{version}"]
         path -> [path: Path.expand(path)]
       end
 
     {app, version, options ++ [runtime: false, targets: target]}
-  end
-
-  defp system_source(:nerves_system_nerves_gate_simulator, _version) do
-    [
-      github: "sid2baker/nerves_system_nerves_gate_simulator",
-      ref: "c15711f1694bcb1c429385b7e18963e03f761fc6"
-    ]
-  end
-
-  defp system_source(:nerves_system_ec100, version) do
-    [
-      github: "sid2baker/nerves_gate",
-      tag: "system-ec100/v#{version}",
-      subdir: "systems/nerves_system_ec100"
-    ]
-  end
-
-  defp system_source(:nerves_system_em300, _version) do
-    [github: "sid2baker/nerves_system_em300", ref: "0c57b9fcb98ace36326a0472f4e1429a68e45dc1"]
   end
 
   defp deps do
@@ -216,7 +197,7 @@ defmodule NervesGate.MixProject do
   # Device builds still resolve their pinned system source and GitHub artifact.
   defp system_dependencies do
     case Mix.target() do
-      :ec100 -> [system_dependency(:nerves_system_ec100, "0.4.0", :ec100)]
+      :ec100 -> [system_dependency(:nerves_system_ec100, "0.5.0", :ec100)]
       :em300 -> [system_dependency(:nerves_system_em300, "0.2.0-dev", :em300)]
       :x86_64 -> [system_dependency(:nerves_system_nerves_gate_simulator, "0.3.0", :x86_64)]
       :host -> []

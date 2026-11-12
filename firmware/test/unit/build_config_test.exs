@@ -259,15 +259,12 @@ defmodule NervesGate.BuildConfigTest do
 
       for {target, app, key} <- systems do
         Mix.target(target)
-        {^app, _, options} = Enum.find(project.project()[:deps], &(elem(&1, 0) == app))
+        {^app, version, options} = Enum.find(project.project()[:deps], &(elem(&1, 0) == app))
         refute options[:path]
-        assert options[:github]
-        assert options[:ref] || options[:tag]
-
-        if target == :x86_64 do
-          assert options[:github] == "sid2baker/nerves_system_nerves_gate_simulator"
-          refute options[:subdir]
-        end
+        assert options[:github] == "sid2baker/#{app}"
+        assert options[:tag] == "v#{version}"
+        refute options[:ref]
+        refute options[:subdir]
 
         System.put_env(key, "/tmp/#{app}")
         {^app, _, options} = Enum.find(project.project()[:deps], &(elem(&1, 0) == app))

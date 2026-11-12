@@ -96,19 +96,22 @@ reviewing and committing `checksum.exs` before tagging for Git consumers. Publis
 a draft is manual. Review Buildroot notices and corresponding-source obligations
 before distribution; the standard artifact does not include source archives.
 
-Firmware retains EC100's published `system-ec100/v0.4.0` pin until the standalone
-`v0.5.0` artifact is published. EM300 pins its standalone bring-up commit and needs
-an explicit local artifact build before firmware can be packaged. See
-[development](development.md#assets) for checkout overrides.
+Firmware pins standalone tags EC100 `v0.5.0`, EM300 `v0.2.0-dev` and simulator
+`v0.3.0`. Each tagged source includes the checksum manifest for its published
+artifact. EM300 is a development prerelease, not a hardware-qualified stable
+release. See [development](development.md#assets) for checkout overrides.
+
+Before publishing, compare every draft asset to the manifest committed in the
+tag. Rebuilds can produce different archive bytes under the same fingerprint.
+If necessary, replace only the unpublished draft assets with the matching,
+verified pre-tag CI artifacts. Never rewrite a tag or replace published bytes.
+Also verify the draft's notes equal the matching changelog section.
 
 ### Simulator system
 
-Firmware pins the standalone simulator source commit as
-`nerves_system_nerves_gate_simulator` 0.3.0; its target remains `x86_64`.
-Before the first release, explicitly build the artifact from that source. Clean
-`mix setup` downloads and firmware CI require a published 0.3.0 artifact and a
-firmware pin containing its reviewed checksum manifest. Update the firmware pin
-and lock together after that release; do not substitute the old system artifact.
+The standalone `nerves_system_nerves_gate_simulator` package uses the firmware
+`x86_64` target. Its published artifact, not a local system tree, supplies normal
+setup and firmware builds.
 
 System builds and publication no longer run in this repository. The workbench
 still owns QEMU lifecycle and the `system_artifact` integration scenario. Validate
