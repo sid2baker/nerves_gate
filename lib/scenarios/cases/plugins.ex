@@ -40,8 +40,8 @@ defmodule Scenarios.Cases.Plugins do
 
       response = guest_page(vm, "/plugins")
       assert response.status == 200
-      assert response.body =~ "/plugins/tailnet_subrouter"
-      assert response.body =~ "/plugins/modbus_plugin"
+      assert [_] = Floki.find(response.body, "a[href='/plugins/tailnet_subrouter']")
+      assert [_] = Floki.find(response.body, "a[href='/plugins/modbus_plugin']")
     after
       assert :ok = ManagedPlugin.plugins(vm, :stop, [:tailnet_subrouter])
       assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
@@ -120,6 +120,7 @@ defmodule Scenarios.Cases.Plugins do
   defp modbus(vm) do
     before = Device.rpc(vm, NervesGate.IO, :definitions)
     assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
+    ui_client = ManagedPlugin.client(vm)
 
     try do
       assert %{storage: nil, connections: []} = Device.rpc(vm, ModbusPlugin, :status)
@@ -187,12 +188,32 @@ defmodule Scenarios.Cases.Plugins do
 
       page = guest_page(vm, "/plugins/modbus_plugin")
       assert page.status == 200
-      assert page.body =~ "Raw ranges"
-      refute page.body =~ "Load Solis"
+      assert page.body |> Floki.find(".ui-help") |> Floki.text() =~ "Connecting to plugin"
+
+      # HTTP deliberately defers loading plugin code. Render the verified
+      # component in a tracked guest PID, as the connected host does.
+      assert {:ok, ModbusPlugin.UI, _} =
+               ManagedPlugin.call(vm, ui_client, NervesGate.Plugins, :mount_ui, ["modbus_plugin"])
+
+      socket = %Phoenix.LiveView.Socket{transport_pid: ui_client, assigns: %{__changed__: %{}}}
+      assigns = %{id: "plugin-ui", myself: %Phoenix.LiveComponent.CID{cid: 1}}
+
+      assert {:ok, socket} =
+               ManagedPlugin.call(vm, ui_client, ModbusPlugin.UI, :update, [assigns, socket])
+
+      rendered = ManagedPlugin.call(vm, ui_client, ModbusPlugin.UI, :render, [socket.assigns])
+
+      html =
+        ManagedPlugin.call(vm, ui_client, Phoenix.HTML.Safe, :to_iodata, [rendered])
+        |> IO.iodata_to_binary()
+
+      assert html =~ "Raw ranges"
+      refute html =~ "Load Solis"
     after
       assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
     end
 
+    refute Device.rpc(vm, :erlang, :is_process_alive, [ui_client])
     assert Device.rpc(vm, :code, :is_loaded, [Modbus.Client]) == false
     assert Device.rpc(vm, NervesGate.IO, :definitions) == before
     assert :ok = ManagedPlugin.plugins(vm, :start, [:modbus_plugin])
