@@ -84,12 +84,13 @@ See [plugin runtime](plugins.md) and [development](plugin-development.md).
 ## Systems
 
 Systems are Git source dependencies with fingerprinted artifacts on GitHub
-Releases, not Hex. Physical systems are maintained separately:
+Releases, not Hex. All systems are maintained in separate repositories:
 
 - [EC100](https://github.com/sid2baker/nerves_system_ec100)
 - [EM300](https://github.com/sid2baker/nerves_system_em300)
+- [Simulator](https://github.com/sid2baker/nerves_system_nerves_gate_simulator)
 
-Both use the official `actions-nerves2-package` build/draft-release workflow and
+All use the official `actions-nerves2-package` build/draft-release workflow and
 `vX.Y.Z` tags. Follow each system's README for release preparation, including
 reviewing and committing `checksum.exs` before tagging for Git consumers. Publishing
 a draft is manual. Review Buildroot notices and corresponding-source obligations
@@ -100,21 +101,16 @@ Firmware retains EC100's published `system-ec100/v0.4.0` pin until the standalon
 an explicit local artifact build before firmware can be packaged. See
 [development](development.md#assets) for checkout overrides.
 
-### Owned QEMU system
+### Simulator system
 
-`systems/nerves_system_ec100_qemu/` remains in this repository. Its source,
-version and release model are unchanged. `system-releases.yml` calls
-`system-artifact.yml` only for QEMU changes on main. The dependency-free publisher
-is preloaded into an isolated firmware/Nerves command:
+Firmware pins the standalone simulator source commit as
+`nerves_system_nerves_gate_simulator` 0.3.0; its target remains `x86_64`.
+Before the first release, explicitly build the artifact from that source. Clean
+`mix setup` downloads and firmware CI require a published 0.3.0 artifact and a
+firmware pin containing its reviewed checksum manifest. Update the firmware pin
+and lock together after that release; do not substitute the old system artifact.
 
-```sh
-cd firmware
-MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release plan
-```
-
-`plan` is local/read-only. `source` prefetches through Buildroot. `check` inspects
-publication state; `publish` requires the authorized main-branch GitHub workflow.
-Notes and the download tag come from the system. Existing uploaded bytes are never
-replaced. Lock alignment and pending-input checks remain mandatory. Validate a
-changed QEMU system with the owned `system_artifact` scenario before an authorized
-release. Physical systems are rejected by this publisher.
+System builds and publication no longer run in this repository. The workbench
+still owns QEMU lifecycle and the `system_artifact` integration scenario. Validate
+a system change against the shared boot/application contract and review physical
+coverage separately; the simulator does not emulate every board's hardware.

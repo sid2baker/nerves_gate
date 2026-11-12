@@ -130,29 +130,23 @@ defmodule NervesGate.MixProject do
     release
   end
 
-  defp system_dependency(:nerves_system_ec100_qemu = app, version, :x86_64) do
-    options =
-      if System.get_env("NERVES_GATE_LOCAL_DEPS") == "1" do
-        [path: "../systems/#{app}"]
-      else
-        [
-          github: "sid2baker/nerves_gate",
-          tag: "system-ec100-qemu/v#{version}",
-          subdir: "systems/#{app}"
-        ]
-      end
-
-    {app, version, options ++ [runtime: false, targets: :x86_64]}
-  end
-
   defp system_dependency(app, version, target) do
+    name = if target == :x86_64, do: "SIMULATOR", else: target |> to_string() |> String.upcase()
+
     options =
-      case System.get_env("NERVES_GATE_#{target |> to_string() |> String.upcase()}_SYSTEM_PATH") do
+      case System.get_env("NERVES_GATE_#{name}_SYSTEM_PATH") do
         nil -> system_source(app, version)
         path -> [path: Path.expand(path)]
       end
 
     {app, version, options ++ [runtime: false, targets: target]}
+  end
+
+  defp system_source(:nerves_system_nerves_gate_simulator, _version) do
+    [
+      github: "sid2baker/nerves_system_nerves_gate_simulator",
+      ref: "c15711f1694bcb1c429385b7e18963e03f761fc6"
+    ]
   end
 
   defp system_source(:nerves_system_ec100, version) do
@@ -224,7 +218,7 @@ defmodule NervesGate.MixProject do
     case Mix.target() do
       :ec100 -> [system_dependency(:nerves_system_ec100, "0.4.0", :ec100)]
       :em300 -> [system_dependency(:nerves_system_em300, "0.2.0-dev", :em300)]
-      :x86_64 -> [system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)]
+      :x86_64 -> [system_dependency(:nerves_system_nerves_gate_simulator, "0.3.0", :x86_64)]
       :host -> []
     end
   end

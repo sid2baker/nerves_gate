@@ -241,22 +241,33 @@ defmodule NervesGate.BuildConfigTest do
     refute Process.whereis(NervesGate.Supervisor)
   end
 
-  test "physical system checkout overrides are explicit and independent of QEMU" do
+  test "system checkout overrides are explicit and isolated by target" do
     project = Mix.Project.get()
     previous_target = Mix.target()
-    keys = ~w(NERVES_GATE_LOCAL_DEPS NERVES_GATE_EC100_SYSTEM_PATH NERVES_GATE_EM300_SYSTEM_PATH)
+
+    systems = [
+      {:ec100, :nerves_system_ec100, "NERVES_GATE_EC100_SYSTEM_PATH"},
+      {:em300, :nerves_system_em300, "NERVES_GATE_EM300_SYSTEM_PATH"},
+      {:x86_64, :nerves_system_nerves_gate_simulator, "NERVES_GATE_SIMULATOR_SYSTEM_PATH"}
+    ]
+
+    keys = Enum.map(systems, &elem(&1, 2))
     previous = Map.new(keys, &{&1, System.get_env(&1)})
 
     try do
-      System.put_env("NERVES_GATE_LOCAL_DEPS", "1")
+      Enum.each(keys, &System.delete_env/1)
 
-      for {target, app} <- [ec100: :nerves_system_ec100, em300: :nerves_system_em300] do
+      for {target, app, key} <- systems do
         Mix.target(target)
-        key = "NERVES_GATE_#{target |> to_string() |> String.upcase()}_SYSTEM_PATH"
-        System.delete_env(key)
         {^app, _, options} = Enum.find(project.project()[:deps], &(elem(&1, 0) == app))
         refute options[:path]
         assert options[:github]
+        assert options[:ref] || options[:tag]
+
+        if target == :x86_64 do
+          assert options[:github] == "sid2baker/nerves_system_nerves_gate_simulator"
+          refute options[:subdir]
+        end
 
         System.put_env(key, "/tmp/#{app}")
         {^app, _, options} = Enum.find(project.project()[:deps], &(elem(&1, 0) == app))

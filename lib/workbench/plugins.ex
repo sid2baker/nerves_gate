@@ -141,7 +141,7 @@ defmodule Workbench.Plugins do
           env: [
             {"MIX_TARGET", "host"},
             {"MIX_ENV", to_string(env)},
-            {"NERVES_GATE_LOCAL_DEPS", nil},
+            {"NERVES_GATE_SIMULATOR_SYSTEM_PATH", nil},
             {"NERVES_GATE_DEVICE_NODE", nil}
           ]
         ],

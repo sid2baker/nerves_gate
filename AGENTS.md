@@ -38,10 +38,10 @@ today's problem.
 
 - Application logic, tests and tooling are Elixir; prefer Req for HTTP. External
   tools only for firmware, networking, QEMU and Git.
-- Root `:nerves_gate_workbench` is not an umbrella. `firmware/`, `sdk/`,
-  `systems/nerves_system_ec100_qemu` and `plugins/*` are independent projects with
-  their own targets, tests and releases. Physical systems live in
-  `sid2baker/nerves_system_ec100` and `sid2baker/nerves_system_em300`.
+- Root `:nerves_gate_workbench` is not an umbrella. `firmware/`, `sdk/` and
+  `plugins/*` are independent projects with their own targets, tests and releases.
+  Systems live in `sid2baker/nerves_system_ec100`, `sid2baker/nerves_system_em300`
+  and `sid2baker/nerves_system_nerves_gate_simulator`; none live in this checkout.
 - `firmware/lib/nerves_gate/`: domains own commands, validation, admission,
   deadlines and persistence; call named public domain functions. `NervesGate` is
   the read/subscribe entry point and domain API index. Cellular and application

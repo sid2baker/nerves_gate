@@ -1,7 +1,7 @@
 # Development
 
 The repository root is the host-only developer platform, including the QEMU
-simulator. `sdk/`, `firmware/` and `systems/` are separate projects, not umbrella
+simulator. `sdk/`, `firmware/` and plugins are separate projects, not umbrella
 children. Plugin developers use [ordinary plugin projects](plugin-development.md).
 
 ## Deferred tooling
@@ -359,15 +359,25 @@ cd firmware
 MIX_TARGET=em300 mix nerves.artifact.build nerves_system_em300
 ```
 
-Physical system development uses explicit checkout paths:
-`NERVES_GATE_EC100_SYSTEM_PATH=/absolute/path/to/nerves_system_ec100` or
-`NERVES_GATE_EM300_SYSTEM_PATH=/absolute/path/to/nerves_system_em300`.
+System development uses explicit checkout paths:
+`NERVES_GATE_EC100_SYSTEM_PATH=/absolute/path/to/nerves_system_ec100`,
+`NERVES_GATE_EM300_SYSTEM_PATH=/absolute/path/to/nerves_system_em300`, or
+`NERVES_GATE_SIMULATOR_SYSTEM_PATH=/absolute/path/to/nerves_system_nerves_gate_simulator`.
 Run `mix deps.get` after selecting an override, build its system artifact explicitly,
 then run the firmware build. Workbench passes these paths to isolated builds and
 resolves factory engines from the same selected dependency.
 
-`NERVES_GATE_LOCAL_DEPS=1` selects only the local QEMU system. Simulator QEMU
-builds always use that source. None of these settings controls assets.
+Simulator builds use the pinned standalone `nerves_system_nerves_gate_simulator`
+dependency and retain the `x86_64` target. Before its first release, build the system
+artifact explicitly from `firmware/`:
+
+```sh
+MIX_TARGET=x86_64 mix nerves.artifact.build nerves_system_nerves_gate_simulator
+```
+
+Clean `mix setup` downloads require a published artifact and a source pin containing
+the checksum manifest.
+None of the checkout overrides controls assets.
 
 ## Diagnostics and limits
 
@@ -382,6 +392,7 @@ builds always use that source. None of these settings controls assets.
 
 ## System artifacts
 
-The physical systems live in their own repositories; only the owned QEMU system
-remains under `systems/`. System build-input changes require a new system version.
+All three systems live in their own repositories, not in this checkout. The
+simulator is a virtual reference device for shared contracts, not an emulator of
+all physical peripherals. System build-input changes require a new system version.
 See [system releases](releases.md#systems).
