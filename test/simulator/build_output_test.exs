@@ -62,8 +62,7 @@ defmodule Simulator.BuildOutputTest do
         assert 0 =
                  BuildOutput.run(
                    "sh",
-                   # Let MuonTrap drain its capture pipe before the child exits.
-                   ["-c", "head -c 1048576 /dev/zero; sleep 1"],
+                   ["-c", "head -c 1048576 /dev/zero"],
                    [cd: System.tmp_dir!()],
                    fn _ -> :ok end
                  )

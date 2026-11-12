@@ -169,6 +169,9 @@ defmodule NervesGate.MixProject do
       {:input_event, "~> 1.4"},
       # Host tooling must never start the workstation VPN.
       {:tailscaled_ex, "~> 0.6.0", runtime: Mix.target() != :host},
+      # 2.0 fixes cmd/3 output races. tailscaled_ex 0.6 only constrains v1;
+      # neither it nor our other callers use the removed cgroup-v1 API.
+      {:muontrap, "~> 2.0.1", override: true},
       # Compiled on the host like VintageNet, but started only by firmware.
       {:nerves_runtime, "~> 0.13", runtime: Mix.target() != :host},
       {:nerves_motd, "~> 0.1", targets: @targets},

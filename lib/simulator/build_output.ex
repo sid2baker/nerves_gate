@@ -6,13 +6,6 @@ defmodule Simulator.BuildOutput do
   """
   defstruct [:report, fragment: ""]
 
-  # Acknowledging output races with the wrapper's exit: a late acknowledgement
-  # fails with EPIPE, kills the caller and loses the exit status. A 1 GiB window
-  # avoids acknowledgements for real builds; larger output is acknowledged in
-  # rare batches so the wrapper never stalls.
-  @window 1_073_741_824
-  @ack_batch div(@window, 2)
-
   @doc "Run a command, reporting progress lines. Returns its exit status."
   def run(command, args, options, report) do
     executable = System.find_executable(command) || raise "#{command} not found"
@@ -26,8 +19,6 @@ defmodule Simulator.BuildOutput do
         args: [
           "--capture-output",
           "--capture-stderr",
-          "--stdio-window",
-          "#{@window}",
           "--",
           executable | args
         ],
@@ -36,7 +27,7 @@ defmodule Simulator.BuildOutput do
       ])
 
     try do
-      collect_port(port, new(report), 0)
+      collect_port(port, new(report))
     after
       if Port.info(port), do: Port.close(port)
     end
@@ -46,24 +37,17 @@ defmodule Simulator.BuildOutput do
   defp env(key, nil), do: {String.to_charlist(key), false}
   defp env(key, value), do: {String.to_charlist(key), String.to_charlist(value)}
 
-  defp collect_port(port, output, unacknowledged) do
+  defp collect_port(port, output) do
     receive do
       {^port, {:data, chunk}} ->
-        unacknowledged = acknowledge(port, unacknowledged + byte_size(chunk))
-        collect_port(port, collect(output, chunk), unacknowledged)
+        MuonTrap.Port.report_bytes_handled(port, byte_size(chunk))
+        collect_port(port, collect(output, chunk))
 
       {^port, {:exit_status, status}} ->
         done(output)
         status
     end
   end
-
-  defp acknowledge(port, bytes) when bytes >= @ack_batch do
-    MuonTrap.Port.report_bytes_handled(port, bytes)
-    0
-  end
-
-  defp acknowledge(_port, bytes), do: bytes
 
   def new(report), do: %__MODULE__{report: report}
 
