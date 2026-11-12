@@ -40,8 +40,8 @@ peripheral qualification.
 | `sdk/` | `:nerves_gate_sdk` | Typed plugin contract and packaging; no application supervisor | `sdk/VERSION` |
 | `plugins/tailnet_subrouter/` | `:tailnet_subrouter` | Selected, disabled-on-first-boot subnet plugin | Plugin `mix.exs` |
 | `plugins/modbus/` | `:modbus_plugin` | Selected Modbus TCP/RTU client/server plugin with yamodbus | Plugin `mix.exs` |
-| `systems/nerves_system_ec100/` | `:nerves_system_ec100` | ARM Linux, toolchain, boot and eMMC board support | System `VERSION` |
-| `systems/nerves_system_em300/` | `:nerves_system_em300` | ARM Linux, toolchain, boot and SPI NAND/UBI board support | System `VERSION` |
+| [Standalone EC100](https://github.com/sid2baker/nerves_system_ec100) | `:nerves_system_ec100` | ARM Linux, toolchain, boot and eMMC board support | System `VERSION` |
+| [Standalone EM300](https://github.com/sid2baker/nerves_system_em300) | `:nerves_system_em300` | ARM Linux, toolchain, boot and SPI NAND/UBI board support | System `VERSION` |
 | `systems/nerves_system_ec100_qemu/` | `:nerves_system_ec100_qemu` | x86_64/musl Linux, toolchain and QEMU support | System `VERSION` |
 
 ```text
@@ -60,8 +60,8 @@ the core SDK has no web dependencies.
 
 Each project keeps its own Mix configuration, lockfile and build directory.
 Shared root/firmware dependencies must have matching locks. Device dependencies
-normally select immutable system Git tags; internal local builds use the checkout's
-system sources. Only the SDK is published on Hex; see [releases](releases.md).
+normally select immutable system Git tags or a pinned bring-up commit; explicit
+local checkout overrides support system development. Only the SDK is published on Hex; see [releases](releases.md).
 
 `runtime: false` prevents automatic firmware application startup, **not compilation
 or host code reuse**. The workbench shares firmware components/layouts, projection
@@ -87,7 +87,7 @@ library only when a measured benefit justifies another owner and package.
 | `priv/simulator/`, `priv/templates/` | Trusted bench configs/scripts and ordinary SDK plugin scaffolding |
 | `test/`, `firmware/test/{unit,web}/`, `sdk/test/` | Host tooling/shared UI integration, firmware policy/web checks and SDK tests |
 | `plugins/` | Firmware selection and independently tested first-party plugin projects |
-| `systems/` | Independently versioned Nerves system artifact inputs |
+| `systems/` | Owned-QEMU Nerves system artifact inputs; physical systems live in separate repositories |
 
 ## Host mode and the simulator
 

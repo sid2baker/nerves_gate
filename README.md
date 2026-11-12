@@ -59,7 +59,7 @@ mix scenario.run sdk --device gateway_a       # against your running mix dev
 | `firmware/` | Device runtime and gateway UI (separate Nerves project) |
 | `sdk/` | Small plugin integration contract and packaging (separately versioned, published on Hex) |
 | `plugins/` | Firmware selection, subnet-router and Modbus TCP/RTU projects |
-| `systems/` | Independent EC100, EM300 and owned-QEMU Nerves systems |
+| `systems/` | Owned-QEMU Nerves system; EC100 and EM300 systems have separate repositories |
 
 Read [development](docs/development.md), [architecture](docs/architecture.md),
 [CI](docs/ci.md), [releases](docs/releases.md) and the [changelog](CHANGELOG.md).

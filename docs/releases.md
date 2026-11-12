@@ -83,59 +83,38 @@ See [plugin runtime](plugins.md) and [development](plugin-development.md).
 
 ## Systems
 
-Systems remain Git source dependencies with fingerprinted artifacts on GitHub
-Releases, not Hex. `systems/` files are artifact inputs: changing them requires a
-system version bump, even if the root platform version is unchanged. Do not edit
-system source merely to adjust workstation tooling.
+Systems are Git source dependencies with fingerprinted artifacts on GitHub
+Releases, not Hex. Physical systems are maintained separately:
 
-`system-releases.yml` calls `system-artifact.yml` for EC100 and QEMU on main when
-system paths change. It validates the source contract before creating artifacts.
-The task stays dependency-free under `lib/mix/tasks/nerves.artifact.release.ex`
-and is preloaded into the isolated firmware/Nerves command:
+- [EC100](https://github.com/sid2baker/nerves_system_ec100)
+- [EM300](https://github.com/sid2baker/nerves_system_em300)
+
+Both use the official `actions-nerves2-package` build/draft-release workflow and
+`vX.Y.Z` tags. Follow each system's README for release preparation, including
+reviewing and committing `checksum.exs` before tagging for Git consumers. Publishing
+a draft is manual. Review Buildroot notices and corresponding-source obligations
+before distribution; the standard artifact does not include source archives.
+
+Firmware retains EC100's published `system-ec100/v0.4.0` pin until the standalone
+`v0.5.0` artifact is published. EM300 pins its standalone bring-up commit and needs
+an explicit local artifact build before firmware can be packaged. See
+[development](development.md#assets) for checkout overrides.
+
+### Owned QEMU system
+
+`systems/nerves_system_ec100_qemu/` remains in this repository. Its source,
+version and release model are unchanged. `system-releases.yml` calls
+`system-artifact.yml` only for QEMU changes on main. The dependency-free publisher
+is preloaded into an isolated firmware/Nerves command:
 
 ```sh
 cd firmware
 MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release plan
 ```
 
-`plan` is local/read-only. `check` inspects remote publication state; `publish`
-requires the authorized main-branch GitHub workflow. Exact notes come from the
-system's dated changelog. The system defines the download tag in `artifact_sites`.
-Pending source comparison prevents reuse of a tag after fingerprint inputs change;
-repairs to the publisher alone do not change system inputs. The task reads the
-selected system from the Nerves build plan, including EM300; it has no separate
-target-to-system table. EM300 publication is not enabled in the automatic workflow.
-Its development version remains rejected by the stable-version gate.
-
-All systems use Nerves 2's explicit `mix nerves.artifact.build`. The shared task
-runs Buildroot `make source` before compilation, using Buildroot's configured
-mirrors and checksum validation. The Nerves download cache is saved even after
-failure. No board-specific downloader or toolchain-source manifest is used.
-
-QEMU needs its fingerprinted binary archive. Physical systems also collect Buildroot
-`legal-info`, installed external-toolchain notices/configuration, the matching
-system/Buildroot recipes and a checksum manifest. See the [source collection
-limits](../systems/nerves_system_ec100/SOURCES.md#buildroot-source-and-license-collection):
-legal-info does not collect the prebuilt external toolchain's source archives.
-Review the reports and arrange any additional required source distribution before
-publishing; the archive's existence alone is not proof of compliance.
-
-For local source/license collection, run these current checkout commands from
-`firmware/` on Linux with Docker or Podman and an empty `dist/`:
-
-```sh
-MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release source
-MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 mix nerves.artifact.build nerves_system_ec100
-MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release collect
-(cd dist && sha256sum --check SHA256SUMS)
-```
-
-System documentation such as `SOURCES.md` is itself fingerprinted input and may
-contain paths from the tooling used to publish that system. Use the commands above
-and the current shared workflow; do not change a published system's inputs merely
-to update host helper paths.
-
-Existing uploaded bytes are not replaced. Validate a changed QEMU system with the
-owned `system_artifact` scenario before an authorized release. Firmware locks
-reference immutable monorepo system tags, never a moving branch. When preparing
-firmware alongside a system release, wait for publication before target builds.
+`plan` is local/read-only. `source` prefetches through Buildroot. `check` inspects
+publication state; `publish` requires the authorized main-branch GitHub workflow.
+Notes and the download tag come from the system. Existing uploaded bytes are never
+replaced. Lock alignment and pending-input checks remain mandatory. Validate a
+changed QEMU system with the owned `system_artifact` scenario before an authorized
+release. Physical systems are rejected by this publisher.

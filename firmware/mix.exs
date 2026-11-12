@@ -130,28 +130,41 @@ defmodule NervesGate.MixProject do
     release
   end
 
-  defp system_dependency(app, version, target) do
-    source = "systems/#{app}"
-
-    tag =
-      app |> Atom.to_string() |> String.replace_prefix("nerves_", "") |> String.replace("_", "-")
-
-    # EM300 has no published artifact yet. Do not direct users to a nonexistent tag.
+  defp system_dependency(:nerves_system_ec100_qemu = app, version, :x86_64) do
     options =
-      cond do
-        System.get_env("NERVES_GATE_LOCAL_DEPS") == "1" ->
-          [path: "../#{source}"]
+      if System.get_env("NERVES_GATE_LOCAL_DEPS") == "1" do
+        [path: "../systems/#{app}"]
+      else
+        [
+          github: "sid2baker/nerves_gate",
+          tag: "system-ec100-qemu/v#{version}",
+          subdir: "systems/#{app}"
+        ]
+      end
 
-        app == :nerves_system_em300 ->
-          Mix.raise(
-            "#{app} #{version} is unpublished. Build it locally and set NERVES_GATE_LOCAL_DEPS=1."
-          )
+    {app, version, options ++ [runtime: false, targets: :x86_64]}
+  end
 
-        true ->
-          [github: "sid2baker/nerves_gate", tag: "#{tag}/v#{version}", subdir: source]
+  defp system_dependency(app, version, target) do
+    options =
+      case System.get_env("NERVES_GATE_#{target |> to_string() |> String.upcase()}_SYSTEM_PATH") do
+        nil -> system_source(app, version)
+        path -> [path: Path.expand(path)]
       end
 
     {app, version, options ++ [runtime: false, targets: target]}
+  end
+
+  defp system_source(:nerves_system_ec100, version) do
+    [
+      github: "sid2baker/nerves_gate",
+      tag: "system-ec100/v#{version}",
+      subdir: "systems/nerves_system_ec100"
+    ]
+  end
+
+  defp system_source(:nerves_system_em300, _version) do
+    [github: "sid2baker/nerves_system_em300", ref: "0c57b9fcb98ace36326a0472f4e1429a68e45dc1"]
   end
 
   defp deps do
@@ -167,7 +180,7 @@ defmodule NervesGate.MixProject do
       {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:nerves, "~> 2.0.0-pre.4", runtime: false},
+      {:nerves, "~> 2.0.0-pre.9", runtime: false},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
       {:req, "~> 0.7"},

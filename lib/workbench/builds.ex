@@ -69,6 +69,8 @@ defmodule Workbench.Builds do
       {"MIX_TARGET", target},
       {"MIX_ENV", to_string(env)},
       {"NERVES_GATE_LOCAL_DEPS", System.get_env("NERVES_GATE_LOCAL_DEPS")},
+      {"NERVES_GATE_EC100_SYSTEM_PATH", System.get_env("NERVES_GATE_EC100_SYSTEM_PATH")},
+      {"NERVES_GATE_EM300_SYSTEM_PATH", System.get_env("NERVES_GATE_EM300_SYSTEM_PATH")},
       {"NERVES_SYSTEM", nil},
       {"NERVES_GATE_DEVICE_NODE", nil}
     ]

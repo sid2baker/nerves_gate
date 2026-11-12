@@ -13,7 +13,7 @@ on:
       target:
         required: true
         type: choice
-        options: [ec100, x86_64]
+        options: [x86_64]
 
 permissions:
   contents: read
@@ -50,7 +50,6 @@ jobs:
       - name: Select system
         run: |
           case "$MIX_TARGET" in
-            ec100) echo 'SYSTEM_APP=nerves_system_ec100' >> "$GITHUB_ENV" ;;
             x86_64) echo 'SYSTEM_APP=nerves_system_ec100_qemu' >> "$GITHUB_ENV" ;;
             *) echo 'Unsupported system target' >&2; exit 1 ;;
           esac
@@ -82,9 +81,6 @@ jobs:
         if: steps.release.outputs.publish == 'true'
         # Nerves 2's container runner requests a TTY, including noninteractive builds.
         run: script -q -e -c "mise exec -- mix nerves.artifact.build $SYSTEM_APP" /dev/null < /dev/null
-      - name: Collect Buildroot legal info, source archive and checksums
-        if: steps.release.outputs.publish == 'true' && inputs.target == 'ec100'
-        run: mise exec -- elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release collect
       - name: Save system source downloads, including after failure
         if: ${{ !cancelled() && steps.release.outputs.publish == 'true' && steps.downloads.outcome == 'success' }}
         uses: actions/cache/save@v6

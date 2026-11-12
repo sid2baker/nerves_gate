@@ -349,10 +349,25 @@ runs on the device. No separate asset command or environment flag is required.
 For an asset-only diagnostic build, firmware provides `mix assets.build`
 (`volt.build --tailwind`); repository tooling enters that host project natively.
 Include the resulting `firmware/priv/static/assets/` files with their sources.
-Device builds and `mix setup` use the published system releases pinned in
-`firmware/mix.exs`. Set `NERVES_GATE_LOCAL_DEPS=1` to use the local
-`systems/*` sources instead (required for unpublished EM300). Simulator QEMU
-builds always use local sources. It is not an asset setting.
+Device builds select the system dependencies pinned in `firmware/mix.exs`.
+EC100 retains its published 0.4.0 artifact until the standalone 0.5.0 release is
+available. EM300's standalone bring-up commit is pinned but unpublished; build
+its artifact explicitly before firmware:
+
+```sh
+cd firmware
+MIX_TARGET=em300 mix nerves.artifact.build nerves_system_em300
+```
+
+Physical system development uses explicit checkout paths:
+`NERVES_GATE_EC100_SYSTEM_PATH=/absolute/path/to/nerves_system_ec100` or
+`NERVES_GATE_EM300_SYSTEM_PATH=/absolute/path/to/nerves_system_em300`.
+Run `mix deps.get` after selecting an override, build its system artifact explicitly,
+then run the firmware build. Workbench passes these paths to isolated builds and
+resolves factory engines from the same selected dependency.
+
+`NERVES_GATE_LOCAL_DEPS=1` selects only the local QEMU system. Simulator QEMU
+builds always use that source. None of these settings controls assets.
 
 ## Diagnostics and limits
 
@@ -367,5 +382,6 @@ builds always use local sources. It is not an asset setting.
 
 ## System artifacts
 
-Files under `systems/` are artifact fingerprint inputs: changing them requires a
-new system version. See [system releases](releases.md#systems).
+The physical systems live in their own repositories; only the owned QEMU system
+remains under `systems/`. System build-input changes require a new system version.
+See [system releases](releases.md#systems).

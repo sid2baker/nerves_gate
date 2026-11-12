@@ -86,7 +86,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ${{ env.NERVES_DL_DIR }}
-          key: ec100-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'systems/nerves_system_ec100/**', 'mise.toml') }}
+          key: ec100-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mise.toml') }}
       - name: Fetch locked host dependencies
         run: mise exec -- mix deps.get --check-locked
       - name: Fetch locked EC100 dependencies and initialize the target toolchain

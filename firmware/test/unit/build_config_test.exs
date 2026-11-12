@@ -241,13 +241,41 @@ defmodule NervesGate.BuildConfigTest do
     refute Process.whereis(NervesGate.Supervisor)
   end
 
+  test "physical system checkout overrides are explicit and independent of QEMU" do
+    project = Mix.Project.get()
+    previous_target = Mix.target()
+    keys = ~w(NERVES_GATE_LOCAL_DEPS NERVES_GATE_EC100_SYSTEM_PATH NERVES_GATE_EM300_SYSTEM_PATH)
+    previous = Map.new(keys, &{&1, System.get_env(&1)})
+
+    try do
+      System.put_env("NERVES_GATE_LOCAL_DEPS", "1")
+
+      for {target, app} <- [ec100: :nerves_system_ec100, em300: :nerves_system_em300] do
+        Mix.target(target)
+        key = "NERVES_GATE_#{target |> to_string() |> String.upcase()}_SYSTEM_PATH"
+        System.delete_env(key)
+        {^app, _, options} = Enum.find(project.project()[:deps], &(elem(&1, 0) == app))
+        refute options[:path]
+        assert options[:github]
+
+        System.put_env(key, "/tmp/#{app}")
+        {^app, _, options} = Enum.find(project.project()[:deps], &(elem(&1, 0) == app))
+        assert options[:path] == "/tmp/#{app}"
+        refute options[:github]
+      end
+    after
+      Mix.target(previous_target)
+
+      for {key, value} <- previous do
+        if value, do: System.put_env(key, value), else: System.delete_env(key)
+      end
+    end
+  end
+
   test "code reload listeners are restricted to host development" do
     project = Mix.Project.get()
     previous_env = Mix.env()
     previous_target = Mix.target()
-    previous_local = System.get_env("NERVES_GATE_LOCAL_DEPS")
-    # EM300 is unpublished; its builds always use local system sources.
-    System.put_env("NERVES_GATE_LOCAL_DEPS", "1")
 
     try do
       for {target, env} <- [
@@ -269,10 +297,6 @@ defmodule NervesGate.BuildConfigTest do
     after
       Mix.env(previous_env)
       Mix.target(previous_target)
-
-      if previous_local,
-        do: System.put_env("NERVES_GATE_LOCAL_DEPS", previous_local),
-        else: System.delete_env("NERVES_GATE_LOCAL_DEPS")
     end
   end
 end

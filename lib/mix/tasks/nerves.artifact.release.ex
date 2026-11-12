@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Nerves.Artifact.Release do
   @moduledoc """
-  Release tooling for the selected Nerves system, without compiling gateway firmware.
+  Release tooling for the owned QEMU system, without compiling gateway firmware.
 
   Preload this host-only task so Nerves can run it before resolving artifacts:
 
@@ -11,9 +11,8 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   cannot disagree. Changing it is a system build-input change.
 
   `plan` is local and read-only. `check` checks GitHub and sets the Actions `publish`
-  output. `source` prefetches with Buildroot; `collect` collects its legal info
-  and physical-system release assets after a standard Nerves artifact build. `publish` is
-  restricted to the main-branch GitHub workflow.
+  output. `source` prefetches with Buildroot. `publish` is restricted to the
+  main-branch GitHub workflow. Physical systems release from their own repositories.
   """
   use Mix.Task
 
@@ -47,11 +46,6 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     buildroot!(info, :source)
   end
 
-  def run(["collect"]) do
-    info = metadata!()
-    collect!(info)
-  end
-
   def run(["publish"]) do
     unless System.get_env("GITHUB_ACTIONS") == "true" and
              System.get_env("GITHUB_REPOSITORY") == @repo and
@@ -71,10 +65,9 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   end
 
   def run(_),
-    do: Mix.raise("Usage: nerves.artifact.release plan | check | source | collect | publish")
+    do: Mix.raise("Usage: nerves.artifact.release plan | check | source | publish")
 
-  # Nerves 2.0.0-pre.4 ignores build_runner_opts. Use its workspace and mounts
-  # for ordinary Buildroot commands; do not implement another downloader.
+  # Use Nerves' workspace and mounts for ordinary Buildroot source fetching.
   defp buildroot!(info, phase) do
     plan = Nerves.build_plan()
     {tool, image, downloads, _} = Nerves.Container.prepare_artifact_workspace!(plan, info.package)
@@ -105,42 +98,6 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
     end
   end
 
-  defp collect!(info) do
-    unless match?({:unix, :linux}, :os.type()),
-      do: Mix.raise("Source archive collection requires Linux")
-
-    unless length(info.assets) == 3 and File.regular?(info.download.archive_path),
-      do: Mix.raise("Build the physical system artifact before collecting its sources")
-
-    File.mkdir_p!("dist")
-
-    unless File.ls!("dist") == [],
-      do: Mix.raise("dist must be empty before collecting release assets")
-
-    buildroot!(info, :collect)
-    workspace = Nerves.Container.work_dir(info.package)
-    File.cp!(Path.join(workspace, "build/#{info.download.filename}"), info.download.archive_path)
-    [binary, sources, checksums] = Enum.map(info.assets, &Path.join("dist", &1))
-    File.cp!(info.download.archive_path, binary)
-
-    command!("tar", [
-      "-czf",
-      sources,
-      "--exclude=nerves_system_br/buildroot",
-      "-C",
-      workspace,
-      "build/legal-info",
-      to_string(info.package.app),
-      "nerves_system_br"
-    ])
-
-    for path <- [binary, sources],
-        File.stat!(path).size >= 2_147_483_648,
-        do: Mix.raise("#{path} exceeds GitHub's 2 GiB limit")
-
-    File.write!(checksums, Enum.map_join([binary, sources], "\n", &checksum_line/1) <> "\n")
-  end
-
   @doc false
   def buildroot_command(:source, app, _filename) do
     {"""
@@ -148,21 +105,6 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
      exec make source
      """, []}
   end
-
-  def buildroot_command(:collect, _app, filename) do
-    # Buildroot cannot collect notices/config from a prebuilt external toolchain.
-    # Keep those installed files; do not maintain another compiler source list.
-    {"""
-     make legal-info
-     mkdir -p legal-info/licenses/toolchain-external-custom legal-info/toolchain-external-custom
-     cp -a host/opt/ext-toolchain/share/licenses/. legal-info/licenses/toolchain-external-custom/
-     cp host/opt/ext-toolchain/ct-ng.config host/opt/ext-toolchain/ct-ng.defconfig legal-info/toolchain-external-custom/
-     exec make system "$@"
-     """, ["NERVES_ARTIFACT_NAME=#{String.trim_trailing(filename, ".tar.gz")}"]}
-  end
-
-  defp checksum_line(path),
-    do: String.replace_prefix(sha256(path), "sha256:", "") <> "  " <> Path.basename(path)
 
   defp metadata! do
     package = system_package!(Nerves.build_plan())
@@ -173,22 +115,24 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
       tag: tag!(download.sites),
       package: package,
       download: download,
-      assets: asset_names(package.app, download.filename),
+      assets: [download.filename],
       notes: notes
     }
   end
 
   @doc false
   def system_package!(plan) do
-    # The selected firmware dependency already declares the system; do not keep
-    # another target-to-system table here.
-    case for({Nerves.BuildAction.NervesV1System, opts} <- plan.actions, do: opts[:app]) do
-      [app] ->
+    case (for {Nerves.BuildAction.NervesV1System, opts} <- plan.actions do
+            opts[:app]
+          end) do
+      [:nerves_system_ec100_qemu = app] ->
         Enum.find(plan.packages, &(&1.app == app)) ||
           Mix.raise("#{app} is missing from the Nerves build plan.")
 
       _ ->
-        Mix.raise("Run from firmware/ with exactly one Nerves system selected.")
+        Mix.raise(
+          "This publisher only supports nerves_system_ec100_qemu. Physical systems release from their own repositories."
+        )
     end
   end
 
@@ -377,7 +321,7 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
 
   defp upload_assets!(info, draft, uploads, digests) do
     # Validate every existing asset before uploading anything; resume only exact
-    # bytes, including the physical system's source archive and checksum manifest.
+    # bytes of the QEMU system archive.
     for {name, digest} <- digests do
       case asset(draft, name) do
         nil -> :ok
@@ -410,15 +354,6 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   end
 
   @doc false
-  def asset_names(:nerves_system_ec100_qemu, filename), do: [filename]
-
-  def asset_names(app, filename) do
-    sources = String.replace_prefix(filename, "#{app}-portable-", "#{app}-sources-")
-    if sources == filename, do: Mix.raise("Unexpected system artifact name #{filename}.")
-    [filename, sources, "SHA256SUMS"]
-  end
-
-  @doc false
   def published?(release, names),
     do: release["draft"] == false and assets_uploaded?(release, names)
 
@@ -430,29 +365,13 @@ defmodule Mix.Tasks.Nerves.Artifact.Release do
   end
 
   defp upload_paths!(info) do
-    paths =
-      if length(info.assets) == 3,
-        do: Enum.map(info.assets, &Path.expand("dist/#{&1}")),
-        else: [info.download.archive_path]
+    path = info.download.archive_path
 
-    for path <- paths do
-      unless File.regular?(path), do: Mix.raise("Missing release asset #{path}")
+    unless File.regular?(path) do
+      Mix.raise("Missing release asset #{path}")
     end
 
-    if length(info.assets) == 3,
-      do: verify_assets!(info.download.archive_path, paths)
-
-    paths
-  end
-
-  @doc false
-  def verify_assets!(archive, [system, sources, checksums]) do
-    expected = Enum.map_join([system, sources], "\n", &checksum_line/1)
-
-    unless String.trim(File.read!(checksums)) == expected and sha256(system) == sha256(archive),
-      do: Mix.raise("System release assets or SHA256SUMS do not match the build.")
-
-    :ok
+    [path]
   end
 
   defp asset(release, name),
