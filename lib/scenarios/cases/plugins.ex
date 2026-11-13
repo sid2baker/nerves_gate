@@ -40,8 +40,9 @@ defmodule Scenarios.Cases.Plugins do
 
       response = guest_page(vm, "/plugins")
       assert response.status == 200
-      assert [_] = Floki.find(response.body, "a[href='/plugins/tailnet_subrouter']")
-      assert [_] = Floki.find(response.body, "a[href='/plugins/modbus_plugin']")
+      document = Floki.parse_document!(response.body)
+      assert [_] = Floki.find(document, "a[href='/plugins/tailnet_subrouter']")
+      assert [_] = Floki.find(document, "a[href='/plugins/modbus_plugin']")
     after
       assert :ok = ManagedPlugin.plugins(vm, :stop, [:tailnet_subrouter])
       assert :ok = ManagedPlugin.plugins(vm, :stop, [:modbus_plugin])
@@ -188,7 +189,8 @@ defmodule Scenarios.Cases.Plugins do
 
       page = guest_page(vm, "/plugins/modbus_plugin")
       assert page.status == 200
-      assert page.body |> Floki.find(".ui-help") |> Floki.text() =~ "Connecting to plugin"
+      document = Floki.parse_document!(page.body)
+      assert document |> Floki.find(".ui-help") |> Floki.text() =~ "Connecting to plugin"
 
       # HTTP deliberately defers loading plugin code. Render the verified
       # component in a tracked guest PID, as the connected host does.
