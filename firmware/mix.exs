@@ -131,24 +131,12 @@ defmodule NervesGate.MixProject do
   end
 
   defp system_dependency(app, version, target) do
-    source = "systems/#{app}"
+    name = if target == :x86_64, do: "SIMULATOR", else: target |> to_string() |> String.upcase()
 
-    tag =
-      app |> Atom.to_string() |> String.replace_prefix("nerves_", "") |> String.replace("_", "-")
-
-    # EM300 has no published artifact yet. Do not direct users to a nonexistent tag.
     options =
-      cond do
-        System.get_env("NERVES_GATE_LOCAL_DEPS") == "1" ->
-          [path: "../#{source}"]
-
-        app == :nerves_system_em300 ->
-          Mix.raise(
-            "#{app} #{version} is unpublished. Build it locally and set NERVES_GATE_LOCAL_DEPS=1."
-          )
-
-        true ->
-          [github: "sid2baker/nerves_gate", tag: "#{tag}/v#{version}", subdir: source]
+      case System.get_env("NERVES_GATE_#{name}_SYSTEM_PATH") do
+        nil -> [github: "sid2baker/#{app}", tag: "v#{version}"]
+        path -> [path: Path.expand(path)]
       end
 
     {app, version, options ++ [runtime: false, targets: target]}
@@ -167,7 +155,7 @@ defmodule NervesGate.MixProject do
       {:ex_dna, "~> 1.0", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.0", only: [:dev, :test], runtime: false},
-      {:nerves, "~> 2.0.0-pre.4", runtime: false},
+      {:nerves, "~> 2.0.0-pre.9", runtime: false},
       {:bandit, "~> 1.12"},
       {:jason, "~> 1.4"},
       {:req, "~> 0.7"},
@@ -181,6 +169,9 @@ defmodule NervesGate.MixProject do
       {:input_event, "~> 1.4"},
       # Host tooling must never start the workstation VPN.
       {:tailscaled_ex, "~> 0.6.0", runtime: Mix.target() != :host},
+      # 2.0 fixes cmd/3 output races. tailscaled_ex 0.6 only constrains v1;
+      # neither it nor our other callers use the removed cgroup-v1 API.
+      {:muontrap, "~> 2.0.1", override: true},
       # Compiled on the host like VintageNet, but started only by firmware.
       {:nerves_runtime, "~> 0.13", runtime: Mix.target() != :host},
       {:nerves_motd, "~> 0.1", targets: @targets},
@@ -209,9 +200,9 @@ defmodule NervesGate.MixProject do
   # Device builds still resolve their pinned system source and GitHub artifact.
   defp system_dependencies do
     case Mix.target() do
-      :ec100 -> [system_dependency(:nerves_system_ec100, "0.4.0", :ec100)]
+      :ec100 -> [system_dependency(:nerves_system_ec100, "0.5.0", :ec100)]
       :em300 -> [system_dependency(:nerves_system_em300, "0.2.0-dev", :em300)]
-      :x86_64 -> [system_dependency(:nerves_system_ec100_qemu, "0.2.2", :x86_64)]
+      :x86_64 -> [system_dependency(:nerves_system_nerves_gate_simulator, "0.3.0", :x86_64)]
       :host -> []
     end
   end

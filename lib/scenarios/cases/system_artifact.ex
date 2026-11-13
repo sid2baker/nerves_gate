@@ -2,8 +2,6 @@ defmodule Scenarios.Cases.SystemArtifact do
   @moduledoc false
   import ExUnit.Assertions
 
-  @system Path.expand("../../../systems/nerves_system_ec100_qemu", __DIR__)
-
   def spec,
     do: %{
       name: "QEMU runs the versioned system and boot contract",
@@ -12,7 +10,12 @@ defmodule Scenarios.Cases.SystemArtifact do
 
   def run(%{device: vm}) do
     assert Scenarios.Device.status(vm).system.node == vm.node
-    version = File.read!(Path.join(@system, "VERSION")) |> String.trim()
+
+    system =
+      System.get_env("NERVES_GATE_SIMULATOR_SYSTEM_PATH") ||
+        Path.join(Workbench.root(), "firmware/deps/nerves_system_nerves_gate_simulator")
+
+    version = File.read!(Path.join(system, "VERSION")) |> String.trim()
 
     assert {:ok, os_release} =
              Scenarios.Device.rpc(vm, File, :read, ["/usr/lib/os-release"], 5_000)

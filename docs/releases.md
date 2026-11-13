@@ -83,59 +83,37 @@ See [plugin runtime](plugins.md) and [development](plugin-development.md).
 
 ## Systems
 
-Systems remain Git source dependencies with fingerprinted artifacts on GitHub
-Releases, not Hex. `systems/` files are artifact inputs: changing them requires a
-system version bump, even if the root platform version is unchanged. Do not edit
-system source merely to adjust workstation tooling.
+Systems are Git source dependencies with fingerprinted artifacts on GitHub
+Releases, not Hex. All systems are maintained in separate repositories:
 
-`system-releases.yml` calls `system-artifact.yml` for EC100 and QEMU on main when
-system paths change. It validates the source contract before creating artifacts.
-The task stays dependency-free under `lib/mix/tasks/nerves.artifact.release.ex`
-and is preloaded into the isolated firmware/Nerves command:
+- [EC100](https://github.com/sid2baker/nerves_system_ec100)
+- [EM300](https://github.com/sid2baker/nerves_system_em300)
+- [Simulator](https://github.com/sid2baker/nerves_system_nerves_gate_simulator)
 
-```sh
-cd firmware
-MIX_TARGET=x86_64 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release plan
-```
+All use the official `actions-nerves2-package` build/draft-release workflow and
+`vX.Y.Z` tags. Follow each system's README for release preparation, including
+reviewing and committing `checksum.exs` before tagging for Git consumers. Publishing
+a draft is manual. Review Buildroot notices and corresponding-source obligations
+before distribution; the standard artifact does not include source archives.
 
-`plan` is local/read-only. `check` inspects remote publication state; `publish`
-requires the authorized main-branch GitHub workflow. Exact notes come from the
-system's dated changelog. The system defines the download tag in `artifact_sites`.
-Pending source comparison prevents reuse of a tag after fingerprint inputs change;
-repairs to the publisher alone do not change system inputs. The task reads the
-selected system from the Nerves build plan, including EM300; it has no separate
-target-to-system table. EM300 publication is not enabled in the automatic workflow.
-Its development version remains rejected by the stable-version gate.
+Firmware pins standalone tags EC100 `v0.5.0`, EM300 `v0.2.0-dev` and simulator
+`v0.3.0`. Each tagged source includes the checksum manifest for its published
+artifact. EM300 is a development prerelease, not a hardware-qualified stable
+release. See [development](development.md#assets) for checkout overrides.
 
-All systems use Nerves 2's explicit `mix nerves.artifact.build`. The shared task
-runs Buildroot `make source` before compilation, using Buildroot's configured
-mirrors and checksum validation. The Nerves download cache is saved even after
-failure. No board-specific downloader or toolchain-source manifest is used.
+Before publishing, compare every draft asset to the manifest committed in the
+tag. Rebuilds can produce different archive bytes under the same fingerprint.
+If necessary, replace only the unpublished draft assets with the matching,
+verified pre-tag CI artifacts. Never rewrite a tag or replace published bytes.
+Also verify the draft's notes equal the matching changelog section.
 
-QEMU needs its fingerprinted binary archive. Physical systems also collect Buildroot
-`legal-info`, installed external-toolchain notices/configuration, the matching
-system/Buildroot recipes and a checksum manifest. See the [source collection
-limits](../systems/nerves_system_ec100/SOURCES.md#buildroot-source-and-license-collection):
-legal-info does not collect the prebuilt external toolchain's source archives.
-Review the reports and arrange any additional required source distribution before
-publishing; the archive's existence alone is not proof of compliance.
+### Simulator system
 
-For local source/license collection, run these current checkout commands from
-`firmware/` on Linux with Docker or Podman and an empty `dist/`:
+The standalone `nerves_system_nerves_gate_simulator` package uses the firmware
+`x86_64` target. Its published artifact, not a local system tree, supplies normal
+setup and firmware builds.
 
-```sh
-MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release source
-MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 mix nerves.artifact.build nerves_system_ec100
-MIX_TARGET=ec100 NERVES_GATE_LOCAL_DEPS=1 elixir -r ../lib/mix/tasks/nerves.artifact.release.ex -S mix nerves.artifact.release collect
-(cd dist && sha256sum --check SHA256SUMS)
-```
-
-System documentation such as `SOURCES.md` is itself fingerprinted input and may
-contain paths from the tooling used to publish that system. Use the commands above
-and the current shared workflow; do not change a published system's inputs merely
-to update host helper paths.
-
-Existing uploaded bytes are not replaced. Validate a changed QEMU system with the
-owned `system_artifact` scenario before an authorized release. Firmware locks
-reference immutable monorepo system tags, never a moving branch. When preparing
-firmware alongside a system release, wait for publication before target builds.
+System builds and publication no longer run in this repository. The workbench
+still owns QEMU lifecycle and the `system_artifact` integration scenario. Validate
+a system change against the shared boot/application contract and review physical
+coverage separately; the simulator does not emulate every board's hardware.

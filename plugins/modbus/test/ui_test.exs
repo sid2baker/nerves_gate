@@ -15,6 +15,21 @@ defmodule ModbusPlugin.UITest do
     assert html =~ "block1"
   end
 
+  test "framework component mounting owns the CID and renders the raw controls" do
+    rendered =
+      Phoenix.LiveView.Diff.component_to_rendered(
+        %Phoenix.LiveView.Socket{transport_pid: self()},
+        ModbusPlugin.UI,
+        %{id: "plugin-ui"},
+        %{myself: %Phoenix.LiveComponent.CID{cid: 1}}
+      )
+
+    html = rendered |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
+    assert html =~ "Raw ranges"
+    assert html =~ ~s(phx-target="1")
+    refute html =~ "Load Solis"
+  end
+
   test "range editing, role and transport changes only affect the draft" do
     {:ok, socket} = ModbusPlugin.UI.update(%{id: "modbus"}, %Phoenix.LiveView.Socket{})
 

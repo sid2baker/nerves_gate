@@ -446,7 +446,6 @@ defmodule Simulator do
               env: [
                 {"MIX_TARGET", "x86_64"},
                 {"MIX_ENV", "dev"},
-                {"NERVES_GATE_LOCAL_DEPS", "1"},
                 {"NERVES_GATE_DEVICE_NODE", nil}
               ]
             ],

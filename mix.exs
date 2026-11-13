@@ -63,6 +63,8 @@ defmodule Workbench.MixProject do
 
   defp deps_get(args) do
     for project <- @projects, do: run(project, ["deps.get" | args])
+    # Workbench factory provisioning reads the checked-out systems' flash engines.
+    for target <- [:ec100, :em300], do: run("firmware", ["deps.get" | args], target: target)
     Mix.Tasks.Deps.Get.run(args)
   end
 

@@ -38,17 +38,19 @@ today's problem.
 
 - Application logic, tests and tooling are Elixir; prefer Req for HTTP. External
   tools only for firmware, networking, QEMU and Git.
-- Root `:nerves_gate_workbench` is not an umbrella. `firmware/`, `sdk/`,
-  `systems/*` and `plugins/*` are independent projects with their own targets,
-  tests and releases.
+- Root `:nerves_gate_workbench` is not an umbrella. `firmware/`, `sdk/` and
+  `plugins/*` are independent projects with their own targets, tests and releases.
+  Systems live in `sid2baker/nerves_system_ec100`, `sid2baker/nerves_system_em300`
+  and `sid2baker/nerves_system_nerves_gate_simulator`; none live in this checkout.
 - `firmware/lib/nerves_gate/`: domains own commands, validation, admission,
   deadlines and persistence; call named public domain functions. `NervesGate` is
   the read/subscribe entry point and domain API index. Cellular and application
   network effects share Network's single worker/trial admission.
 - Boards: `config/<target>.exs` declares hardware as data (`:board`). EC100 and
   EM300 are physical RK3506 targets, x86_64 is QEMU. `Workbench.Builds` owns which
-  targets can be built and which are physical; each `systems/nerves_system_<board>`
-  owns its layout and its factory flash engine.
+  targets can be built and which are physical; each standalone physical system
+  owns its layout and factory flash engine. Resolve engines from firmware's
+  selected system dependency, never a copied task or local monorepo source.
 - Projections are sanitized read models, never authority. Subscribe before
   reading, resubscribe after loss, keep drafts separate. UI availability never
   replaces backend validation. Workbench device views subscribe to a remote

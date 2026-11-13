@@ -18,8 +18,31 @@ defmodule Workbench.FactoryProvisioning do
     engine = Module.concat([Mix.Tasks, Macro.camelize(platform), Flash])
 
     unless Code.ensure_loaded?(engine) do
-      source = "systems/nerves_system_#{platform}/lib/mix/tasks/#{platform}.flash.ex"
-      Code.require_file(Path.join(Workbench.root(), source))
+      script = Path.join(Workbench.root(), "priv/workbench/factory_engine.exs")
+
+      {out, status} =
+        Workbench.FirmwareCommand.run("elixir", ["-r", script, "-S", "mix", "dev.factory_engine"],
+          cd: Path.join(Workbench.root(), "firmware"),
+          timeout: 60_000,
+          stderr_to_stdout: true,
+          env: Workbench.Builds.target_env(platform, :dev)
+        )
+
+      source =
+        out
+        |> String.split("\n")
+        |> Enum.find_value(fn line ->
+          if String.starts_with?(line, "FACTORY_ENGINE="),
+            do: String.replace_prefix(line, "FACTORY_ENGINE=", "")
+        end)
+
+      unless status == 0 and source,
+        do:
+          raise(
+            "Fetch the locked #{platform} system dependency first; cannot resolve its flash engine"
+          )
+
+      Code.require_file(Base.decode64!(source))
     end
 
     Map.put(engine.board(), :engine, engine)

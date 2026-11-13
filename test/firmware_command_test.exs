@@ -18,6 +18,13 @@ defmodule Workbench.FirmwareCommandTest do
     assert FirmwareCommand.run(System.find_executable("printf"), ["%s", output]) == {output, 0}
   end
 
+  test "output at the hard limit stops the command without retry" do
+    assert {"", :output_limit} =
+             FirmwareCommand.run(System.find_executable("head"), ["-c", "67108864", "/dev/zero"],
+               timeout: 5_000
+             )
+  end
+
   test "nonzero command status is preserved without retry" do
     assert {"", 1} = FirmwareCommand.run(System.find_executable("false"), [])
   end

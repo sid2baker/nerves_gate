@@ -10,9 +10,10 @@ On **Develop → Firmware**, choose a target from the build catalogue and build.
 Builds run in an isolated process, never flash hardware, and show the resulting
 `.fw` path.
 Alternatively run `mix firmware ec100`, `mix firmware em300` or `mix firmware x86_64`
-at the root. EM300 builds need the locally built, unpublished
-`nerves_system_em300` artifact (see `systems/nerves_system_em300/README.md`).
-See [system releases](releases.md#systems) for local system builds.
+at the root. All targets use published standalone system artifacts. EM300 remains
+a hardware-unqualified development prerelease (see its
+[standalone repository](https://github.com/sid2baker/nerves_system_em300)).
+See [system releases](releases.md#systems) for system development.
 
 ## Reviewed physical gateway update
 

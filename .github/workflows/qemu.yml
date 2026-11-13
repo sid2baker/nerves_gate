@@ -6,6 +6,10 @@ on:
     - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
+      scenario:
+        description: Scenario ID, or all for the full suite
+        type: string
+        default: all
       tailscale:
         description: Also run credentialed Tailscale authentication checks
         type: boolean
@@ -26,6 +30,7 @@ jobs:
     env:
       NERVES_SYSTEM: ''
       NERVES_DL_DIR: ${{ github.workspace }}/_build/nerves-downloads
+      QEMU_SCENARIO: ${{ inputs.scenario || 'all' }}
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v5
@@ -47,7 +52,7 @@ jobs:
           path: |
             ${{ env.NERVES_DL_DIR }}
             firmware/_build/setup
-          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'mix.exs') }}
+          key: simulator-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mix.lock', 'mise.toml', 'mix.exs') }}
           restore-keys: simulator-downloads-${{ runner.os }}-
       - name: Fetch dependencies and the prebuilt system
         run: mise exec -- mix setup
@@ -57,7 +62,7 @@ jobs:
         run: |
           mkdir -p _build/simulator
           set -o pipefail
-          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix scenario.ci all --device gateway_a 2>&1 | tee _build/simulator/suite.log
+          mise exec -- env -u NERVES_GATE_DEVICE_NODE mix scenario.ci "$QEMU_SCENARIO" --device gateway_a 2>&1 | tee _build/simulator/suite.log
       - name: Remove recorded management hardware
         if: always()
         run: mise exec -- mix dev.network cleanup

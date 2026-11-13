@@ -85,7 +85,7 @@ defmodule ManagedFixture.Client do
 
   def handle_call(:events, _, events), do: {:reply, Enum.reverse(events), []}
 
-  def handle_info(:app_ui_close, events), do: {:stop, :normal, events}
+  def handle_info(:plugin_ui_close, events), do: {:stop, :normal, events}
 
   def handle_info(%NervesGateSDK.Events.Event{} = event, events),
     do: {:noreply, Enum.take([event | events], 32)}

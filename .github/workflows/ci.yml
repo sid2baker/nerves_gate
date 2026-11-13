@@ -59,7 +59,7 @@ jobs:
           path: |
             ${{ env.NERVES_DL_DIR }}
             firmware/_build/setup
-          key: firmware-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mise.toml', 'systems/nerves_system_ec100_qemu/**', 'mix.exs') }}
+          key: firmware-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mise.toml', 'mix.exs') }}
       - name: Prepare all projects without booting devices
         run: mise exec -- mix setup
       - name: Build assets and target firmware (never boot a device)
@@ -86,7 +86,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: ${{ env.NERVES_DL_DIR }}
-          key: ec100-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'systems/nerves_system_ec100/**', 'mise.toml') }}
+          key: ec100-downloads-${{ runner.os }}-${{ hashFiles('firmware/mix.lock', 'mise.toml') }}
       - name: Fetch locked host dependencies
         run: mise exec -- mix deps.get --check-locked
       - name: Fetch locked EC100 dependencies and initialize the target toolchain

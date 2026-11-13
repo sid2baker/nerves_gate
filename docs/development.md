@@ -1,7 +1,7 @@
 # Development
 
 The repository root is the host-only developer platform, including the QEMU
-simulator. `sdk/`, `firmware/` and `systems/` are separate projects, not umbrella
+simulator. `sdk/`, `firmware/` and plugins are separate projects, not umbrella
 children. Plugin developers use [ordinary plugin projects](plugin-development.md).
 
 ## Deferred tooling
@@ -96,8 +96,8 @@ system/toolchain, and checks these prerequisites. It neither builds firmware nor
 boots devices. QEMU's amd64 daemon is installed by `Tailscaled.Installer` before
 target compilation, with an explicit Tailscale 1.104.1 archive checksum and cache
 under `firmware/_build/setup/`. Physical targets use their system's ARM daemon;
-they also require the selected board's system artifact. EC100 uses its published
-artifact; EM300 currently requires a locally built, unpublished artifact. See
+they also require the selected board's published system artifact. EM300's
+artifact is a hardware-unqualified development prerelease. See
 [firmware builds](firmware-updates.md#build).
 
 ## Commands
@@ -349,10 +349,23 @@ runs on the device. No separate asset command or environment flag is required.
 For an asset-only diagnostic build, firmware provides `mix assets.build`
 (`volt.build --tailwind`); repository tooling enters that host project natively.
 Include the resulting `firmware/priv/static/assets/` files with their sources.
-Device builds and `mix setup` use the published system releases pinned in
-`firmware/mix.exs`. Set `NERVES_GATE_LOCAL_DEPS=1` to use the local
-`systems/*` sources instead (required for unpublished EM300). Simulator QEMU
-builds always use local sources. It is not an asset setting.
+Device builds select the system dependencies pinned in `firmware/mix.exs`.
+All three download published artifacts from their standalone repositories:
+EC100 0.5.0, EM300 0.2.0-dev and simulator 0.3.0. The EM300 prerelease remains
+hardware-unqualified; availability of an artifact is not hardware acceptance.
+
+System development uses explicit checkout paths:
+`NERVES_GATE_EC100_SYSTEM_PATH=/absolute/path/to/nerves_system_ec100`,
+`NERVES_GATE_EM300_SYSTEM_PATH=/absolute/path/to/nerves_system_em300`, or
+`NERVES_GATE_SIMULATOR_SYSTEM_PATH=/absolute/path/to/nerves_system_nerves_gate_simulator`.
+Run `mix deps.get` after selecting an override, build its system artifact explicitly,
+then run the firmware build. Workbench passes these paths to isolated builds and
+resolves factory engines from the same selected dependency.
+
+Simulator builds use the pinned standalone `nerves_system_nerves_gate_simulator`
+dependency and retain the `x86_64` target. `mix setup` fetches its published
+artifact and checks it against the manifest in the tagged source. None of the
+checkout overrides controls assets.
 
 ## Diagnostics and limits
 
@@ -367,5 +380,7 @@ builds always use local sources. It is not an asset setting.
 
 ## System artifacts
 
-Files under `systems/` are artifact fingerprint inputs: changing them requires a
-new system version. See [system releases](releases.md#systems).
+All three systems live in their own repositories, not in this checkout. The
+simulator is a virtual reference device for shared contracts, not an emulator of
+all physical peripherals. System build-input changes require a new system version.
+See [system releases](releases.md#systems).

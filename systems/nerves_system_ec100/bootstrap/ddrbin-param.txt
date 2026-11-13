@@ -1,2 +1,0 @@
-start tag=0x12345678
-uart baudrate=115200
