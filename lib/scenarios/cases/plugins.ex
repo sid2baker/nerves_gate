@@ -197,13 +197,13 @@ defmodule Scenarios.Cases.Plugins do
       assert {:ok, ModbusPlugin.UI, _} =
                ManagedPlugin.call(vm, ui_client, NervesGate.Plugins, :mount_ui, ["modbus_plugin"])
 
-      socket = %Phoenix.LiveView.Socket{transport_pid: ui_client, assigns: %{__changed__: %{}}}
-      assigns = %{id: "plugin-ui", myself: %Phoenix.LiveComponent.CID{cid: 1}}
-
-      assert {:ok, socket} =
-               ManagedPlugin.call(vm, ui_client, ModbusPlugin.UI, :update, [assigns, socket])
-
-      rendered = ManagedPlugin.call(vm, ui_client, ModbusPlugin.UI, :render, [socket.assigns])
+      rendered =
+        ManagedPlugin.call(vm, ui_client, Phoenix.LiveView.Diff, :component_to_rendered, [
+          %Phoenix.LiveView.Socket{transport_pid: ui_client},
+          ModbusPlugin.UI,
+          %{id: "plugin-ui"},
+          %{myself: %Phoenix.LiveComponent.CID{cid: 1}}
+        ])
 
       html =
         ManagedPlugin.call(vm, ui_client, Phoenix.HTML.Safe, :to_iodata, [rendered])
